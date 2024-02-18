@@ -1,27 +1,17 @@
-;this file defines block 4 of a MINTIA partition as specified by our boot
-;descriptor to be the start of the boot program.
+; This file defines block 4 of a MINTIA partition as specified by our boot
+; descriptor to be the start of the boot program.
 ;
-;it is very dumb and only understands how to load /OSLoader.a3x from an
-;AisixFS volume. assumes OSLoader.a3x is inode number 2.
-;=========== BOOT PROGRAM ============
+; It is very dumb and only understands how to load /OSLoader.a4x from an
+; AisixFS volume. It assumes that OSLoader.a4x is inode number 2.
+; =========== BOOT PROGRAM ============
 
 .section text
-.ds "ANTE"   ;magic number so a3x knows this is a valid bootloader
-
-             ;entry pointer so a3x knows where to jump
-.dl AisixFSBoot
-
-VarArea:
-	.dl 0 ;Args
-	.dl 0 ;DeviceNode
-	.dl 0 ;BlockBuffer
-	.dl 0 ;FATStart
+.ds "ndog" ; Magic number so a4x knows this is a valid bootloader.
 
 .struct Vars
 	4 Args
-	4 DeviceNode
-	4 BlockBuffer
-	4 FATStart
+	4 BootPartition
+	4 DeviceDatabase
 .end-struct
 
 .struct Superblock
@@ -56,32 +46,13 @@ VarArea:
 	4 bytesize
 .end-struct
 
-.define _a3xCIC_Putc 0
-.define _a3xCIC_Getc 4
-.define _a3xCIC_Gets 8
-.define _a3xCIC_Puts 12
-.define _a3xCIC_DevTree 16
-.define _a3xCIC_Malloc 20
-.define _a3xCIC_Calloc 24
-.define _a3xCIC_Free 28
-.define _a3xCIC_DevTreeWalk 32
-.define _a3xCIC_DeviceParent 36
-.define _a3xCIC_DeviceSelectNode 40
-.define _a3xCIC_DeviceSelect 44
-.define _a3xCIC_DeviceDGetProperty 48
-.define _a3xCIC_DeviceDGetMethod 52
-.define _a3xCIC_DeviceDCallMethod 56
-.define _a3xCIC_DeviceExit 60
-.define _a3xCIC_DeviceDSetProperty 64
-.define _a3xCIC_DeviceDCallMethodPtr 68
-.define _a3xCIC_DevIteratorInit 72
-.define _a3xCIC_DevIterate 76
-.define _a3xCIC_DeviceDGetName 80
-.define _a3xCIC_ConsoleUserOut 84
-.define _a3xCIC_DGetCurrent 88
+.define _a4x_ReadDisk 8
+.define _a4x_PutString 12
 
-;arguments: api devnode args
-;registers:  a2      a1   a0
+; a0 - devicedatabase
+; a1 - apitable
+; a2 - partition
+; a3 - args
 AisixFSBoot:
 	subi sp, sp, 36
 	mov  long [sp], lr
@@ -94,30 +65,23 @@ AisixFSBoot:
 	mov  long [sp + 28], s6
 	mov  long [sp + 32], s7
 
-;save the stuff a3x passed in
+;save the stuff a4x passed in
 
 	la   s0, VarArea
-	mov  long [s0 + Vars_Args], a0
-	mov  long [s0 + Vars_DeviceNode], a1
-	mov  s7, a2
+	mov  long [s0 + Vars_Args], a3
+	mov  long [s0 + Vars_BootPartition], a2
+	mov  long [s0 + Vars_DeviceDatabase], a0
+	mov  s7, a1
 
-;select the boot device node
+;load address of temporary sector buffer which will be 0x20000
 
-	mov  a0, a1
-	mov  t0, long [s7 + _a3xCIC_DeviceSelectNode]
-	jalr lr, t0, 0
-
-;get the address of our temporary disk block buffer, which should be right
-;after the end of this program in memory.
-
-	la   s1, DiskBlockBuffer
-	mov  long [s0 + Vars_BlockBuffer], s1
+	lui  s1, zero, 0x20000
 
 ;load the superblock
 
 	li   a0, 0
 	mov  a1, s1
-	jal  a3xReadBlock
+	jal  a4xReadBlock
 
 ;save the FAT start block number
 
@@ -127,7 +91,7 @@ AisixFSBoot:
 
 	mov  a0, long [s1 + Superblock_IStart]
 	mov  a1, s1
-	jal  a3xReadBlock
+	jal  a4xReadBlock
 
 ;check the type number of inode 2 (should be nonzero)
 
@@ -139,19 +103,19 @@ AisixFSBoot:
 	mov  s2, long [s1 + INode_startblock]
 
 ;iterate the FAT chain until we see a 0xFFFFFFFF (-1) and load OSLoader.a3x
-;starting at 0x20400.
+;starting at 0x3200.
 
 	subi s3, zero, 1
 	subi s6, zero, 1
 
-	la   s4, 0x20400
+	li   s4, 0x3200
 
 .loadloop:
 
 ;load this block of the file
 	mov  a0, s2
 	mov  a1, s4
-	jal  a3xReadBlock
+	jal  a4xReadBlock
 
 ;we have to get the next block number in the chain; if the FAT block we need
 ;is already loaded, then skip over that.
@@ -165,7 +129,7 @@ AisixFSBoot:
 	mov  s6, a0
 	add  a0, a0, s5
 	mov  a1, s1
-	jal  a3xReadBlock
+	jal  a4xReadBlock
 
 .skipfat:
 	lshi t0, s2, 2
@@ -176,18 +140,19 @@ AisixFSBoot:
 	sub  t0, s3, s2
 	bne  t0, .loadloop
 
-;reload the a3x arguments so we can chain-load OSLoader.a3x which just uses
-;the a3x boot protocol.
+;reload the a4x arguments so we can chain-load OSLoader.a4x which just uses
+;the a4x boot protocol.
 
-	mov  a0, long [s0 + Vars_Args]
-	mov  a1, long [s0 + Vars_DeviceNode]
-	mov  a2, s7
+	mov  a0, long [s0 + Vars_DeviceDatabase]
+	mov  a1, s7
+	mov  a2, long [s0 + Vars_BootPartition]
+	mov  a3, long [s0 + Vars_Args]
 
-;check for the a3x program signature
+;check for the a4x program signature
 
-	la   t0, 0x20400
+	li   t0, 0x3200
 
-	la   t1, 0x45544E41
+	la   t1, 0x676F646E
 	mov  t2, long [t0]
 	sub  t1, t1, t2
 	bne  t1, .invalid
@@ -209,26 +174,26 @@ AisixFSBoot:
 
 .invalid:
 	la   a0, loadername
-	mov  t0, long [s7 + _a3xCIC_Puts]
+	mov  t0, long [s7 + _a4x_PutString]
 	jalr lr, t0, 0
 
 	la   a0, invalidmessage
-	mov  t0, long [s7 + _a3xCIC_Puts]
+	mov  t0, long [s7 + _a4x_PutString]
 	jalr lr, t0, 0
 
 	b    .errout
 
 .notfound:
 	la   a0, loadername
-	mov  t0, long [s7 + _a3xCIC_Puts]
+	mov  t0, long [s7 + _a4x_PutString]
 	jalr lr, t0, 0
 
 	la   a0, notfoundmessage
-	mov  t0, long [s7 + _a3xCIC_Puts]
+	mov  t0, long [s7 + _a4x_PutString]
 	jalr lr, t0, 0
 
 .errout:
-	subi a0, zero, 1
+	subi a3, zero, 1
 
 .out:
 
@@ -244,39 +209,35 @@ AisixFSBoot:
 	addi sp, sp, 36
 	ret
 
+VarArea:
+	.dl 0 ;Args
+	.dl 0 ;BootPartition
+	.dl 0 ;DeviceDatabase
+
 ;a0 - blockno
 ;a1 - buffer
-a3xReadBlock:
-	subi sp, sp, 12
+a4xReadBlock:
+	subi sp, sp, 4
 	mov  long [sp], lr
-	mov  long [sp + 8], a1
-	mov  long [sp + 4], a0
 
-	la   a1, readblockname
-	li   a0, 2
+	mov  a2, a0
+	mov  a0, long [s0 + Vars_BootPartition]
+	li   a3, 1
 
-	mov  t0, long [s7 + _a3xCIC_DeviceDCallMethod]
+	mov  t0, long [s7 + _a4x_ReadDisk]
 	jalr lr, t0, 0
 
 	mov  lr, long [sp]
-	addi sp, sp, 12
+	addi sp, sp, 4
 	ret
 
-readblockname:
-	.ds "readBlock\0"
-
 loadername:
-	.ds "OSLoader.bin: \0"
+	.ds "Couldn't load OSLoader.a4x: \0"
 
 invalidmessage:
-	.ds "invalid program\n\0"
+	.ds "Invalid program\n\0"
 
 notfoundmessage:
-	.ds "not found\n\0"
+	.ds "Not found\n\0"
 
 .align 512            ;fill rest of disk block with zeroes
-
-.section bss
-
-DiskBlockBuffer:
-	.bytes 512 0
