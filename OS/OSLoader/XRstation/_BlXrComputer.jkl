@@ -1,0 +1,39 @@
+//
+// Implements XR/computer specific parts of the bootloader.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "<ll>/a4xClient.hjk"
+
+#ASM [
+
+.dl 0x676F646E
+
+entry:
+	j   BlEntry
+
+]
+
+FwApiTable : ^FwApiTableRecord
+
+FN (RtlPrintCallbackF) RtljPrintCallback (
+    IN byte : UBYTE,
+    IN context : ^VOID,
+)
+
+    FwApiTable^.PutCharacter ( byte )
+END
+
+FN (FwBootstrapEntrypoint) BlEntry (
+    IN devicedatabase : ^FwDeviceDatabaseRecord,
+    IN apitable : ^FwApiTableRecord,
+    IN bootpartition : ^FwDiskPartitionInfo,
+    IN args : ^UBYTE,
+) : UWORD
+
+	FwApiTable = apitable
+
+	RtlPrint ( "Sup from OSLoader.a4x\n" )
+
+	RETURN 0
+END

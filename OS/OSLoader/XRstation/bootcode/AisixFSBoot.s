@@ -165,8 +165,7 @@ AisixFSBoot:
 
 ;jump to the entrypoint
 
-	mov  t0, long [t0 + 4]
-	jalr lr, t0, 0
+	jalr lr, t0, 4
 
 ;it returned, we're done
 

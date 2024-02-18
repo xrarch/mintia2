@@ -9,6 +9,10 @@ ifndef SDK
 	SDK := $(REPO)/../sdk
 endif
 
+ifndef NEWSDK
+	NEWSDK := $(REPO)/../newsdk
+endif
+
 ifndef PLATFORM
 	PLATFORM := XRstation
 endif
@@ -26,6 +30,7 @@ endif
 export CHKFRE
 
 export SDK
+export NEWSDK
 export PLATFORM
 
 export JC := $(SDK)/jcd.sh
