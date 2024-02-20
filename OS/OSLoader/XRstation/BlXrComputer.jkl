@@ -24,6 +24,11 @@ FN (RtlPrintCallbackF) RtljPrintCallback (
     FwApiTable^.PutCharacter ( byte )
 END
 
+EXTERN _bss : UBYTE
+EXTERN _bss_size : UBYTE
+
+EXTERN FN BlMain () : UWORD
+
 FN (FwBootstrapEntrypoint) BlEntry (
     IN devicedatabase : ^FwDeviceDatabaseRecord,
     IN apitable : ^FwApiTableRecord,
@@ -31,9 +36,17 @@ FN (FwBootstrapEntrypoint) BlEntry (
     IN args : ^UBYTE,
 ) : UWORD
 
+	// Clear the BSS section.
+
+	RtlFillMemoryWithUlong (
+		&_bss, // ptr
+		CAST &_bss_size TO UWORD, // size
+		0, // ulong
+	)
+
 	FwApiTable = apitable
 
-	RtlPrint ( "Sup from OSLoader.a4x\n" )
+	// Call the generic bootloader entrypoint.
 
-	RETURN 0
+	RETURN BlMain ()
 END
