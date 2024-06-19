@@ -23,7 +23,7 @@ a pretty strong system at the time. It is also intended to be very portable.
 
 ## Building
 
-As with all XR/station projects, the [newsdk](http://github.com/xrarch/newsdk) should
+The [newsdk](http://github.com/xrarch/newsdk) should
 be in a directory `../newsdk` relative to this repository. It should be set up as per
 the instructions in that repo.
 
