@@ -46,6 +46,6 @@ With the XR/station emulator (`./xremu/`) and MINTIA repository (`./mintia2/`) i
 
 If it doesn't boot automatically, type this command at the firmware prompt:
 
-`boot /disks/0/a`
+`boot dks0s0`
 
 MINTIA ~~should boot to the login prompt.~~ does nothing currently!
