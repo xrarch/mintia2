@@ -48,4 +48,4 @@ If it doesn't boot automatically, type this command at the firmware prompt:
 
 `boot /disks/0/a`
 
-MINTIA ~~should boot to the `username:` prompt.~~ does nothing currently!
+MINTIA ~~should boot to the login prompt.~~ does nothing currently!
