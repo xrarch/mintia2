@@ -15,8 +15,6 @@ MINTIA aims to be something that might have come off of a weird workstation
 computer made by a doomed company in 1989, and that might have been considered
 a pretty strong system at the time. It is also intended to be very portable.
 
-![Running](https://raw.githubusercontent.com/xrarch/mintia/main/screenshot.png)
-
 ## Supported Architectures
 
 <a href="https://github.com/xrarch/xremu"><img src="https://raw.githubusercontent.com/xrarch/mintia/main/badge-17032.png" width="256"></a>
