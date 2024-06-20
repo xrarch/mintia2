@@ -348,7 +348,7 @@ FN (FwBootstrapEntrypoint) BxEntry (
 
     RtlFillMemoryWithUlong (
         &_bss, // ptr
-        CAST &_bss_size TO UWORD, // size
+        &_bss_size, // size
         0, // ulong
     )
 
@@ -460,7 +460,7 @@ FN BxInitializeMemoryMapping ()
 
     excva := BlAllocateKernelSpace (
         1, // pages
-        CAST BL_KERNEL_STRUCTURES TO ^VOID, // prefva
+        BL_KERNEL_STRUCTURES, // prefva
         0, // fixed
     )
 
@@ -484,7 +484,7 @@ FN BxInitializeMemoryMapping ()
     RtlCopyBytes (
         excblock + 0xE00, // dest
         missroutine, // src
-        CAST &BxItbMissHandlerEnd - missroutine TO UWORD, // sz
+        &BxItbMissHandlerEnd - missroutine, // sz
     )
 
     missroutine = &BxDtbMissHandler
@@ -492,7 +492,7 @@ FN BxInitializeMemoryMapping ()
     RtlCopyBytes (
         excblock + 0xF00, // dest
         missroutine, // src
-        CAST &BxDtbMissHandlerEnd - missroutine TO UWORD, // sz
+        &BxDtbMissHandlerEnd - missroutine, // sz
     )
 
     // Create a virtually linear mapping of the page table by inserting the page
@@ -500,8 +500,7 @@ FN BxInitializeMemoryMapping ()
 
     pdeptr := &BxPageDirectory[0xB0000000 >> 22]
 
-    pdeptr^ =
-        CAST ((BxPageDirectory >> 12) << 5) | PTE_V | PTE_W | PTE_K TO ULONG
+    pdeptr^ = ((BxPageDirectory >> 12) << 5) | PTE_V | PTE_W | PTE_K
 
     // Now we can enable paging.
 
@@ -540,7 +539,7 @@ FN BxInitializeMemory ()
     // Initialize first descriptor as a reclaimable area covering the firmware
     // data region up to the end of our BSS section.
 
-    endreclaimable := CAST &_bss_end TO UWORD
+    endreclaimable : UWORD = &_bss_end
     endreclaimable += RTL_PAGE_SIZE - 1
     endreclaimable >>= RTL_PAGE_SHIFT
 
@@ -579,7 +578,7 @@ FN BxInitializeMemory ()
         SIZEOF BlMemoryDescriptor, // bytes
     ) TO ^BlMemoryDescriptor
 
-    desc^.StartPfn = CAST BlHeapPointer TO UWORD >> RTL_PAGE_SHIFT
+    desc^.StartPfn = BlHeapPointer >> RTL_PAGE_SHIFT
     desc^.PageCount = bumppages
     desc^.Type = BL_MEMORY_RECLAIMABLE
 
