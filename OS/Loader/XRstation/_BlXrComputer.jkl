@@ -166,7 +166,7 @@ BxItbMissHandlerEnd:
 
 // a0 - Virtual address of exception block
 // a1 - Physical address of exception block
-BxEnablePaging:
+BxEnableVirtualAddressing:
     wmb
 
     mtcr eb, a0
@@ -224,7 +224,7 @@ BxEnablePaging:
     mtcr itbindex, t0
     mtcr dtbindex, t0
 
-    // Set map enable bit in RS to turn on paging.
+    // Set map enable bit in RS to turn on virtual addressing.
 
     li   t0, 4
     mtcr rs, t0
@@ -396,7 +396,7 @@ EXTERN BxDtbMissHandlerEnd : UBYTE
 EXTERN BxItbMissHandler : UBYTE
 EXTERN BxItbMissHandlerEnd : UBYTE
 
-EXTERN FN BxEnablePaging (
+EXTERN FN BxEnableVirtualAddressing (
     IN excva : ^VOID,
     IN excblock : ^VOID,
 )
@@ -502,9 +502,9 @@ FN BxInitializeMemoryMapping ()
 
     pdeptr^ = ((BxPageDirectory >> 12) << 5) | PTE_V | PTE_W | PTE_K
 
-    // Now we can enable paging.
+    // Now we can enable virtual addressing.
 
-    BxEnablePaging (
+    BxEnableVirtualAddressing (
         excva, // excva
         excblock, // excblock
     )
@@ -708,4 +708,27 @@ FN BxMapRange (
         vaddr += RTL_PAGE_SIZE
         pages -= 1
     END
+END
+
+FN BxVirtualToPfn (
+    IN vaddr : ^VOID,
+) : UWORD
+
+    // Translate a virtual address to a physical address. Returns -1 if invalid.
+
+    pdeptr := &BxPageDirectory[vaddr >> 22]
+
+    pagetable := CAST (pdeptr^ >> 5) << RTL_PAGE_SHIFT TO ^ULONG
+
+    IF NOT pagetable THEN
+        RETURN -1
+    END
+
+    pte := pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
+
+    IF pte & PTE_V THEN
+        RETURN pte >> 5
+    END
+
+    RETURN -1
 END
