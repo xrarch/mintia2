@@ -1,17 +1,60 @@
 //
-// Main routine for the MINTIA OSLoader.
+// Main routine for the MINTIA Loader.
 //
 
-#INCLUDE "<ll>/Rtl.hjk"
 #INCLUDE "Bl.hjk"
+
+#DEFINE PLATFORM_FULL_NAME_STR ( STRCAT ( STRCAT "\"" PLATFORM_FULL_NAME ) "\"" )
 
 PUBLIC BlInfoBlock : BlInfoRecord
 
+PUBLIC BlDoRelinkAll : UWORD
+
+EXTERN FN BlInitializeMemory ()
+
 FN BlMain () : UWORD
 
-    RtlPrint ( "\nMINTIA OSLoader\n" )
+    RtlPrint (
+        "\nMINTIA 2 START! %s. Base Level %d.\n", // fmt
+        PLATFORM_FULL_NAME_STR,
+        BLD_BASE_LEVEL,
+    )
 
-    
+    BlDoRelinkAll = BlGetExistenceArg ( "-relink" )
 
-    RETURN 0
+    // Initialize memory management.
+
+    BlInitializeMemory ()
+
+    BlExit ( 0 )
+END
+
+FN BlCrash (
+    IN fmt : ^UBYTE,
+    ... argv argc
+)
+
+    RtlPrint ( "*** Cannot continue booting: " )
+
+    RtlPrintByVarTable (
+        NULLPTR, // handle
+        fmt, // fmt
+        argv, // argv
+        argc, // argc
+    )
+
+    BlExit ( -1 )
+END
+
+EXTERN FN BxExit (
+    IN status : UWORD,
+)
+
+FN BlExit (
+    IN status : UWORD,
+)
+
+    // Call the platform exit code.
+
+    BxExit ( status )
 END

@@ -2,51 +2,720 @@
 // Implements XR/computer specific parts of the bootloader.
 //
 
-#INCLUDE "<ll>/Rtl.hjk"
 #INCLUDE "<ll>/a4xClient.hjk"
+#INCLUDE "../Bl.hjk"
 
 #ASM [
 
 .dl 0x676F646E
 
 entry:
-	j   BlEntry
+    // Save the non-volatile registers so that we can longjmp back into the
+    // firmware.
+
+    mfcr t0, eb
+    mov  long [FirmwareEb], t0, tmp=t1
+
+    la   t0, SaveArea
+    mov  long [t0 + 0], s0
+    mov  long [t0 + 4], s1
+    mov  long [t0 + 8], s2
+    mov  long [t0 + 12], s3
+    mov  long [t0 + 16], s4
+    mov  long [t0 + 20], s5
+    mov  long [t0 + 24], s6
+    mov  long [t0 + 28], s7
+    mov  long [t0 + 32], s8
+    mov  long [t0 + 36], s9
+    mov  long [t0 + 40], s10
+    mov  long [t0 + 44], s11
+    mov  long [t0 + 48], s12
+    mov  long [t0 + 52], s13
+    mov  long [t0 + 56], s14
+    mov  long [t0 + 60], s15
+    mov  long [t0 + 64], s16
+    mov  long [t0 + 68], s17
+    mov  long [t0 + 72], lr
+    mov  long [t0 + 76], sp
+
+    j    BxEntry
+
+SaveArea:
+    .bytes (32 * 4), 0
+
+BxExit:
+.global BxExit
+    // Disable paging and interrupts.
+
+    mfcr t0, rs
+    andi t0, t0, 0xFFF8
+    mtcr rs, t0
+
+    mov  t0, long [FirmwareEb]
+    mtcr eb, t0
+
+    // Restore non-volatile registers.
+
+    la   t0, SaveArea
+    mov  s0, long [t0 + 0]
+    mov  s1, long [t0 + 4]
+    mov  s2, long [t0 + 8]
+    mov  s3, long [t0 + 12]
+    mov  s4, long [t0 + 16]
+    mov  s5, long [t0 + 20]
+    mov  s6, long [t0 + 24]
+    mov  s7, long [t0 + 28]
+    mov  s8, long [t0 + 32]
+    mov  s9, long [t0 + 36]
+    mov  s10, long [t0 + 40]
+    mov  s11, long [t0 + 44]
+    mov  s12, long [t0 + 48]
+    mov  s13, long [t0 + 52]
+    mov  s14, long [t0 + 56]
+    mov  s15, long [t0 + 60]
+    mov  s16, long [t0 + 64]
+    mov  s17, long [t0 + 68]
+    mov  lr, long [t0 + 72]
+    mov  sp, long [t0 + 76]
+
+    // Back to firmware.
+
+    mov  a3, a0
+    ret
+
+SavedLR:
+    .dl 0
+
+SavedS0:
+    .dl 0
+
+FirmwareEb:
+    .dl 0
+
+// Tons of stubs for calling into the firmware.
+// These need to disable paging and interrupts, otherwise we will just shit the
+// bed when we try to call up.
+
+FwPutCharacter:
+    mov  long [SavedS0], s0, tmp=t0
+    mov  long [SavedLR], lr, tmp=t0
+
+    mfcr s0, rs
+    andi t0, s0, 0xFFF8
+    mtcr rs, t0
+
+    mov  t0, long [FwApiTable]
+    mov  t0, long [t0 + 0]
+    jalr lr, t0, 0
+
+    mtcr rs, s0
+
+    mov  lr, long [SavedLR]
+    mov  s0, long [SavedS0]
+    ret
+
+FwGetCharacter:
+    mov  long [SavedS0], s0, tmp=t0
+    mov  long [SavedLR], lr, tmp=t0
+
+    mfcr s0, rs
+    andi t0, s0, 0xFFF8
+    mtcr rs, t0
+
+    mov  t0, long [FwApiTable]
+    mov  t0, long [t0 + 4]
+    jalr lr, t0, 0
+
+    mtcr rs, s0
+
+    mov  lr, long [SavedLR]
+    mov  s0, long [SavedS0]
+    ret
+
+FwReadDisk:
+    mov  long [SavedS0], s0, tmp=t0
+    mov  long [SavedLR], lr, tmp=t0
+
+    mfcr s0, rs
+    andi t0, s0, 0xFFF8
+    mtcr rs, t0
+
+    mov  t0, long [FwApiTable]
+    mov  t0, long [t0 + 8]
+    jalr lr, t0, 0
+
+    mtcr rs, s0
+
+    mov  lr, long [SavedLR]
+    mov  s0, long [SavedS0]
+    ret
+
+BxDtbMissHandler:
+    mfcr zero, dtbaddr
+    mov  zero, long [zero]
+    mtcr dtbpte, zero
+    rfe
+BxDtbMissHandlerEnd:
+
+BxItbMissHandler:
+    mfcr zero, itbaddr
+    mov  zero, long [zero]
+    mtcr itbpte, zero
+    rfe
+BxItbMissHandlerEnd:
+
+// a0 - Virtual address of exception block
+// a1 - Physical address of exception block
+BxEnablePaging:
+    wmb
+
+    mtcr eb, a0
+    
+    // Flush icache.
+
+    li   t0, 3
+    mtcr icachectrl, t0
+
+    // Flush translation buffers.
+
+    li   t0, 3
+    mtcr itbctrl, t0
+    mtcr dtbctrl, t0
+
+    // Zero out processor status.
+
+    mtcr rs, zero
+
+    // Set the page table virtual base.
+
+    la   t0, 0xB0000000
+    mtcr itbaddr, t0
+    mtcr dtbaddr, t0
+
+    // Insert page directory and exception block into zeroth and first reserved
+    // TB entries, respectively. this will keep them permanently mapped
+    // forever.
+
+    mtcr itbindex, zero
+    mtcr dtbindex, zero
+
+    la   t0, 0xB02C0000
+    rshi t0, t0, 12
+    mtcr dtbtag, t0
+
+    mov  t0, long [BxPageDirectory]
+    rshi t0, t0, 12
+    lshi t0, t0, 5
+    ori  t0, t0, 0x7 // PTE_V | PTE_W | PTE_K
+    mtcr dtbpte, t0
+
+    mov  t0, a0
+    rshi t0, t0, 12
+    mtcr itbtag, t0
+
+    mov  t0, a1
+    rshi t0, t0, 12
+    lshi t0, t0, 5
+    ori  t0, t0, 0x17 // PTE_V | PTE_W | PTE_G | PTE_K
+    mtcr itbpte, t0
+
+    // Re-initialize TB replacement indices to 4.
+
+    li   t0, 4
+    mtcr itbindex, t0
+    mtcr dtbindex, t0
+
+    // Set map enable bit in RS to turn on paging.
+
+    li   t0, 4
+    mtcr rs, t0
+
+    ret
 
 ]
 
+// Prototypes for the firmware call stubs.
+
+EXTERN FN (FwApiPutCharacterF) FwPutCharacter (
+    IN byte : UWORD,
+)
+
+EXTERN FN (FwApiGetCharacterF) FwGetCharacter () : UWORD
+
+EXTERN FN (FwApiReadDiskF) FwReadDisk (
+    IN partition : ^FwDiskPartitionInfo,
+    IN buffer : ^VOID,
+    IN sector : ULONG,
+    IN count : ULONG,
+) : UWORD
+
 FwApiTable : ^FwApiTableRecord
+
+FwDeviceDatabase : ^FwDeviceDatabaseRecord
 
 FN (RtlPrintCallbackF) RtljPrintCallback (
     IN byte : UBYTE,
     IN context : ^VOID,
 )
 
-    FwApiTable^.PutCharacter ( byte )
+    FwPutCharacter ( byte )
 END
 
 EXTERN _bss : UBYTE
 EXTERN _bss_size : UBYTE
+EXTERN _bss_end : UBYTE
 
 EXTERN FN BlMain () : UWORD
 
-FN (FwBootstrapEntrypoint) BlEntry (
+#DEFINE BX_ARG_TABLE_SIZE 256
+#DEFINE BX_ARG_MAX 32
+
+BxArgBuffer : UBYTE[BX_ARG_TABLE_SIZE]
+BxArgTable : ^UBYTE[BX_ARG_MAX]
+
+FN BxInitializeArgs (
+    IN argstring : ^UBYTE,
+)
+
+    // Initialize argument string into a table of null-terminated arguments.
+
+    BlArgTable = &BxArgTable[0]
+
+    // First copy the argument string into our private buffer.
+
+    RtlCopyString (
+        &BxArgBuffer[0], // dest
+        argstring, // src
+        BX_ARG_TABLE_SIZE, // bufsize
+    )
+
+    // Crawl along the arguments to fill in the table of argument pointers.
+
+    ptr := &BxArgBuffer[0]
+    i := 0
+
+    WHILE TRUE DO
+        WHILE ptr^ == ' ' DO
+            ptr += 1
+        END
+
+        IF ptr^ == 0 THEN
+            BREAK
+        END
+
+        argstart := ptr
+
+        WHILE TRUE DO
+            IF ptr^ == 0 OR ptr^ == ' ' THEN
+                // Found the end of this argument.
+
+                BxArgTable[i] = argstart
+
+                i += 1
+
+                IF ptr^ == 0 THEN
+                    BREAK
+                END
+
+                ptr^ = 0
+                ptr += 1
+
+                IF i == BX_ARG_MAX THEN
+                    BlArgCount = i
+
+                    LEAVE
+                END
+
+                BREAK
+            END
+
+            ptr += 1
+        END
+    END
+
+    BlArgCount = i
+
+    LEAVE
+END
+
+FN (FwBootstrapEntrypoint) BxEntry (
     IN devicedatabase : ^FwDeviceDatabaseRecord,
     IN apitable : ^FwApiTableRecord,
     IN bootpartition : ^FwDiskPartitionInfo,
     IN args : ^UBYTE,
 ) : UWORD
 
-	// Clear the BSS section.
+    // Clear the BSS section.
 
-	RtlFillMemoryWithUlong (
-		&_bss, // ptr
-		CAST &_bss_size TO UWORD, // size
-		0, // ulong
-	)
+    RtlFillMemoryWithUlong (
+        &_bss, // ptr
+        CAST &_bss_size TO UWORD, // size
+        0, // ulong
+    )
 
-	FwApiTable = apitable
+    FwApiTable = apitable
+    FwDeviceDatabase = devicedatabase
 
-	// Call the generic bootloader entrypoint.
+    // Initialize argument string into a table of null-terminated arguments, as
+    // expected by the loader's argument stuff.
 
-	RETURN BlMain ()
+    BxInitializeArgs ( args )
+
+    // Call the generic bootloader entrypoint.
+
+    RETURN BlMain ()
+END
+
+BxPageDirectory : ^ULONG
+
+FN BxIdentityMapMemory ()
+
+    i := 0
+    base := NULLPTR
+
+    WHILE i < FW_RAM_MAX DO
+        pagecount := FwDeviceDatabase^.Ram[i].PageFrameCount
+
+        IF pagecount THEN
+            BxMapRange (
+                base, // vaddr
+                base, // phyaddr
+                pagecount, // pages
+                BL_MEMORY_RECLAIMABLE, // pttype
+                FALSE, // noncached
+            )
+        END
+
+        base += 32 * 1024 * 1024
+        i += 1
+    END
+END
+
+EXTERN BxDtbMissHandler : UBYTE
+EXTERN BxDtbMissHandlerEnd : UBYTE
+
+EXTERN BxItbMissHandler : UBYTE
+EXTERN BxItbMissHandlerEnd : UBYTE
+
+EXTERN FN BxEnablePaging (
+    IN excva : ^VOID,
+    IN excblock : ^VOID,
+)
+
+#DEFINE PTE_V 1
+#DEFINE PTE_W 2
+#DEFINE PTE_K 4
+#DEFINE PTE_NC 8
+#DEFINE PTE_G 16
+
+FN BxInitializeMemoryMapping ()
+
+    // Create the initial page tables and turn on memory mapping.
+
+    // Allocate the kernel page directory.
+
+    desc := BlAllocatePhysicalRange (
+        1, // pages
+        BL_MEMORY_USED, // type
+    )
+
+    IF NOT desc THEN
+        BlCrash ( "Failed to allocate page directory\n" )
+    END
+
+    // Fill the bottom half of the page directory with zeroes and the upper half
+    // with invalid kernel PTEs.
+
+    BxPageDirectory = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
+
+    RtlFillMemoryWithUlong (
+        BxPageDirectory, // ptr
+        2048, // size
+        0x00000000, // ulong
+    )
+
+    RtlFillMemoryWithUlong (
+        BxPageDirectory + 2048, // ptr
+        2048, // size
+        0x00000010, // ulong
+    )
+
+    // Identity map each RAM slot.
+
+    BxIdentityMapMemory ()
+
+    // Allocate a page for the exception block.
+
+    desc = BlAllocatePhysicalRange (
+        1, // pages
+        BL_MEMORY_USED, // type
+    )
+
+    IF NOT desc THEN
+        BlCrash ( "Failed to allocate exception block\n" )
+    END
+
+    excblock := CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID
+
+    // Map it into kernel space somewhere too.
+
+    excva := BlAllocateKernelSpace (
+        1, // pages
+        CAST BL_KERNEL_STRUCTURES TO ^VOID, // prefva
+        0, // fixed
+    )
+
+    IF NOT excva THEN
+        BlCrash ( "Failed to allocate exception block mapping\n" )
+    END
+
+    BxMapPage (
+        excva, // va
+        excblock, // phyaddr
+        BL_MEMORY_USED, // pttype
+        FALSE, // noncached
+    )
+
+    BlInfoBlock.U.XrStation.ExceptionBlock = excva
+
+    // Copy TB miss routines into the exception block.
+
+    missroutine := &BxItbMissHandler
+
+    RtlCopyBytes (
+        excblock + 0xE00, // dest
+        missroutine, // src
+        CAST &BxItbMissHandlerEnd - missroutine TO UWORD, // sz
+    )
+
+    missroutine = &BxDtbMissHandler
+
+    RtlCopyBytes (
+        excblock + 0xF00, // dest
+        missroutine, // src
+        CAST &BxDtbMissHandlerEnd - missroutine TO UWORD, // sz
+    )
+
+    // Create a virtually linear mapping of the page table by inserting the page
+    // directory into one of its own PDEs.
+
+    pdeptr := &BxPageDirectory[0xB0000000 >> 22]
+
+    pdeptr^ =
+        CAST ((BxPageDirectory >> 12) << 5) | PTE_V | PTE_W | PTE_K TO ULONG
+
+    // Now we can enable paging.
+
+    BxEnablePaging (
+        excva, // excva
+        excblock, // excblock
+    )
+END
+
+#IF ( & BL_BUMP_SIZE ( - RTL_PAGE_SIZE 1 ) )
+    #ERROR "BL_BUMP_SIZE not page aligned"
+#END
+
+FN BxInitializeMemory ()
+
+    // On XR/computer platforms, this function has to populate the memory
+    // descriptor list, identity map memory, and then enable paging.
+
+    // First set up the bump allocator at the end of the first RAM slot.
+
+    ramslotzero := FwDeviceDatabase^.Ram[0].PageFrameCount
+    bumppages := BL_BUMP_SIZE >> RTL_PAGE_SHIFT
+
+    BlHeapTop = CAST ramslotzero << RTL_PAGE_SHIFT TO ^VOID
+
+    IF BlHeapTop < BL_BUMP_SIZE THEN
+        BlCrash ( "Not enough memory in slot 0 for bump allocator\n" )
+    END
+
+    BlHeapPointer = BlHeapTop - BL_BUMP_SIZE
+
+    IF BlHeapPointer < &_bss_end THEN
+        BlCrash ( "Bump allocator overlaps loader BSS\n" )
+    END
+
+    // Initialize first descriptor as a reclaimable area covering the firmware
+    // data region up to the end of our BSS section.
+
+    endreclaimable := CAST &_bss_end TO UWORD
+    endreclaimable += RTL_PAGE_SIZE - 1
+    endreclaimable >>= RTL_PAGE_SHIFT
+
+    desc := CAST BlAllocateMemory (
+        SIZEOF BlMemoryDescriptor, // bytes
+    ) TO ^BlMemoryDescriptor
+
+    desc^.StartPfn = 0
+    desc^.PageCount = endreclaimable
+    desc^.OriginalPfn = desc^.StartPfn
+    desc^.OriginalExtent = desc^.PageCount
+    desc^.Type = BL_MEMORY_RECLAIMABLE
+
+    RtlInsertAtTailList (
+        &BlDescriptorList, // head
+        &desc^.Entry, // entry
+    )
+
+    // Initialize next descriptor as a free area consisting of the remainder of
+    // RAM slot 0 up until the start of the bump allocator.
+
+    desc = CAST BlAllocateMemory (
+        SIZEOF BlMemoryDescriptor, // bytes
+    ) TO ^BlMemoryDescriptor
+
+    desc^.StartPfn = endreclaimable
+    desc^.PageCount = ramslotzero - bumppages - endreclaimable
+    desc^.OriginalPfn = desc^.StartPfn
+    desc^.OriginalExtent = desc^.PageCount
+    desc^.Type = BL_MEMORY_FREE
+
+    RtlInsertAtTailList (
+        &BlDescriptorList, // head
+        &desc^.Entry, // entry
+    )
+
+    // Now insert the descriptor for the bump allocator.
+
+    desc = CAST BlAllocateMemory (
+        SIZEOF BlMemoryDescriptor, // bytes
+    ) TO ^BlMemoryDescriptor
+
+    desc^.StartPfn = CAST BlHeapPointer TO UWORD >> RTL_PAGE_SHIFT
+    desc^.PageCount = bumppages
+    desc^.OriginalPfn = desc^.StartPfn
+    desc^.OriginalExtent = desc^.PageCount
+    desc^.Type = BL_MEMORY_RECLAIMABLE
+
+    RtlInsertAtTailList (
+        &BlDescriptorList, // head
+        &desc^.Entry, // entry
+    )
+
+    // Now insert the rest of the RAM slots as free areas.
+
+    i := 1
+    base := 32 * 1024 * 1024
+
+    WHILE i < FW_RAM_MAX DO
+        pagecount := FwDeviceDatabase^.Ram[i].PageFrameCount
+
+        IF pagecount THEN
+            // Create a descriptor for this RAM slot.
+
+            desc = CAST BlAllocateMemory (
+                SIZEOF BlMemoryDescriptor, // bytes
+            ) TO ^BlMemoryDescriptor
+
+            desc^.StartPfn = base >> RTL_PAGE_SHIFT
+            desc^.PageCount = pagecount
+            desc^.OriginalPfn = desc^.StartPfn
+            desc^.OriginalExtent = desc^.PageCount
+            desc^.Type = BL_MEMORY_FREE
+
+            RtlInsertAtTailList (
+                &BlDescriptorList, // head
+                &desc^.Entry, // entry
+            )
+        END
+
+        base += 32 * 1024 * 1024
+        i += 1
+    END
+
+    BxInitializeMemoryMapping ()
+END
+
+FN BxMapPage (
+    IN vaddr : ^VOID,
+    IN phyaddr : ^VOID,
+    IN pttype : BlMemoryDescriptorType,
+    IN noncached : UWORD,
+)
+
+    pdeptr := &BxPageDirectory[vaddr >> 22]
+
+    pagetable := CAST (pdeptr^ >> 5) << RTL_PAGE_SHIFT TO ^ULONG
+
+    IF NOT pagetable THEN
+        // Allocate a new page table.
+
+        desc := BlAllocatePhysicalRange (
+            1, // pages
+            pttype, // type
+        )
+
+        IF NOT desc THEN
+            BlCrash ( "Failed to allocate page table\n" )
+        END
+
+        pagetable = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
+
+        newpde := (desc^.StartPfn << 5) | PTE_V | PTE_W | PTE_K
+
+        IF vaddr >= BL_KERNEL_SPACE THEN
+            RtlFillMemoryWithUlong (
+                pagetable, // dest
+                RTL_PAGE_SIZE, // sz
+                0x00000010, // ulong
+            )
+
+            newpde |= PTE_G
+
+        ELSE
+            RtlFillMemoryWithUlong (
+                pagetable, // dest
+                RTL_PAGE_SIZE, // sz
+                0x00000000, // ulong
+            )
+        END
+
+        pdeptr^ = newpde
+    END
+
+    pteptr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
+
+#IF BLD_CHK
+    IF pteptr^ & PTE_V THEN
+        BlCrash ( "VPN %x already mapped\n", vaddr >> RTL_PAGE_SHIFT )
+    END
+#END
+
+    newpte := CAST (phyaddr >> RTL_PAGE_SHIFT) << 5 TO ULONG
+    newpte |= PTE_V | PTE_W | PTE_K
+
+    IF vaddr >= BL_KERNEL_SPACE THEN
+        newpte |= PTE_G
+    END
+
+    IF noncached THEN
+        newpte |= PTE_NC
+    END
+
+    pteptr^ = newpte
+END
+
+FN BxMapRange (
+    IN vaddr : ^VOID,
+    IN phyaddr : ^VOID,
+    IN pages : UWORD,
+    IN pttype : BlMemoryDescriptorType,
+    IN noncached : UWORD,
+)
+
+    WHILE pages DO
+        BxMapPage (
+            vaddr, // vaddr
+            phyaddr, // phyaddr
+            pttype, // pttype
+            noncached, // noncached
+        )
+
+        phyaddr += RTL_PAGE_SIZE
+        vaddr += RTL_PAGE_SIZE
+        pages -= 1
+    END
 END

@@ -1,0 +1,162 @@
+//
+// Memory management for the bootloader.
+//
+
+#INCLUDE "Bl.hjk"
+
+PUBLIC BlDescriptorList : RtlListEntry
+
+PUBLIC BlHeapTop : ^VOID
+PUBLIC BlHeapPointer : ^VOID
+
+BlKernelStructureBump := CAST BL_KERNEL_STRUCTURES TO ^VOID
+
+EXTERN FN BxInitializeMemory ()
+
+#IF BLD_CHK
+
+FN BlDumpDescriptors ()
+
+    listhead := &BlDescriptorList
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        desc := CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+        RtlPrint (
+            "%p: start=%p end=%p type=%d\n", // fmt
+            desc,
+            desc^.StartPfn << RTL_PAGE_SHIFT,
+            ((desc^.StartPfn + desc^.PageCount) << RTL_PAGE_SHIFT) - 1,
+            desc^.Type,
+        )
+
+        listentry = listentry^.Next
+    END
+END
+
+#END
+
+FN BlInitializeMemory ()
+
+    // Initialize the descriptor list.
+
+    RtlInitializeList ( &BlDescriptorList )
+
+    // Call the platform code to populate our memory descriptor list.
+
+    BxInitializeMemory ()
+
+#IF BLD_CHK
+    BlDumpDescriptors ()
+#END
+
+END
+
+FN BlAllocateMemory (
+    IN bytes : UWORD,
+) : ^VOID
+
+    // Trivial bump allocator.
+
+    // First align bytes up to word size boundary.
+
+    bytes += (RTL_MACHINE_WORD_SIZE - 1)
+    bytes &= ~(RTL_MACHINE_WORD_SIZE - 1)
+
+    IF BlHeapPointer + bytes <= BlHeapTop THEN
+        ptr := BlHeapPointer
+
+        BlHeapPointer += bytes
+
+        RETURN ptr
+    END
+
+    // XXX If necessary, extend bump allocator by carving a chunk off the end of
+    //     a memory descriptor. For now we just crash.
+
+    BlCrash ( "Out of bump memory\n" )
+END
+
+FN BlAllocatePhysicalRange (
+    IN pages : UWORD,
+    IN type : BlMemoryDescriptorType,
+) : ^BlMemoryDescriptor
+
+    listhead := &BlDescriptorList
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        desc := CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+        IF desc^.Type == BL_MEMORY_FREE AND
+            desc^.PageCount >= pages THEN
+
+            // Draw the range from the start of this descriptor.
+
+            newdesc := CAST BlAllocateMemory (
+                SIZEOF BlMemoryDescriptor, // bytes
+            ) TO ^BlMemoryDescriptor
+
+            newdesc^.PageCount = pages
+            newdesc^.StartPfn = desc^.StartPfn
+            newdesc^.Type = type
+            newdesc^.OriginalPfn = 0
+            newdesc^.OriginalExtent = 0
+
+            // Insert before the old descriptor.
+
+            RtlInsertAtTailList (
+                &desc^.Entry, // head
+                &newdesc^.Entry, // entry
+            )
+
+            // Trim old descriptor.
+
+            desc^.PageCount -= pages
+            desc^.StartPfn += pages
+
+            RETURN newdesc
+        END
+
+        listentry = listentry^.Next
+    END
+
+    RETURN NULLPTR
+END
+
+FN BlFreePhysicalRange (
+    IN desc : ^BlMemoryDescriptor
+)
+
+    desc^.Type = BL_MEMORY_FREE
+END
+
+FN BlAllocateKernelSpace (
+    IN pages : UWORD,
+    IN preferredva : ^VOID,
+    IN fixed : UWORD,
+) : ^VOID
+
+    IF preferredva < BL_KERNEL_SPACE THEN
+        IF fixed THEN
+            RETURN NULLPTR
+        END
+
+        preferredva = CAST BL_KERNEL_SPACE TO ^VOID
+    END
+
+    IF preferredva == BL_KERNEL_STRUCTURES THEN
+        IF fixed THEN
+            RETURN NULLPTR
+        END
+
+        va := BlKernelStructureBump
+
+        BlKernelStructureBump += pages << RTL_PAGE_SHIFT
+
+        RETURN va
+    END
+
+    BlCrash ( "BlAllocateKernelSpace: TODO Needs RTL bitmap\n" )
+END

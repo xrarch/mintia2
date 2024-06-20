@@ -2,5 +2,81 @@
 // Private header file for Loader.
 //
 
+#INCLUDE "<ll>/Rtl.hjk"
+
 #INCLUDE "Headers/Loader.hjk"
 
+#IF ( STRCMP PLATFORM "XRstation" )
+    #INCLUDE "XRstation/Bl.hjk"
+
+#ELSEIF ( STRCMP PLATFORM "fox32" )
+    #INCLUDE "fox32/Bl.hjk"
+
+#ELSE
+    #ERROR ( STRCAT "Unknown platform " PLATFORM )
+#END
+
+#DEFINE BL_BUMP_SIZE 32768
+
+#DEFINE BL_MANAGED_KERNEL_SPACE [(256 * 1024 * 1024)]
+
+EXTERN BlInfoBlock : BlInfoRecord
+
+EXTERN BlArgCount : UWORD
+EXTERN BlArgTable : ^^UBYTE
+
+EXTERN BlDoRelinkAll : UWORD
+
+EXTERN BlDescriptorList : RtlListEntry
+
+EXTERN BlHeapTop : ^VOID
+EXTERN BlHeapPointer : ^VOID
+
+EXTERN FN BlDumpDescriptors ()
+
+EXTERN FN BlExit (
+    IN status : UWORD,
+)
+
+EXTERN FN BlCrash (
+    IN fmt : ^UBYTE,
+    ... argv argc
+)
+
+EXTERN FN BlAllocateMemory (
+    IN bytes : UWORD,
+) : ^VOID
+
+EXTERN FN BlAllocatePhysicalRange (
+    IN pages : UWORD,
+    IN type : BlMemoryDescriptorType,
+) : ^BlMemoryDescriptor
+
+EXTERN FN BlGetExistenceArg (
+    IN str : ^UBYTE,
+) : UWORD
+
+EXTERN FN BlGetValueArg (
+    IN key : ^UBYTE,
+) : ^UBYTE
+
+EXTERN FN BxMapRange (
+    IN vaddr : ^VOID,
+    IN phyaddr : ^VOID,
+    IN pages : UWORD,
+    IN pttype : BlMemoryDescriptorType,
+    IN noncached : UWORD,
+)
+
+EXTERN FN BxMapPage (
+    IN vaddr : ^VOID,
+    IN phyaddr : ^VOID,
+    IN pttype : BlMemoryDescriptorType,
+    IN noncached : UWORD,
+)
+
+EXTERN FN BlAllocateKernelSpace (
+    IN pages : UWORD,
+    IN preferredva : ^VOID,
+    IN fixed : UWORD,
+) : ^VOID
