@@ -551,8 +551,6 @@ FN BxInitializeMemory ()
 
     desc^.StartPfn = 0
     desc^.PageCount = endreclaimable
-    desc^.OriginalPfn = desc^.StartPfn
-    desc^.OriginalExtent = desc^.PageCount
     desc^.Type = BL_MEMORY_RECLAIMABLE
 
     RtlInsertAtTailList (
@@ -569,8 +567,6 @@ FN BxInitializeMemory ()
 
     desc^.StartPfn = endreclaimable
     desc^.PageCount = ramslotzero - bumppages - endreclaimable
-    desc^.OriginalPfn = desc^.StartPfn
-    desc^.OriginalExtent = desc^.PageCount
     desc^.Type = BL_MEMORY_FREE
 
     RtlInsertAtTailList (
@@ -586,8 +582,6 @@ FN BxInitializeMemory ()
 
     desc^.StartPfn = CAST BlHeapPointer TO UWORD >> RTL_PAGE_SHIFT
     desc^.PageCount = bumppages
-    desc^.OriginalPfn = desc^.StartPfn
-    desc^.OriginalExtent = desc^.PageCount
     desc^.Type = BL_MEMORY_RECLAIMABLE
 
     RtlInsertAtTailList (
@@ -612,8 +606,6 @@ FN BxInitializeMemory ()
 
             desc^.StartPfn = base >> RTL_PAGE_SHIFT
             desc^.PageCount = pagecount
-            desc^.OriginalPfn = desc^.StartPfn
-            desc^.OriginalExtent = desc^.PageCount
             desc^.Type = BL_MEMORY_FREE
 
             RtlInsertAtTailList (
