@@ -192,15 +192,13 @@ BxEnablePaging:
     mtcr itbaddr, t0
     mtcr dtbaddr, t0
 
-    // Insert page directory and exception block into zeroth and first reserved
-    // TB entries, respectively. this will keep them permanently mapped
-    // forever.
+    // Insert page directory and exception block into zeroth reserved DTB and
+    // ITB entries, respectively. They will be mapped by those entries forever.
 
     mtcr itbindex, zero
     mtcr dtbindex, zero
 
-    la   t0, 0xB02C0000
-    rshi t0, t0, 12
+    la   t0, (0xB02C0000 >> 12)
     mtcr dtbtag, t0
 
     mov  t0, long [BxPageDirectory]
@@ -219,7 +217,8 @@ BxEnablePaging:
     ori  t0, t0, 0x17 // PTE_V | PTE_W | PTE_G | PTE_K
     mtcr itbpte, t0
 
-    // Re-initialize TB replacement indices to 4.
+    // Re-initialize TB replacement indices to 4, to skip over the 4 reserved
+    // entries.
 
     li   t0, 4
     mtcr itbindex, t0
