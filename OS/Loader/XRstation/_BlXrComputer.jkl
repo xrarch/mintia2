@@ -249,8 +249,8 @@ EXTERN FN (FwApiReadDiskF) FwReadDisk (
 ) : UWORD
 
 FwApiTable : ^FwApiTableRecord
-
 FwDeviceDatabase : ^FwDeviceDatabaseRecord
+FwBootPartition : ^FwDiskPartitionInfo
 
 FN (RtlPrintCallbackF) RtljPrintCallback (
     IN byte : UBYTE,
@@ -354,6 +354,7 @@ FN (FwBootstrapEntrypoint) BxEntry (
 
     FwApiTable = apitable
     FwDeviceDatabase = devicedatabase
+    FwBootPartition = bootpartition
 
     // Initialize argument string into a table of null-terminated arguments, as
     // expected by the loader's argument stuff.
@@ -475,7 +476,7 @@ FN BxInitializeMemoryMapping ()
         FALSE, // noncached
     )
 
-    BlInfoBlock.U.XrStation.ExceptionBlock = excva
+    BlInfoBlock.U.Xr.ExceptionBlock = excva
 
     // Copy TB miss routines into the exception block.
 
@@ -731,4 +732,241 @@ FN BxVirtualToPfn (
     END
 
     RETURN -1
+END
+
+FN BxDiskNameToNumbers (
+    IN name : ^UBYTE,
+    OUT diskid : UWORD,
+    OUT partid : UWORD,
+) : UWORD
+
+    // Parse a disk name into a disk ID and partition ID. The disk name must be
+    // of the form dks<diskid>s<partid>.
+
+    IF RtlCompareStringWithMax ( name, "dks", 3 ) != 0 THEN
+        RETURN FALSE
+    END
+
+    num : UBYTE[8]
+    num[0] = 0
+
+    i := 3
+    j := 0
+
+    WHILE name[i] AND name[i] != 's' AND j < 7 DO
+        num[j] = name[i]
+        num[j + 1] = 0
+
+        j += 1
+        i += 1
+    END
+
+    IF NOT j OR name[i] != 's' THEN
+        RETURN FALSE
+    END
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        8, // bufsize
+        OUT diskid, // num
+    ) THEN
+        RETURN FALSE
+    END
+
+    IF diskid >= FW_DISK_MAX THEN
+        RETURN FALSE
+    END
+
+    num[0] = 0
+
+    i = j + 3 + 1
+    j = 0
+
+    WHILE name[i] AND j < 7 DO
+        num[j] = name[i]
+        num[j + 1] = 0
+
+        j += 1
+        i += 1
+    END
+
+    IF NOT j OR name[i] THEN
+        RETURN FALSE
+    END
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        8, // bufsize
+        OUT partid, // num
+    ) THEN
+        RETURN FALSE
+    END
+
+    IF partid >= FW_PARTITION_MAX + 1 THEN
+        RETURN FALSE
+    END
+
+    RETURN TRUE
+END
+
+FN BxGetPartitionByName (
+    IN name : ^UBYTE,
+) : ^FwDiskPartitionInfo
+
+    // Get a pointer to a partition info by name. If the partition doesn't
+    // exist, return a null pointer.
+
+    diskid : UWORD
+    partid : UWORD
+
+    IF BxDiskNameToNumbers (
+        name, // name
+        OUT diskid, // diskid
+        OUT partid, // partid
+    ) THEN
+        disk := &FwDeviceDatabase^.Dks[diskid]
+        part := &disk^.Partitions[partid]
+
+        IF part^.SectorCount THEN
+            RETURN part
+        END
+    END
+
+    RETURN NULLPTR
+END
+
+FN (BlReadF) BxReadPartition (
+    IN file : ^BlFile,
+    IN offset : UWORD,
+    IN buf : ^VOID,
+    IN length : UWORD,
+) : UWORD
+
+    IF offset % 512 THEN
+        BlCrash ( "BxReadPartition: Offset not sector-aligned\n" )
+    END
+
+    IF length % 512 THEN
+        BlCrash ( "BxReadPartition: Length not sector-aligned\n" )
+    END
+
+    // Call the firmware.
+
+    IF NOT FwReadDisk (
+        file^.DriverContext, // file
+        buf, // buffer
+        offset / 512, // sector
+        length / 512, // count
+    ) THEN
+        BlCrash ( "FW I/O error\n" )
+    END
+
+    RETURN length
+END
+
+FN BxInitializeIo (
+    IN bootdevname : ^UBYTE,
+)
+
+    part := FwBootPartition
+
+    IF bootdevname THEN
+        part = BxGetPartitionByName ( bootdevname )
+
+        IF NOT part THEN
+            BlCrash ( "Couldn't find partition %s\n", bootdevname )
+        END
+    END
+
+    RtlFormat (
+        &BlBootDeviceName[0], // dest
+        64, // bufsize
+        "dks%ds%d", // fmt
+        part^.Id,
+        part^.PartitionId,
+    )
+
+    // Save the boot partition in the boot device's driver context.
+
+    BlBootDevice.DriverContext = part
+
+    // Register the read function.
+
+    BlBootDevice.Read = &BxReadPartition
+
+    // Initialize size.
+
+    BlBootDevice.Size = part^.SectorCount * 512
+
+    // Now map the integral MMIO areas.
+
+    // Map the citron base.
+
+    devaddr := BlMapIoRegion (
+        1, // pages
+        0xF8000000, // phyaddr
+        TRUE, // noncached
+    )
+
+    IF NOT devaddr THEN
+        BlCrash ( "Failed to map citron base\n" )
+    END
+
+    BlInfoBlock.U.Xr.CitronBase = devaddr
+
+    // Map the LSIC base.
+
+    devaddr = BlMapIoRegion (
+        1, // pages
+        0xF8030000, // phyaddr
+        TRUE, // noncached
+    )
+
+    IF NOT devaddr THEN
+        BlCrash ( "Failed to map LSIC base\n" )
+    END
+
+    BlInfoBlock.U.Xr.LsicBase = devaddr
+
+    // Map the NVRAM base.
+
+    devaddr = BlMapIoRegion (
+        1, // pages
+        0xF8001000, // phyaddr
+        TRUE, // noncached
+    )
+
+    IF NOT devaddr THEN
+        BlCrash ( "Failed to map NVRAM base\n" )
+    END
+
+    BlInfoBlock.U.Xr.NvramBase = devaddr
+
+    // Map the boot framebuffer if available.
+
+    BlInfoBlock.BootFbBase = NULLPTR
+
+    fwfb := &FwDeviceDatabase^.Framebuffer
+
+    IF fwfb^.Type == FW_FRAMEBUFFER_KINNOWFB THEN
+        // Available, so map it.
+
+        fbsize := fwfb^.Width * fwfb^.Height + RTL_PAGE_SIZE - 1
+
+        devaddr = BlMapIoRegion (
+            fbsize >> RTL_PAGE_SHIFT, // pages
+            fwfb^.Address, // phyaddr
+            FALSE, // noncached
+        )
+
+        IF NOT devaddr THEN
+            BlCrash ( "Failed to map NVRAM base\n" )
+        END
+
+        // Stash the parameters.
+
+        BlInfoBlock.BootFbBase = devaddr
+        BlInfoBlock.BootFbWidth = fwfb^.Width
+        BlInfoBlock.BootFbHeight = fwfb^.Height
+    END
 END

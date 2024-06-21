@@ -1,0 +1,109 @@
+//
+// Implements file I/O for the MINTIA bootloader.
+//
+
+#INCLUDE "Bl.hjk"
+
+PUBLIC BlBootDevice : BlFile
+PUBLIC BlBootDeviceName : UBYTE[64]
+
+EXTERN FN (BlMountF) BlMountAisixFs (
+    IN device : ^BlFile,
+) : UWORD
+
+BlMountTable : BlMountF[] = {
+    &BlMountAisixFs,
+
+    NULLPTR, // SENTINEL
+}
+
+FN BlMountDevice (
+    IN device : ^BlFile,
+) : UWORD
+
+    // Try to mount the device as one of the supported filesystems. Return TRUE
+    // if successful, FALSE otherwise.
+
+    IF device^.Open THEN
+        // Already mounted.
+
+        RETURN TRUE
+    END
+
+    mount := &BlMountTable[0]
+
+    WHILE mount^ DO
+        IF mount^^ ( device ) THEN
+            RETURN TRUE
+        END
+
+        mount += SIZEOF ^VOID
+    END
+
+    RETURN FALSE
+END
+
+FN BlOpenFile (
+    IN device : ^BlFile,
+    IN path : ^UBYTE,
+) : ^BlFile
+
+    // Try to open a file. Return a pointer to the BlFile if success, otherwise
+    // NULLPTR.
+
+    IF NOT device^.Open THEN
+        // Not mounted.
+
+        RETURN NULLPTR
+    END
+
+    RETURN device^.Open (
+        device, // device
+        path, // path
+    )
+END
+
+FN BlReadFile (
+    IN file : ^BlFile,
+    IN offset : UWORD,
+    IN buf : ^VOID,
+    IN length : UWORD,
+) : UWORD
+
+    IF NOT file^.Read THEN
+        BlCrash ( "Read not supported on file\n" )
+    END
+
+    RETURN file^.Read (
+        file, // file
+        offset, // offset
+        buf, // buf
+        length, // length
+    )
+END
+
+FN BlInitializeFile (
+    IN file : ^BlFile,
+)
+
+    RtlFillMemoryWithUlong (
+        file, // dest
+        SIZEOF BlFile, // sz
+        0, // ulong
+    )
+END
+
+FN BlInitializeIo ()
+
+    // Call the platform code.
+
+    BxInitializeIo (
+        BlGetValueArg ( "BOOTDEV" ), // bootdevname
+    )
+
+    RtlPrint ( "BlInitializeIo: bootdev @ %s\n", &BlBootDeviceName[0] )
+
+    IF NOT BlMountDevice ( &BlBootDevice ) THEN
+        BlCrash ( "Inaccessible boot device\n" )
+    END
+END

@@ -32,6 +32,8 @@ EXTERN BlDescriptorList : RtlListEntry
 EXTERN BlHeapTop : ^VOID
 EXTERN BlHeapPointer : ^VOID
 
+EXTERN BlBootDeviceName : UBYTE[64]
+
 EXTERN FN BlDumpDescriptors ()
 
 EXTERN FN BlExit (
@@ -96,3 +98,45 @@ EXTERN FN BlAllocateMappedRange (
 EXTERN FN BxVirtualToPfn (
     IN vaddr : ^VOID,
 ) : UWORD
+
+EXTERN FN BlMapIoRegion (
+    IN pages : UWORD,
+    IN phyaddr : ^VOID,
+    IN noncached : UWORD,
+) : ^VOID
+
+FNPTR BlMountF (
+    IN device : ^BlFile,
+) : UWORD
+
+FNPTR BlOpenF (
+    IN device : ^BlFile,
+    IN path : ^UBYTE,
+) : ^BlFile
+
+FNPTR BlReadF (
+    IN file : ^BlFile,
+    IN offset : UWORD,
+    IN buf : ^VOID,
+    IN length : UWORD,
+) : UWORD
+
+STRUCT BlFile
+    Open : BlOpenF,
+    Read : BlReadF,
+    DriverContext : ^VOID,
+    MountContext : ^VOID,
+    BlockSize : UWORD,
+    Device : ^BlFile,
+    Size : UWORD,
+END
+
+EXTERN FN BxInitializeIo (
+    IN bootdevname : ^UBYTE,
+)
+
+EXTERN FN BlInitializeFile (
+    IN file : ^BlFile,
+)
+
+EXTERN BlBootDevice : BlFile
