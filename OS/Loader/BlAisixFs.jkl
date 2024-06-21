@@ -4,11 +4,584 @@
 
 #INCLUDE "Bl.hjk"
 
+#DEFINE AFS_INODE_FILE 1
+#DEFINE AFS_INODE_DIR 2
+
+STRUCT AfsSuperblock
+    Version : ULONG,
+    Magic : ULONG,
+    Dirty : ULONG,
+    ReservedBlocks : ULONG,
+    FatStart : ULONG,
+    FatSize : ULONG,
+    Istart : ULONG,
+    Icount : ULONG,
+    DataStart : ULONG,
+    DataSize : ULONG,
+    VolSize : ULONG,
+END
+
+STRUCT AfsDirent
+    Inumber : ULONG,
+    Name : UBYTE[60],
+END
+
+STRUCT AfsInode
+    Type : ULONG,
+    Permissions : ULONG,
+    Uid : ULONG,
+    Iparent : ULONG,
+    Timestamp : ULONG,
+    StartBlock : ULONG,
+    Gid : ULONG,
+    ByteSize : ULONG,
+END
+
+STRUCT AfsCacheControl
+    LruEntry : RtlListEntry,
+    SectorNumber : UWORD,
+    Block : ^VOID,
+END
+
+#DEFINE AFS_CACHE_BLOCKS [(RTL_PAGE_SIZE / 512)]
+
+STRUCT AfsContext
+    FatStart : UWORD,
+    Istart : UWORD,
+
+    MdCachePage : ^VOID,
+    DataCachePage : ^VOID,
+
+    MdCc : AfsCacheControl[AFS_CACHE_BLOCKS],
+    DataCc : AfsCacheControl[AFS_CACHE_BLOCKS],
+
+    MdListHead : RtlListEntry,
+    DataListHead : RtlListEntry,
+
+    RootInode : AfsInode,
+
+    SysDirFile : ^BlFile,
+    BootRsrcFile : ^BlFile,
+    BootDrvFile : ^BlFile,
+END
+
+FN AfsCacheRead (
+    IN device : ^BlFile,
+    IN sector : UWORD,
+    IN metadata : UWORD,
+) : ^VOID
+
+    ctx := CAST device^.MountContext TO ^AfsContext
+
+    listentry : ^RtlListEntry
+    listhead : ^RtlListEntry
+    cc : ^AfsCacheControl
+
+    IF metadata THEN
+        listhead = &ctx^.MdListHead
+        listentry = listhead^.Next
+
+    ELSE
+        listhead = &ctx^.DataListHead
+        listentry = listhead^.Next
+    END
+
+    WHILE listentry != listhead DO
+        cc = CONTAINEROF listentry TO AfsCacheControl.LruEntry
+
+        IF cc^.SectorNumber == sector THEN
+            // Already cached! Remove from the list and re-insert at the head.
+
+            RtlRemoveEntryList ( &cc^.LruEntry )
+
+            IF metadata THEN
+                RtlInsertAtHeadList (
+                    &ctx^.MdListHead, // head
+                    &cc^.LruEntry, // entry
+                )
+
+            ELSE
+                RtlInsertAtHeadList (
+                    &ctx^.DataListHead, // head
+                    &cc^.LruEntry, // entry
+                )
+            END
+
+            RETURN cc^.Block
+        END
+
+        listentry = listentry^.Next
+    END
+
+    // Not in the cache. Grab the guy at the tail. He should be the least
+    // recently used and we can reuse him for this sector.
+
+    listentry = listhead^.Prev
+
+    cc = CONTAINEROF listentry TO AfsCacheControl.LruEntry
+
+    cc^.SectorNumber = sector
+
+    IF BlReadFile (
+        device, // file
+        sector * 512, // offset
+        cc^.Block, // buf
+        512, // length
+    ) != 512 THEN
+
+        BlCrash ( "Failed to read sector into AFS cache\n" )
+    END
+
+    // Move to the head since he's now the most recently used.
+
+    RtlRemoveEntryList ( &cc^.LruEntry )
+
+    IF metadata THEN
+        RtlInsertAtHeadList (
+            &ctx^.MdListHead, // head
+            &cc^.LruEntry, // entry
+        )
+
+    ELSE
+        RtlInsertAtHeadList (
+            &ctx^.DataListHead, // head
+            &cc^.LruEntry, // entry
+        )
+    END
+
+    RETURN cc^.Block
+END
+
+FN AfsBlockStatus (
+    IN device : ^BlFile,
+    IN sector : UWORD,
+) : UWORD
+
+    // Return the status of the given sector in the FAT.
+
+    IF sector == 0xFFFFFFFF THEN
+        BlCrash ( "AFS sector == 0xFFFFFFFF\n" )
+    END
+
+    ctx := CAST device^.MountContext TO ^AfsContext
+
+    fatsector := sector / 128
+
+    fat := CAST AfsCacheRead (
+        device, // device
+        ctx^.FatStart + fatsector, // sector
+        TRUE, // metadata
+    ) TO ^ULONG
+
+    RETURN fat[sector % 128]
+END
+
+FN AfsReadInode (
+    IN device : ^BlFile,
+    IN inum : UWORD,
+) : ^AfsInode
+
+    // Read an inode into the cache and return the pointer.
+
+    ctx := CAST device^.MountContext TO ^AfsContext
+
+    isector := (inum * SIZEOF AfsInode) / 512
+
+    itable := CAST AfsCacheRead (
+        device, // device
+        ctx^.Istart + isector, // sector
+        TRUE, // metadata
+    ) TO ^AfsInode
+
+    RETURN &itable[inum % (512 / SIZEOF AfsInode)]
+END
+
+FN AfsSeekFat (
+    IN device : ^BlFile,
+    IN blkno : UWORD,
+    IN offset : UWORD,
+) : UWORD
+
+    // Seek to the specified offset from the starting sector.
+
+    seeks := offset / 512
+
+    WHILE seeks DO
+        blkno = AfsBlockStatus (
+            device, // device
+            blkno, // sector
+        )
+
+        seeks -= 1
+    END
+
+    RETURN blkno
+END
+
+FN AfsFindEntry (
+    IN device : ^BlFile,
+    IN ino : ^AfsInode,
+    IN name : ^UBYTE,
+) : ^AfsDirent
+
+    // Find a directory entry with a matching name or return NULLPTR.
+
+    blkno := ino^.StartBlock
+    bytesize := ino^.ByteSize
+
+    byteoff := 0
+
+    dirent : ^AfsDirent
+
+    WHILE byteoff < bytesize DO
+        IF byteoff & 511 == 0 THEN
+            // Read next block.
+
+            dirent = AfsCacheRead (
+                device, // device
+                blkno, // sector
+                TRUE, // metadata
+            )
+
+            blkno = AfsBlockStatus (
+                device, // device
+                blkno, // sector
+            )
+        END
+
+        IF dirent^.Inumber AND
+            RtlCompareString ( &dirent^.Name[0], name ) == 0 THEN
+
+            // Found it!
+
+            RETURN dirent
+        END
+
+        byteoff += SIZEOF AfsDirent
+        dirent += SIZEOF AfsDirent
+    END
+
+    RETURN NULLPTR
+END
+
+FN (BlReadF) AfsRead (
+    IN file : ^BlFile,
+    IN offset : UWORD,
+    IN buf : ^VOID,
+    IN length : UWORD,
+) : UWORD
+
+    device := file^.Device
+
+    ino := CAST file^.DriverContext TO ^AfsInode
+
+    IF offset >= ino^.ByteSize THEN
+        RETURN 0
+    END
+
+    IF offset + length > ino^.ByteSize THEN
+        length = ino^.ByteSize - offset
+    END
+
+    blkno := AfsSeekFat (
+        device, // device
+        ino^.StartBlock, // startblkno
+        offset, // offset
+    )
+
+    tot := 0
+    ptr : ^VOID
+
+    IF offset & 511 THEN
+        ptr = AfsCacheRead (
+            device, // device
+            blkno, // sector
+            FALSE, // metadata
+        )
+
+        blkno = AfsBlockStatus (
+            device, // device
+            blkno, // sector
+        )
+    END
+
+    WHILE tot < length DO
+        IF offset & 511 == 0 THEN
+            ptr = AfsCacheRead (
+                device, // device
+                blkno, // sector
+                FALSE, // metadata
+            )
+
+            blkno = AfsBlockStatus (
+                device, // device
+                blkno, // sector
+            )
+        END
+
+        amt := 512 - (offset % 512)
+
+        IF amt > length - tot THEN
+            amt = length - tot
+        END
+
+        RtlCopyBytes (
+            buf, // dest
+            ptr + (offset % 512), // src
+            amt, // sz
+        )
+
+        buf += amt
+        tot += amt
+        offset += amt
+    END
+
+    RETURN length
+END
+
+FN (BlOpenF) AfsOpen (
+    IN device : ^BlFile,
+    IN path : ^UBYTE,
+) : ^BlFile
+
+    ctx := CAST device^.MountContext TO ^AfsContext
+
+    ino := &ctx^.RootInode
+
+    // Try to speed up the lookup by using one of the ones we already looked up
+    // to start from.
+
+    IF RtlCompareStringWithMax ( path, "/mintia/", 8 ) == 0 THEN
+        IF NOT ctx^.SysDirFile THEN
+            RETURN NULLPTR
+        END
+
+        path += 8
+
+        IF RtlCompareStringWithMax ( path, "Resources/", 10 ) == 0 THEN
+            IF NOT ctx^.BootRsrcFile THEN
+                RETURN NULLPTR
+            END
+
+            ino = CAST ctx^.BootRsrcFile^.DriverContext TO ^AfsInode
+
+            path += 10
+
+        ELSEIF RtlCompareStringWithMax ( path, "Drivers/", 8 ) == 0 THEN
+            IF NOT ctx^.BootDrvFile THEN
+                RETURN NULLPTR
+            END
+
+            ino = CAST ctx^.BootDrvFile^.DriverContext TO ^AfsInode
+
+            path += 8
+
+        ELSE
+            ino = CAST ctx^.SysDirFile^.DriverContext TO ^AfsInode
+        END
+    END
+
+    pcomp : UBYTE[64]
+
+    WHILE TRUE DO
+        WHILE path^ == '/' DO
+            path += 1
+        END
+
+        IF NOT path^ THEN
+            BREAK
+        END
+
+        IF ino^.Type != AFS_INODE_DIR THEN
+            RETURN NULLPTR
+        END
+
+        len := 0
+
+        WHILE TRUE DO
+            IF path^ == '/' OR path^ == 0 THEN
+                BREAK
+            END
+
+            IF len >= 59 THEN
+                // Too long
+
+                RETURN NULLPTR
+            END
+
+            pcomp[len] = path^
+
+            path += 1
+            len += 1
+        END
+
+        pcomp[len] = 0
+
+        // Try to find this name in the directory we're currently looking at.
+
+        dirent := AfsFindEntry (
+            device, // device
+            ino, // ino
+            &pcomp[0], // name
+        )
+
+        IF NOT dirent THEN
+            RETURN NULLPTR
+        END
+
+        ino = AfsReadInode (
+            device, // device
+            dirent^.Inumber, // inum
+        )
+    END
+
+    file := CAST BlAllocateMemory (
+        SIZEOF BlFile + SIZEOF AfsInode, // bytes
+    ) TO ^BlFile
+
+    dctx := CAST file + SIZEOF BlFile TO ^AfsInode
+
+    RtlCopyBytes (
+        dctx, // dest
+        ino, // src
+        SIZEOF AfsInode, // sz
+    )
+
+    BlInitializeFile ( file )
+
+    file^.Size = ino^.ByteSize
+    file^.DriverContext = dctx
+    file^.Device = device
+    file^.Read = &AfsRead
+
+    RETURN file
+END
+
 FN (BlMountF) BlMountAisixFs (
     IN device : ^BlFile,
 ) : UWORD
 
     // Try to mount the device as aisixfs. Return TRUE if successful.
 
-    RETURN FALSE
+    // Read the superblock.
+
+    buf := &BlTemporaryBuffer[0]
+    buf += 511
+    buf &= ~511
+
+    IF BlReadFile (
+        device, // file
+        0, // offset
+        buf, // buf
+        512, // length
+    ) != 512 THEN
+
+        RETURN FALSE
+    END
+
+    sb := CAST buf TO ^AfsSuperblock
+
+    IF sb^.Version != 6 THEN
+        RETURN FALSE
+    END
+
+    IF sb^.Magic != 0xAFBBAFBB THEN
+        RETURN FALSE
+    END
+
+    // Good enough! Assemble the mount structures.
+
+    ctx := CAST BlAllocateMemory (
+        SIZEOF AfsContext, // bytes
+    ) TO ^AfsContext
+
+    ctx^.FatStart = sb^.FatStart
+    ctx^.Istart = sb^.Istart
+
+    RtlInitializeList ( &ctx^.MdListHead )
+    RtlInitializeList ( &ctx^.DataListHead )
+
+    ctx^.MdCachePage = BlAllocateMappedRange (
+        2, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_RECLAIMABLE, // type
+    )
+
+    IF NOT ctx^.MdCachePage THEN
+        RtlPrint ( "WARNING: Failed to allocate AFS cache pages\n" )
+
+        RETURN FALSE
+    END
+
+    ctx^.DataCachePage = ctx^.MdCachePage + RTL_PAGE_SIZE
+
+    i := 0
+    cc := &ctx^.MdCc[0]
+
+    WHILE i < AFS_CACHE_BLOCKS DO
+        cc^.SectorNumber = -1
+        cc^.Block = ctx^.MdCachePage + (i * 512)
+
+        RtlInsertAtTailList (
+            &ctx^.MdListHead, // head
+            &cc^.LruEntry, // entry
+        )
+
+        i += 1
+        cc += SIZEOF AfsCacheControl
+    END
+
+    i = 0
+    cc = &ctx^.DataCc[0]
+
+    WHILE i < AFS_CACHE_BLOCKS DO
+        cc^.SectorNumber = -1
+        cc^.Block = ctx^.DataCachePage + (i * 512)
+
+        RtlInsertAtTailList (
+            &ctx^.DataListHead, // head
+            &cc^.LruEntry, // entry
+        )
+
+        i += 1
+        cc += SIZEOF AfsCacheControl
+    END
+
+    // Set up the device stuff.
+
+    device^.MountContext = ctx
+    device^.Open = &AfsOpen
+
+    // Stash the root inode.
+
+    rootino := AfsReadInode (
+        device, // device
+        1, // inum
+    )
+
+    RtlCopyBytes (
+        &ctx^.RootInode, // dest
+        rootino, // src
+        SIZEOF AfsInode, // sz
+    )
+
+    // Pre-open some common directories to accelerate lookups.
+
+    ctx^.SysDirFile = AfsOpen (
+        device, // device
+        "/mintia", // path
+    )
+
+    ctx^.BootRsrcFile = AfsOpen (
+        device, // device
+        "/mintia/Resources", // path
+    )
+
+    ctx^.BootDrvFile = AfsOpen (
+        device, // device
+        "/mintia/Drivers", // path
+    )
+
+    RETURN TRUE
 END

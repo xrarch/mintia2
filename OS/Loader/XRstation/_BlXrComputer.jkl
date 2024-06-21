@@ -850,11 +850,20 @@ FN (BlReadF) BxReadPartition (
         BlCrash ( "BxReadPartition: Length not sector-aligned\n" )
     END
 
+    physbuf := CAST BxVirtualToPfn ( buf ) TO ^VOID
+
+    IF physbuf == -1 THEN
+        BlCrash ( "BxReadPartition: Invalid physical address\n" )
+    END
+
+    physbuf <<= RTL_PAGE_SHIFT
+    physbuf += buf & (RTL_PAGE_SIZE - 1)
+
     // Call the firmware.
 
     IF NOT FwReadDisk (
         file^.DriverContext, // file
-        buf, // buffer
+        physbuf, // buffer
         offset / 512, // sector
         length / 512, // count
     ) THEN
