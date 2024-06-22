@@ -19,6 +19,20 @@ BlKernelSpaceBitmapData : UBYTE[(BL_MANAGED_KERNEL_SPACE >> RTL_PAGE_SHIFT) / 8]
 
 BlKernelSpaceHint := 0
 
+#DEFINE BL_BUMP_EXTENSION_FLAG 0x80000000
+
+// BL_DESCRIPTOR_MAX must be set to a value high enough for memory management to
+// initialize itself without hitting the bump allocator before the address space
+// is set up.
+
+#DEFINE BL_DESCRIPTOR_MAX 32
+
+BlFirstBumpExtensionDescriptor : BlMemoryDescriptor
+BlBumpExtensionDescriptor := &BlFirstBumpExtensionDescriptor
+
+BlDescriptors : BlMemoryDescriptor[BL_DESCRIPTOR_MAX]
+BlDescriptorIndex := 0
+
 EXTERN FN BxInitializeMemory ()
 
 #IF BLD_CHK
@@ -49,12 +63,32 @@ FN BlAllocateMemory (
     IN bytes : UWORD,
 ) : ^VOID
 
-    // Trivial bump allocator.
+#IF BLD_CHK
+    IF NOT bytes THEN
+        BlCrash ( "BlAllocateMemory\n" )
+    END
+#END
 
     // First align bytes up to word size boundary.
 
     bytes += (RTL_MACHINE_WORD_SIZE - 1)
     bytes &= ~(RTL_MACHINE_WORD_SIZE - 1)
+
+    junk : ^BlMemoryDescriptor
+
+    IF bytes >= RTL_PAGE_SIZE THEN
+        // Allocate a mapped range.
+
+        RETURN BlAllocateMappedRange (
+            (bytes + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT, // bytes
+            BL_KERNEL_STRUCTURES, // preferredva
+            FALSE, // fixed
+            BL_MEMORY_RECLAIMABLE, // type
+            OUT junk, // desc
+        )
+    END
+
+    // Trivial bump allocator.
 
     IF BlHeapPointer + bytes <= BlHeapTop THEN
         ptr := BlHeapPointer
@@ -64,10 +98,38 @@ FN BlAllocateMemory (
         RETURN ptr
     END
 
-    // XXX If necessary, extend bump allocator by carving a chunk off the end of
-    //     a memory descriptor. For now we just crash.
+    // Extend the bump allocator.
 
-    BlCrash ( "Out of bump memory\n" )
+    pages := (BL_BUMP_EXTEND + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
+
+    BlHeapPointer = BlAllocateMappedRange (
+        pages, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_RECLAIMABLE | BL_BUMP_EXTENSION_FLAG, // type
+        OUT junk, // desc
+    )
+
+    IF NOT BlHeapPointer THEN
+        BlCrash ( "Out of bump heap\n" )
+    END
+
+    // Use the start of the new block as the next bump extension descriptor.
+
+    BlBumpExtensionDescriptor = CAST BlHeapPointer TO ^BlMemoryDescriptor
+
+    BlHeapTop = BlHeapPointer + (pages << RTL_PAGE_SHIFT)
+
+    BlHeapPointer += SIZEOF BlMemoryDescriptor
+
+    BlHeapPointer += (RTL_MACHINE_WORD_SIZE - 1)
+    BlHeapPointer &= ~(RTL_MACHINE_WORD_SIZE - 1)
+
+    ptr := BlHeapPointer
+
+    BlHeapPointer += bytes
+
+    RETURN ptr
 END
 
 FN BlAllocatePhysicalRange (
@@ -86,9 +148,21 @@ FN BlAllocatePhysicalRange (
 
             // Draw the range from the start of this descriptor.
 
-            newdesc := CAST BlAllocateMemory (
-                SIZEOF BlMemoryDescriptor, // bytes
-            ) TO ^BlMemoryDescriptor
+            newdesc : ^BlMemoryDescriptor
+
+            IF type & BL_BUMP_EXTENSION_FLAG THEN
+                type &= ~BL_BUMP_EXTENSION_FLAG
+                newdesc = BlBumpExtensionDescriptor
+
+            ELSEIF BlDescriptorIndex < BL_DESCRIPTOR_MAX THEN
+                newdesc = &BlDescriptors[BlDescriptorIndex]
+                BlDescriptorIndex += 1
+
+            ELSE
+                newdesc = CAST BlAllocateMemory (
+                    SIZEOF BlMemoryDescriptor, // bytes
+                ) TO ^BlMemoryDescriptor
+            END
 
             newdesc^.PageCount = pages
             newdesc^.StartPfn = desc^.StartPfn

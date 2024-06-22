@@ -511,31 +511,14 @@ FN BxInitializeMemoryMapping ()
     )
 END
 
-#IF ( & BL_BUMP_SIZE ( - RTL_PAGE_SIZE 1 ) )
-    #ERROR "BL_BUMP_SIZE not page aligned"
-#END
+BxInitialDescriptors : BlMemoryDescriptor[FW_RAM_MAX + 2]
 
 FN BxInitializeMemory ()
 
     // On XR/computer platforms, this function has to populate the memory
     // descriptor list, identity map memory, and then enable paging.
 
-    // First set up the bump allocator at the end of the first RAM slot.
-
     ramslotzero := FwDeviceDatabase^.Ram[0].PageFrameCount
-    bumppages := BL_BUMP_SIZE >> RTL_PAGE_SHIFT
-
-    BlHeapTop = CAST ramslotzero << RTL_PAGE_SHIFT TO ^VOID
-
-    IF BlHeapTop < BL_BUMP_SIZE THEN
-        BlCrash ( "Not enough memory in slot 0 for bump allocator\n" )
-    END
-
-    BlHeapPointer = BlHeapTop - BL_BUMP_SIZE
-
-    IF BlHeapPointer < &_bss_end THEN
-        BlCrash ( "Bump allocator overlaps loader BSS\n" )
-    END
 
     // Initialize first descriptor as a reclaimable area covering the firmware
     // data region up to the end of our BSS section.
@@ -544,9 +527,10 @@ FN BxInitializeMemory ()
     endreclaimable += RTL_PAGE_SIZE - 1
     endreclaimable >>= RTL_PAGE_SHIFT
 
-    desc := CAST BlAllocateMemory (
-        SIZEOF BlMemoryDescriptor, // bytes
-    ) TO ^BlMemoryDescriptor
+    descidx := 0
+
+    desc := &BxInitialDescriptors[descidx]
+    descidx += 1
 
     desc^.StartPfn = 0
     desc^.PageCount = endreclaimable
@@ -560,28 +544,12 @@ FN BxInitializeMemory ()
     // Initialize next descriptor as a free area consisting of the remainder of
     // RAM slot 0 up until the start of the bump allocator.
 
-    desc = CAST BlAllocateMemory (
-        SIZEOF BlMemoryDescriptor, // bytes
-    ) TO ^BlMemoryDescriptor
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
 
     desc^.StartPfn = endreclaimable
-    desc^.PageCount = ramslotzero - bumppages - endreclaimable
+    desc^.PageCount = ramslotzero - endreclaimable
     desc^.Type = BL_MEMORY_FREE
-
-    RtlInsertAtTailList (
-        &BlDescriptorList, // head
-        &desc^.Entry, // entry
-    )
-
-    // Now insert the descriptor for the bump allocator.
-
-    desc = CAST BlAllocateMemory (
-        SIZEOF BlMemoryDescriptor, // bytes
-    ) TO ^BlMemoryDescriptor
-
-    desc^.StartPfn = BlHeapPointer >> RTL_PAGE_SHIFT
-    desc^.PageCount = bumppages
-    desc^.Type = BL_MEMORY_RECLAIMABLE
 
     RtlInsertAtTailList (
         &BlDescriptorList, // head
@@ -599,9 +567,8 @@ FN BxInitializeMemory ()
         IF pagecount THEN
             // Create a descriptor for this RAM slot.
 
-            desc = CAST BlAllocateMemory (
-                SIZEOF BlMemoryDescriptor, // bytes
-            ) TO ^BlMemoryDescriptor
+            desc = &BxInitialDescriptors[descidx]
+            descidx += 1
 
             desc^.StartPfn = base >> RTL_PAGE_SHIFT
             desc^.PageCount = pagecount
@@ -848,6 +815,13 @@ FN (BlReadF) BxReadPartition (
 
     IF length % 512 THEN
         BlCrash ( "BxReadPartition: Length not sector-aligned\n" )
+    END
+
+    IF length != 512 THEN
+        // This is because we don't bother to deal with transfers that cross a
+        // page boundary.
+
+        BlCrash ( "BxReadPartition: Length not 512\n" )
     END
 
     physbuf := CAST BxVirtualToPfn ( buf ) TO ^VOID
