@@ -262,6 +262,7 @@ FN BlAllocateMappedRange (
     IN preferredva : ^VOID,
     IN fixed : UWORD,
     IN type : BlMemoryDescriptorType,
+    OUT desc : ^BlMemoryDescriptor,
 ) : ^VOID
 
     vaddr := BlAllocateKernelSpace (
@@ -274,7 +275,7 @@ FN BlAllocateMappedRange (
         RETURN NULLPTR
     END
 
-    desc := BlAllocatePhysicalRange (
+    desc = BlAllocatePhysicalRange (
         pages, // pages
         type, // type
     )

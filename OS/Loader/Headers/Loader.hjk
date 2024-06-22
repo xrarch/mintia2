@@ -22,6 +22,8 @@ UNION BlInfoUnion
 END
 
 STRUCT BlInfoRecord
+    ResourceListHead : RtlListEntry,
+
     U : BlInfoUnion,
 
     BootFbBase : ^VOID,
@@ -53,4 +55,17 @@ STRUCT BlMemoryDescriptor
     PageCount : UWORD,
 
     Type : BlMemoryDescriptorType,
+END
+
+#DEFINE BL_RESOURCE_NAME_MAX 64
+
+STRUCT BlResource
+    Entry : RtlListEntry,
+
+    Name : UBYTE[BL_RESOURCE_NAME_MAX],
+
+    Data : ^VOID,
+
+    Size : UWORD,
+    Jettison : UWORD,
 END

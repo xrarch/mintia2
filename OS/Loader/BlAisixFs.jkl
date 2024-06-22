@@ -501,11 +501,14 @@ FN (BlMountF) BlMountAisixFs (
     RtlInitializeList ( &ctx^.MdListHead )
     RtlInitializeList ( &ctx^.DataListHead )
 
+    garbagecan : ^BlMemoryDescriptor
+
     ctx^.MdCachePage = BlAllocateMappedRange (
         2, // pages
         BL_KERNEL_STRUCTURES, // preferredva
         FALSE, // fixed
         BL_MEMORY_RECLAIMABLE, // type
+        OUT garbagecan, // desc
     )
 
     IF NOT ctx^.MdCachePage THEN

@@ -95,6 +95,7 @@ EXTERN FN BlAllocateMappedRange (
     IN preferredva : ^VOID,
     IN fixed : UWORD,
     IN type : BlMemoryDescriptorType,
+    OUT desc : ^BlMemoryDescriptor,
 ) : ^VOID
 
 EXTERN FN BxVirtualToPfn (
@@ -106,6 +107,10 @@ EXTERN FN BlMapIoRegion (
     IN phyaddr : ^VOID,
     IN noncached : UWORD,
 ) : ^VOID
+
+EXTERN FN BlFreePhysicalRange (
+    IN desc : ^BlMemoryDescriptor
+)
 
 FNPTR BlMountF (
     IN device : ^BlFile,
@@ -154,3 +159,22 @@ EXTERN FN BlOpenFile (
 ) : ^BlFile
 
 EXTERN BlBootDevice : BlFile
+
+FNPTR BlCallbackPerLineF (
+    IN buf : ^UBYTE,
+    IN context : ^VOID,
+    IN linenum : UWORD,
+)
+
+EXTERN FN BlCallbackPerLine (
+    IN buf : ^UBYTE,
+    IN callback : BlCallbackPerLineF,
+    IN context : ^VOID,
+)
+
+EXTERN FN BlCallbackPerLineFile (
+    IN device : ^BlFile,
+    IN path : ^UBYTE,
+    IN callback : BlCallbackPerLineF,
+    IN context : ^VOID,
+) : UWORD
