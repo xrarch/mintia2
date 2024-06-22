@@ -102,7 +102,7 @@ FN BlAllocateMemory (
 
     pages := (BL_BUMP_EXTEND + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
 
-    BlHeapPointer = BlAllocateMappedRange (
+    newptr := BlAllocateMappedRange (
         pages, // pages
         BL_KERNEL_STRUCTURES, // preferredva
         FALSE, // fixed
@@ -110,7 +110,7 @@ FN BlAllocateMemory (
         OUT junk, // desc
     )
 
-    IF NOT BlHeapPointer THEN
+    IF NOT newptr THEN
         BlCrash ( "Out of bump heap\n" )
     END
 
@@ -118,16 +118,18 @@ FN BlAllocateMemory (
 
     BlBumpExtensionDescriptor = CAST BlHeapPointer TO ^BlMemoryDescriptor
 
-    BlHeapTop = BlHeapPointer + (pages << RTL_PAGE_SHIFT)
+    BlHeapTop = newptr + (pages << RTL_PAGE_SHIFT)
 
-    BlHeapPointer += SIZEOF BlMemoryDescriptor
+    newptr += SIZEOF BlMemoryDescriptor
 
-    BlHeapPointer += (RTL_MACHINE_WORD_SIZE - 1)
-    BlHeapPointer &= ~(RTL_MACHINE_WORD_SIZE - 1)
+    newptr += (RTL_MACHINE_WORD_SIZE - 1)
+    newptr &= ~(RTL_MACHINE_WORD_SIZE - 1)
 
-    ptr := BlHeapPointer
+    ptr := newptr
 
-    BlHeapPointer += bytes
+    newptr += bytes
+
+    BlHeapPointer = newptr
 
     RETURN ptr
 END
