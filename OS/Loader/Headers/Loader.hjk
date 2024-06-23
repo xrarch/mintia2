@@ -23,6 +23,7 @@ END
 
 STRUCT BlInfoRecord
     ResourceListHead : RtlListEntry,
+    DllListHead : RtlListEntry,
 
     U : BlInfoUnion,
 
@@ -68,4 +69,19 @@ STRUCT BlResource
 
     Size : UWORD,
     Jettison : UWORD,
+END
+
+#DEFINE BL_DLL_NAME_MAX 64
+
+STRUCT BlDll
+    Entry : RtlListEntry,
+
+    Name : ^UBYTE,
+
+    LoadCount : UWORD,
+
+    Head : ^VOID,
+    HeadLength : UWORD,
+
+    Flags : UWORD,
 END

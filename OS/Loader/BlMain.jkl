@@ -36,6 +36,20 @@ FN BlMain () : UWORD
 
     BlLoadResources ()
 
+    // Initialize the DLL list.
+
+    RtlInitializeList ( &BlInfoBlock.DllListHead )
+
+    // Load the executive.
+
+    RtlPrint ( "Loading the system...\n" )
+
+    exec := BlLoadDll ( "mpx.sys" )
+
+    IF NOT exec THEN
+        BlCrash ( "Failed to load the system executive.\n" )
+    END
+
     BlExit ( 0 )
 END
 
@@ -44,7 +58,7 @@ FN BlCrash (
     ... argv argc
 )
 
-    RtlPrint ( "*** Cannot continue booting: " )
+    RtlPrint ( "*** Cannot continue: " )
 
     RtlPrintByVarTable (
         NULLPTR, // handle
@@ -52,6 +66,8 @@ FN BlCrash (
         argv, // argv
         argc, // argc
     )
+
+    RtlPrint ( "\n" )
 
     BlExit ( -1 )
 END

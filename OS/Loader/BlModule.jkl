@@ -1,0 +1,129 @@
+//
+// Module and dynamic linking support for the MINTIA loader.
+//
+
+#INCLUDE "Bl.hjk"
+#INCLUDE "<ll>/Xlo.hjk"
+
+FN BlpOpenDll (
+    IN name : ^UBYTE,
+) : ^BlFile
+
+    pathbuf : UBYTE[64]
+    path := &pathbuf[0]
+
+    IF name[0] == '/' THEN
+        path = name
+
+    ELSE
+        RtlFormat (
+            path, // dest
+            64, // bufsize
+            "/mintia/%s", // fmt
+            name
+        )
+    END
+
+    printafter := FALSE
+
+    IF RtlCompareStringWithMax ( path, "/mintia/Drivers/", 16 ) == 0 THEN
+        printafter = TRUE
+
+    ELSE
+        RtlPrint ( "%s\n", path )
+    END
+
+    file := BlOpenFile (
+        &BlBootDevice, // device
+        path, // path
+    )
+
+    IF file AND printafter THEN
+        RtlPrint ( "%s\n", path )
+    END
+
+    RETURN file
+END
+
+FN BlpFindDll (
+    IN name : ^UBYTE,
+) : ^BlDll
+
+    // Search for the DLL with the given name.
+
+    listhead := &BlInfoBlock.DllListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        dll := CONTAINEROF listentry TO BlDll.Entry
+
+        IF RtlCompareString ( dll^.Name, name ) == 0 THEN
+            RETURN dll
+        END
+
+        listentry = listentry^.Next
+    END
+
+    RETURN NULLPTR
+END
+
+FN BlLoadDll (
+    IN name : ^UBYTE,
+) : ^BlDll
+
+    // First look for the DLL in the list.
+
+    dll := BlpFindDll ( name )
+
+    IF dll THEN
+        dll^.LoadCount += 1
+
+        RETURN dll
+    END
+
+    // Nope! Gotta load it now.
+
+    file := BlpOpenDll ( name )
+
+    IF NOT file THEN
+        RETURN NULLPTR
+    END
+
+    header : XloHeader
+
+    // Read in the header.
+
+    IF BlReadFile (
+        file, // file
+        0, // offset
+        &header, // buf
+        SIZEOF XloHeader, // length
+    ) != SIZEOF XloHeader THEN
+
+        RtlPrint ( "LOAD: Short module %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    // Verify the header a bit.
+
+    IF header.Magic != XLO_MAGIC_NUMBER THEN
+        RtlPrint ( "LOAD: Bad module %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    IF header.TargetArchitecture != XLO_THIS_ARCHITECTURE THEN
+        RtlPrint ( "LOAD: Wrong architecture on module %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    IF header.Flags & XLO_FILE_FRAGMENT THEN
+        RtlPrint ( "LOAD: Fragmentary module %s\n", name )
+
+        RETURN NULLPTR
+    END
+
+    // 
+END
