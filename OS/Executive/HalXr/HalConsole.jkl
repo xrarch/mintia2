@@ -2,8 +2,7 @@
 // Implementation of a simple boot time console for the MINTIA Executive.
 //
 
-#INCLUDE "<ll>/Rtl.hjk"
-#INCLUDE "../../Loader/Headers/Loader.hjk"
+#INCLUDE "Hal.hjk"
 
 HalCitronBase := NULLPTR
 
@@ -44,9 +43,9 @@ FN (RtlPrintCallbackF) RtljPrintCallback (
     HalPutCharacter ( byte )
 END
 
-FN HalInitialize (
-    IN loaderblock : ^BlInfoRecord,
-)
+FN HalInitialize ()
+
+    loaderblock := &ExLoaderBlock
 
     HalCitronBase = loaderblock^.U.Xr.CitronBase
 END

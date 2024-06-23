@@ -2,39 +2,58 @@
 // Initialization of the Kernel (Ke) subcomponent of the MINTIA Executive.
 //
 
-#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "Ke.hjk"
+
+#INCLUDE "<inc>/Hal.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
-EXTERN FN HalInitialize (
-    IN loaderblock : ^BlInfoRecord,
-)
+EXTERN FN HalInitialize ()
 
-FNPTR DriverEntrypoint ()
+PUBLIC ExLoaderBlock : BlInfoRecord
 
 EXPORT FN KeMain (
     IN loaderblock : ^BlInfoRecord,
 )
 
-    // Initialize the HAL.
+    // At this point:
+    //
+    // o  We have been transferred to from the Loader.
+    // o  We are on a page-sized initial stack.
+    // o  We have no thread context - we need to hand-craft one.
+    // o  Interrupts are disabled. Paging is enabled.
+    // o  The PFN database has been constructed by the Loader for us. Not much
+    //    else has been.
+    // o  The firmware - no matter what system we are on - is inaccessible, as a
+    //    rule, even if we could theoretically use it on some platform. Only
+    //    exception are firmware services that *must* be called at certain
+    //    points in HAL initialization, and only then.
+    //
+    // Any pointers from the Loader may or may not be in a spot where they are
+    // permanently accessible, since this may or may not be a platform where the
+    // Loader is entered with paging enabled. If it wasn't, the Loader ran out
+    // of an identity mapping in what is going to become userspace. Therefore
+    // anything from loader-space that we need to access during runtime must be
+    // be transferred into the Executive between now and the execution of the
+    // first usermode process in order to guarantee its safe to touch. Plus, we
+    // are going to reclaim all of the Loader's physical memory during Mm init.
+    //
+    // Start by copying the loader block into the Executive.
 
-    HalInitialize ( loaderblock )
+    RtlCopyBytes (
+        &ExLoaderBlock, // dest
+        loaderblock, // src
+        SIZEOF BlInfoRecord, // sz
+    )
 
-    RtlPrint ( "Uhm hi?\n" )
+    // Perform early initialization of the HAL. This will perform baseline
+    // initialization of integral platform components such as the interval
+    // timer. Interrupts will still be disabled though. Also, we get a boot
+    // console which is guaranteed to stay sane throughout the lifetime of
+    // the system and at any IPL.
 
-    listhead := &loaderblock^.DllListHead
-    listentry := listhead^.Next
+    HalInitialize ()
 
-    WHILE listentry != listhead DO
-        dll := CONTAINEROF listentry TO BlDll.Entry
-
-        IF dll^.DriverEntrypoint THEN
-            entry := CAST dll^.DriverEntrypoint TO DriverEntrypoint
-
-            entry ()
-        END
-
-        listentry = listentry^.Next
-    END
+    RtlPrint ( "MINTIA is awake!\n" )
 
     WHILE TRUE DO END
 END
