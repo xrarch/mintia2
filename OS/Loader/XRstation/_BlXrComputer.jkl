@@ -195,8 +195,8 @@ BxEnableVirtualAddressing:
     // Insert page directory and exception block into zeroth reserved DTB and
     // ITB entries, respectively. They will be mapped by those entries forever.
 
-    mtcr itbindex, zero
     mtcr dtbindex, zero
+    mtcr itbindex, zero
 
     la   t0, (0xB02C0000 >> 12)
     mtcr dtbtag, t0
@@ -207,12 +207,10 @@ BxEnableVirtualAddressing:
     ori  t0, t0, 0x7 // PTE_V | PTE_W | PTE_K
     mtcr dtbpte, t0
 
-    mov  t0, a0
-    rshi t0, t0, 12
+    rshi t0, a0, 12
     mtcr itbtag, t0
 
-    mov  t0, a1
-    rshi t0, t0, 12
+    rshi t0, a1, 12
     lshi t0, t0, 5
     ori  t0, t0, 0x17 // PTE_V | PTE_W | PTE_G | PTE_K
     mtcr itbpte, t0
@@ -231,23 +229,48 @@ BxEnableVirtualAddressing:
 
     ret
 
-// a0 - initialsp
-// a1 - entrypoint
+// We would align BxStartSystem to a 64 byte (16 instruction) boundary to
+// ensure that we don't take a TB miss while inserting the zeroth Prb into the
+// reserved entry, but the only miss possible is an ITB miss which won't impact
+// anything we do with the DTB.
+
+// a0 - entrypoint
+// a1 - prb
 BxStartSystem:
 .global BxStartSystem
     // Flush the icache.
 
-    li   t1, 3
-    mtcr icachectrl, t1
+    li   t0, 3
+    mtcr icachectrl, t0
 
-    // Switch to initial stack pointer.
+    // Insert the zeroth Prb into DTB reserved entry #1.
 
-    mov  sp, a0
+    mfcr t0, dtbindex
+
+    li   t1, 1
+    mtcr dtbindex, t1
+
+    la   t1, (0xFFFFF000 >> 12)
+    mtcr dtbtag, t1
+
+    rshi t1, a1, 12
+    lshi t1, t1, 5
+    ori  t1, t1, 0x17 // PTE_V | PTE_W | PTE_G | PTE_K
+    mtcr dtbpte, t1
+
+    mtcr dtbindex, t0
+
+    // Switch to initial stack pointer. This will later be the stack for
+    // processor 0's idle thread.
+
+    la   sp, (0xFFFFF000 + 3072)
 
     // Call entrypoint.
 
+    mov  t0, a0
+
     la   a0, BlInfoBlock
-    jalr lr, a1, 0
+    jalr lr, t0, 0
 
 .hang:
     b    .hang
@@ -377,6 +400,8 @@ FN (FwBootstrapEntrypoint) BxEntry (
     FwApiTable = apitable
     FwDeviceDatabase = devicedatabase
     FwBootPartition = bootpartition
+
+    BlInfoBlock.ProcessorCount = FwDeviceDatabase^.ProcessorCount
 
     // Initialize argument string into a table of null-terminated arguments, as
     // expected by the loader's argument stuff.
