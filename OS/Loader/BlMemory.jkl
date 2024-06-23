@@ -557,7 +557,7 @@ FN BlInitializeMemory ()
 
     desc : ^BlMemoryDescriptor
 
-    BlInfoBlock.PrbBase = BlAllocateMappedRange (
+    BlInfoBlock.VirtualPrbBase = BlAllocateMappedRange (
         BlInfoBlock.ProcessorCount, // pages
         BL_KERNEL_STRUCTURES, // preferredva
         FALSE, // fixed
@@ -565,17 +565,17 @@ FN BlInitializeMemory ()
         OUT desc, // desc
     )
 
-    IF NOT BlInfoBlock.PrbBase THEN
+    IF NOT BlInfoBlock.VirtualPrbBase THEN
         BlCrash ( "Failed to allocate processor blocks\n" )
     END
 
     RtlFillMemoryWithUlong (
-        BlInfoBlock.PrbBase, // ptr
+        BlInfoBlock.VirtualPrbBase, // ptr
         BlInfoBlock.ProcessorCount << RTL_PAGE_SHIFT, // sz
         0, // ulong
     )
 
-    BlInfoBlock.PrbBasePhysical =
+    BlInfoBlock.PhysicalPrbBase =
         CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID
 
 #IF BLD_CHK
