@@ -176,9 +176,8 @@ FN BlpMapSection (
             dll^.OffsetTable = offtable
         END
 
-        offtable[sectionindex] =
-            CAST realva - sectionheader^.VirtualAddress TO WORD
-
+        offtable[sectionindex] = realva - sectionheader^.VirtualAddress
+        
         sectionheader^.VirtualAddress = realva
     END
 
@@ -327,13 +326,66 @@ FN BlpDoImports (
     RETURN TRUE
 END
 
+FN BlpRelocateSection (
+    IN dll : ^BlDll,
+    IN sectionheader : ^XloSectionHeader,
+    IN offset : UWORD,
+)
+
+    // Relocate the section by the specified offset.
+
+    head := dll^.Head
+
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
+
+    reloc := CAST head + sectionheader^.RelocTableOffset TO ^XloRelocEntry
+    count := sectionheader^.RelocCount
+
+    i := 0
+
+    WHILE i < count DO
+        section := &sectiontable[reloc^.SectionIndex]
+
+        fixptr := CAST section^.VirtualAddress +
+            reloc^.SectionOffset TO ^VOID
+
+        XloPerformRelocationTable[reloc^.Type] (
+            fixptr, // ptr
+            offset, // value
+            BLD_BITS, // bits
+        )
+
+        i += 1
+        reloc += SIZEOF XloRelocEntry
+    END
+END
+
 FN BlpProcessRelocations (
     IN dll : ^BlDll,
 )
 
+    // Perform all of the relocations on sections that require it.
+
     head := dll^.Head
 
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
 
+    count := head^.SectionCount
+    i := 0
+
+    WHILE i < count DO
+        sectionheader := &sectiontable[i]
+
+        IF sectionheader^.Flags & XLO_SECTION_RELOCATED THEN
+            BlpRelocateSection (
+                dll, // dll
+                sectionheader, // sectionheader
+                dll^.OffsetTable[i], // offset
+            )
+        END
+
+        i += 1
+    END
 END
 
 FN BlLookupSymbol (
