@@ -18,10 +18,14 @@ TARGET "Executive"
 		LINK "<sdk>/Rtl/build/fox32/Rtl.lib"
 	#END
 
-	#IF ( == BITS 32 )
+	#IF ( == BLD_BITS 32 )
 		LINKOPT "-pabase:0x80010000"
 	#ELSE
 		#ERROR "Somebody set up appropriate bases for the 64-bit platforms"
+	#END
+
+	#IF BLD_CHK
+		LINKOPT "-keepglobals"
 	#END
 
 	LINKOPT "-nostubs"

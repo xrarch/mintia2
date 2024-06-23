@@ -4,7 +4,7 @@
 
 #INCLUDE "<ll>/Rtl.hjk"
 
-#IF ( == BITS 32 )
+#IF ( == BLD_BITS 32 )
     #DEFINE BL_PFN_ELEMENT_SIZE 32
 #ELSE
     #DEFINE BL_PFN_ELEMENT_SIZE 64
@@ -72,6 +72,7 @@ STRUCT BlResource
 END
 
 #DEFINE BL_DLL_NAME_MAX 64
+#DEFINE BL_DLL_RELOCATED 1
 
 STRUCT BlDll
     Entry : RtlListEntry,
@@ -80,8 +81,12 @@ STRUCT BlDll
 
     LoadCount : UWORD,
 
-    Head : ^VOID,
-    HeadLength : UWORD,
+    OffsetTable : ^WORD,
 
-    Flags : UWORD,
+    Head : ^XloHeader,
+    HeadLength : ULONG,
+
+    Flags : ULONG,
+
+    Timestamp : ULONG,
 END
