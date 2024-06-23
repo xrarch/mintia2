@@ -3,11 +3,37 @@
 //
 
 #INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
 
-FN HalPutCharacter (
-    IN byte : UBYTE,
+HalCitronBase := NULLPTR
+
+FN HalSerialWrite (
+    IN byte : UWORD,
 )
 
+    // Write a character to the serial port.
+
+    cmdport := CAST HalCitronBase + 0x40 TO ^UBYTE
+    dataport := CAST HalCitronBase + 0x44 TO ^UBYTE
+
+    WHILE cmdport^ DO
+        BARRIER
+    END
+
+    dataport^ = byte
+
+    BARRIER
+END
+
+FN HalPutCharacter (
+    IN byte : UWORD,
+)
+
+    IF byte == '\n' THEN
+        HalSerialWrite ( '\r' )
+    END
+
+    HalSerialWrite ( byte )
 END
 
 FN (RtlPrintCallbackF) RtljPrintCallback (
@@ -16,4 +42,11 @@ FN (RtlPrintCallbackF) RtljPrintCallback (
 )
 
     HalPutCharacter ( byte )
+END
+
+FN HalInitialize (
+    IN loaderblock : ^BlInfoRecord,
+)
+
+    HalCitronBase = loaderblock^.U.Xr.CitronBase
 END

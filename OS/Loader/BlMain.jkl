@@ -13,6 +13,7 @@ PUBLIC BlDoRelinkAll : UWORD
 EXTERN FN BlInitializeMemory ()
 EXTERN FN BlInitializeIo ()
 EXTERN FN BlLoadResources ()
+EXTERN FN BlLoadDrivers ()
 
 FN BlMain () : UWORD
 
@@ -50,7 +51,45 @@ FN BlMain () : UWORD
         BlCrash ( "Failed to load the system executive.\n" )
     END
 
-    BlExit ( 0 )
+    kemain : ^VOID
+
+    IF NOT BlLookupSymbol (
+        exec, // dll
+        "KeMain", // name
+        OUT kemain, // value
+    ) THEN
+        BlCrash ( "KeMain() not found in executive\n" )
+    END
+
+    // Load the drivers.
+
+    BlLoadDrivers ()
+
+    // So far we've been running on whatever stack we entered with. This is
+    // scary, so create a new stack for the kernel to initially run on.
+
+    desc : ^BlMemoryDescriptor
+
+    stack := BlAllocateMappedRange (
+        1, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_RECLAIMABLE, // type
+        OUT desc, // desc
+    )
+
+    IF NOT stack THEN
+        BlCrash ( "Failed to allocate initial kernel stack\n" )
+    END
+
+    // Start the system.
+
+    BxStartSystem (
+        stack + RTL_PAGE_SIZE, // initialsp
+        kemain, // entrypoint
+    )
+
+    BlCrash ( "BxStartSystem returned\n" )
 END
 
 FN BlCrash (

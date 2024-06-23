@@ -21,9 +21,14 @@ UNION BlInfoUnion
     Xr : BlInfoRecordXrStation,
 END
 
+#DEFINE BL_BOOT_NAME_MAX 64
+
 STRUCT BlInfoRecord
     ResourceListHead : RtlListEntry,
     DllListHead : RtlListEntry,
+    DescriptorListHead : RtlListEntry,
+    PfnDatabase : ^VOID,
+    BootDeviceName : UBYTE[BL_BOOT_NAME_MAX],
 
     U : BlInfoUnion,
 
@@ -82,6 +87,8 @@ STRUCT BlDll
     LoadCount : UWORD,
 
     OffsetTable : ^UWORD,
+
+    DriverEntrypoint : ^VOID,
 
     Head : ^XloHeader,
     HeadLength : ULONG,

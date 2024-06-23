@@ -4,12 +4,8 @@
 
 #INCLUDE "Bl.hjk"
 
-PUBLIC BlDescriptorList : RtlListEntry
-
 PUBLIC BlHeapTop : ^VOID
 PUBLIC BlHeapPointer : ^VOID
-
-PUBLIC BlPfnDatabase : ^VOID
 
 BlKernelSpaceBitmap : RtlBitmapHeader
 BlKernelSpaceBitmapData : UBYTE[(BL_MANAGED_KERNEL_SPACE >> RTL_PAGE_SHIFT) / 8]
@@ -38,7 +34,7 @@ EXTERN FN BxInitializeMemory ()
 
 FN BlDumpDescriptors ()
 
-    listhead := &BlDescriptorList
+    listhead := &BlInfoBlock.DescriptorListHead
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
@@ -138,7 +134,7 @@ FN BlAllocatePhysicalRange (
     IN type : BlMemoryDescriptorType,
 ) : ^BlMemoryDescriptor
 
-    listhead := &BlDescriptorList
+    listhead := &BlInfoBlock.DescriptorListHead
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
@@ -413,7 +409,7 @@ FN BlCreatePfnDatabase (
     // Calculate the offset into the PFN database of the first page frame of the
     // region.
 
-    vaddr := BlPfnDatabase + (desc^.StartPfn * BL_PFN_ELEMENT_SIZE)
+    vaddr := BlInfoBlock.PfnDatabase + (desc^.StartPfn * BL_PFN_ELEMENT_SIZE)
 
     endaddr := vaddr + (desc^.PageCount * BL_PFN_ELEMENT_SIZE)
 
@@ -483,7 +479,7 @@ FN BlInitializePfnDatabase ()
 
     desc : ^BlMemoryDescriptor
 
-    listhead := &BlDescriptorList
+    listhead := &BlInfoBlock.DescriptorListHead
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
@@ -513,11 +509,11 @@ FN BlInitializePfnDatabase ()
         BlCrash ( "Failed to allocate enough kernel space for PFN database" )
     END
 
-    BlPfnDatabase = vaddr
+    BlInfoBlock.PfnDatabase = vaddr
 
     // Allocate and initialize PFN database pages for each region.
 
-    listhead = &BlDescriptorList
+    listhead = &BlInfoBlock.DescriptorListHead
     listentry = listhead^.Next
 
     WHILE listentry != listhead DO
@@ -539,7 +535,7 @@ FN BlInitializeMemory ()
 
     // Initialize the descriptor list.
 
-    RtlInitializeList ( &BlDescriptorList )
+    RtlInitializeList ( &BlInfoBlock.DescriptorListHead )
 
     // Initialize the kernel space bitmap.
 

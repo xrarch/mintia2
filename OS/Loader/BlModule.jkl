@@ -177,7 +177,7 @@ FN BlpMapSection (
         END
 
         offtable[sectionindex] = realva - sectionheader^.VirtualAddress
-        
+
         sectionheader^.VirtualAddress = realva
     END
 
@@ -266,6 +266,8 @@ FN BlpProcessImportFixups (
 
             extern^.Type = XLO_EXTERN_RESOLVED
         END
+
+        RtlPrint ( "Fixup %p\n", addr )
 
         fixptr := CAST section^.VirtualAddress +
             fixup^.SectionOffset TO ^VOID
@@ -531,6 +533,7 @@ FN BlLoadDll (
     dll^.Head = headva
     dll^.HeadLength = headsz
     dll^.Timestamp = header.Timestamp
+    dll^.DriverEntrypoint = NULLPTR
 
     // Now map the module sections.
 

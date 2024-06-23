@@ -231,6 +231,28 @@ BxEnableVirtualAddressing:
 
     ret
 
+// a0 - initialsp
+// a1 - entrypoint
+BxStartSystem:
+.global BxStartSystem
+    // Flush the icache.
+
+    li   t1, 3
+    mtcr icachectrl, t1
+
+    // Switch to initial stack pointer.
+
+    mov  sp, a0
+
+    // Call entrypoint.
+
+    la   a0, BlInfoBlock
+    jalr lr, a1, 0
+
+.hang:
+    b    .hang
+
+
 ]
 
 // Prototypes for the firmware call stubs.
@@ -537,7 +559,7 @@ FN BxInitializeMemory ()
     desc^.Type = BL_MEMORY_RECLAIMABLE
 
     RtlInsertAtTailList (
-        &BlDescriptorList, // head
+        &BlInfoBlock.DescriptorListHead, // head
         &desc^.Entry, // entry
     )
 
@@ -552,7 +574,7 @@ FN BxInitializeMemory ()
     desc^.Type = BL_MEMORY_FREE
 
     RtlInsertAtTailList (
-        &BlDescriptorList, // head
+        &BlInfoBlock.DescriptorListHead, // head
         &desc^.Entry, // entry
     )
 
@@ -575,7 +597,7 @@ FN BxInitializeMemory ()
             desc^.Type = BL_MEMORY_FREE
 
             RtlInsertAtTailList (
-                &BlDescriptorList, // head
+                &BlInfoBlock.DescriptorListHead, // head
                 &desc^.Entry, // entry
             )
         END
@@ -862,8 +884,8 @@ FN BxInitializeIo (
     END
 
     RtlFormat (
-        &BlBootDeviceName[0], // dest
-        64, // bufsize
+        &BlInfoBlock.BootDeviceName[0], // dest
+        BL_BOOT_NAME_MAX, // bufsize
         "dks%ds%d", // fmt
         part^.Id,
         part^.PartitionId,

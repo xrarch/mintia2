@@ -1,0 +1,89 @@
+//
+// Boot driver management for the MINTIA Loader.
+//
+
+#INCLUDE "Bl.hjk"
+
+FN BlLoadDriver (
+    IN name : ^UBYTE,
+) : ^BlDll
+
+    dll := BlLoadDll ( name )
+
+    IF NOT dll THEN
+        RETURN NULLPTR
+    END
+
+    IF NOT BlLookupSymbol (
+        dll, // dll
+        "DrvInitialize", // name
+        OUT dll^.DriverEntrypoint, // value
+    ) THEN
+
+        dll^.DriverEntrypoint = NULLPTR
+
+        RtlPrint ( "WARNING: Driver '%s' had no entrypoint\n", name )
+    END
+
+    RETURN dll
+END
+
+FN (BlCallbackPerLineF) BlLoadDriverCallback (
+    IN buf : ^UBYTE,
+    IN context : ^VOID,
+    IN linenum : UWORD,
+)
+
+    WHILE buf^ == ' ' OR buf^ == '\t' DO
+        buf += 1
+    END
+
+    IF buf^ == '#' THEN
+        // Comment line. Ignore.
+
+        LEAVE
+    END
+
+    // Parse a resource line of the format:
+    // name
+
+    tokenbuf := &BlTemporaryBuffer[0]
+
+    RtlCopyString (
+        tokenbuf, // dest
+        "/mintia/Drivers/", // src
+        1024, // bufsize
+    )
+
+    next := RtlTokenize (
+        buf, // buffer
+        &tokenbuf[16], // tokenbuffer
+        1024 - 16, // bufsize
+        ' ', // delimiter
+    )
+
+    IF NOT next THEN
+        // Empty line.
+
+        LEAVE
+    END
+
+    IF NOT BlLoadDriver ( &tokenbuf[0] ) THEN
+        RtlPrint ( "WARNING: Failed to load driver %s\n", &tokenbuf[0] )
+    END
+END
+
+FN BlLoadDrivers ()
+
+    // Load all of the boot drivers.
+
+    IF NOT BlCallbackPerLineFile (
+        &BlBootDevice, // device
+        "/mintia/Drivers.txt", // path
+        &BlLoadDriverCallback, // callback
+        NULLPTR, // context
+    ) THEN
+
+        RtlPrint ( "WARNING: Couldn't open /mintia/Drivers.txt\n" )
+    END
+END
