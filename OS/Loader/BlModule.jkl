@@ -232,7 +232,7 @@ FN BlpProcessImportFixups (
     stringtable := CAST head + head^.StringTableOffset TO ^UBYTE
     externtable := CAST head + head^.ExternTableOffset TO ^XloExternEntry
 
-    fixup := CAST head + import^.FixupTableOffset TO ^XloRelocEntry
+    fixup := CAST head + import^.FixupTableOffset TO ^XloImportFixupEntry
     count := import^.FixupCount
 
     i := 0
@@ -267,19 +267,35 @@ FN BlpProcessImportFixups (
             extern^.Type = XLO_EXTERN_RESOLVED
         END
 
-        RtlPrint ( "Fixup %p\n", addr )
-
         fixptr := CAST section^.VirtualAddress +
             fixup^.SectionOffset TO ^VOID
 
+        origval := fixup^.OriginalValue
+
+#IF ( == BLD_BITS 64 )
+        // Sign extend the 32-bit original value.
+
+        IF origval & 0x80000000 THEN
+            origval |= 0xFFFFFFFF00000000
+        END
+#END
+
+        RtlPrint ( "Fixup %p to point to %p+%x\n", fixptr, addr, fixup^.OriginalValue )
+
         XloPerformRelocationTable[fixup^.Type] (
             fixptr, // ptr
-            addr, // value
+            addr + fixup^.OriginalValue, // value
             BLD_BITS, // bits
+            TRUE, // absolute
         )
 
+        RtlPrint ( "New = %x\n", XloFetchRelocationTable[fixup^.Type] (
+            fixptr, // ptr
+            BLD_BITS, // bits
+        ) )
+
         i += 1
-        fixup += SIZEOF XloRelocEntry
+        fixup += SIZEOF XloImportFixupEntry
     END
 
     RETURN TRUE
@@ -355,6 +371,7 @@ FN BlpRelocateSection (
             fixptr, // ptr
             offset, // value
             BLD_BITS, // bits
+            FALSE, // absolute
         )
 
         i += 1

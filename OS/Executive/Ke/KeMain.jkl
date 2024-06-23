@@ -9,6 +9,8 @@ EXTERN FN HalInitialize (
     IN loaderblock : ^BlInfoRecord,
 )
 
+FNPTR DriverEntrypoint ()
+
 EXPORT FN KeMain (
     IN loaderblock : ^BlInfoRecord,
 )
@@ -17,7 +19,22 @@ EXPORT FN KeMain (
 
     HalInitialize ( loaderblock )
 
-    RtlPrint ( "Uhm hi?\r\n" )
+    RtlPrint ( "Uhm hi?\n" )
+
+    listhead := &loaderblock^.DllListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        dll := CONTAINEROF listentry TO BlDll.Entry
+
+        IF dll^.DriverEntrypoint THEN
+            entry := CAST dll^.DriverEntrypoint TO DriverEntrypoint
+
+            entry ()
+        END
+
+        listentry = listentry^.Next
+    END
 
     WHILE TRUE DO END
 END
