@@ -132,7 +132,7 @@ FN BlpMapSection (
     IF flags & XLO_SECTION_ZERO THEN
         // BSS section. Zero out the memory.
 
-        RtlPrint ( "bss %p %x\n", realva, length )
+        // RtlPrint ( "bss %p %x\n", realva, length )
 
         RtlFillMemoryWithUlong (
             realva, // ptr
@@ -143,7 +143,7 @@ FN BlpMapSection (
     ELSE
         // Read the data.
 
-        RtlPrint ( "map %p %x\n", realva, length )
+        // RtlPrint ( "map %p %x\n", realva, length )
 
         IF BlReadFile (
             file, // file
@@ -159,7 +159,7 @@ FN BlpMapSection (
     IF realva != sectionheader^.VirtualAddress THEN
         // Couldn't map at the preferred address. Mark the section relocated.
 
-        RtlPrint ( "reloc from %p\n", sectionheader^.VirtualAddress )
+        // RtlPrint ( "reloc from %p\n", sectionheader^.VirtualAddress )
 
         dll^.Flags |= BL_DLL_RELOCATED
         sectionheader^.Flags |= XLO_SECTION_RELOCATED
@@ -280,7 +280,7 @@ FN BlpProcessImportFixups (
         END
 #END
 
-        RtlPrint ( "Fixup %p to point to %p+%x\n", fixptr, addr, fixup^.OriginalValue )
+        // RtlPrint ( "Fixup %p to point to %p+%x\n", fixptr, addr, fixup^.OriginalValue )
 
         XloPerformRelocationTable[fixup^.Type] (
             fixptr, // ptr
@@ -289,10 +289,10 @@ FN BlpProcessImportFixups (
             TRUE, // absolute
         )
 
-        RtlPrint ( "New = %x\n", XloFetchRelocationTable[fixup^.Type] (
-            fixptr, // ptr
-            BLD_BITS, // bits
-        ) )
+        // RtlPrint ( "New = %x\n", XloFetchRelocationTable[fixup^.Type] (
+        //     fixptr, // ptr
+        //     BLD_BITS, // bits
+        // ) )
 
         i += 1
         fixup += SIZEOF XloImportFixupEntry
