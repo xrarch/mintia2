@@ -105,11 +105,13 @@ FN BlpMapSection (
 
     // Try to map in the DLL section.
 
-    length := sectionheader^.DataLength
+    length := sectionheader^.VirtualLength
 
     IF length == 0 THEN
         RETURN TRUE
     END
+
+    datalength := sectionheader^.DataLength
 
     // Allocate space for the section contents.
 
@@ -127,33 +129,32 @@ FN BlpMapSection (
         RETURN FALSE
     END
 
-    flags := sectionheader^.Flags
-
-    IF flags & XLO_SECTION_ZERO THEN
-        // BSS section. Zero out the memory.
-
-        // RtlPrint ( "bss %p %x\n", realva, length )
-
-        RtlFillMemoryWithUlong (
-            realva, // ptr
-            length, // sz
-            0, // ulong
-        )
-
-    ELSE
+    IF datalength THEN
         // Read the data.
 
-        // RtlPrint ( "map %p %x\n", realva, length )
+        // RtlPrint ( "map %p %d\n", realva, datalength )
 
         IF BlReadFile (
             file, // file
             sectionheader^.FileOffset, // offset
             realva, // buf
-            length, // length
-        ) != length THEN
+            datalength, // length
+        ) != datalength THEN
 
             RETURN FALSE
         END
+    END
+
+    IF length - datalength THEN
+        // Zero out the slack space.
+
+        // RtlPrint ( "zero %p %d\n", realva + datalength, length - datalength )
+
+        RtlFillMemoryWithUlong (
+            realva + datalength, // ptr
+            length - datalength, // sz
+            0, // ulong
+        )
     END
 
     IF realva != sectionheader^.VirtualAddress THEN

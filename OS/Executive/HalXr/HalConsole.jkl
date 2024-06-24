@@ -1,38 +1,202 @@
 //
-// Implementation of a simple boot time console for the MINTIA Executive.
+// Implementation of a simple boot console.
 //
 
 #INCLUDE "Hal.hjk"
 
-HalCitronBase := NULLPTR
+HalpUseFramebuffer := FALSE
+HalpDebugConsole := FALSE
+HalpFramebufferBytes := 0
+HalpFont : ^HalConsoleFont
+HalpCursorX := 0
+HalpCursorY := 0
+HalpWidth := 0
+HalpHeight := 0
 
-FN HalSerialWrite (
-    IN byte : UWORD,
+#IF BLD_MP
+
+PUBLIC HalpConsoleLock : UWORD
+
+#END
+
+FN HalpDrawCharacter (
+    IN c : UWORD,
+    IN x : UWORD,
+    IN y : UWORD,
 )
 
-    // Write a character to the serial port.
+    font := HalpFont
+    w := font^.Width
+    h := font^.Height
 
-    cmdport := CAST HalCitronBase + 0x40 TO ^UBYTE
-    dataport := CAST HalCitronBase + 0x44 TO ^UBYTE
+    j : UWORD
+    byte : UWORD
+    left : UWORD
 
-    WHILE cmdport^ DO
-        BARRIER
+    dest : ^UBYTE =
+        ExLoaderBlock.BootFbBase + x + (y * ExLoaderBlock.BootFbWidth)
+
+    mod := ExLoaderBlock.BootFbWidth - w
+
+    bmp := CAST font + SIZEOF HalConsoleFont TO ^UBYTE
+    bmp += ((w + 7) >> 3) * h * c
+
+    IF font^.Flags & HCF_FLAG_REVERSE == 0 THEN
+        WHILE h DO
+            left = w >> 3
+
+            WHILE left DO
+                byte = bmp^
+
+                IF byte THEN
+                    IF byte & 128 THEN
+                        dest[0] = 0xFF
+                    END
+
+                    IF byte & 64 THEN
+                        dest[1] = 0xFF
+                    END
+
+                    IF byte & 32 THEN
+                        dest[2] = 0xFF
+                    END
+
+                    IF byte & 16 THEN
+                        dest[3] = 0xFF
+                    END
+
+                    IF byte & 8 THEN
+                        dest[4] = 0xFF
+                    END
+
+                    IF byte & 4 THEN
+                        dest[5] = 0xFF
+                    END
+
+                    IF byte & 2 THEN
+                        dest[6] = 0xFF
+                    END
+
+                    IF byte & 1 THEN
+                        dest[7] = 0xFF
+                    END
+                END
+
+                dest += 8
+                left -= 1
+                bmp += 1
+            END
+
+            left = w & 7
+
+            IF left THEN
+                byte = bmp^
+                bmp += 1
+                
+                IF w >> 3 THEN
+                    j = 128
+
+                ELSE
+                    j = 1 << left
+                END
+
+                WHILE left DO
+                    IF byte & j THEN
+                        dest^ = 0xFF
+                    END
+
+                    dest += 1
+                    j >>= 1
+                    left -= 1
+                END
+            END
+
+            dest += mod
+            h -= 1
+        END
+
+    ELSE
+        WHILE h DO
+            left = w >> 3
+
+            WHILE left DO
+                byte = bmp^
+
+                IF byte THEN
+                    IF byte & 128 THEN
+                        dest[7] = 0xFF
+                    END
+
+                    IF byte & 64 THEN
+                        dest[6] = 0xFF
+                    END
+
+                    IF byte & 32 THEN
+                        dest[5] = 0xFF
+                    END
+
+                    IF byte & 16 THEN
+                        dest[4] = 0xFF
+                    END
+
+                    IF byte & 8 THEN
+                        dest[3] = 0xFF
+                    END
+
+                    IF byte & 4 THEN
+                        dest[2] = 0xFF
+                    END
+
+                    IF byte & 2 THEN
+                        dest[1] = 0xFF
+                    END
+
+                    IF byte & 1 THEN
+                        dest[0] = 0xFF
+                    END
+                END
+
+                dest += 8
+                left -= 1
+                bmp += 1
+            END
+
+            left = w & 7
+
+            IF left THEN
+                byte = bmp^
+                bmp += 1
+                j = 1
+
+                WHILE left DO
+                    IF byte & j THEN
+                        dest^ = 0xFF
+                    END
+
+                    dest += 1
+                    j <<= 1
+                    left -= 1
+                END
+            END
+
+            dest += mod
+            h -= 1
+        END
     END
-
-    dataport^ = byte
-
-    BARRIER
 END
 
-FN HalPutCharacter (
-    IN byte : UWORD,
-)
+FN HalpClearScreen ()
 
-    IF byte == '\n' THEN
-        HalSerialWrite ( '\r' )
-    END
+    // Fill the framebuffer with blue pixels.
 
-    HalSerialWrite ( byte )
+    RtlFillMemoryWithUlong (
+        ExLoaderBlock.BootFbBase, // ptr
+        HalpFramebufferBytes, // sz
+        0x04040404, // ulong
+    )
+
+    HalpCursorX = 0
+    HalpCursorY = 0
 END
 
 FN (RtlPrintCallbackF) RtljPrintCallback (
@@ -40,12 +204,82 @@ FN (RtlPrintCallbackF) RtljPrintCallback (
     IN context : ^VOID,
 )
 
-    HalPutCharacter ( byte )
+    oldstate : UWORD
+
+    IF NOT HalpDebugConsole THEN
+        oldstate = HalpAcquireConsole ()
+    END
+
+    IF HalpUseFramebuffer AND NOT HalpDebugConsole THEN
+        // Write to the framebuffer console.
+
+        IF byte == '\n' OR HalpCursorX >= HalpWidth THEN
+            HalpCursorX = 0
+            HalpCursorY += 1
+        END
+
+        IF byte != '\n' THEN
+            IF HalpCursorY >= HalpHeight THEN
+                HalpClearScreen ()
+            END
+
+            HalpDrawCharacter (
+                byte, // c
+                HalpCursorX * HalpFont^.Width, // x
+                HalpCursorY * HalpFont^.Height, // y
+            )
+
+            HalpCursorX += 1
+        END
+    ELSE
+        // Write to serial port.
+
+        HalDebugWrite ( byte )
+    END
+
+    IF NOT HalpDebugConsole THEN
+        HalpReleaseConsole ( oldstate )
+    END
 END
 
-FN HalEarlyInitialize ()
+#SECTION "INIT$text"
+FN HalpInitializeConsole ()
 
-    loaderblock := &ExLoaderBlock
+    // First see if we got a boot framebuffer.
 
-    HalCitronBase = loaderblock^.U.Xr.CitronBase
+    IF ExLoaderBlock.BootFbBase THEN
+        // We did! Try to find the HAL console font resource.
+
+        rsrc := KeFindResource (
+            "HalFont", // name
+            OUT HalpFont, // data
+        )
+
+        IF rsrc AND HalpFont^.Magic == HCF_MAGIC THEN
+            KePinResource ( rsrc )
+
+            HalpUseFramebuffer = TRUE
+
+            HalpFramebufferBytes =
+                ExLoaderBlock.BootFbWidth * ExLoaderBlock.BootFbHeight
+
+            HalpWidth = ExLoaderBlock.BootFbWidth / HalpFont^.Width
+            HalpHeight = ExLoaderBlock.BootFbHeight / HalpFont^.Height
+
+            // Draw the background.
+
+            HalpClearScreen ()
+        END
+    END
+END
+
+EXPORT FN HalSetDebugConsole (
+    IN new : UWORD,
+) : UWORD
+
+    old := HalpDebugConsole
+
+    HalpDebugConsole = new
+
+    RETURN old
 END

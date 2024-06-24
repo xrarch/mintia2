@@ -9,6 +9,29 @@
 
 PUBLIC ExLoaderBlock : BlInfoRecord
 
+#SECTION "INIT$text"
+FN KiFixupLoaderBlockLists ()
+
+    // Fix up the circular lists in the loader block so that they still point to
+    // the newly relocated list heads.
+
+    listhead := &ExLoaderBlock.ResourceListHead
+
+    listhead^.Next^.Prev = listhead
+    listhead^.Prev^.Next = listhead
+
+    listhead = &ExLoaderBlock.DllListHead
+
+    listhead^.Next^.Prev = listhead
+    listhead^.Prev^.Next = listhead
+
+    listhead = &ExLoaderBlock.DescriptorListHead
+
+    listhead^.Next^.Prev = listhead
+    listhead^.Prev^.Next = listhead
+END
+
+#SECTION "INIT$text"
 EXPORT FN KeMain (
     IN loaderblock : ^BlInfoRecord,
 )
@@ -43,6 +66,10 @@ EXPORT FN KeMain (
         SIZEOF BlInfoRecord, // sz
     )
 
+    // Fix up loader block lists.
+
+    KiFixupLoaderBlockLists ()
+
     // Perform early initialization of the HAL. This will perform baseline
     // initialization of integral platform components such as the interval
     // timer. Interrupts will still be disabled though. Also, we get a boot
@@ -53,5 +80,7 @@ EXPORT FN KeMain (
 
     RtlPrint ( "MINTIA is awake!\n" )
 
-    WHILE TRUE DO END
+    WHILE TRUE DO
+        RtlPrint ( "Yippee! " )
+    END
 END

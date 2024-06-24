@@ -1,0 +1,42 @@
+//
+// Management for boot resources loaded by the bootloader.
+//
+
+#INCLUDE "Ke.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
+
+#SECTION "INIT$text"
+EXPORT FN KeFindResource (
+    IN name : ^UBYTE,
+    OUT data : ^VOID,
+) : ^BlResource
+
+    // Look up the resource in the loader's list.
+
+    listhead := &ExLoaderBlock.ResourceListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        rsrc := CONTAINEROF listentry TO BlResource.Entry
+
+        IF RtlCompareString ( &rsrc^.Name[0], name ) == 0 THEN
+            data = rsrc^.Data
+
+            RETURN rsrc
+        END
+
+        listentry = listentry^.Next
+    END
+
+    RETURN NULLPTR
+END
+
+#SECTION "INIT$text"
+EXPORT FN KePinResource (
+    IN rsrc : ^BlResource,
+)
+
+    // Pin the resource so it won't get reclaimed by Mm later.
+
+    rsrc^.Jettison = FALSE
+END

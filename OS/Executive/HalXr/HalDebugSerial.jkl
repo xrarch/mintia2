@@ -1,0 +1,54 @@
+//
+// Implementation of a polled serial driver for the debugger.
+//
+
+#INCLUDE "Hal.hjk"
+
+FN HalpSerialWrite (
+    IN byte : UWORD,
+)
+
+    // Write a character to the serial port.
+
+    citron := ExLoaderBlock.U.Xr.CitronBase
+
+    cmdport := CAST citron + 0x40 TO ^UBYTE
+    dataport := CAST citron + 0x44 TO ^UBYTE
+
+    WHILE cmdport^ DO
+        BARRIER
+    END
+
+    dataport^ = byte
+
+    BARRIER
+END
+
+FN HalDebugWrite (
+    IN byte : UWORD,
+)
+
+    IF byte == '\n' THEN
+        HalpSerialWrite ( '\r' )
+    END
+
+    HalpSerialWrite ( byte )
+END
+
+FN HalDebugRead () : UWORD
+
+    // Read a character from the serial port.
+    // Non-blocking. Return -1 if none available.
+
+    citron := ExLoaderBlock.U.Xr.CitronBase
+
+    dataport := CAST citron + 0x44 TO ^UINT
+
+    char := dataport^
+
+    IF char == 0xFFFF THEN
+        RETURN -1
+    END
+
+    RETURN char
+END

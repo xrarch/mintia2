@@ -5,3 +5,60 @@
 #INCLUDE "<ll>/Rtl.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 #INCLUDE "<inc>/Hal.hjk"
+#INCLUDE "<inc>/Ke.hjk"
+
+#DEFINE HCF_MAGIC 0x664E4C45
+#DEFINE HCF_FLAG_REVERSE 1
+
+STRUCT HalConsoleFont
+    Magic : ULONG,
+    Width : ULONG,
+    Height : ULONG,
+    Flags : ULONG,
+    FontName : UBYTE[16],
+    Reserved : UBYTE[16],
+END
+
+EXTERN FN HalpDisableInterrupts () : UWORD
+
+EXTERN FN HalpRestoreInterrupts (
+    IN oldstate : UWORD,
+)
+
+#IF BLD_MP
+
+EXTERN HalpConsoleLock : UWORD
+
+EXTERN FN HalpAcquireSpinlock (
+    IN spinlock : ^VOID,
+) : UWORD
+
+EXTERN FN HalpReleaseSpinlock (
+    IN spinlock : ^VOID,
+    IN oldstate : UWORD,
+)
+
+#MACRO HalpAcquireConsole () [
+    HalpAcquireSpinlock ( &HalpConsoleLock )
+]
+
+#MACRO HalpReleaseConsole ( oldstate ) [
+    HalpReleaseSpinlock (
+        &HalpConsoleLock, // spinlock
+        oldstate, // oldstate
+    )
+]
+
+#ELSE
+
+#MACRO HalpAcquireConsole () [
+    HalpDisableInterrupts ()
+]
+
+#MACRO HalpReleaseConsole ( oldstate ) [
+    HalpRestoreInterrupts ( oldstate )
+]
+
+#END
+
+EXTERN FN HalpInitializeConsole ()
