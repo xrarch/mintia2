@@ -199,6 +199,35 @@ FN HalpClearScreen ()
     HalpCursorY = 0
 END
 
+FN HalpScrollScreen ()
+
+    // Scroll the framebuffer up by 1 line. This is REALLY slow but the HAL
+    // console isn't a performance concern (if it shows up in runtime, the
+    // system is either being debugged, or something broke) so simplicity beats
+    // speed here. The primary system console used during runtime is *not* this
+    // one.
+
+    font := HalpFont
+
+    RtlCopyBytes (
+        ExLoaderBlock.BootFbBase, // dest
+        ExLoaderBlock.BootFbBase +
+        ExLoaderBlock.BootFbWidth * font^.Height, // src
+        ExLoaderBlock.BootFbWidth *
+        (ExLoaderBlock.BootFbHeight - font^.Height), // sz
+    )
+
+    // Clear the last line.
+
+    RtlFillMemoryWithUlong (
+        ExLoaderBlock.BootFbBase +
+        ExLoaderBlock.BootFbWidth *
+        (ExLoaderBlock.BootFbHeight - font^.Height), // ptr
+        ExLoaderBlock.BootFbWidth * font^.Height, // sz
+        0x04040404, // ulong
+    )
+END
+
 FN (RtlPrintCallbackF) RtljPrintCallback (
     IN byte : UBYTE,
     IN context : ^VOID,
@@ -218,11 +247,14 @@ FN (RtlPrintCallbackF) RtljPrintCallback (
             HalpCursorY += 1
         END
 
-        IF byte != '\n' THEN
-            IF HalpCursorY >= HalpHeight THEN
-                HalpClearScreen ()
-            END
+        IF HalpCursorY >= HalpHeight THEN
+            HalpCursorX = 0
+            HalpCursorY = HalpHeight - 1
 
+            HalpScrollScreen ()
+        END
+
+        IF byte != '\n' THEN
             HalpDrawCharacter (
                 byte, // c
                 HalpCursorX * HalpFont^.Width, // x
