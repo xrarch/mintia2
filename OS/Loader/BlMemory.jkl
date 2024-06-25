@@ -14,21 +14,23 @@ BlKernelStructureBump : ^VOID = BL_KERNEL_STRUCTURES
 
 BlKernelSpaceHint := 0
 
+#IF BLD_CHK
+    BlOkayToAllocate := FALSE
+#END
+
 #DEFINE BL_BUMP_EXTENSION_FLAG 0x80000000
 
 // BL_DESCRIPTOR_MAX must be set to a value high enough for memory management to
 // initialize itself without hitting the bump allocator before the address space
 // is set up.
 
-#DEFINE BL_DESCRIPTOR_MAX 32
+#DEFINE BL_DESCRIPTOR_MAX 16
 
 BlFirstBumpExtensionDescriptor : BlMemoryDescriptor
 BlBumpExtensionDescriptor := &BlFirstBumpExtensionDescriptor
 
 BlDescriptors : BlMemoryDescriptor[BL_DESCRIPTOR_MAX]
-BlDescriptorIndex := 0
-
-EXTERN FN BxInitializeMemory ()
+PUBLIC BlDescriptorIndex := 0
 
 #IF BLD_CHK
 
@@ -61,6 +63,10 @@ FN BlAllocateMemory (
 #IF BLD_CHK
     IF NOT bytes THEN
         BlCrash ( "BlAllocateMemory\n" )
+    END
+
+    IF NOT BlOkayToAllocate THEN
+        BlCrash ( "Not okay to allocate - increase BL_DESCRIPTOR_MAX\n" )
     END
 #END
 
@@ -545,9 +551,14 @@ FN BlInitializeMemory ()
         &BlKernelSpaceBitmapData[0], // data
     )
 
-    // Call the platform code to populate our memory descriptor list.
+    // Call the platform code to populate our memory descriptor list, enable
+    // paging, whatever it needs to do.
 
     BxInitializeMemory ()
+
+#IF BLD_CHK
+    BlOkayToAllocate = TRUE
+#END
 
     // Initialize the sparse PFN database.
 
