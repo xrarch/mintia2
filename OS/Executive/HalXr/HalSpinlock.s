@@ -62,23 +62,3 @@ HalpReleaseSpinlock:
 	ret
 
 #END
-
-// outputs:
-// a3 - old interrupt state
-HalpDisableInterrupts:
-.global HalpDisableInterrupts
-
-	mfcr a3, rs
-	subi t0, zero, 3
-	and  t0, a3, t0
-	mtcr rs, t0
-
-	ret
-
-// a0 - old interrupt state
-HalpRestoreInterrupts:
-.global HalpRestoreInterrupts
-
-	mtcr rs, a0
-
-	ret

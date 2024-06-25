@@ -4,8 +4,11 @@
 
 #INCLUDE "<ll>/Rtl.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
-#INCLUDE "<inc>/Hal.hjk"
-#INCLUDE "<inc>/Ke.hjk"
+
+// Include the Kernel internal header since the HAL is logically located within
+// it.
+
+#INCLUDE "../Ke/Ki.hjk"
 
 #DEFINE HCF_MAGIC 0x664E4C45
 #DEFINE HCF_FLAG_REVERSE 1
@@ -52,11 +55,11 @@ EXTERN FN HalpReleaseSpinlock (
 #ELSE
 
 #MACRO HalpAcquireConsole () [
-    HalpDisableInterrupts ()
+    KiDisableInterrupts ()
 ]
 
 #MACRO HalpReleaseConsole ( oldstate ) [
-    HalpRestoreInterrupts ( oldstate )
+    KiRestoreInterrupts ( oldstate )
 ]
 
 #END
