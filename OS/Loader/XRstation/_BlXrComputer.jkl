@@ -275,6 +275,15 @@ BxStartSystem:
 .hang:
     b    .hang
 
+// a0 - vaddr
+BxFlushPage:
+
+    rshi t0, a0, 12
+    lshi t0, t0, 12
+    mtcr itbctrl, t0
+    mtcr dtbctrl, t0
+
+    ret
 
 ]
 
@@ -308,6 +317,10 @@ END
 EXTERN _bss : UBYTE
 EXTERN _bss_size : UBYTE
 EXTERN _bss_end : UBYTE
+
+EXTERN FN BxFlushPage (
+    IN vaddr : ^VOID,
+)
 
 EXTERN FN BlMain () : UWORD
 
@@ -479,7 +492,7 @@ FN BxInitializeMemoryMapping ()
     IF pages > (4 * 1024 * 1024) / 4096 THEN
         // Only map up to 4MB so that we don't allocate extra page tables for no
         // reason.
-    
+
         pages = (4 * 1024 * 1024) / 4096
     END
 
@@ -720,6 +733,48 @@ FN BxMapRange (
         )
 
         phyaddr += RTL_PAGE_SIZE
+        vaddr += RTL_PAGE_SIZE
+        pages -= 1
+    END
+END
+
+FN BxRemapCodePage (
+    IN vaddr : ^VOID,
+)
+
+    // Set a code page to read-only.
+
+    pdeptr := &BxPageDirectory[vaddr >> 22]
+
+    pagetable := CAST (pdeptr^ >> 5) << RTL_PAGE_SHIFT TO ^ULONG
+
+    IF NOT pagetable THEN
+        BlCrash ( "BxRemapCodePage\n" )
+    END
+
+    pteaddr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
+    pte := pteaddr^
+
+    IF NOT (pte & PTE_V) THEN
+        BlCrash ( "BxRemapCodePage 2\n" )
+    END
+
+    pte &= ~(PTE_W)
+    pteaddr^ = pte
+
+    // Purge TB page.
+
+    BxFlushPage ( vaddr )
+END
+
+FN BxRemapCodeRange (
+    IN vaddr : ^VOID,
+    IN pages : UWORD,
+)
+
+    WHILE pages DO
+        BxRemapCodePage ( vaddr )
+
         vaddr += RTL_PAGE_SIZE
         pages -= 1
     END

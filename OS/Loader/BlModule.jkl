@@ -408,6 +408,36 @@ FN BlpProcessRelocations (
     END
 END
 
+FN BlpRemapCodeSections (
+    IN dll : ^BlDll,
+)
+
+    // Perform all of the relocations on sections that require it.
+
+    head := dll^.Head
+
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
+
+    count := head^.SectionCount
+    i := 0
+
+    WHILE i < count DO
+        sectionheader := &sectiontable[i]
+
+        IF sectionheader^.Flags & XLO_SECTION_CODE THEN
+            pages := sectionheader^.VirtualLength + RTL_PAGE_SIZE - 1
+            pages >>= RTL_PAGE_SHIFT
+
+            BxRemapCodeRange (
+                CAST sectionheader^.VirtualAddress TO ^VOID, // vaddr
+                pages, // pages
+            )
+        END
+
+        i += 1
+    END
+END
+
 FN BlLookupSymbol (
     IN dll : ^BlDll,
     IN name : ^UBYTE,
@@ -595,6 +625,10 @@ FN BlLoadDll (
 
         RETURN NULLPTR
     END
+
+    // Remap the code sections read-only and executable.
+
+    BlpRemapCodeSections ( dll )
 
     RETURN dll
 END
