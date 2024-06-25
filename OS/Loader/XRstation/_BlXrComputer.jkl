@@ -401,7 +401,11 @@ FN (FwBootstrapEntrypoint) BxEntry (
     FwDeviceDatabase = devicedatabase
     FwBootPartition = bootpartition
 
+#IF BLD_MP
     BlInfoBlock.ProcessorCount = FwDeviceDatabase^.ProcessorCount
+#ELSE
+    BlInfoBlock.ProcessorCount = 1
+#END
 
     // Initialize argument string into a table of null-terminated arguments, as
     // expected by the loader's argument stuff.
