@@ -36,6 +36,9 @@ with the `JOBS=N` argument, where N is the number of cores on your machine.
 To build for fox32, add `PLATFORM=fox32` and the distribution image should
 be placed at `Images/MintiaTest-fox32-upfre.img`.
 
+To clean the source tree, add `CLEANUP=1` to the command line you'd use to
+build.
+
 ## Testing
 
 With the XR/station emulator (`./xremu/`) and MINTIA repository (`./mintia2/`) in your current directory, run this command:
