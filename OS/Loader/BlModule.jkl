@@ -85,7 +85,7 @@ FN BlpFindDll (
     WHILE listentry != listhead DO
         dll := CONTAINEROF listentry TO BlDll.Entry
 
-        IF RtlCompareString ( dll^.Name, name ) == 0 THEN
+        IF RtlCompareString ( &dll^.Name[0], name ) == 0 THEN
             RETURN dll
         END
 
@@ -182,6 +182,10 @@ FN BlpMapSection (
         sectionheader^.VirtualAddress = realva
     END
 
+    IF NOT dll^.Base THEN
+        dll^.Base = CAST sectionheader^.VirtualAddress TO ^VOID
+    END
+
     RETURN TRUE
 END
 
@@ -256,8 +260,8 @@ FN BlpProcessImportFixups (
                 RtlPrint (
                     "LINK: Symbol %s not found in %s, referenced by %s\n",
                     stringtable + extern^.NameOffset,
-                    idll^.Name,
-                    dll^.Name,
+                    &idll^.Name[0],
+                    &dll^.Name[0],
                 )
 
                 RETURN FALSE
@@ -537,7 +541,12 @@ FN BlLoadDll (
         SIZEOF BlDll, // bytes
     ) TO ^BlDll
 
-    dll^.Name = name
+    RtlCopyString (
+        &dll^.Name[0], // dest
+        name, // src
+        BL_DLL_NAME_MAX, // bufsize
+    )
+
     dll^.LoadCount = 1
     dll^.Flags = 0
     dll^.OffsetTable = NULLPTR
@@ -582,6 +591,7 @@ FN BlLoadDll (
     dll^.HeadLength = headsz
     dll^.Timestamp = header.Timestamp
     dll^.DriverEntrypoint = NULLPTR
+    dll^.Base = NULLPTR
 
     // Now map the module sections.
 

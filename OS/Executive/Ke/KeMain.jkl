@@ -29,31 +29,7 @@ FN KiFixupLoaderBlockLists ()
     listhead^.Prev^.Next = listhead
 END
 
-FN (KeCrashCallbackF) KeTestCrash2 ()
-
-    i := 600
-
-    WHILE i DO
-        KeCrashPrint ( "%u ", i )
-
-        i -= 1
-    END
-
-    KeCrashPrint ( "\n" )
-END
-
-FN (KeCrashCallbackF) KeTestCrash ()
-
-    i := 10000
-
-    WHILE i DO
-        KeCrashPrint ( "%u ", i )
-
-        i -= 1
-    END
-
-    KeCrashPrint ( "\n" )
-END
+FNPTR DbgMainF ()
 
 #SECTION "INIT$text"
 EXPORT FN KeMain (
@@ -106,45 +82,15 @@ EXPORT FN KeMain (
 
     HalEarlyInitialize ()
 
-    testcallback : KeCrashCallback
+    // Perform early initialization of the debugger.
 
-    testcallback.Function = &KeTestCrash2
-    testcallback.DoesPrint = TRUE
-    testcallback.Horizontal = TRUE
+    IF ExLoaderBlock.DbgMain THEN
+        dbgmain := CAST ExLoaderBlock.DbgMain TO DbgMainF
 
-    KeRegisterCrashCallback ( &testcallback )
+        dbgmain ()
+    END
 
-    secondcallback : KeCrashCallback
-
-    secondcallback.Function = &KeTestCrash2
-    secondcallback.DoesPrint = TRUE
-    secondcallback.Horizontal = FALSE
-
-    KeRegisterCrashCallback ( &secondcallback )
-
-    thirdcallback : KeCrashCallback
-
-    thirdcallback.Function = &KeTestCrash2
-    thirdcallback.DoesPrint = TRUE
-    thirdcallback.Horizontal = FALSE
-
-    KeRegisterCrashCallback ( &thirdcallback )
-
-    fourthcallback : KeCrashCallback
-
-    fourthcallback.Function = &KeTestCrash2
-    fourthcallback.DoesPrint = TRUE
-    fourthcallback.Horizontal = FALSE
-
-    KeRegisterCrashCallback ( &fourthcallback )
-
-    fifthcallback : KeCrashCallback
-
-    fifthcallback.Function = &KeTestCrash2
-    fifthcallback.DoesPrint = TRUE
-    fifthcallback.Horizontal = TRUE
-
-    KeRegisterCrashCallback ( &fifthcallback )
+    // Announce ourselves.
 
     RtlPrint ( "KeMain(): MINTIA is awake!\n" )
 

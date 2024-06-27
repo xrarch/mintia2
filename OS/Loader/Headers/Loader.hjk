@@ -32,6 +32,7 @@ STRUCT BlInfoRecord
     ProcessorCount : UWORD,
     VirtualPrbBase : ^VOID,
     PhysicalPrbBase : ^VOID,
+    DbgMain : ^VOID,
 
     U : BlInfoUnion,
 
@@ -85,13 +86,15 @@ END
 STRUCT BlDll
     Entry : RtlListEntry,
 
-    Name : ^UBYTE,
+    Name : UBYTE[BL_DLL_NAME_MAX],
 
     LoadCount : UWORD,
 
     OffsetTable : ^UWORD,
 
     DriverEntrypoint : ^VOID,
+
+    Base : ^VOID,
 
     Head : ^XloHeader,
     HeadLength : ULONG,

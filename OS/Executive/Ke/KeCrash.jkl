@@ -3,10 +3,13 @@
 //
 
 #INCLUDE "Ki.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
 
 KiCrashVerticalListHead : RtlListEntry
 KiCrashHorizListHead : RtlListEntry
 KiCrashCallbackListHead : RtlListEntry
+
+KiCrashModuleListCallback : KeCrashCallback
 
 KiCrashGate : ULONG = 0
 
@@ -97,11 +100,71 @@ FN KeCrashPrint (
     )
 END
 
+FN (KeCrashCallbackF) KiCrashModuleListFunc (
+    IN columns : UWORD,
+)
+
+#IF ( == BLD_BITS 64 )
+    infocols := columns / 48
+#ELSE
+    infocols := columns / 40
+#END
+
+    i := infocols
+
+    WHILE i DO
+#IF ( == BLD_BITS 64 )
+        KeCrashPrint ( "DLL Base         TimeStmp Name                 " )
+#ELSE
+        KeCrashPrint ( "DLL Base TimeStmp Name                 " )
+#END
+
+        i -= 1
+    END
+
+    KeCrashPrint ( "\n" )
+
+    listhead := &ExLoaderBlock.DllListHead
+    listentry := listhead^.Next
+    i = 0
+
+    WHILE listentry != listhead DO
+        dll := CONTAINEROF listentry TO BlDll.Entry
+
+        IF i >= infocols THEN
+            RtlPrint ( "\n" )
+            i = 0
+        END
+
+        RtlPrint (
+            "%p %08x %-20s ", // fmt
+            dll^.Base,
+            dll^.Timestamp,
+            RtlGetFileName ( &dll^.Name[0] ),
+        )
+
+        i += 1
+
+        listentry = listentry^.Next
+    END
+END
+
 FN KiInitCrashing ()
+
+    // Initialize the list heads.
 
     RtlInitializeList ( &KiCrashVerticalListHead )
     RtlInitializeList ( &KiCrashHorizListHead )
     RtlInitializeList ( &KiCrashCallbackListHead )
+
+    // Now initialize the standard callbacks.
+
+    KeRegisterCrashCallback (
+        &KiCrashModuleListCallback, // callback
+        &KiCrashModuleListFunc, // function
+        TRUE, // doesprint
+        TRUE, // horizontal
+    )
 END
 
 FN KiDoCrashPrints (
@@ -167,7 +230,7 @@ FN KiDoCrashPrints (
             KiNextRow, // y
         )
 
-        callback^.Function ()
+        callback^.Function ( KiColumns )
 
         IF NOT KiRemainingRows THEN
             BREAK
@@ -209,7 +272,7 @@ FN KiDoCrashPrints (
                 KiNextRow, // y
             )
 
-            callback^.Function ()
+            callback^.Function ( colwidth )
 
             KiResetX += colwidth + 1
 
@@ -263,7 +326,7 @@ EXPORT FN KeCrash (
     WHILE listentry != listhead DO
         callback := CONTAINEROF listentry TO KeCrashCallback.Entry
 
-        callback^.Function ()
+        callback^.Function ( 0 )
 
         listentry = listentry^.Next
     END
@@ -301,13 +364,18 @@ END
 #SECTION "INIT$text"
 EXPORT FN KeRegisterCrashCallback (
     IN callback : ^KeCrashCallback,
+    IN callbackfunc : KeCrashCallbackF,
+    IN doesprint : UWORD,
+    IN horizontal : UWORD,
 )
 
     // Assumes being called from single-threaded context at boot time. Uses no
     // synchronization.
 
-    IF callback^.DoesPrint THEN
-        IF callback^.Horizontal THEN
+    callback^.Function = callbackfunc
+
+    IF doesprint THEN
+        IF horizontal THEN
             RtlInsertAtTailList (
                 &KiCrashHorizListHead, // head
                 &callback^.Entry, // entry

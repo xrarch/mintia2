@@ -65,6 +65,22 @@ FN BlMain () : UWORD
 
     BlLoadDrivers ()
 
+    IF BlGetExistenceArg ( "-dbg" ) THEN
+        // Load the debugger.
+
+        dbg := BlLoadDll ( "sysdbg.sys" )
+
+        IF dbg THEN
+            IF NOT BlLookupSymbol (
+                dbg, // dll
+                "DbgMain", // name
+                OUT BlInfoBlock.DbgMain, // value
+            ) THEN
+                BlInfoBlock.DbgMain = NULLPTR
+            END
+        END
+    END
+
     // Start the system.
 
     RtlPrint ( "Starting the system...\n\n" )
