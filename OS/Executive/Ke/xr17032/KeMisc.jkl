@@ -48,7 +48,7 @@ KiCurrentProcessor:
 // outputs:
 // a3 - old value
 KeIncrementUlong:
-.global KeIncrementUlong
+.export KeIncrementUlong
 	
 .retry:
 	ll   a3, a0                     // Load-locked the location.
@@ -64,7 +64,7 @@ KeIncrementUlong:
 // outputs:
 // a3 - origvalue
 KeCompareSwapUlong:
-.global KeCompareSwapUlong
+.export KeCompareSwapUlong
 
 .retry:
 
@@ -84,5 +84,20 @@ KeCompareSwapUlong:
 
 .exit:
 	ret
+
+KeBreakpoint:
+.export KeBreakpoint
+    
+    brk
+
+    ret
+
+KeFlushIcache:
+.export KeFlushIcache
+    
+    li   t0, 3
+    mtcr icachectrl, t0
+
+    ret
 
 ]

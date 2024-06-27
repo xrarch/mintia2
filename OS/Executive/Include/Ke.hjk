@@ -1,5 +1,5 @@
 //
-// Public header file for the Kernel component of the MINTIA Executive.
+// Public header file for the Kernel (Ke) component of the MINTIA Executive.
 //
 
 EXTERN FN KeFindResource (
@@ -32,6 +32,10 @@ EXTERN FN KeCrashPrint (
     ... argv argc
 )
 
+EXTERN FN KeFlushIcache ()
+
+EXTERN FN KeBreakpoint ()
+
 FNPTR KeCrashCallbackF (
     IN columns : UWORD,
 )
@@ -50,3 +54,9 @@ EXTERN FN KeRegisterCrashCallback (
     IN doesprint : UWORD,
     IN horizontal : UWORD,
 )
+
+FNPTR KeDebuggerEntryF (
+    IN context : ^OsContext,
+)
+
+EXTERN KeDebuggerEntry : KeDebuggerEntryF

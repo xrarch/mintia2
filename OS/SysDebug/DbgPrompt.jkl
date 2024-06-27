@@ -1,0 +1,218 @@
+//
+// Implements the debugger prompt.
+//
+
+#INCLUDE "Dbg.hjk"
+
+#DEFINE DBG_TOKEN_BUFFER_SIZE 128
+#DEFINE DBG_MONITOR_HEIGHT 24
+
+DbgCommandBuffer : UBYTE[256]
+DbgTokenBuffer : UBYTE[DBG_TOKEN_BUFFER_SIZE]
+
+DbgNextTokenPointer : ^UBYTE
+
+PUBLIC DbgCurrentContext : ^OsContext
+
+FNPTR DbgCommandF ()
+
+STRUCT DbgCommand
+    Name : ^UBYTE,
+    Function : DbgCommandF,
+    Help : ^UBYTE,
+END
+
+// FORWARD
+EXTERN DbgCommandTable : DbgCommand[]
+
+DbgUsedLines : UBYTE
+DbgAllLines : UBYTE
+
+FN DbgPaginate () : UWORD
+
+    // Simple text pagination for the console.
+
+    IF DbgAllLines THEN
+        RETURN TRUE
+    END
+
+    result := TRUE
+
+    IF DbgUsedLines >= DBG_MONITOR_HEIGHT - 1 THEN
+        RtlPrint (
+        "\[[7m(any) for more, (a) for all, (p) for a page, (q) to quit\[[0m" )
+
+        c := -1
+
+        WHILE c == -1 DO
+            c = HalDebugRead ()
+        END
+
+        RtlPrint ( "\[[2K\r" )
+
+        IF c == 'q' THEN
+            result = FALSE
+        
+        ELSEIF c == 'p' THEN
+            DbgUsedLines = 0
+
+        ELSEIF c == 'a' THEN
+            DbgAllLines = TRUE
+        END
+    END
+
+    DbgUsedLines += 1
+
+    RETURN result
+END
+
+FN DbgResetPagination ()
+    
+    // Reset the pagination; should be called before printing a list.
+
+    DbgUsedLines = 0
+    DbgAllLines = FALSE
+END
+
+FN DbgNextToken (
+    IN tokenbuffer : ^UBYTE,
+    IN bufsize : UWORD,
+) : UWORD
+
+    // Helper routine for getting the next token from a monitor command line.
+
+    IF NOT DbgNextTokenPointer THEN
+        RETURN FALSE
+    END
+
+    DbgNextTokenPointer = RtlTokenize (
+        DbgNextTokenPointer, // buffer
+        tokenbuffer, // tokenbuffer
+        bufsize, // bufsize
+        ' ', // delimiter
+    )
+
+    IF DbgNextTokenPointer THEN
+        RETURN TRUE
+    END
+
+    RETURN FALSE
+END
+
+FN (DbgCommandF) DbgCommandHelp ()
+
+    // Print the help table.
+
+    DbgResetPagination ()
+
+    i := 0
+
+    WHILE DbgCommandTable[i].Name DO
+        cmd := &DbgCommandTable[i]
+
+        IF cmd^.Help THEN
+            IF NOT DbgPaginate () THEN
+                LEAVE
+            END
+
+            RtlPrint ( " %-10s%s\n", cmd^.Name, cmd^.Help )
+        END
+
+        i += 1
+    END
+END
+
+#SECTION "text"
+DbgCommandTable : DbgCommand[] = {
+    {
+        [Name] = "help",
+        [Function] = &DbgCommandHelp,
+        [Help] = "Display this help text.",
+    },
+
+    // Sentinel.
+
+    {},
+}
+
+FN DbgGetString (
+    IN buffer : ^UBYTE,
+    IN bufsize : UWORD,
+)
+
+    // Collect a string into the buffer.
+
+    len := 0
+
+    WHILE TRUE DO
+        c := -1
+
+        WHILE c == -1 DO
+            c = HalDebugRead ()
+        END
+
+        IF c == '\r' THEN
+            RtlPrint ( "\n" )
+
+            BREAK
+        END
+
+        IF c == '\b' THEN
+            IF len THEN
+                len -= 1
+
+                RtlPrint ( "\b \b" )
+            END
+
+        ELSEIF len < bufsize - 1 THEN
+            buffer[len] = c
+
+            RtlPrint ( "%c", c )
+
+            len += 1
+        END
+    END
+
+    buffer[len] = 0
+END
+
+FN DbgPrompt ()
+
+    RtlPrint ( "\nMINTIA System Debugger\n" )
+
+    WHILE TRUE DO
+        RtlPrint ( ">> " )
+
+        DbgGetString (
+            &DbgCommandBuffer[0], // buffer
+            256, // bufsize
+        )
+
+        DbgNextTokenPointer = &DbgCommandBuffer[0]
+
+        IF DbgNextToken (
+            &DbgTokenBuffer[0], // tokenbuffer
+            DBG_TOKEN_BUFFER_SIZE, // bufsize
+        ) THEN
+
+            i := 0
+
+            WHILE DbgCommandTable[i].Name DO
+                cmd := &DbgCommandTable[i]
+
+                IF RtlCompareString ( &DbgTokenBuffer[0], cmd^.Name ) == 0 THEN
+                    cmd^.Function ()
+
+                    BREAK
+                END
+
+                i += 1
+            END
+
+            IF NOT DbgCommandTable[i].Name THEN
+                RtlPrint ( "%s is not a recognized command.\n",
+                    &DbgTokenBuffer[0] )
+            END
+        END
+    END
+END

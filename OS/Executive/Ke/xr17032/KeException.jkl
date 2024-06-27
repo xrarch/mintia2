@@ -1,0 +1,231 @@
+//
+// Implements low-level exception handling for XR/17032.
+//
+
+#INCLUDE "../Ki.hjk"
+#INCLUDE "<ll>/System/OsContext.hjk"
+
+FNPTR KiHighLevelHandlerF (
+    IN context : ^OsContext,
+    IN badaddr : ^VOID,
+)
+
+#DEFINE EXC_INT 1
+#DEFINE EXC_SYS 2
+#DEFINE EXC_BUS 4
+#DEFINE EXC_NMI 5
+#DEFINE EXC_BRK 6
+#DEFINE EXC_INV 7
+#DEFINE EXC_PRV 8
+#DEFINE EXC_UNA 9
+#DEFINE EXC_PGF 12
+#DEFINE EXC_PFW 13
+
+FN (KiHighLevelHandlerF) KiSpuriousException (
+    IN context : ^OsContext,
+    IN badaddr : ^VOID,
+)
+
+    KeCrash (
+        "Spurious Exception EXC=%u ADDR=%p\n", // fmt
+        context^.Rs >> 28,
+        badaddr
+    )
+END
+
+FN (KiHighLevelHandlerF) KiHandleInterrupt (
+    IN context : ^OsContext,
+    IN badaddr : ^VOID,
+)
+
+    KeCrash ( "KiHandleInterrupt Unimplemented\n" )
+END
+
+FN (KiHighLevelHandlerF) KiHandleError (
+    IN context : ^OsContext,
+    IN badaddr : ^VOID,
+)
+
+    KeCrash ( "KiHandleError Unimplemented\n" )
+END
+
+FN (KiHighLevelHandlerF) KiHandleBreakpoint (
+    IN context : ^OsContext,
+    IN badaddr : ^VOID,
+)
+
+    ecause := context^.Rs >> 28
+
+    IF context^.Rs & 1 AND ecause != EXC_NMI THEN
+        // Usermode breakpoint.
+
+        KeCrash ( "Usermode breakpoint Unimplemented\n" )
+
+    ELSE
+        IF KeDebuggerEntry THEN
+            KeDebuggerEntry ( context )
+
+        ELSEIF ecause != EXC_NMI THEN
+            KeCrash ( "Unhandled kernel mode breakpoint\n" )
+        END
+    END
+END
+
+FN (KiHighLevelHandlerF) KiHandlePageFault (
+    IN context : ^OsContext,
+    IN badaddr : ^VOID,
+)
+
+    KeCrash ( "KiHandlePageFault Unimplemented\n" )
+END
+
+KiHandlerTable : KiHighLevelHandlerF[16] = {
+    [0] = &KiSpuriousException,
+    [EXC_INT] = &KiHandleInterrupt,
+    [2] = &KiSpuriousException,
+    [3] = &KiSpuriousException,
+    [EXC_BUS] = &KiHandleError,
+    [EXC_NMI] = &KiHandleBreakpoint,
+    [EXC_BRK] = &KiHandleBreakpoint,
+    [EXC_INV] = &KiHandleError,
+    [EXC_PRV] = &KiHandleError,
+    [EXC_UNA] = &KiHandleError,
+    [10] = &KiSpuriousException,
+    [11] = &KiSpuriousException,
+    [EXC_PGF] = &KiHandlePageFault,
+    [EXC_PFW] = &KiHandlePageFault,
+    [14] = &KiSpuriousException,
+    [15] = &KiSpuriousException,
+}
+
+#ASM [
+
+KiExceptionHandler:
+    mtcr scratch0, t0               // Save T0 as a scratch register.
+    mtcr scratch1, sp               // Save the current stack pointer.
+
+    mfcr t0, rs                     // Read the status register.
+    andi t0, t0, 1                  // Isolate the USER bit.
+    beq  t0, .waskernel             // If not set, we were already in kernel mode.
+
+    subi t0, zero, 4096             // Load the address of the PRB.
+    mov  sp, long [t0 + KiPrb_KernelStackTop]
+
+.waskernel:
+    subi sp, sp, OsContext__SIZEOF   // Create a context block on the stack.
+
+    mfcr t0, scratch0
+    mov  long [sp + OsContext_T1], t1
+    mov  long [sp + OsContext_T0], t0
+    mov  long [sp + OsContext_T2], t2
+    mov  long [sp + OsContext_T3], t3
+    mov  long [sp + OsContext_T4], t4
+    mov  long [sp + OsContext_T5], t5
+    mov  long [sp + OsContext_A0], a0
+    mov  long [sp + OsContext_A1], a1
+    mov  long [sp + OsContext_A2], a2
+    mov  long [sp + OsContext_A3], a3
+    mov  long [sp + OsContext_S0], s0
+    mov  long [sp + OsContext_S1], s1
+    mov  long [sp + OsContext_S2], s2
+    mov  long [sp + OsContext_S3], s3
+    mov  long [sp + OsContext_S4], s4
+    mov  long [sp + OsContext_S5], s5
+    mov  long [sp + OsContext_S6], s6
+    mov  long [sp + OsContext_S7], s7
+    mov  long [sp + OsContext_S8], s8
+    mov  long [sp + OsContext_S9], s9
+    mov  long [sp + OsContext_S10], s10
+    mov  long [sp + OsContext_S11], s11
+    mov  long [sp + OsContext_S12], s12
+    mov  long [sp + OsContext_S13], s13
+    mov  long [sp + OsContext_S14], s14
+    mov  long [sp + OsContext_S15], s15
+    mov  long [sp + OsContext_S16], s16
+    mov  long [sp + OsContext_S17], s17
+    mov  long [sp + OsContext_Tp], tp
+    mfcr t0, scratch1
+    mov  long [sp + OsContext_Lr], lr
+    mfcr t1, epc
+    mov  long [sp + OsContext_Sp], t0
+    mfcr t2, rs
+    mov  long [sp + OsContext_Epc], t1
+    mov  long [sp + OsContext_Rs], t2
+
+    rshi t0, t2, 28
+    la   t1, KiHandlerTable
+    mov  t0, long [t1 + t0 LSH 2]
+
+    mfcr a1, ebadaddr
+    mov  a0, sp
+    jalr lr, t0, 0
+    
+    mov  t0, long [sp + OsContext_Rs]
+    mtcr rs, t0
+    mov  t1, long [sp + OsContext_Epc]
+    mtcr epc, t1
+    mov  t0, long [sp + OsContext_T0]
+    mov  t1, long [sp + OsContext_T1]
+    mov  t2, long [sp + OsContext_T2]
+    mov  t3, long [sp + OsContext_T3]
+    mov  t4, long [sp + OsContext_T4]
+    mov  t5, long [sp + OsContext_T5]
+    mov  a0, long [sp + OsContext_A0]
+    mov  a1, long [sp + OsContext_A1]
+    mov  a2, long [sp + OsContext_A2]
+    mov  a3, long [sp + OsContext_A3]
+    mov  s0, long [sp + OsContext_S0]
+    mov  s1, long [sp + OsContext_S1]
+    mov  s2, long [sp + OsContext_S2]
+    mov  s3, long [sp + OsContext_S3]
+    mov  s4, long [sp + OsContext_S4]
+    mov  s5, long [sp + OsContext_S5]
+    mov  s6, long [sp + OsContext_S6]
+    mov  s7, long [sp + OsContext_S7]
+    mov  s8, long [sp + OsContext_S8]
+    mov  s9, long [sp + OsContext_S9]
+    mov  s10, long [sp + OsContext_S10]
+    mov  s11, long [sp + OsContext_S11]
+    mov  s12, long [sp + OsContext_S12]
+    mov  s13, long [sp + OsContext_S13]
+    mov  s14, long [sp + OsContext_S14]
+    mov  s15, long [sp + OsContext_S15]
+    mov  s16, long [sp + OsContext_S16]
+    mov  s17, long [sp + OsContext_S17]
+    mov  tp, long [sp + OsContext_Tp]
+    mov  lr, long [sp + OsContext_Lr]
+    mov  sp, long [sp + OsContext_Sp]
+
+    rfe
+
+]
+
+EXTERN FN KiExceptionHandler ()
+
+#SECTION "INIT$text"
+FN KiInitializeArchitecture ()
+
+    // Construct a jump instruction that just jumps to our exception handler,
+    // and then copy it to the first instruction of each entry of the exception
+    // block, except for the TB miss handlers, which have already been set up by
+    // Loader.
+
+    eb := CAST ExLoaderBlock.U.Xr.ExceptionBlock TO ^ULONG
+
+    jmpinstruction := CAST &KiExceptionHandler TO ULONG
+
+    jmpinstruction >>= 2
+    jmpinstruction <<= 3
+    jmpinstruction |= 6
+
+    i := 0
+
+    WHILE i < 14 DO
+        eb^ = jmpinstruction
+
+        i += 1
+        eb += 256
+    END
+
+    KeFlushIcache ()
+END

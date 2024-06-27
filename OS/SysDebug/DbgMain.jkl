@@ -6,6 +6,19 @@
 
 DbgStackTraceCallback : KeCrashCallback
 
+FN (KeDebuggerEntryF) DbgEntrypoint (
+    IN context : ^OsContext,
+)
+
+    DbgCurrentContext = context
+
+    old := HalSetDebugConsole ( TRUE )
+
+    DbgPrompt ()
+
+    HalSetDebugConsole ( FALSE )
+END
+
 EXPORT FN DbgMain ()
     
     // First register the crash callbacks.
@@ -16,6 +29,10 @@ EXPORT FN DbgMain ()
         TRUE, // doesprint
         FALSE, // horizontal
     )
+
+    // Now register the debugger prompt entry.
+
+    KeDebuggerEntry = &DbgEntrypoint
 
     // Announce ourselves.
 

@@ -4,6 +4,8 @@
 
 #INCLUDE "Ki.hjk"
 
+EXPORT KeDebuggerEntry : KeDebuggerEntryF
+
 KiCrashVerticalListHead : RtlListEntry
 KiCrashHorizListHead : RtlListEntry
 KiCrashCallbackListHead : RtlListEntry
@@ -150,7 +152,8 @@ FN (KeCrashCallbackF) KiCrashModuleListFunc (
     KeCrashPrint ( "\n" )
 END
 
-FN KiInitCrashing ()
+#SECTION "INIT$text"
+FN KiInitializeCrashing ()
 
     // Initialize the list heads.
 
@@ -280,6 +283,8 @@ FN KiDoCrashPrints (
 
     CenterPrint ( "An error occurred! Please take a screenshot and report the issue.\n", width )
     CenterPrint ( "The repository can be found at http://www.github.com/xrarch/mintia2.", width )
+
+    HalSetConsolePosition ( 0, 0 )
 END
 
 EXPORT FN KeCrash (
@@ -356,6 +361,10 @@ EXPORT FN KeCrash (
     END
 
     // If there's a debugger, call it. Otherwise, do nothing forever.
+
+    IF KeDebuggerEntry THEN
+        KeBreakpoint ()
+    END
 
     WHILE TRUE DO
         KiWaitForInterrupt ()
