@@ -1,8 +1,21 @@
-#INCLUDE "<ll>/Rtl.hjk"
+//
+// Initialization for the MINTIA system debugger.
+//
+
+#INCLUDE "Dbg.hjk"
+
+DbgStackTraceCallback : KeCrashCallback
 
 EXPORT FN DbgMain ()
     
     // First register the crash callbacks.
+
+    KeRegisterCrashCallback (
+        &DbgStackTraceCallback, // callback
+        &DbgStackTrace, // callbackfunc
+        TRUE, // doesprint
+        FALSE, // horizontal
+    )
 
     // Announce ourselves.
 

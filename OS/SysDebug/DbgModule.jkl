@@ -1,0 +1,114 @@
+//
+// Support for looking up symbols in loaded system modules.
+//
+
+#INCLUDE "Dbg.hjk"
+
+FN DbgGetSymbolByAddress (
+    IN dll : ^BlDll,
+    IN address : ^VOID,
+    OUT symvalue : ^VOID,
+    OUT symname : ^UBYTE,
+) : ^XloSymbolEntry
+
+    head := dll^.Head
+
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
+    symbol := CAST head + head^.SymbolTableOffset TO ^XloSymbolEntry
+    count := head^.SymbolCount
+    strtab := CAST head + head^.StringTableOffset TO ^UBYTE
+
+    lastsym : ^XloSymbolEntry = NULLPTR
+
+    WHILE count DO
+        section := &sectiontable[symbol^.SectionIndex]
+
+        vaddr := section^.VirtualAddress
+        end := vaddr + section^.VirtualLength
+
+        IF vaddr <= address AND address < end THEN
+            symbase := CAST vaddr + symbol^.SectionOffset TO ^VOID
+
+            IF address >= symbase THEN
+                lastsym = symbol
+                symname = &strtab[symbol^.NameOffset]
+                symvalue = symbase
+
+            ELSE
+                RETURN lastsym
+            END
+        END
+
+        symbol += SIZEOF XloSymbolEntry
+        count -= 1
+    END
+
+    RETURN lastsym
+END
+
+FN DbgGetSymbolByName (
+    IN dll : ^BlDll,
+    IN name : ^UBYTE,
+    OUT value : ^VOID,
+) : UWORD
+
+    // Look up the value of a symbol. Return TRUE on success, FALSE otherwise.
+
+    head := dll^.Head
+
+    symtable := CAST head + head^.SymbolTableOffset TO ^XloSymbolEntry
+    strtab := CAST head + head^.StringTableOffset TO ^UBYTE
+    sectiontable := CAST head + head^.SectionTableOffset TO ^XloSectionHeader
+
+    count := head^.SymbolCount
+    i := 0
+
+    WHILE i < count DO
+        symbol := &symtable[i]
+
+        IF RtlCompareString ( strtab + symbol^.NameOffset, name ) == 0 THEN
+            // Found it.
+
+            sectionheader := &sectiontable[symbol^.SectionIndex]
+
+            value = CAST sectionheader^.VirtualAddress +
+                symbol^.SectionOffset TO ^VOID
+
+            RETURN TRUE
+        END
+
+        i += 1
+    END
+
+    RETURN FALSE
+END
+
+FN DbgGetSymbolAndDll (
+    IN address : ^VOID,
+    OUT dll : ^BlDll,
+    OUT symvalue : ^VOID,
+    OUT symname : ^UBYTE,
+) : ^XloSymbolEntry
+
+    listhead := &ExLoaderBlock.DllListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        dll = CONTAINEROF listentry TO BlDll.Entry
+
+        sym := DbgGetSymbolByAddress (
+            dll, // dll
+            address, // address
+            OUT symvalue, // symvalue
+            OUT symname, // symname
+        )
+
+        IF sym THEN
+            RETURN sym
+        END
+
+        listentry = listentry^.Next
+    END
+
+    RETURN NULLPTR
+END

@@ -1,0 +1,152 @@
+//
+// Implements stack tracing for the XR/17032 architecture.
+//
+
+#INCLUDE "../Dbg.hjk"
+
+#ASM [
+
+DbgGetLink:
+    mov  a3, sp
+    ret
+
+]
+
+EXTERN FN DbgGetLink () : ^VOID
+
+#DEFINE DBG_TRACE_NAME_MAX 40
+
+DbgTraceNameBuffer : UBYTE[DBG_TRACE_NAME_MAX]
+
+FN DbgTrace (
+    IN sp : ^VOID,
+    IN pc : ^VOID,
+)
+
+#IF ( == BLD_BITS 64 )
+    infostr := "InstrPtr         Name"
+#ELSE
+    infostr := "InstrPtr Name"
+#END
+
+    KeCrashPrint ( "%s\n", infostr )
+
+    links := 0
+
+    IF NOT sp THEN
+        KeCrashPrint ( "!! SP=0 !!\n" )
+
+        LEAVE
+    END
+
+    IF sp & 3 THEN
+        KeCrashPrint ( "!! SP & 3 !!\n" )
+
+        LEAVE
+    END
+
+    IF pc & 3 THEN
+        KeCrashPrint ( "!! PC & 3 !!\n" )
+
+        LEAVE
+    END
+
+    lr := NULLPTR
+    leaf := FALSE
+
+    WHILE pc DO
+        IF links >= 128 THEN
+            KeCrashPrint ( "!! Maximum trace !!\n" )
+
+            LEAVE
+        END
+
+        dll : ^BlDll
+        symvalue : ^VOID
+        symname : ^UBYTE
+        dllname : ^UBYTE
+
+        sym := DbgGetSymbolAndDll (
+            pc, // address
+            OUT dll, // dll
+            OUT symvalue, // symvalue
+            OUT symname, // symname
+        )
+
+        IF NOT sym THEN
+            symname = "UNKNOWN"
+            symvalue = 0
+            dllname = "UNK"
+        
+        ELSE
+            dllname = &dll^.Name[0]
+        END
+
+        RtlFormat (
+            &DbgTraceNameBuffer[0], // dest
+            DBG_TRACE_NAME_MAX, // bufsize
+            "%s!%s+0x%x", // fmt
+            dllname,
+            symname,
+            pc - symvalue,
+        )
+
+        KeCrashPrint ( "%p %s\n", pc, &DbgTraceNameBuffer[0] )
+
+        // Get next link.
+
+        offset := 0
+        ulong : ^ULONG
+
+        WHILE pc >= symvalue DO
+            ulong = CAST pc TO ^ULONG
+
+            IF ulong[0] & 0xFFFF == 0xF7B4 THEN
+                // Found the "subi sp, sp, X" instruction that created the
+                // stack frame. Extract the X to find out how big the stack
+                // frame is, so we can offset to the next one.
+
+                offset = ulong[0] >> 16
+
+                BREAK
+
+            ELSEIF ulong[0] & 0xFFFF == 0xFFAA THEN
+                // Found a "mov long [sp + X], lr" instruction. that means
+                // this is NOT a leaf function.
+
+                leaf = FALSE
+            END
+
+            pc -= 4
+        END
+
+        IF leaf THEN
+            pc = lr
+
+        ELSE
+            IF offset < 4 THEN
+                BREAK
+            END
+
+            ulong = CAST sp + offset - 4 TO ^ULONG
+
+            pc = CAST ulong^ TO ^VOID
+        END
+
+        leaf = FALSE
+
+        sp += offset
+
+        links += 1
+    END
+END
+
+FN (KeCrashCallbackF) DbgStackTrace (
+    IN columns : UWORD,
+)
+
+    DbgTrace (
+        DbgGetLink (), // sp
+        &DbgStackTrace, // pc
+    )
+END

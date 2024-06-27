@@ -3,7 +3,6 @@
 //
 
 #INCLUDE "Ki.hjk"
-#INCLUDE "../../Loader/Headers/Loader.hjk"
 
 KiCrashVerticalListHead : RtlListEntry
 KiCrashHorizListHead : RtlListEntry
@@ -88,7 +87,7 @@ FN KiCrashPrintByVarTable (
     )
 END
 
-FN KeCrashPrint (
+EXPORT FN KeCrashPrint (
     IN fmt : ^UBYTE,
     ... argv argc
 )
@@ -132,11 +131,11 @@ FN (KeCrashCallbackF) KiCrashModuleListFunc (
         dll := CONTAINEROF listentry TO BlDll.Entry
 
         IF i >= infocols THEN
-            RtlPrint ( "\n" )
+            KeCrashPrint ( "\n" )
             i = 0
         END
 
-        RtlPrint (
+        KeCrashPrint (
             "%p %08x %-20s ", // fmt
             dll^.Base,
             dll^.Timestamp,
@@ -147,6 +146,8 @@ FN (KeCrashCallbackF) KiCrashModuleListFunc (
 
         listentry = listentry^.Next
     END
+
+    KeCrashPrint ( "\n" )
 END
 
 FN KiInitCrashing ()
@@ -175,14 +176,9 @@ FN KiDoCrashPrints (
     IN argc : UWORD,
 )
 
-    HalSetConsolePosition ( 0, height - 2 )
-
-    CenterPrint ( "An error occurred! Please take a screenshot and report the issue.\n", width )
-    CenterPrint ( "The repository can be found at http://www.github.com/xrarch/mintia2.", width )
-
     HalSetConsolePosition ( 0, 0 )
 
-    RtlPrint ( "*** STOP: %s BASE LEVEL %u\n", PLATFORM_FULL_NAME_STR, BLD_BASE_LEVEL )
+    RtlPrint ( "*** STOP: MINTIA %s BASE LEVEL %u\n", PLATFORM_FULL_NAME_STR, BLD_BASE_LEVEL )
 
     RtlPrintByVarTable (
         NULLPTR, // handle
@@ -279,6 +275,11 @@ FN KiDoCrashPrints (
             listentry = listentry^.Next
         END
     END
+
+    HalSetConsolePosition ( 0, height - 2 )
+
+    CenterPrint ( "An error occurred! Please take a screenshot and report the issue.\n", width )
+    CenterPrint ( "The repository can be found at http://www.github.com/xrarch/mintia2.", width )
 END
 
 EXPORT FN KeCrash (

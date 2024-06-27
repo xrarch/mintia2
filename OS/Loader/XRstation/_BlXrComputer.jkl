@@ -265,12 +265,16 @@ BxStartSystem:
 
     la   sp, (0xFFFFF000 + 3072)
 
+    // Set LR to 0 so that stack traces terminate here.
+
+    mov  lr, zero
+
     // Call entrypoint.
 
     mov  t0, a0
 
     la   a0, BlInfoBlock
-    jalr lr, t0, 0
+    jalr zero, t0, 0
 
 .hang:
     b    .hang

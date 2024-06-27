@@ -4,6 +4,7 @@ TARGET "SysDebug"
 	DRIVER_TARGET
 
 	LIBDIR "<sdk>/Rtl/Headers"
+	INCDIR "../Executive/Include"
 
 	SOURCES "./"
 
@@ -13,9 +14,10 @@ TARGET "SysDebug"
 		#ERROR "Somebody set up appropriate bases for the 64-bit platforms"
 	#END
 
-	#IF BLD_CHK
-		LINKOPT "-keepglobals"
-	#END
+	#IF ( STRCMP ARCHITECTURE "xr17032" )
+		SOURCES "./xr17032"
 
-	LINKOPT "-nostubs"
+	#ELSEIF ( STRCMP ARCHITECTURE "fox32" )
+		SOURCES "./fox32"
+	#END
 END
