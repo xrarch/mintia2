@@ -3,6 +3,7 @@
 //
 
 #INCLUDE "../Dbg.hjk"
+#INCLUDE "<inc>/Mm.hjk"
 
 #ASM [
 
@@ -99,6 +100,12 @@ FN DbgTrace (
         ulong : ^ULONG
 
         WHILE pc >= symvalue DO
+            IF NOT MmIsVirtualValid ( pc ) THEN
+                KeCrashPrint ( "#\n" )
+
+                LEAVE
+            END
+
             ulong = CAST pc TO ^ULONG
 
             IF ulong[0] & 0xFFFF == 0xF7B4 THEN
@@ -124,11 +131,17 @@ FN DbgTrace (
             pc = lr
 
         ELSE
-            IF offset < 4 THEN
+            IF offset < 4 OR offset & 3 THEN
                 BREAK
             END
 
             ulong = CAST sp + offset - 4 TO ^ULONG
+
+            IF NOT MmIsVirtualValid ( ulong ) THEN
+                KeCrashPrint ( "#\n" )
+
+                LEAVE
+            END
 
             pc = CAST ulong^ TO ^VOID
         END

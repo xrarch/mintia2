@@ -1,0 +1,32 @@
+//
+// Private memory management header file for the XR/17032 architecture.
+//
+
+// Describes the base address of the virtually linear page table.
+
+#DEFINE MI_TABLE_BASE 0xB0000000
+
+// Describes the number of levels in the page table.
+
+#DEFINE MI_TABLE_LEVELS 2
+
+// Describes whether the page table gives a "complete" picture of the address
+// space. This is not the case on architectures where there is an architectural
+// mapping of physical memory (such as MIPS) or where the TLB can be used to
+// permanently map pages that are not reflected in the page table.
+
+#DEFINE MI_TABLE_COMPLETE 0
+
+#DEFINE MI_PTE_V 1
+
+TYPE MiPte : ULONG
+
+#MACRO MI_PTE_ADDRESS ( vaddr ) [
+    MI_TABLE_BASE + ((vaddr >> 12) << 2)
+]
+
+// We use a fixed TB entry to map the PRB at this address on all processors.
+
+#MACRO MI_IS_VALID ( vaddr ) [
+    vaddr & 0xFFFFF000 == 0xFFFFF000
+]

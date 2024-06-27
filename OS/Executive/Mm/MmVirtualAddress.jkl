@@ -1,0 +1,50 @@
+//
+// Miscellaneous routines for dealing with virtual addresses.
+//
+
+#INCLUDE "Mi.hjk"
+
+EXPORT FN MmIsVirtualValid (
+    IN vaddr : ^VOID,
+) : UWORD
+
+#IF ( NOT MI_TABLE_COMPLETE )
+    // Some architectures have valid addresses not described by the page table.
+
+    IF MI_IS_VALID ( vaddr ) THEN
+        RETURN TRUE
+    END
+#END
+
+#IF ( == BLD_BITS 64 )
+    // 64-bit architectures have "non-canonical" addresses.
+
+    IF NOT (MI_IS_CANONICAL ( vaddr )) THEN
+        RETURN FALSE
+    END
+#END
+
+    ptes : ^MiPte[MI_TABLE_LEVELS]
+
+    i := 0
+
+    WHILE i < MI_TABLE_LEVELS DO
+        pteaddr := CAST MI_PTE_ADDRESS ( vaddr ) TO ^MiPte
+        ptes[i] = pteaddr
+        vaddr = pteaddr
+
+        i += 1
+    END
+
+    WHILE i DO
+        i -= 1
+
+        pte := ptes[i]^
+
+        IF pte & MI_PTE_V == 0 THEN
+            RETURN FALSE
+        END
+    END
+
+    RETURN TRUE
+END
