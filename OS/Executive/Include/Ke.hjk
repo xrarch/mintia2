@@ -10,3 +10,38 @@ EXTERN FN KeFindResource (
 EXTERN FN KePinResource (
     IN rsrc : ^BlResource,
 )
+
+EXTERN FN KeIncrementUlong (
+    IN ptr : ^ULONG,
+    IN inc : ULONG,
+) : ULONG
+
+EXTERN FN KeCompareSwapUlong (
+    IN ptr : ^ULONG,
+    IN newvalue : ULONG,
+    IN expectedvalue : ULONG,
+) : ULONG
+
+EXTERN FN KeCrash (
+    IN fmt : ^UBYTE,
+    ... argv argc
+)
+
+EXTERN FN KeCrashPrint (
+    IN fmt : ^UBYTE,
+    ... argv argc
+)
+
+FNPTR KeCrashCallbackF ()
+
+STRUCT KeCrashCallback
+    Entry : RtlListEntry,
+
+    Function : KeCrashCallbackF,
+    DoesPrint : UBYTE,
+    Horizontal : UBYTE,
+END
+
+EXTERN FN KeRegisterCrashCallback (
+    IN callback : ^KeCrashCallback,
+)

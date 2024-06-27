@@ -29,6 +29,32 @@ FN KiFixupLoaderBlockLists ()
     listhead^.Prev^.Next = listhead
 END
 
+FN (KeCrashCallbackF) KeTestCrash2 ()
+
+    i := 600
+
+    WHILE i DO
+        KeCrashPrint ( "%u ", i )
+
+        i -= 1
+    END
+
+    KeCrashPrint ( "\n" )
+END
+
+FN (KeCrashCallbackF) KeTestCrash ()
+
+    i := 10000
+
+    WHILE i DO
+        KeCrashPrint ( "%u ", i )
+
+        i -= 1
+    END
+
+    KeCrashPrint ( "\n" )
+END
+
 #SECTION "INIT$text"
 EXPORT FN KeMain (
     IN loaderblock : ^BlInfoRecord,
@@ -55,7 +81,11 @@ EXPORT FN KeMain (
     // be transferred into the Executive between now and the execution of the
     // first usermode process in order to guarantee its safe to touch. Plus, we
     // are going to reclaim all of the Loader's physical memory during Mm init.
-    //
+
+    // Initialize the KeCrash module.
+
+    KiInitCrashing ()
+
     // Start by copying the loader block into the Executive.
 
     RtlCopyBytes (
@@ -76,7 +106,57 @@ EXPORT FN KeMain (
 
     HalEarlyInitialize ()
 
+    testcallback : KeCrashCallback
+
+    testcallback.Function = &KeTestCrash2
+    testcallback.DoesPrint = TRUE
+    testcallback.Horizontal = TRUE
+
+    KeRegisterCrashCallback ( &testcallback )
+
+    secondcallback : KeCrashCallback
+
+    secondcallback.Function = &KeTestCrash2
+    secondcallback.DoesPrint = TRUE
+    secondcallback.Horizontal = FALSE
+
+    KeRegisterCrashCallback ( &secondcallback )
+
+    thirdcallback : KeCrashCallback
+
+    thirdcallback.Function = &KeTestCrash2
+    thirdcallback.DoesPrint = TRUE
+    thirdcallback.Horizontal = FALSE
+
+    KeRegisterCrashCallback ( &thirdcallback )
+
+    fourthcallback : KeCrashCallback
+
+    fourthcallback.Function = &KeTestCrash2
+    fourthcallback.DoesPrint = TRUE
+    fourthcallback.Horizontal = FALSE
+
+    KeRegisterCrashCallback ( &fourthcallback )
+
+    fifthcallback : KeCrashCallback
+
+    fifthcallback.Function = &KeTestCrash2
+    fifthcallback.DoesPrint = TRUE
+    fifthcallback.Horizontal = TRUE
+
+    KeRegisterCrashCallback ( &fifthcallback )
+
     RtlPrint ( "KeMain(): MINTIA is awake!\n" )
+
+    i := 150
+
+    WHILE i DO
+        RtlPrint ( "Some text in the background " )
+
+        i -= 1
+    END
+
+    KeCrash ( "Nothing to do :(\n" )
 
     WHILE TRUE DO
     END

@@ -11,10 +11,36 @@
 
 STRUCT KiPrb
     IdleStack : UBYTE[3072],
+
+    Id : UINT,
 END
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    // The Prb is mapped in the same location on all processors on XR/17032 via
+    // a wired entry in each DTB. This location is -4096 in order to allow the
+    // address to be loaded with a single SUBI instruction.
+
+    #DEFINE KE_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
+    #DEFINE KE_DIRECT_PRB 1
+
+#ELSEIF ( STRCMP ARCHITECTURE "fox32" )
+    // Fox32 is always uniprocessor.
+
+    #DEFINE KE_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
+    #DEFINE KE_DIRECT_PRB 1
+
+#ELSE
+    #ERROR ( STRCAT "Unknown architecture " ARCHITECTURE )
+#END
 
 EXTERN FN KiDisableInterrupts () : UWORD
 
 EXTERN FN KiRestoreInterrupts (
     IN oldstate : UWORD,
 )
+
+EXTERN FN KiWaitForInterrupt ()
+
+EXTERN FN KiCurrentProcessor () : UWORD
+
+EXTERN FN KiInitCrashing ()

@@ -1,0 +1,333 @@
+//
+// Implementation of lithobraking for the MINTIA Executive.
+//
+
+#INCLUDE "Ki.hjk"
+
+KiCrashVerticalListHead : RtlListEntry
+KiCrashHorizListHead : RtlListEntry
+KiCrashCallbackListHead : RtlListEntry
+
+KiCrashGate : ULONG = 0
+
+KiRemainingRows : UINT = 0
+KiRemainingColumns : UINT = 0
+KiColumns : UINT = 0
+KiResetX : UINT = 0
+KiNextRow : UINT = 0
+KiCrashVerticalCount : UINT = 0
+KiCrashHorizCount : UINT = 0
+
+#DEFINE PLATFORM_FULL_NAME_STR ( STRCAT ( STRCAT "\"" PLATFORM_FULL_NAME ) "\"" )
+
+PRIVATE FN CenterPrint (
+    IN str : ^UBYTE,
+    IN width : UWORD,
+)
+
+    len := RtlMeasureString ( str )
+
+    pad := (width / 2) - (len / 2)
+
+    WHILE pad DO
+        RtlPrint ( " " )
+
+        pad -= 1
+    END
+
+    RtlPrint ( "%s", str )
+END
+
+FN (RtlPrintCallbackF) KiCrashPrintCallback (
+    IN byte : UBYTE,
+    IN context : ^VOID,
+)
+
+    IF NOT KiRemainingRows THEN
+        LEAVE
+    END
+
+    RtlPrint ( "%c", byte )
+
+    next := FALSE
+
+    IF byte == '\n' THEN
+        next = TRUE
+    ELSE
+        KiRemainingColumns -= 1
+
+        IF KiRemainingColumns == 0 THEN
+            next = TRUE
+        END
+    END
+
+    IF next THEN
+        KiRemainingRows -= 1
+        KiRemainingColumns = KiColumns
+        KiNextRow += 1
+
+        HalSetConsolePosition ( KiResetX, KiNextRow )
+    END
+END
+
+FN KiCrashPrintByVarTable (
+    IN fmt : ^UBYTE,
+    IN argv : ^^VOID,
+    IN argc : UWORD,
+)
+
+    RtlPrintByCallbackByVarTable (
+        &KiCrashPrintCallback, // callback
+        NULLPTR, // context
+        fmt, // fmt
+        argv, // argv
+        argc, // argc
+    )
+END
+
+FN KeCrashPrint (
+    IN fmt : ^UBYTE,
+    ... argv argc
+)
+
+    KiCrashPrintByVarTable (
+        fmt, // fmt
+        argv, // argv
+        argc, // argc
+    )
+END
+
+FN KiInitCrashing ()
+
+    RtlInitializeList ( &KiCrashVerticalListHead )
+    RtlInitializeList ( &KiCrashHorizListHead )
+    RtlInitializeList ( &KiCrashCallbackListHead )
+END
+
+FN KiDoCrashPrints (
+    IN width : UWORD,
+    IN height : UWORD,
+    IN fmt : ^UBYTE,
+    IN argv : ^^VOID,
+    IN argc : UWORD,
+)
+
+    HalSetConsolePosition ( 0, height - 2 )
+
+    CenterPrint ( "An error occurred! Please take a screenshot and report the issue.\n", width )
+    CenterPrint ( "The repository can be found at http://www.github.com/xrarch/mintia2.", width )
+
+    HalSetConsolePosition ( 0, 0 )
+
+    RtlPrint ( "*** STOP: %s BASE LEVEL %u\n", PLATFORM_FULL_NAME_STR, BLD_BASE_LEVEL )
+
+    RtlPrintByVarTable (
+        NULLPTR, // handle
+        fmt, // fmt
+        argv, // argv
+        argc, // argc
+    )
+
+    x : UWORD
+    y : UWORD
+
+    HalQueryConsolePosition (
+        OUT x, // x
+        OUT y, // y
+    )
+
+    // Call all of the horizontally printing callbacks.
+    // These each get a horizontal section of the console that they can greedily
+    // consume.
+
+    KiColumns = width
+    KiRemainingColumns = KiColumns
+    KiResetX = 0
+    KiRemainingRows = height - y - 4
+
+    callback : ^KeCrashCallback
+
+    listhead := &KiCrashHorizListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        callback = CONTAINEROF listentry TO KeCrashCallback.Entry
+
+        HalQueryConsolePosition (
+            OUT x, // x
+            OUT y, // y
+        )
+
+        KiRemainingColumns = KiColumns
+        KiRemainingRows = height - y - 4
+        KiNextRow = y + 1
+
+        HalSetConsolePosition (
+            0, // x
+            KiNextRow, // y
+        )
+
+        callback^.Function ()
+
+        IF NOT KiRemainingRows THEN
+            BREAK
+        END
+
+        listentry = listentry^.Next
+    END
+
+    IF KiRemainingRows AND KiCrashVerticalCount THEN
+        // Call each callback. They each get a column of the console.
+
+        HalQueryConsolePosition (
+            OUT x, // x
+            OUT y, // y
+        )
+
+        resetrows := height - y - 4
+
+        colwidth := width / KiCrashVerticalCount
+
+        IF KiCrashVerticalCount != 1 THEN
+            colwidth -= 1
+        END
+
+        KiColumns = colwidth
+
+        listhead = &KiCrashVerticalListHead
+        listentry = listhead^.Next
+
+        WHILE listentry != listhead DO
+            callback = CONTAINEROF listentry TO KeCrashCallback.Entry
+
+            KiRemainingRows = resetrows
+            KiRemainingColumns = colwidth
+            KiNextRow = y + 1
+
+            HalSetConsolePosition (
+                KiResetX, // x
+                KiNextRow, // y
+            )
+
+            callback^.Function ()
+
+            KiResetX += colwidth + 1
+
+            listentry = listentry^.Next
+        END
+    END
+END
+
+EXPORT FN KeCrash (
+    IN fmt : ^UBYTE,
+    ... argv argc
+)
+
+    // Disable interrupts ASAP.
+
+    KiDisableInterrupts ()
+
+    // Only one processor should get through the crash gate.
+    // Implement this with an atomic increment.
+    // This is compiled in on UP builds too since it also catches nested entries
+    // into KeCrash.
+
+    oldvalue := KeIncrementUlong ( &KiCrashGate, 1 )
+
+    IF oldvalue THEN
+        // We weren't the first. Complain and hang forever.
+
+        RtlPrint ( "KeCrash(): Nested on %u\n", KiCurrentProcessor () )
+
+        WHILE TRUE DO
+            KiWaitForInterrupt ()
+        END
+    END
+
+    // We are now the official "crash processor". We are responsible for dumping
+    // info to the screen.
+
+#IF BLD_MP
+    // Bring other processors to a halt. This may time out, such as if another
+    // processor crashed simultaneously and didn't make it through the gate.
+    // In any case, we just proceed.
+
+    KiHaltProcessors ()
+#END
+
+    // Call all the non-printing callbacks.
+
+    listhead := &KiCrashCallbackListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        callback := CONTAINEROF listentry TO KeCrashCallback.Entry
+
+        callback^.Function ()
+
+        listentry = listentry^.Next
+    END
+
+    // Call the HAL to do stuff with the console to make the crash visible to
+    // the user.
+
+    HalCrashConsole ()
+
+    width : UWORD
+    height : UWORD
+
+    HalQueryConsoleSize (
+        OUT width, // width
+        OUT height, // height
+    )
+
+    IF width >= 80 AND height >= 24 THEN
+        KiDoCrashPrints (
+            width, // width
+            height, // height
+            fmt, // fmt
+            argv, // argv
+            argc, // argc
+        )
+    END
+
+    // If there's a debugger, call it. Otherwise, do nothing forever.
+
+    WHILE TRUE DO
+        KiWaitForInterrupt ()
+    END
+END
+
+#SECTION "INIT$text"
+EXPORT FN KeRegisterCrashCallback (
+    IN callback : ^KeCrashCallback,
+)
+
+    // Assumes being called from single-threaded context at boot time. Uses no
+    // synchronization.
+
+    IF callback^.DoesPrint THEN
+        IF callback^.Horizontal THEN
+            RtlInsertAtTailList (
+                &KiCrashHorizListHead, // head
+                &callback^.Entry, // entry
+            )
+
+            KiCrashHorizCount += 1
+
+        ELSE
+            RtlInsertAtTailList (
+                &KiCrashVerticalListHead, // head
+                &callback^.Entry, // entry
+            )
+
+            KiCrashVerticalCount += 1
+        END
+
+    ELSE
+        RtlInsertAtTailList (
+            &KiCrashCallbackListHead, // head
+            &callback^.Entry, // entry
+        )
+    END
+END

@@ -1,0 +1,88 @@
+//
+// Various architecture-specific functions.
+//
+
+#INCLUDE "../Ki.hjk"
+
+#ASM [
+
+// outputs:
+// a3 - old interrupt state
+KiDisableInterrupts:
+.global KiDisableInterrupts
+
+	mfcr a3, rs                     // Load current value of RS.
+	subi t0, zero, 3                // t0 = 0xFFFFFFFD
+	and  t0, a3, t0                 // Mask out the INT bit.
+	mtcr rs, t0                     // Write new RS.
+
+	ret
+
+// a0 - old interrupt state
+KiRestoreInterrupts:
+.global KiRestoreInterrupts
+
+	mtcr rs, a0                     // Write new RS.
+
+	ret
+
+KiWaitForInterrupt:
+.global KiWaitForInterrupt
+
+	hlt
+
+	ret
+
+// outputs:
+// a3 - processor id
+KiCurrentProcessor:
+.global KiCurrentProcessor
+
+    mfcr a3, whami                  // Load WHO-AM-I control register.
+
+    ret
+
+
+// a0 - ptr
+// a1 - inc
+// outputs:
+// a3 - old value
+KeIncrementUlong:
+.global KeIncrementUlong
+	
+.retry:
+	ll   a3, a0                     // Load-locked the location.
+	add  t1, a3, a1                 // Add the increment.
+	sc   t1, a0, t1                 // Conditionally store the new value.
+	beq  t1, .retry                 // If store failed, retry.
+
+	ret
+
+// a0 - ptr
+// a1 - newvalue
+// a2 - expectedvalue
+// outputs:
+// a3 - origvalue
+KeCompareSwapUlong:
+.global KeCompareSwapUlong
+
+.retry:
+
+#IF BLD_MP
+	mb                              // Ensure coherence with other processors.
+#END
+
+	ll   a3, a0                     // Load-locked the location.
+	sub  t0, a3, a2                 // Compare equality with expected value.
+	bne  t0, .exit                  // Not equal, leave.
+	sc   t0, a0, a1                 // Conditionally store the new value.
+	beq  t0, .retry                 // If store failed, retry.
+
+#IF BLD_MP
+	mb                              // Ensure coherence with other processors.
+#END
+
+.exit:
+	ret
+
+]

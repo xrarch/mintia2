@@ -19,7 +19,8 @@ PUBLIC HalpConsoleLock : HalSpinlock
 
 #END
 
-#DEFINE HAL_CONSOLE_FG 0x0
+#DEFINE HAL_CONSOLE_FG 0xFF
+#DEFINE HAL_CONSOLE_BG 0x04
 
 FN HalpDrawCharacter (
     IN c : UWORD,
@@ -50,38 +51,52 @@ FN HalpDrawCharacter (
             WHILE left DO
                 byte = bmp^
 
-                IF byte THEN
-                    IF byte & 128 THEN
-                        dest[0] = HAL_CONSOLE_FG
-                    END
+                IF byte & 128 THEN
+                    dest[0] = HAL_CONSOLE_FG
+                ELSE
+                    dest[0] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 64 THEN
-                        dest[1] = HAL_CONSOLE_FG
-                    END
+                IF byte & 64 THEN
+                    dest[1] = HAL_CONSOLE_FG
+                ELSE
+                    dest[1] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 32 THEN
-                        dest[2] = HAL_CONSOLE_FG
-                    END
+                IF byte & 32 THEN
+                    dest[2] = HAL_CONSOLE_FG
+                ELSE
+                    dest[2] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 16 THEN
-                        dest[3] = HAL_CONSOLE_FG
-                    END
+                IF byte & 16 THEN
+                    dest[3] = HAL_CONSOLE_FG
+                ELSE
+                    dest[3] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 8 THEN
-                        dest[4] = HAL_CONSOLE_FG
-                    END
+                IF byte & 8 THEN
+                    dest[4] = HAL_CONSOLE_FG
+                ELSE
+                    dest[4] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 4 THEN
-                        dest[5] = HAL_CONSOLE_FG
-                    END
+                IF byte & 4 THEN
+                    dest[5] = HAL_CONSOLE_FG
+                ELSE
+                    dest[5] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 2 THEN
-                        dest[6] = HAL_CONSOLE_FG
-                    END
+                IF byte & 2 THEN
+                    dest[6] = HAL_CONSOLE_FG
+                ELSE
+                    dest[6] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 1 THEN
-                        dest[7] = HAL_CONSOLE_FG
-                    END
+                IF byte & 1 THEN
+                    dest[7] = HAL_CONSOLE_FG
+                ELSE
+                    dest[7] = HAL_CONSOLE_BG
                 END
 
                 dest += 8
@@ -105,6 +120,8 @@ FN HalpDrawCharacter (
                 WHILE left DO
                     IF byte & j THEN
                         dest^ = HAL_CONSOLE_FG
+                    ELSE
+                        dest^ = HAL_CONSOLE_BG
                     END
 
                     dest += 1
@@ -124,38 +141,52 @@ FN HalpDrawCharacter (
             WHILE left DO
                 byte = bmp^
 
-                IF byte THEN
-                    IF byte & 128 THEN
-                        dest[7] = HAL_CONSOLE_FG
-                    END
+                IF byte & 128 THEN
+                    dest[7] = HAL_CONSOLE_FG
+                ELSE
+                    dest[7] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 64 THEN
-                        dest[6] = HAL_CONSOLE_FG
-                    END
+                IF byte & 64 THEN
+                    dest[6] = HAL_CONSOLE_FG
+                ELSE
+                    dest[6] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 32 THEN
-                        dest[5] = HAL_CONSOLE_FG
-                    END
+                IF byte & 32 THEN
+                    dest[5] = HAL_CONSOLE_FG
+                ELSE
+                    dest[5] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 16 THEN
-                        dest[4] = HAL_CONSOLE_FG
-                    END
+                IF byte & 16 THEN
+                    dest[4] = HAL_CONSOLE_FG
+                ELSE
+                    dest[4] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 8 THEN
-                        dest[3] = HAL_CONSOLE_FG
-                    END
+                IF byte & 8 THEN
+                    dest[3] = HAL_CONSOLE_FG
+                ELSE
+                    dest[3] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 4 THEN
-                        dest[2] = HAL_CONSOLE_FG
-                    END
+                IF byte & 4 THEN
+                    dest[2] = HAL_CONSOLE_FG
+                ELSE
+                    dest[2] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 2 THEN
-                        dest[1] = HAL_CONSOLE_FG
-                    END
+                IF byte & 2 THEN
+                    dest[1] = HAL_CONSOLE_FG
+                ELSE
+                    dest[1] = HAL_CONSOLE_BG
+                END
 
-                    IF byte & 1 THEN
-                        dest[0] = HAL_CONSOLE_FG
-                    END
+                IF byte & 1 THEN
+                    dest[0] = HAL_CONSOLE_FG
+                ELSE
+                    dest[0] = HAL_CONSOLE_BG
                 END
 
                 dest += 8
@@ -173,6 +204,8 @@ FN HalpDrawCharacter (
                 WHILE left DO
                     IF byte & j THEN
                         dest^ = HAL_CONSOLE_FG
+                    ELSE
+                        dest^ = HAL_CONSOLE_BG
                     END
 
                     dest += 1
@@ -191,10 +224,15 @@ FN HalpClearScreen ()
 
     // Fill the framebuffer with blue pixels.
 
+    ulong := (HAL_CONSOLE_BG << 24) |
+        (HAL_CONSOLE_BG << 16) |
+        (HAL_CONSOLE_BG << 8) |
+        HAL_CONSOLE_BG
+
     RtlFillMemoryWithUlong (
         ExLoaderBlock.BootFbBase, // ptr
         HalpFramebufferBytes, // sz
-        0xFFFFFFFF, // ulong
+        ulong, // ulong
     )
 
     HalpCursorX = 0
@@ -221,12 +259,17 @@ FN HalpScrollScreen ()
 
     // Clear the last line.
 
+    ulong := (HAL_CONSOLE_BG << 24) |
+        (HAL_CONSOLE_BG << 16) |
+        (HAL_CONSOLE_BG << 8) |
+        HAL_CONSOLE_BG
+
     RtlFillMemoryWithUlong (
         ExLoaderBlock.BootFbBase +
         ExLoaderBlock.BootFbWidth *
-        (ExLoaderBlock.BootFbHeight - font^.Height), // ptr
+        (HalpHeight - 1) * font^.Height, // ptr
         ExLoaderBlock.BootFbWidth * font^.Height, // sz
-        0xFFFFFFFF, // ulong
+        ulong, // ulong
     )
 END
 
@@ -274,6 +317,91 @@ FN (RtlPrintCallbackF) RtljPrintCallback (
     IF NOT HalpDebugConsole THEN
         HalpReleaseConsole ( oldstate )
     END
+END
+
+FN HalCrashConsole ()
+
+    // We assume the system is in a globally single-threaded uniprocessor state
+    // right now (since KeCrash has disabled interrupts and made any other
+    // processors quiescent). Don't bother taking locks.
+
+    IF HalpUseFramebuffer AND NOT HalpDebugConsole THEN
+        // Set the console cursor to x=0 y=0.
+
+        HalpCursorX = 0
+        HalpCursorY = 0
+
+        // Draw a cool shutter effect.
+
+        size := HalpFramebufferBytes
+        addr := CAST ExLoaderBlock.BootFbBase TO ^UBYTE
+
+        height := ExLoaderBlock.BootFbHeight
+
+        WHILE height DO
+            width := ExLoaderBlock.BootFbWidth
+
+            off := height & 1
+
+            WHILE width >= 2 DO
+                addr[off] = 0
+
+                width -= 2
+                addr += 2
+            END
+
+            height -= 1
+        END
+    END
+END
+
+FN HalQueryConsoleSize (
+    OUT width : UWORD,
+    OUT height : UWORD,
+)
+
+    IF HalpUseFramebuffer THEN
+        width = HalpWidth
+        height = HalpHeight
+
+    ELSE
+        // Assume VT terminal.
+
+        width = 80
+        height = 24
+    END
+END
+
+FN HalQueryConsolePosition (
+    OUT x : UWORD,
+    OUT y : UWORD,
+)
+
+    IF HalpUseFramebuffer THEN
+        x = HalpCursorX
+        y = HalpCursorY
+
+    ELSE
+        x = 0
+        y = 0
+    END
+END
+
+FN HalSetConsolePosition (
+    IN x : UWORD,
+    IN y : UWORD,
+)
+
+    IF x >= HalpWidth THEN
+        x = HalpWidth - 1
+    END
+
+    IF y >= HalpHeight THEN
+        y = HalpHeight - 1
+    END
+
+    HalpCursorX = x
+    HalpCursorY = y
 END
 
 #SECTION "INIT$text"
