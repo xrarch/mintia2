@@ -22,11 +22,15 @@
 TYPE MiPte : ULONG
 
 #MACRO MI_PTE_ADDRESS ( vaddr ) [
-    MI_TABLE_BASE + ((vaddr >> 12) << 2)
+    (MI_TABLE_BASE + ((vaddr >> 12) << 2))
 ]
 
 // We use a fixed TB entry to map the PRB at this address on all processors.
 
-#MACRO MI_IS_VALID ( vaddr ) [
-    vaddr & 0xFFFFF000 == 0xFFFFF000
+#MACRO MI_IS_ARCHITECTURALLY_VALID ( vaddr ) [
+    ((vaddr) & 0xFFFFF000 == 0xFFFFF000)
+]
+
+#MACRO MI_IS_PTE_VALID ( pte ) [
+    ((pte) & MI_PTE_V == 1)
 ]

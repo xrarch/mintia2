@@ -11,7 +11,7 @@ EXPORT FN MmIsVirtualValid (
 #IF ( NOT MI_TABLE_COMPLETE )
     // Some architectures have valid addresses not described by the page table.
 
-    IF MI_IS_VALID ( vaddr ) THEN
+    IF MI_IS_ARCHITECTURALLY_VALID ( vaddr ) THEN
         RETURN TRUE
     END
 #END
@@ -19,32 +19,35 @@ EXPORT FN MmIsVirtualValid (
 #IF ( == BLD_BITS 64 )
     // 64-bit architectures have "non-canonical" addresses.
 
-    IF NOT (MI_IS_CANONICAL ( vaddr )) THEN
+    IF NOT ( MI_IS_CANONICAL ( vaddr ) ) THEN
         RETURN FALSE
     END
 #END
 
-    ptes : ^MiPte[MI_TABLE_LEVELS]
+    l1 := CAST MI_PTE_ADDRESS ( vaddr ) TO ^MiPte
+    l2 := CAST MI_PTE_ADDRESS ( l1 ) TO ^MiPte
 
-    i := 0
+#IF ( >= MI_TABLE_LEVELS 3 )
+    l3 := CAST MI_PTE_ADDRESS ( l2 ) TO ^MiPte
+#END
 
-    WHILE i < MI_TABLE_LEVELS DO
-        pteaddr := CAST MI_PTE_ADDRESS ( vaddr ) TO ^MiPte
-        ptes[i] = pteaddr
-        vaddr = pteaddr
+#IF ( >= MI_TABLE_LEVELS 4 )
+    l4 := CAST MI_PTE_ADDRESS ( l3 ) TO ^MiPte
 
-        i += 1
+    IF NOT ( MI_IS_PTE_VALID ( l4^ ) ) THEN
+        RETURN FALSE
+    END
+#END
+
+#IF ( >= MI_TABLE_LEVELS 3 )
+    IF NOT ( MI_IS_PTE_VALID ( l3^ ) ) THEN
+        RETURN FALSE
+    END
+#END
+
+    IF NOT ( MI_IS_PTE_VALID ( l2^ ) ) THEN
+        RETURN FALSE
     END
 
-    WHILE i DO
-        i -= 1
-
-        pte := ptes[i]^
-
-        IF pte & MI_PTE_V == 0 THEN
-            RETURN FALSE
-        END
-    END
-
-    RETURN TRUE
+    RETURN MI_IS_PTE_VALID ( l1^ )
 END
