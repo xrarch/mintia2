@@ -34,3 +34,15 @@ EXTERN FN HalSetConsolePosition (
 EXTERN FN HalPutCharacter (
     IN byte : UBYTE,
 )
+
+#IF ( STRCMP PLATFORM "XRstation" )
+    #DEFINE HAL_TIMER_INTERVAL 5
+
+#ELSEIF ( STRCMP PLATFORM "fox32" )
+    // Rounded up from 16.67ms vblank interval.
+
+    #DEFINE HAL_TIMER_INTERVAL 17
+
+#ELSE
+    #ERROR "Unknown platform"
+#END

@@ -24,25 +24,25 @@
 
     #DEFINE KI_CACHE_ALIGN 16
 
-    #DEFINE KI_QUANTUM_PER_TICK 1
-
 #ELSEIF ( STRCMP ARCHITECTURE "fox32" )
     // Fox32 is always uniprocessor.
 
     #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
     #DEFINE KI_DIRECT_PRB 1
 
-    #DEFINE KI_QUANTUM_PER_TICK 3
-
 #ELSE
     #ERROR ( STRCAT "Unknown architecture " ARCHITECTURE )
 #END
+
+// Try to make ticks represent 5ms intervals.
+
+#DEFINE KI_QUANTUM_PER_TICK ( / HAL_TIMER_INTERVAL 5 )
 
 // The per-processor block (Prb) is an architectural page size, but is at
 // minimum 4KB. It contains all per-processor information.
 
 STRUCT KiPrb
-    IdleStack : UBYTE[2048],
+    IdleStack : UBYTE[3072],
 
 #IF BLD_MP
     // Give the spinlocks their own cache lines.
@@ -55,6 +55,10 @@ STRUCT KiPrb
 
     TimerTreeLock : KiSpinlock,
     CacheAlign3 : UBYTE[KI_CACHE_ALIGN - SIZEOF KiSpinlock]
+#END
+
+#IF ( STRCMP PLATFORM "XRstation" )
+    LsicBase : ^VOID,
 #END
 
     ClockTicks : RtlUquad,
