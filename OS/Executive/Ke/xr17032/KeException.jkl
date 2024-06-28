@@ -26,6 +26,8 @@ FN (KiHighLevelHandlerF) KiSpuriousException (
     IN badaddr : ^VOID,
 )
 
+    // Don't know why we're here.
+
     KeCrash (
         "Spurious Exception EXC=%u ADDR=%p\n", // fmt
         context^.Rs >> 28,
@@ -45,6 +47,11 @@ FN (KiHighLevelHandlerF) KiHandleError (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
 )
+
+    // An "error" fault occurred. If this happened in kernel mode, figure out
+    // if its handled by a SafeCopy function. If not, crash.
+    //
+    // If it happened in usermode, generate a signal to the thread.
 
     RtlPrint ( "%u %p\n", context^.Rs >> 28, badaddr )
     KeCrash ( "KiHandleError Unimplemented\n" )
@@ -67,7 +74,7 @@ FN (KiHighLevelHandlerF) KiHandleBreakpoint (
         IF KeDebuggerEntry THEN
             KeDebuggerEntry ( context )
 
-            IF ecause != EXC_NMI AND context^.Epc == &KeBreakpoint THEN
+            IF ecause == EXC_BRK AND context^.Epc == &KeBreakpoint THEN
                 // Skip over the explicit breakpoint.
 
                 context^.Epc += 4
