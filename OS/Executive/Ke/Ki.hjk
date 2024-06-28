@@ -7,6 +7,11 @@
 #INCLUDE "<inc>/Ke.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
+#DEFINE KI_IPL_LOW 0
+#DEFINE KI_IPL_APC 1
+#DEFINE KI_IPL_DPC 2
+#DEFINE KI_IPL_MAX 32
+
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     // The Prb is mapped in the same location on all processors on XR/17032 via
     // a wired entry in each DTB. This location is -4096 in order to allow the
@@ -17,11 +22,17 @@
 
     TYPE KiSpinlock : ULONG
 
+    #DEFINE KI_CACHE_ALIGN 16
+
+    #DEFINE KI_QUANTUM_PER_TICK 1
+
 #ELSEIF ( STRCMP ARCHITECTURE "fox32" )
     // Fox32 is always uniprocessor.
 
     #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
     #DEFINE KI_DIRECT_PRB 1
+
+    #DEFINE KI_QUANTUM_PER_TICK 3
 
 #ELSE
     #ERROR ( STRCAT "Unknown architecture " ARCHITECTURE )
@@ -31,7 +42,27 @@
 // minimum 4KB. It contains all per-processor information.
 
 STRUCT KiPrb
-    IdleStack : UBYTE[3072],
+    IdleStack : UBYTE[2048],
+
+#IF BLD_MP
+    // Give the spinlocks their own cache lines.
+
+    DpcQueueLock : KiSpinlock,
+    CacheAlign1 : UBYTE[KI_CACHE_ALIGN - SIZEOF KiSpinlock]
+
+    ReadyQueueLock : KiSpinlock,
+    CacheAlign2 : UBYTE[KI_CACHE_ALIGN - SIZEOF KiSpinlock]
+
+    TimerTreeLock : KiSpinlock,
+    CacheAlign3 : UBYTE[KI_CACHE_ALIGN - SIZEOF KiSpinlock]
+#END
+
+    ClockTicks : RtlUquad,
+    DpcTimeMs : RtlUquad,
+    UserTimeMs : RtlUquad,
+    SystemTimeMs : RtlUquad,
+
+    IplTimes : RtlUquad[KI_IPL_MAX],
 
     KernelStackTop : ^VOID,
     CurrentThread : ^KeThread,
@@ -39,10 +70,9 @@ STRUCT KiPrb
 
     DpcListHead : RtlListEntry,
 
-#IF BLD_MP
-    DpcQueueLock : KiSpinlock,
-    ReadyQueueLock : KiSpinlock,
-#END
+    TimerExpirationDpc : KeDpc,
+
+    EarliestTimerTick : UWORD,
 
     PendingSoftwareInterrupts : ULONG,
 
@@ -50,11 +80,8 @@ STRUCT KiPrb
 
     Ipl : UBYTE,
     QuantumEnd : UBYTE,
+    DpcActive : UBYTE,
 END
-
-#DEFINE KI_IPL_LOW 0
-#DEFINE KI_IPL_APC 1
-#DEFINE KI_IPL_DPC 2
 
 // KiRaiseIpl and KiLowerIpl may only be used to move between the software IPLs:
 //
@@ -166,11 +193,23 @@ EXTERN FN KiQuantumEnd (
     IN prb : ^KiPrb,
 )
 
+EXTERN FN (KeDpcF) KiTimerExpiration (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN KiClockTick (
+    IN intervalms : UWORD,
+    IN usermode : UWORD,
+    IN previpl : UWORD,
+)
+
+#IF BLD_MP
+
 EXTERN FN KiFreezeOtherProcessors ()
 
 EXTERN FN KiUnfreezeOtherProcessors ()
-
-#IF BLD_MP
 
 EXTERN FN KiInitializeSpinlock (
     IN spinlock : ^KiSpinlock,

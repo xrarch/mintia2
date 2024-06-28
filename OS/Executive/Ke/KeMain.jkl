@@ -41,7 +41,13 @@ FN KiInitializePrb (
 #IF BLD_MP
     KiInitializeSpinlock ( &prb^.DpcQueueLock )
     KiInitializeSpinlock ( &prb^.ReadyQueueLock )
+    KiInitializeSpinlock ( &prb^.TimerTreeLock )
 #END
+
+    KeInitializeDpc (
+        &prb^.TimerExpirationDpc, // dpc
+        &KiTimerExpiration, // function
+    )
 
     prb^.Ipl = KI_IPL_LOW
 END

@@ -61,6 +61,8 @@ FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
     END
 
     IF prb^.QuantumEnd THEN
+        prb^.QuantumEnd = FALSE
+
         KiQuantumEnd ( prb )
     END
 
@@ -116,8 +118,9 @@ FN KiDispatchSoftwareInterrupts (
 END
 
 FN KiClockTick (
-    IN interval : UWORD,
+    IN intervalms : UWORD,
     IN usermode : UWORD,
+    IN previpl : UWORD,
 )
 
     // Called from interrupt context by the interval timer.
@@ -125,5 +128,95 @@ FN KiClockTick (
     // enqueuing the expiration DPC to process them. Also triggers the
     // scheduler when the current thread's quantum expires.
 
+    prb := KI_CURRENT_PRB
 
+    // Increment count of clock ticks on this processor.
+
+    RtlAddUlongToUquad ( &prb^.ClockTicks, 1 )
+
+    // Update time spent at previous IPL on this processor.
+
+    RtlAddUlongToUquad ( &prb^.IplTimes[previpl], intervalms )
+
+    // Check if the earliest timer has expired.
+
+#IF ( == BLD_BITS 64 )
+    IF prb^.ClockTicks.Uquad >= prb^.EarliestTimerTick THEN
+#ELSE
+    IF prb^.ClockTicks.Low >= prb^.EarliestTimerTick THEN
+#END
+
+        // Enqueue the timer expiration DPC.
+
+        KeEnqueueDpc (
+            &prb^.TimerExpirationDpc, // dpc
+            0, // context1
+            0, // context2
+        )
+    END
+
+    thread := prb^.CurrentThread
+
+    IF prb^.DpcActive THEN
+        // Update time spent executing DPCs on this processor.
+
+        RtlAddUlongToUquad ( &prb^.DpcTimeMs, intervalms )
+
+    ELSEIF thread THEN
+        IF usermode THEN
+            // Update time this thread has spent in usermode.
+
+            RtlAddUlongToUquad ( &thread^.UserTimeMs, intervalms )
+
+        ELSEIF previpl == KI_IPL_DPC THEN
+            // Update time this thread has spent at elevated IPL.
+
+            RtlAddUlongToUquad ( &thread^.DpcTimeMs, intervalms )
+
+        ELSE
+            // Update time this thread has spent in the system.
+
+            RtlAddUlongToUquad ( &thread^.SystemTimeMs, intervalms )
+        END
+    END
+
+    IF NOT thread THEN
+        // No thread yet. This can happen during early init.
+
+        LEAVE
+    END
+
+    // Decrement thread quantum.
+
+    q := thread^.RemainingQuantum
+
+    IF NOT q THEN
+        // Already decremented to zero and requested a quantum end.
+
+        LEAVE
+    END
+
+    IF q < KI_QUANTUM_PER_TICK THEN
+        q = 0
+
+    ELSE
+        q -= KI_QUANTUM_PER_TICK
+    END
+
+    thread^.RemainingQuantum = q
+
+    // If quantum has run down, request a quantum end interrupt at IPLDPC.
+
+    IF NOT q THEN
+        prb^.QuantumEnd = TRUE
+
+#IF BLD_MP
+        KeOrUlong (
+            &prb^.PendingSoftwareInterrupts, // ptr
+            1 << KI_IPL_DPC, // bitset
+        )
+#ELSE
+        prb^.PendingSoftwareInterrupts |= 1 << KI_IPL_DPC
+#END
+    END
 END

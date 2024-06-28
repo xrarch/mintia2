@@ -17,21 +17,28 @@ END
 
 FN KeEnqueueDpc (
     IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
 ) : UWORD
 
     // Enqueue a DPC object to the current processor's queue.
     // NOTE: No attempt is made whatsoever to synchronize against multiple
     //       concurrent enqueues of the same DPC.
 
+    // Lock our DPC queue.
+
+    ipl := KiAcquireDpcQueue ()
+
     IF dpc^.EnqueuedTo THEN
         // Already enqueued.
+
+        KiReleaseDpcQueue ( ipl )
 
         RETURN FALSE
     END
 
-    // Lock our DPC queue.
-
-    ipl := KiAcquireDpcQueue ()
+    dpc^.Context1 = context1
+    dpc^.Context2 = context2
 
     // Capture the PRB into the DPC.
 
@@ -124,6 +131,8 @@ FN KiDispatchDpcQueue (
     // Dispatch the DPC queue for this processor.
     // Note that we're already at DPC level on entry to this function.
 
+    prb^.DpcActive = TRUE
+
     // Lock the DPC queue.
 
     ipl := KiAcquireDpcQueue ()
@@ -165,4 +174,6 @@ FN KiDispatchDpcQueue (
     // Unlock the DPC queue.
 
     KiReleaseDpcQueue ( ipl )
+
+    prb^.DpcActive = FALSE
 END

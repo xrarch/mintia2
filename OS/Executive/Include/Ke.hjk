@@ -71,6 +71,12 @@ EXTERN KeDebuggerEntry : KeDebuggerEntryF
 
 STRUCT KeThread
     ApcListHead : RtlListEntry,
+
+    UserTimeMs : RtlUquad,
+    DpcTimeMs : RtlUquad,
+    SystemTimeMs : RtlUquad,
+
+    RemainingQuantum : UBYTE,
 END
 
 FNPTR KeDpcF (
@@ -91,3 +97,13 @@ EXTERN FN KeInitializeDpc (
     IN dpc : ^KeDpc,
     IN func : KeDpcF,
 )
+
+EXTERN FN KeDequeueDpc (
+    IN dpc : ^KeDpc,
+) : UWORD
+
+EXTERN FN KeEnqueueDpc (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
