@@ -1,0 +1,129 @@
+//
+// Implements support for software Interrupt Priority Levels (IPLs).
+//
+
+#INCLUDE "Ki.hjk"
+
+FNPTR KiSoftwareInterruptHandlerF (
+    IN prb : ^KiPrb,
+    IN oldstate : UWORD,
+)
+
+FN (KiSoftwareInterruptHandlerF) KiApcInterrupt (
+    IN prb : ^KiPrb,
+    IN oldstate : UWORD,
+)
+
+    // Atomically clear the pending APC interrupt.
+
+#IF BLD_MP
+    KeMaskUlong (
+        &prb^.PendingSoftwareInterrupts, // ptr
+        ~(1 << KI_IPL_APC), // mask
+    )
+#ELSE
+    prb^.PendingSoftwareInterrupts &= ~(1 << KI_IPL_APC)
+#END
+
+    current := prb^.CurrentThread
+
+    prb^.Ipl = KI_IPL_APC
+
+    KiRestoreInterrupts ( oldstate )
+
+    KiDispatchApcQueue ( current )
+
+    KiDisableInterrupts ()
+END
+
+FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
+    IN prb : ^KiPrb,
+    IN oldstate : UWORD,
+)
+
+    // Atomically clear the pending DPC interrupt.
+
+#IF BLD_MP
+    KeMaskUlong (
+        &prb^.PendingSoftwareInterrupts, // ptr
+        ~(1 << KI_IPL_DPC), // mask
+    )
+#ELSE
+    prb^.PendingSoftwareInterrupts &= ~(1 << KI_IPL_DPC)
+#END
+
+    prb^.Ipl = KI_IPL_DPC
+
+    KiRestoreInterrupts ( oldstate )
+
+    IF NOT RtlEmptyList ( &prb^.DpcListHead ) THEN
+        KiDispatchDpcQueue ( prb )
+    END
+
+    IF prb^.QuantumEnd THEN
+        KiQuantumEnd ( prb )
+    END
+
+    IF prb^.NextThread THEN
+        // A next thread was selected to preempt the current one.
+        // Switch to it immediately.
+
+        KiPreemptThread ( prb )
+    END
+
+    KiDisableInterrupts ()
+END
+
+KiSoftwareInterruptPriorityTable : KiSoftwareInterruptHandlerF[8] = {
+    [0] = NULLPTR,
+    [1] = NULLPTR,
+    [2] = &KiApcInterrupt,
+    [3] = &KiApcInterrupt,
+    [4] = &KiDpcInterrupt,
+    [5] = &KiDpcInterrupt,
+    [6] = &KiDpcInterrupt,
+    [7] = &KiDpcInterrupt,
+}
+
+FN KiDispatchSoftwareInterrupts (
+    IN newipl : UWORD,
+)
+
+    oldstate := KiDisableInterrupts ()
+
+    prb := KI_CURRENT_PRB
+    pending := prb^.PendingSoftwareInterrupts & (0xF << newipl)
+
+    WHILE pending DO
+        KiSoftwareInterruptPriorityTable[pending] (
+            prb, // prb
+            oldstate, // oldstate
+        )
+
+#IF ( NOT KI_DIRECT_PRB )
+        // Recapture the Prb since it might have changed due to activity of the
+        // scheduler while interrupts were enabled.
+
+        prb = KI_CURRENT_PRB
+#END
+
+        pending = prb^.PendingSoftwareInterrupts & (0xF << newipl)
+    END
+
+    prb^.Ipl = newipl
+
+    KiRestoreInterrupts ( oldstate )
+END
+
+FN KiClockTick (
+    IN interval : UWORD,
+    IN usermode : UWORD,
+)
+
+    // Called from interrupt context by the interval timer.
+    // Responsible for noticing when the earliest timer has expired, and
+    // enqueuing the expiration DPC to process them. Also triggers the
+    // scheduler when the current thread's quantum expires.
+
+
+END

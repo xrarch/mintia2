@@ -28,6 +28,24 @@ FN KiFixupLoaderBlockLists ()
     listhead^.Prev^.Next = listhead
 END
 
+#SECTION "INIT$text"
+FN KiInitializePrb (
+    IN prb : ^KiPrb,
+)
+
+    // Initialize this PRB. It has already been filled with zeroes by the Loader
+    // so avoid doing that again.
+
+    RtlInitializeList ( &prb^.DpcListHead )
+
+#IF BLD_MP
+    KiInitializeSpinlock ( &prb^.DpcQueueLock )
+    KiInitializeSpinlock ( &prb^.ReadyQueueLock )
+#END
+
+    prb^.Ipl = KI_IPL_LOW
+END
+
 FNPTR DbgMainF ()
 
 #SECTION "INIT$text"
@@ -73,9 +91,15 @@ EXPORT FN KeMain (
 
     KiFixupLoaderBlockLists ()
 
+    // Initialize the boot processor's PRB.
+
+    prb := KI_CURRENT_PRB
+
+    KiInitializePrb ( prb )
+
     // Initialize architectural support.
 
-    KiInitializeArchitecture ()
+    KiInitializeArchitecture ( prb )
 
     // Perform early initialization of the HAL. This will perform baseline
     // initialization of integral platform components such as the interval

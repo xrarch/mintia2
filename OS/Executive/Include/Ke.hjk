@@ -22,6 +22,21 @@ EXTERN FN KeCompareSwapUlong (
     IN expectedvalue : ULONG,
 ) : ULONG
 
+EXTERN FN KeMaskUlong (
+    IN ptr : ^ULONG,
+    IN mask : ULONG,
+) : ULONG
+
+EXTERN FN KeOrUlong (
+    IN ptr : ^ULONG,
+    IN bitset : ULONG,
+) : ULONG
+
+EXTERN FN KeFetchAndSetUlong (
+    IN ptr : ^ULONG,
+    IN newvalue : ULONG,
+) : ULONG
+
 EXTERN FN KeCrash (
     IN fmt : ^UBYTE,
     ... argv argc
@@ -53,3 +68,26 @@ FNPTR KeDebuggerEntryF (
 )
 
 EXTERN KeDebuggerEntry : KeDebuggerEntryF
+
+STRUCT KeThread
+    ApcListHead : RtlListEntry,
+END
+
+FNPTR KeDpcF (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+STRUCT KeDpc
+    Entry : RtlListEntry,
+    Function : KeDpcF,
+    Context1 : UWORD,
+    Context2 : UWORD,
+    EnqueuedTo : ^KiPrb,
+END
+
+EXTERN FN KeInitializeDpc (
+    IN dpc : ^KeDpc,
+    IN func : KeDpcF,
+)

@@ -7,32 +7,125 @@
 #INCLUDE "<inc>/Ke.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
-// The per-processor block (Prb) is an architectural page size, but is at
-// minimum 4KB.
-
-STRUCT KiPrb
-    IdleStack : UBYTE[3072],
-
-    KernelStackTop : ^VOID,
-    Id : UINT,
-END
-
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     // The Prb is mapped in the same location on all processors on XR/17032 via
     // a wired entry in each DTB. This location is -4096 in order to allow the
     // address to be loaded with a single SUBI instruction.
 
-    #DEFINE KE_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
-    #DEFINE KE_DIRECT_PRB 1
+    #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
+    #DEFINE KI_DIRECT_PRB 1
+
+    TYPE KiSpinlock : ULONG
 
 #ELSEIF ( STRCMP ARCHITECTURE "fox32" )
     // Fox32 is always uniprocessor.
 
-    #DEFINE KE_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
-    #DEFINE KE_DIRECT_PRB 1
+    #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
+    #DEFINE KI_DIRECT_PRB 1
 
 #ELSE
     #ERROR ( STRCAT "Unknown architecture " ARCHITECTURE )
+#END
+
+// The per-processor block (Prb) is an architectural page size, but is at
+// minimum 4KB. It contains all per-processor information.
+
+STRUCT KiPrb
+    IdleStack : UBYTE[3072],
+
+    KernelStackTop : ^VOID,
+    CurrentThread : ^KeThread,
+    NextThread : ^KeThread,
+
+    DpcListHead : RtlListEntry,
+
+#IF BLD_MP
+    DpcQueueLock : KiSpinlock,
+    ReadyQueueLock : KiSpinlock,
+#END
+
+    PendingSoftwareInterrupts : ULONG,
+
+    Id : UINT,
+
+    Ipl : UBYTE,
+    QuantumEnd : UBYTE,
+END
+
+#DEFINE KI_IPL_LOW 0
+#DEFINE KI_IPL_APC 1
+#DEFINE KI_IPL_DPC 2
+
+// KiRaiseIpl and KiLowerIpl may only be used to move between the software IPLs:
+//
+//  o  KI_IPL_DPC
+//  o  KI_IPL_APC
+//  o  KI_IPL_LOW
+//
+// With this in mind, they can be implemented quite efficiently as macros,
+// provided direct access to the Prb is sane across thread migration on this
+// architecture.
+//
+// If it is not, these routines are written as short assembly routines elsewhere
+// so that they can disable interrupts briefly while holding a pointer to the
+// current Prb.
+//
+// Direct access to the Prb is always sane if this is a uniprocessor build.
+// Otherwise, it's sane if the architecture provides a way to wire the Prb into
+// the same address across all cores. If neither of the above hold, it's insane!
+
+#IF KI_DIRECT_PRB
+
+#MACRO KiRaiseIpl ( newipl ) [
+    KI_CURRENT_PRB^.Ipl
+
+    #IF ( DEFINED BLD_CHK )
+        oldipl := KI_CURRENT_PRB^.Ipl
+
+        IF newipl < oldipl THEN
+            KeCrash ( "IPL not greater or equal (%d, %d)", oldipl, newipl )
+
+        ELSEIF newipl > KI_IPL_DPC THEN
+            KeCrash ( "Hardware IPL %d", newipl )
+        END
+    #END
+
+    KI_CURRENT_PRB^.Ipl = newipl
+]
+
+#MACRO KiLowerIpl ( newipl ) [
+    prb := KI_CURRENT_PRB
+
+    oldipl := prb^.Ipl
+
+    #IF ( DEFINED BLD_CHK )
+        IF newipl > oldipl THEN
+            KeCrash ( "IPL not less or equal (%d, %d)", oldipl, newipl )
+
+        ELSEIF oldipl > KI_IPL_DPC THEN
+            KeCrash ( "Hardware old IPL %d", oldipl )
+        END
+    #END
+
+    prb^.Ipl = newipl
+
+    pending := prb^.PendingSoftwareInterrupts
+
+    IF pending & (0xF << newipl) THEN
+        KiDispatchSoftwareInterrupts ( newipl )
+    END
+]
+
+#ELSE
+
+EXTERN FN KiRaiseIpl (
+    IN newipl : UWORD,
+) : UWORD
+
+EXTERN FN KiLowerIpl (
+    IN newipl : UWORD,
+)
+
 #END
 
 EXTERN FN KiDisableInterrupts () : UWORD
@@ -47,6 +140,122 @@ EXTERN FN KiCurrentProcessor () : UWORD
 
 EXTERN FN KiInitializeCrashing ()
 
-EXTERN FN KiInitializeArchitecture ()
+EXTERN FN KiInitializeArchitecture (
+    IN prb : ^KiPrb,
+)
 
 EXTERN FN KiFlushMyIcache ()
+
+EXTERN FN KiDispatchSoftwareInterrupts (
+    IN newipl : UWORD,
+)
+
+EXTERN FN KiDispatchApcQueue (
+    IN current : ^KeThread,
+)
+
+EXTERN FN KiDispatchDpcQueue (
+    IN prb : ^KiPrb,
+)
+
+EXTERN FN KiPreemptThread (
+    IN prb : ^KiPrb,
+)
+
+EXTERN FN KiQuantumEnd (
+    IN prb : ^KiPrb,
+)
+
+EXTERN FN KiFreezeOtherProcessors ()
+
+EXTERN FN KiUnfreezeOtherProcessors ()
+
+#IF BLD_MP
+
+EXTERN FN KiInitializeSpinlock (
+    IN spinlock : ^KiSpinlock,
+)
+
+EXTERN FN KiAcquireSpinlock (
+    IN spinlock : ^KiSpinlock,
+)
+
+EXTERN FN KiReleaseSpinlock (
+    IN spinlock : ^KiSpinlock,
+)
+
+#MACRO KiAcquireDpcQueue () [
+    KiDisableInterrupts ()
+    prb := KI_CURRENT_PRB
+    KiAcquireSpinlock ( &prb^.DpcQueueLock )
+]
+
+#MACRO KiReleaseDpcQueue ( oldstate ) [
+    prb := KI_CURRENT_PRB
+    KiReleaseSpinlock ( &prb^.DpcQueueLock )
+    KiRestoreInterrupts ( oldstate )
+]
+
+#MACRO KiAcquireOtherDpcQueue ( prb ) [
+    KiDisableInterrupts ()
+    KiAcquireSpinlock ( &(prb)^.DpcQueueLock )
+]
+
+#MACRO KiReleaseOtherDpcQueue ( prb, oldstate ) [
+    KiReleaseSpinlock ( &(prb)^.DpcQueueLock )
+    KiRestoreInterrupts ( oldstate )
+]
+
+#MACRO KiAcquireReadyQueueLow () [
+    KiRaiseIpl ( KI_IPL_DPC )
+    prb := KI_CURRENT_PRB
+    KiAcquireSpinlock ( &prb^.ReadyQueueLock )
+]
+
+#MACRO KiReleaseReadyQueueLow ( oldstate ) [
+    prb := KI_CURRENT_PRB
+    KiReleaseSpinlock ( &prb^.ReadyQueueLock )
+    KiLowerIpl ( oldstate )
+]
+
+#MACRO KiAcquireReadyQueueElevated () [
+    prb := KI_CURRENT_PRB
+    KiAcquireSpinlock ( &(prb)^.ReadyQueueLock )
+]
+
+#MACRO KiReleaseReadyQueueElevated () [
+    prb := KI_CURRENT_PRB
+    KiReleaseSpinlock ( &(prb)^.ReadyQueueLock )
+]
+
+#ELSE
+
+#MACRO KiAcquireDpcQueue () [
+    KiDisableInterrupts ()
+]
+
+#MACRO KiReleaseDpcQueue ( oldstate ) [
+    KiRestoreInterrupts ( oldstate )
+]
+
+#MACRO KiAcquireOtherDpcQueue ( prb ) [
+    KiDisableInterrupts ()
+]
+
+#MACRO KiReleaseOtherDpcQueue ( prb, oldstate ) [
+    KiRestoreInterrupts ( oldstate )
+]
+
+#MACRO KiAcquireReadyQueueLow () [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseReadyQueueLow ( oldstate ) [
+    KiLowerIpl ( oldstate )
+]
+
+#MACRO KiAcquireReadyQueueElevated () []
+
+#MACRO KiReleaseReadyQueueElevated () []
+
+#END

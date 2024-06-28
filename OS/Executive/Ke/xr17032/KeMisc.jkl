@@ -52,14 +52,22 @@ KiCurrentProcessor:
 // a3 - old value
 KeIncrementUlong:
 .export KeIncrementUlong
-	
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
 .retry:
 	ll   a3, a0                     // Load-locked the location.
 	add  t1, a3, a1                 // Add the increment.
 	sc   t1, a0, t1                 // Conditionally store the new value.
 	beq  t1, .retry                 // If store failed, retry.
 
-	ret
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+    ret
 
 // a0 - ptr
 // a1 - newvalue
@@ -87,6 +95,74 @@ KeCompareSwapUlong:
 
 .exit:
 	ret
+
+// a0 - ptr
+// a1 - mask
+// outputs:
+// a3 - origvalue
+KeMaskUlong:
+.export KeMaskUlong
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+.retry:
+    ll   a3, a0                     // Load-locked the location.
+    and  t0, a3, a1                 // Mask the value.
+    sc   t0, a0, t0                 // Conditionally store the new value.
+    beq  t0, .retry                 // If store failed, retry.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+    ret
+
+// a0 - ptr
+// a1 - bitset
+// outputs:
+// a3 - origvalue
+KeOrUlong:
+.export KeOrUlong
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+.retry:
+    ll   a3, a0                     // Load-locked the location.
+    or   t0, a3, a1                 // OR the value.
+    sc   t0, a0, t0                 // Conditionally store the new value.
+    beq  t0, .retry                 // If store failed, retry.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+    ret
+
+// a0 - ptr
+// a1 - newvalue
+// outputs:
+// a3 - origvalue
+KeFetchAndSetUlong:
+.export KeFetchAndSetUlong
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+.retry:
+    ll   a3, a0                     // Load-locked the location.
+    sc   t0, a0, a1                 // Conditionally set the location.
+    beq  t0, .retry                 // If store failed, retry.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+    ret
 
 // Debugger doorstop
 .dl 0

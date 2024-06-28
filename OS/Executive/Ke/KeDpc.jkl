@@ -1,0 +1,168 @@
+//
+// Implements support for DPC objects.
+//
+
+#INCLUDE "Ki.hjk"
+
+FN KeInitializeDpc (
+    IN dpc : ^KeDpc,
+    IN func : KeDpcF,
+)
+
+    // Initialize a DPC object.
+
+    dpc^.Function = func
+    dpc^.EnqueuedTo = NULLPTR
+END
+
+FN KeEnqueueDpc (
+    IN dpc : ^KeDpc,
+) : UWORD
+
+    // Enqueue a DPC object to the current processor's queue.
+    // NOTE: No attempt is made whatsoever to synchronize against multiple
+    //       concurrent enqueues of the same DPC.
+
+    IF dpc^.EnqueuedTo THEN
+        // Already enqueued.
+
+        RETURN FALSE
+    END
+
+    // Lock our DPC queue.
+
+    ipl := KiAcquireDpcQueue ()
+
+    // Capture the PRB into the DPC.
+
+    prb := KI_CURRENT_PRB
+    dpc^.EnqueuedTo = prb
+
+    // Insert into the queue.
+
+    RtlInsertAtTailList (
+        &prb^.DpcListHead, // head
+        &dpc^.Entry, // entry
+    )
+
+    // Set the DPC interrupt pending.
+
+#IF BLD_MP
+    KeOrUlong (
+        &prb^.PendingSoftwareInterrupts, // ptr
+        1 << KI_IPL_DPC, // bitset
+    )
+#ELSE
+    prb^.PendingSoftwareInterrupts |= 1 << KI_IPL_DPC
+#END
+
+    // Release the DPC queue lock.
+    // Note that we simply re-enable interrupts and therefore may not actually
+    // dispatched the DPC here.
+    //
+    // The expectation is that critical DPCs will be enqueued from interrupt
+    // context. They will therefore be dispatched on exit from the exception
+    // handler. It is not anticipated that DPCs will ever be enqueued from a
+    // lower IPL, but if they are, they will get dispatched next timer
+    // interrupt.
+
+    KiReleaseDpcQueue ( ipl )
+
+    RETURN TRUE
+END
+
+FN KeDequeueDpc (
+    IN dpc : ^KeDpc,
+) : UWORD
+
+    // Dequeue a DPC.
+
+@Retry
+
+    // Get the PRB it was enqueued to.
+
+    trgprb := CAST dpc^.EnqueuedTo TO ^KiPrb
+
+    IF NOT trgprb THEN
+        // It wasn't enqueued to a PRB.
+
+        RETURN FALSE
+    END
+
+    // Lock the PRB's DPC queue.
+
+    ipl := KiAcquireOtherDpcQueue ( trgprb )
+
+    IF dpc^.EnqueuedTo != trgprb THEN
+        // It changed while we were checking.
+        // Retry.
+
+        KiReleaseOtherDpcQueue ( trgprb, ipl )
+
+        GOTO Retry
+    END
+
+    // Remove the DPC from the list.
+
+    RtlRemoveEntryList ( &dpc^.Entry )
+
+    // Set dequeued.
+
+    dpc^.EnqueuedTo = NULLPTR
+
+    // Release the DPC queue lock.
+
+    KiReleaseOtherDpcQueue ( trgprb, ipl )
+
+    RETURN TRUE
+END
+
+FN KiDispatchDpcQueue (
+    IN prb : ^KiPrb,
+)
+
+    // Dispatch the DPC queue for this processor.
+    // Note that we're already at DPC level on entry to this function.
+
+    // Lock the DPC queue.
+
+    ipl := KiAcquireDpcQueue ()
+
+    // Pop items from the list until it's emptied.
+
+    head := &prb^.DpcListHead
+
+    WHILE NOT RtlEmptyList ( head ) DO
+        dpc := CONTAINEROF head^.Next TO KeDpc.Entry
+
+        // Remove from the list.
+
+        RtlRemoveEntryList ( &dpc^.Entry )
+        dpc^.EnqueuedTo = NULLPTR
+
+        // Capture the context.
+
+        context1 := dpc^.Context1
+        context2 := dpc^.Context2
+
+        // Unlock the queue.
+
+        KiReleaseDpcQueue ( ipl )
+
+        // Call the DPC function.
+
+        dpc^.Function (
+            dpc, // dpc
+            context1, // context1
+            context2, // context2
+        )
+
+        // Re-lock the queue.
+
+        ipl = KiAcquireDpcQueue ()
+    END
+
+    // Unlock the DPC queue.
+
+    KiReleaseDpcQueue ( ipl )
+END

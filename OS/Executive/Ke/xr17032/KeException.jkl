@@ -72,7 +72,15 @@ FN (KiHighLevelHandlerF) KiHandleBreakpoint (
 
     ELSE
         IF KeDebuggerEntry THEN
+#IF BLD_MP
+            KiFreezeOtherProcessors ()
+#END
+
             KeDebuggerEntry ( context )
+
+#IF BLD_MP
+            KiUnfreezeOtherProcessors ()
+#END
 
             IF ecause == EXC_BRK AND context^.Epc == &KeBreakpoint THEN
                 // Skip over the explicit breakpoint.
@@ -226,37 +234,50 @@ DbgExcEnd:
 EXTERN FN KiExceptionHandler ()
 
 #SECTION "INIT$text"
-FN KiInitializeArchitecture ()
+FN KiInitializeArchitecture (
+    IN prb : ^KiPrb,
+)
 
-    // Construct a jump instruction that just jumps to our exception handler,
-    // and then copy it to the first instruction of each entry of the exception
-    // block, except for the TB miss handlers, which have already been set up by
-    // Loader.
+    // Our KiCurrentProcessor is implemented by reading the WHAMI control
+    // register, so it's already okay to do that.
 
-    eb := CAST ExLoaderBlock.U.Xr.ExceptionBlock TO ^ULONG
+    procid := KiCurrentProcessor ()
 
-    jmpinstruction := CAST &KiExceptionHandler TO ULONG
+    IF procid == 0 THEN
+        // Construct a jump instruction that just jumps to our exception handler,
+        // and then copy it to the first instruction of each entry of the exception
+        // block, except for the TB miss handlers, which have already been set up by
+        // Loader.
 
-    jmpinstruction >>= 2
-    jmpinstruction <<= 3
-    jmpinstruction |= 6
+        eb := CAST ExLoaderBlock.U.Xr.ExceptionBlock TO ^ULONG
 
-    i := 0
+        jmpinstruction := CAST &KiExceptionHandler TO ULONG
 
-    WHILE i < 14 DO
-        eb^ = jmpinstruction
+        jmpinstruction >>= 2
+        jmpinstruction <<= 3
+        jmpinstruction |= 6
 
-        i += 1
-        eb += 256
+        i := 0
+
+        WHILE i < 14 DO
+            eb^ = jmpinstruction
+
+            i += 1
+            eb += 256
+        END
+
+        // Copy the syscall handler into the exception block.
+        // This one is special because it doesn't need to save as much as the others
+        // do.
+
+        // ... TODO ...
+
+        // We modified the instruction stream, so flush the icache.
+
+        KiFlushMyIcache ()
     END
 
-    // Copy the syscall handler into the exception block.
-    // This one is special because it doesn't need to save as much as the others
-    // do.
+    // Initialize the ID field of the PRB.
 
-    // ... TODO ...
-
-    // We modified the instruction stream, so flush the icache.
-
-    KiFlushMyIcache ()
+    prb^.Id = procid
 END
