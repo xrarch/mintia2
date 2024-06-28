@@ -46,6 +46,7 @@ FN (KiHighLevelHandlerF) KiHandleError (
     IN badaddr : ^VOID,
 )
 
+    RtlPrint ( "%u %p\n", context^.Rs >> 28, badaddr )
     KeCrash ( "KiHandleError Unimplemented\n" )
 END
 
@@ -57,13 +58,20 @@ FN (KiHighLevelHandlerF) KiHandleBreakpoint (
     ecause := context^.Rs >> 28
 
     IF context^.Rs & 1 AND ecause != EXC_NMI THEN
-        // Usermode breakpoint.
+        // Usermode breakpoint. Dispatch to debugger or send an illegal
+        // instruction signal to the thread if no debugger attached.
 
         KeCrash ( "Usermode breakpoint Unimplemented\n" )
 
     ELSE
         IF KeDebuggerEntry THEN
             KeDebuggerEntry ( context )
+
+            IF ecause != EXC_NMI AND context^.Epc == &KeBreakpoint THEN
+                // Skip over the explicit breakpoint.
+
+                context^.Epc += 4
+            END
 
         ELSEIF ecause != EXC_NMI THEN
             KeCrash ( "Unhandled kernel mode breakpoint\n" )
@@ -79,6 +87,7 @@ FN (KiHighLevelHandlerF) KiHandlePageFault (
     KeCrash ( "KiHandlePageFault Unimplemented\n" )
 END
 
+#SECTION "text"
 KiHandlerTable : KiHighLevelHandlerF[16] = {
     [0] = &KiSpuriousException,
     [EXC_INT] = &KiHandleInterrupt,
@@ -100,7 +109,11 @@ KiHandlerTable : KiHighLevelHandlerF[16] = {
 
 #ASM [
 
+// Put symbols here to allow the debugger to know how to interpret the
+// context.
+
 KiExceptionHandler:
+.export KiExceptionHandler
     mtcr scratch0, t0               // Save T0 as a scratch register.
     mtcr scratch1, sp               // Save the current stack pointer.
 
@@ -197,6 +210,9 @@ KiExceptionHandler:
     mov  sp, long [sp + OsContext_Sp]
 
     rfe
+
+DbgExcEnd:
+.export DbgExcEnd
 
 ]
 

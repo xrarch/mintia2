@@ -6,6 +6,8 @@
 
 DbgStackTraceCallback : KeCrashCallback
 
+PUBLIC DbgCauseCrash := FALSE
+
 FN (KeDebuggerEntryF) DbgEntrypoint (
     IN context : ^OsContext,
 )
@@ -16,7 +18,11 @@ FN (KeDebuggerEntryF) DbgEntrypoint (
 
     DbgPrompt ()
 
-    HalSetDebugConsole ( FALSE )
+    HalSetDebugConsole ( old )
+
+    IF DbgCauseCrash THEN
+        KeCrash ( "Debug\n" )
+    END
 END
 
 EXPORT FN DbgMain ()

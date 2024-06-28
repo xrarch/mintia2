@@ -27,6 +27,7 @@ EXTERN DbgCommandTable : DbgCommand[]
 
 DbgUsedLines : UBYTE
 DbgAllLines : UBYTE
+DbgExit : UBYTE = FALSE
 
 FN DbgPaginate () : UWORD
 
@@ -122,12 +123,288 @@ FN (DbgCommandF) DbgCommandHelp ()
     END
 END
 
+FN (DbgCommandF) DbgCommandClear ()
+
+    // Print magic ANSI-compatible sequence to clear the terminal and reset the
+    // cursor back to the top left.
+
+    RtlPrint ( "\[[0m\[[1;1H\[[2J" )
+
+    RtlPrint ( "MINTIA System Debugger\n" )
+END
+
+FN (DbgCommandF) DbgCommandExit ()
+
+    DbgExit = TRUE
+END
+
+FN (DbgCommandF) DbgCommandReg ()
+
+    DbgDumpRegisters ( DbgCurrentContext )
+END
+
+FN (DbgCommandF) DbgCommandPcSym ()
+
+    num : UBYTE[32]
+
+    IF NOT DbgNextToken (
+        &num[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: pcsym [pc]\n" )
+
+        LEAVE
+    END
+
+    numval : UWORD
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        32, // bufsize
+        OUT numval, // num
+    ) THEN
+
+        RtlPrint ( "Usage: pcsym [pc]\n" )
+
+        LEAVE
+    END
+
+    dll : ^BlDll
+    symvalue : ^VOID
+    symname : ^UBYTE
+
+    sym := DbgGetSymbolAndDll (
+        CAST numval TO ^VOID, // address
+        OUT dll, // dll
+        OUT symvalue, // symvalue
+        OUT symname, // symname
+    )
+
+    IF NOT sym THEN
+        RtlPrint ( "Couldn't find matching symbol\n" )
+
+        LEAVE
+    END
+
+    dllname := RtlGetFileName ( &dll^.Name[0] )
+
+    RtlPrint (
+        "%s!%s+%x\n", // fmt
+        dllname,
+        symname,
+        numval - symvalue,
+    )
+END
+
+FN (DbgCommandF) DbgCommandTrace ()
+
+    DbgTraceContext ( DbgCurrentContext )
+END
+
+FN (DbgCommandF) DbgCommandPeekUlong ()
+
+    num : UBYTE[32]
+
+    IF NOT DbgNextToken (
+        &num[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: peekl [addr]\n" )
+
+        LEAVE
+    END
+
+    numval : UWORD
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        32, // bufsize
+        OUT numval, // num
+    ) THEN
+
+        RtlPrint ( "Usage: peekl [addr]\n" )
+
+        LEAVE
+    END
+
+    addr := CAST numval TO ^ULONG
+
+    IF NOT MmIsVirtualValid ( addr ) THEN
+        RtlPrint ( "Invalid address\n" )
+
+        LEAVE
+    END
+
+    IF addr & 3 THEN
+        RtlPrint ( "Unaligned address\n" )
+
+        LEAVE
+    END
+
+    RtlPrint ( "%08x\n", addr[0] )
+END
+
+FN (DbgCommandF) DbgCommandPokeUlong ()
+
+    num : UBYTE[32]
+
+    IF NOT DbgNextToken (
+        &num[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: pokel [addr] [value]\n" )
+
+        LEAVE
+    END
+
+    numval : UWORD
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        32, // bufsize
+        OUT numval, // num
+    ) THEN
+
+        RtlPrint ( "Usage: pokel [addr] [value]\n" )
+
+        LEAVE
+    END
+
+    IF NOT DbgNextToken (
+        &num[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: pokel [addr] [value]\n" )
+
+        LEAVE
+    END
+
+    newval : UWORD
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        32, // bufsize
+        OUT newval, // num
+    ) THEN
+
+        RtlPrint ( "Usage: pokel [addr] [value]\n" )
+
+        LEAVE
+    END
+
+    addr := CAST numval TO ^ULONG
+
+    IF NOT MmIsVirtualValid ( addr ) THEN
+        RtlPrint ( "Invalid address\n" )
+
+        LEAVE
+    END
+
+    IF addr & 3 THEN
+        RtlPrint ( "Unaligned address\n" )
+
+        LEAVE
+    END
+
+    addr[0] = newval
+
+    RtlPrint ( "%08x = %08x\n", addr, newval )
+END
+
+FN (DbgCommandF) DbgCommandCrash ()
+
+    DbgExit = TRUE
+    DbgCauseCrash = TRUE
+END
+
+FN (DbgCommandF) DbgCommandSym ()
+
+    name : UBYTE[64]
+
+    IF NOT DbgNextToken (
+        &name[0], // tokenbuffer
+        64, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: sym [name]\n" )
+
+        LEAVE
+    END
+
+    dll : ^BlDll
+    value : ^VOID
+
+    IF NOT DbgGetSymbolValueByName (
+        &name[0], // name
+        OUT dll, // dll
+        OUT value, // symvalue
+    ) THEN
+
+        RtlPrint ( "Couldn't find that symbol\n" )
+
+        LEAVE
+    END
+
+    dllname := RtlGetFileName ( &dll^.Name[0] )
+
+    RtlPrint ( "%s!%s = %p\n", dllname, &name[0], value )
+END
+
 #SECTION "text"
 DbgCommandTable : DbgCommand[] = {
     {
         [Name] = "help",
         [Function] = &DbgCommandHelp,
         [Help] = "Display this help text.",
+    },
+    {
+        [Name] = "clear",
+        [Function] = &DbgCommandClear,
+        [Help] = "Clear the console.",
+    },
+    {
+        [Name] = "exit",
+        [Function] = &DbgCommandExit,
+        [Help] = "Exit the debugger.",
+    },
+    {
+        [Name] = "reg",
+        [Function] = &DbgCommandReg,
+        [Help] = "Dump register contents.",
+    },
+    {
+        [Name] = "pcsym",
+        [Function] = &DbgCommandPcSym,
+        [Help] = "Convert a program counter to a symbol name.",
+    },
+    {
+        [Name] = "trace",
+        [Function] = &DbgCommandTrace,
+        [Help] = "Perform a backtrace.",
+    },
+    {
+        [Name] = "peekl",
+        [Function] = &DbgCommandPeekUlong,
+        [Help] = "Peek a ULONG.",
+    },
+    {
+        [Name] = "pokel",
+        [Function] = &DbgCommandPokeUlong,
+        [Help] = "Poke a ULONG.",
+    },
+    {
+        [Name] = "crash",
+        [Function] = &DbgCommandCrash,
+        [Help] = "Cause a test crash.",
+    },
+    {
+        [Name] = "sym",
+        [Function] = &DbgCommandSym,
+        [Help] = "Look up the value of a symbol by name.",
     },
 
     // Sentinel.
@@ -180,7 +457,9 @@ FN DbgPrompt ()
 
     RtlPrint ( "\nMINTIA System Debugger\n" )
 
-    WHILE TRUE DO
+    DbgExit = FALSE
+
+    WHILE NOT DbgExit DO
         RtlPrint ( ">> " )
 
         DbgGetString (

@@ -112,3 +112,30 @@ FN DbgGetSymbolAndDll (
 
     RETURN NULLPTR
 END
+
+FN DbgGetSymbolValueByName (
+    IN name : ^UBYTE,
+    OUT dll : ^BlDll,
+    OUT symvalue : ^VOID,
+) : UWORD
+
+    listhead := &ExLoaderBlock.DllListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        dll = CONTAINEROF listentry TO BlDll.Entry
+
+        IF DbgGetSymbolByName (
+            dll, // dll
+            name, // name
+            OUT symvalue, // symvalue
+        ) THEN
+
+            RETURN TRUE
+        END
+
+        listentry = listentry^.Next
+    END
+
+    RETURN FALSE
+END

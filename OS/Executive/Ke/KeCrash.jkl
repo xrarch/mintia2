@@ -21,6 +21,7 @@ KiResetX : UINT = 0
 KiNextRow : UINT = 0
 KiCrashVerticalCount : UINT = 0
 KiCrashHorizCount : UINT = 0
+KiCrashPrints : UBYTE = FALSE
 
 #DEFINE PLATFORM_FULL_NAME_STR ( STRCAT ( STRCAT "\"" PLATFORM_FULL_NAME ) "\"" )
 
@@ -42,16 +43,15 @@ PRIVATE FN CenterPrint (
     RtlPrint ( "%s", str )
 END
 
-FN (RtlPrintCallbackF) KiCrashPrintCallback (
+FN KiCrashPutCharacter (
     IN byte : UBYTE,
-    IN context : ^VOID,
 )
 
     IF NOT KiRemainingRows THEN
         LEAVE
     END
 
-    RtlPrint ( "%c", byte )
+    HalPutCharacter ( byte )
 
     next := FALSE
 
@@ -74,31 +74,16 @@ FN (RtlPrintCallbackF) KiCrashPrintCallback (
     END
 END
 
-FN KiCrashPrintByVarTable (
-    IN fmt : ^UBYTE,
-    IN argv : ^^VOID,
-    IN argc : UWORD,
+FN (RtlPrintCallbackF) RtljPrintCallback (
+    IN byte : UBYTE,
+    IN context : ^VOID,
 )
 
-    RtlPrintByCallbackByVarTable (
-        &KiCrashPrintCallback, // callback
-        NULLPTR, // context
-        fmt, // fmt
-        argv, // argv
-        argc, // argc
-    )
-END
-
-EXPORT FN KeCrashPrint (
-    IN fmt : ^UBYTE,
-    ... argv argc
-)
-
-    KiCrashPrintByVarTable (
-        fmt, // fmt
-        argv, // argv
-        argc, // argc
-    )
+    IF KiCrashPrints THEN
+        KiCrashPutCharacter ( byte )
+    ELSE
+        HalPutCharacter ( byte )
+    END
 END
 
 FN (KeCrashCallbackF) KiCrashModuleListFunc (
@@ -115,15 +100,15 @@ FN (KeCrashCallbackF) KiCrashModuleListFunc (
 
     WHILE i DO
 #IF ( == BLD_BITS 64 )
-        KeCrashPrint ( "DLL Base         TimeStmp Name                 " )
+        RtlPrint ( "DLL Base         TimeStmp Name                 " )
 #ELSE
-        KeCrashPrint ( "DLL Base TimeStmp Name                 " )
+        RtlPrint ( "DLL Base TimeStmp Name                 " )
 #END
 
         i -= 1
     END
 
-    KeCrashPrint ( "\n" )
+    RtlPrint ( "\n" )
 
     listhead := &ExLoaderBlock.DllListHead
     listentry := listhead^.Next
@@ -133,11 +118,11 @@ FN (KeCrashCallbackF) KiCrashModuleListFunc (
         dll := CONTAINEROF listentry TO BlDll.Entry
 
         IF i >= infocols THEN
-            KeCrashPrint ( "\n" )
+            RtlPrint ( "\n" )
             i = 0
         END
 
-        KeCrashPrint (
+        RtlPrint (
             "%p %08x %-20s ", // fmt
             dll^.Base,
             dll^.Timestamp,
@@ -149,7 +134,7 @@ FN (KeCrashCallbackF) KiCrashModuleListFunc (
         listentry = listentry^.Next
     END
 
-    KeCrashPrint ( "\n" )
+    RtlPrint ( "\n" )
 END
 
 #SECTION "INIT$text"
@@ -201,6 +186,8 @@ FN KiDoCrashPrints (
     // Call all of the horizontally printing callbacks.
     // These each get a horizontal section of the console that they can greedily
     // consume.
+
+    KiCrashPrints = TRUE
 
     KiColumns = width
     KiRemainingColumns = KiColumns
@@ -279,6 +266,8 @@ FN KiDoCrashPrints (
         END
     END
 
+    KiCrashPrints = FALSE
+
     HalSetConsolePosition ( 0, height - 2 )
 
     CenterPrint ( "An error occurred! Please take a screenshot and report the issue.\n", width )
@@ -306,7 +295,11 @@ EXPORT FN KeCrash (
     IF oldvalue THEN
         // We weren't the first. Complain and hang forever.
 
-        RtlPrint ( "KeCrash(): Nested on %u\n", KiCurrentProcessor () )
+        RtlPrint (
+            "KeCrash(): Nested on %u: %s\n", // fmt
+            KiCurrentProcessor (),
+            fmt,
+        )
 
         WHILE TRUE DO
             KiWaitForInterrupt ()

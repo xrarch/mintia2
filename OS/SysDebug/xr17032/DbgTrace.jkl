@@ -3,17 +3,24 @@
 //
 
 #INCLUDE "../Dbg.hjk"
-#INCLUDE "<inc>/Mm.hjk"
+#INCLUDE "<ll>/System/OsContext.hjk"
 
 #ASM [
 
-DbgGetLink:
-    mov  a3, sp
+DbgGetLinks:
+    mov  a2, sp
+    mov  a1, lr
     ret
 
 ]
 
-EXTERN FN DbgGetLink () : ^VOID
+EXTERN FN DbgGetLinks (
+    OUT sp : ^VOID,
+    OUT pc : ^VOID,
+)
+
+EXTERN KiExceptionHandler : UBYTE
+EXTERN DbgExcEnd : UBYTE
 
 #DEFINE DBG_TRACE_NAME_MAX 40
 
@@ -22,6 +29,7 @@ DbgTraceNameBuffer : UBYTE[DBG_TRACE_NAME_MAX]
 FN DbgTrace (
     IN sp : ^VOID,
     IN pc : ^VOID,
+    IN lr : ^VOID,
 )
 
 #IF ( == BLD_BITS 64 )
@@ -30,34 +38,15 @@ FN DbgTrace (
     infostr := "InstrPtr Name"
 #END
 
-    KeCrashPrint ( "%s\n", infostr )
+    RtlPrint ( "%s\n", infostr )
 
     links := 0
 
-    IF NOT sp THEN
-        KeCrashPrint ( "!! SP=0 !!\n" )
-
-        LEAVE
-    END
-
-    IF sp & 3 THEN
-        KeCrashPrint ( "!! SP & 3 !!\n" )
-
-        LEAVE
-    END
-
-    IF pc & 3 THEN
-        KeCrashPrint ( "!! PC & 3 !!\n" )
-
-        LEAVE
-    END
-
-    lr := NULLPTR
-    leaf := FALSE
+    leaf := TRUE
 
     WHILE pc DO
         IF links >= 128 THEN
-            KeCrashPrint ( "!! Maximum trace !!\n" )
+            RtlPrint ( "!! Maximum trace !!\n" )
 
             LEAVE
         END
@@ -92,63 +81,131 @@ FN DbgTrace (
             pc - symvalue,
         )
 
-        KeCrashPrint ( "%p %s\n", pc, &DbgTraceNameBuffer[0] )
+        RtlPrint ( "%p %s\n", pc, &DbgTraceNameBuffer[0] )
+
+        IF NOT sp THEN
+            RtlPrint ( "!! SP=0 !!\n" )
+
+            LEAVE
+        END
+
+        IF sp & 3 THEN
+            RtlPrint ( "!! SP & 3 !!\n" )
+
+            LEAVE
+        END
+
+        IF pc & 3 THEN
+            RtlPrint ( "!! PC & 3 !!\n" )
+
+            LEAVE
+        END
+
+        IF pc < 0x80000000 THEN
+            RtlPrint ( "!! PC < 0x80000000 !!\n" )
+
+            LEAVE
+        END
+
+        IF pc >= 0xA0000000 THEN
+            RtlPrint ( "!! PC >= 0xA0000000 !!\n" )
+
+            LEAVE
+        END
 
         // Get next link.
 
-        offset := 0
-        ulong : ^ULONG
+        IF pc >= &KiExceptionHandler AND pc < &DbgExcEnd THEN
+            // Step out of the exception handler. The "stack frame" is really
+            // an OsContext record.
 
-        WHILE pc >= symvalue DO
-            IF NOT MmIsVirtualValid ( pc ) THEN
-                KeCrashPrint ( "#\n" )
+            ctx := CAST sp TO ^OsContext
+
+            IF NOT MmIsVirtualValid ( ctx ) THEN
+                RtlPrint ( "#\n" )
 
                 LEAVE
             END
 
-            ulong = CAST pc TO ^ULONG
+            IF NOT MmIsVirtualValid ( ctx + SIZEOF OsContext ) THEN
+                RtlPrint ( "#\n" )
 
-            IF ulong[0] & 0xFFFF == 0xF7B4 THEN
-                // Found the "subi sp, sp, X" instruction that created the
-                // stack frame. Extract the X to find out how big the stack
-                // frame is, so we can offset to the next one.
-
-                offset = ulong[0] >> 16
-
-                BREAK
-
-            ELSEIF ulong[0] & 0xFFFF == 0xFFAA THEN
-                // Found a "mov long [sp + X], lr" instruction. that means
-                // this is NOT a leaf function.
-
-                leaf = FALSE
+                LEAVE
             END
 
-            pc -= 4
-        END
+            IF ctx^.Rs & 1 THEN
+                // Was usermode. Can't step there.
 
-        IF leaf THEN
-            pc = lr
+                LEAVE
+            END
+
+            sp = CAST ctx^.Sp TO ^VOID
+            lr = CAST ctx^.Lr TO ^VOID
+            pc = CAST ctx^.Epc TO ^VOID
+
+            leaf = TRUE
 
         ELSE
-            IF offset < 4 OR offset & 3 THEN
-                BREAK
+            offset := 0
+            ulong : ^ULONG
+
+            WHILE pc >= symvalue DO
+                IF NOT MmIsVirtualValid ( pc ) THEN
+                    RtlPrint ( "#\n" )
+
+                    LEAVE
+                END
+
+                ulong = CAST pc TO ^ULONG
+
+                IF ulong[0] == 0 THEN
+                    // Doorstop.
+
+                    BREAK
+                END
+
+                IF ulong[0] & 0xFFFF == 0xF7B4 THEN
+                    // Found the "subi sp, sp, X" instruction that created the
+                    // stack frame. Extract the X to find out how big the stack
+                    // frame is, so we can offset to the next one.
+
+                    offset = ulong[0] >> 16
+
+                    BREAK
+
+                ELSEIF ulong[0] & 0xFFFF == 0xFFAA THEN
+                    // Found a "mov long [sp + X], lr" instruction. that means
+                    // this is NOT a leaf function.
+
+                    leaf = FALSE
+                END
+
+                pc -= 4
             END
 
-            ulong = CAST sp + offset - 4 TO ^ULONG
+            IF leaf THEN
+                pc = lr
 
-            IF NOT MmIsVirtualValid ( ulong ) THEN
-                KeCrashPrint ( "#\n" )
+            ELSE
+                IF offset < 4 OR offset & 3 THEN
+                    BREAK
+                END
 
-                LEAVE
+                ulong = CAST sp + offset - 4 TO ^ULONG
+
+                IF NOT MmIsVirtualValid ( ulong ) THEN
+                    RtlPrint ( "#\n" )
+
+                    LEAVE
+                END
+
+                pc = CAST ulong^ TO ^VOID
             END
 
-            pc = CAST ulong^ TO ^VOID
+            leaf = FALSE
+
+            sp += offset
         END
-
-        leaf = FALSE
-
-        sp += offset
 
         links += 1
     END
@@ -158,8 +215,67 @@ FN (KeCrashCallbackF) DbgStackTrace (
     IN columns : UWORD,
 )
 
+    sp : ^VOID
+    pc : ^VOID
+
+    DbgGetLinks (
+        OUT sp, // sp
+        OUT pc, // pc
+    )
+
     DbgTrace (
-        DbgGetLink (), // sp
-        &DbgStackTrace, // pc
+        sp, // sp
+        pc, // pc
+        NULLPTR, // lr
+    )
+END
+
+FN DbgDumpRegisters (
+    IN context : ^OsContext,
+)
+
+    RtlPrint (
+        " t0=%08x  t1=%08x  t2=%08x  t3=%08x  t4=%08x  t5=%08x\n", // fmt
+        context^.T0, context^.T1, context^.T2, context^.T3, context^.T4,
+        context^.T5,
+    )
+
+    RtlPrint (
+        " a0=%08x  a1=%08x  a2=%08x  a3=%08x\n", // fmt
+        context^.A0, context^.A1, context^.A2, context^.A3,
+    )
+
+    RtlPrint (
+        " s0=%08x  s1=%08x  s2=%08x  s3=%08x  s4=%08x  s5=%08x\n", // fmt
+        context^.S0, context^.S1, context^.S2, context^.S3, context^.S4,
+        context^.S5,
+    )
+
+    RtlPrint (
+        " s6=%08x  s7=%08x  s8=%08x  s9=%08x s10=%08x s11=%08x\n", // fmt
+        context^.S6, context^.S7, context^.S8, context^.S9, context^.S10,
+        context^.S11,
+    )
+
+    RtlPrint (
+        "s12=%08x s13=%08x s14=%08x s15=%08x s16=%08x s17=%08x\n", // fmt
+        context^.S12, context^.S13, context^.S14, context^.S15, context^.S16,
+        context^.S17,
+    )
+
+    RtlPrint (
+        " tp=%08x  sp=%08x  lr=%08x epc=%08x  rs=%08x\n", // fmt
+        context^.Tp, context^.Sp, context^.Lr, context^.Epc, context^.Rs,
+    )
+END
+
+FN DbgTraceContext (
+    IN context : ^OsContext,
+)
+
+    DbgTrace (
+        CAST context^.Sp TO ^VOID, // sp
+        CAST context^.Epc TO ^VOID, // pc
+        CAST context^.Lr TO ^VOID, // lr
     )
 END
