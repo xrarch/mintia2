@@ -5,6 +5,12 @@
 #INCLUDE "../Ki.hjk"
 #INCLUDE "<ll>/System/OsContext.hjk"
 
+// The exact interface to the HAL for interrupts is private to the architecture.
+
+EXTERN FN HalInterrupt (
+    IN context : ^OsContext,
+)
+
 FNPTR KiHighLevelHandlerF (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
@@ -40,7 +46,15 @@ FN (KiHighLevelHandlerF) KiHandleInterrupt (
     IN badaddr : ^VOID,
 )
 
-    KeCrash ( "KiHandleInterrupt Unimplemented\n" )
+    HalInterrupt ( context )
+
+    prb := KI_CURRENT_PRB
+
+    currentipl := prb^.Ipl
+
+    IF prb^.PendingSoftwareInterrupts & (0xF << currentipl) THEN
+        KiDispatchSoftwareInterrupts ( currentipl )
+    END
 END
 
 FN (KiHighLevelHandlerF) KiHandleError (

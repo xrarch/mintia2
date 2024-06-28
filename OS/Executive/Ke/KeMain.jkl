@@ -34,7 +34,8 @@ FN KiInitializePrb (
 )
 
     // Initialize this PRB. It has already been filled with zeroes by the Loader
-    // so avoid doing that again.
+    // so avoid doing that again for those fields where zeroes (and NULLPTR) are
+    // the initial state.
 
     RtlInitializeList ( &prb^.DpcListHead )
 
@@ -109,9 +110,8 @@ EXPORT FN KeMain (
 
     // Perform early initialization of the HAL. This will perform baseline
     // initialization of integral platform components such as the interval
-    // timer. Interrupts will still be disabled though. Also, we get a boot
-    // console which is guaranteed to stay sane throughout the lifetime of
-    // the system and at any IPL.
+    // timer. Also, we get a boot console which is guaranteed to stay sane
+    // throughout the lifetime of the system and at any IPL.
 
     HalEarlyInitialize ()
 
