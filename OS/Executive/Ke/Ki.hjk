@@ -23,8 +23,6 @@
     #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
     #DEFINE KI_DIRECT_PRB 1
 
-    TYPE KiSpinlock : ULONG
-
     #DEFINE KI_CACHE_ALIGN 16
 
     #DEFINE KI_INITIAL_SPINLOCK 0
@@ -52,14 +50,14 @@ STRUCT KiPrb
 #IF BLD_MP
     // Give the spinlocks their own cache lines.
 
-    DpcQueueLock : KiSpinlock,
-    CacheAlign1 : UBYTE[KI_CACHE_ALIGN - SIZEOF KiSpinlock],
+    DpcQueueLock : KeSpinlock,
+    CacheAlign1 : UBYTE[KI_CACHE_ALIGN - SIZEOF KeSpinlock],
 
-    ReadyQueueLock : KiSpinlock,
-    CacheAlign2 : UBYTE[KI_CACHE_ALIGN - SIZEOF KiSpinlock],
+    ReadyQueueLock : KeSpinlock,
+    CacheAlign2 : UBYTE[KI_CACHE_ALIGN - SIZEOF KeSpinlock],
 
-    TimerTreeLock : KiSpinlock,
-    CacheAlign3 : UBYTE[KI_CACHE_ALIGN - SIZEOF KiSpinlock],
+    TimerTreeLock : KeSpinlock,
+    CacheAlign3 : UBYTE[KI_CACHE_ALIGN - SIZEOF KeSpinlock],
 
     IpiInterrupt : KeInterrupt,
 #END
@@ -228,15 +226,15 @@ EXTERN FN KiFreezeOtherProcessors ()
 EXTERN FN KiUnfreezeOtherProcessors ()
 
 EXTERN FN KiInitializeSpinlock (
-    IN spinlock : ^KiSpinlock,
+    IN spinlock : ^KeSpinlock,
 )
 
 EXTERN FN KiAcquireSpinlock (
-    IN spinlock : ^KiSpinlock,
+    IN spinlock : ^KeSpinlock,
 )
 
 EXTERN FN KiReleaseSpinlock (
-    IN spinlock : ^KiSpinlock,
+    IN spinlock : ^KeSpinlock,
 )
 
 #END
