@@ -54,10 +54,10 @@ FN HalpInitializeLsic (
 
     // Initialize the timer interrupt object.
 
-    timerint := &prb^.TimerInterrupt
+    int := &prb^.TimerInterrupt
 
     KeInitializeInterrupt (
-        timerint, // interrupt
+        int, // interrupt
         &HalpTimerInterrupt, // routine
         0, // context
         2, // vector
@@ -69,7 +69,28 @@ FN HalpInitializeLsic (
 
     // Manually insert in PRB.
 
-    prb^.IrqDispatchTable[2] = timerint
+    prb^.IrqDispatchTable[2] = int
+
+#IF BLD_MP
+    // Initialize the IPI interrupt object.
+
+    int = &prb^.IpiInterrupt
+
+    KeInitializeInterrupt (
+        int, // interrupt
+        &HalpIpiInterrupt, // routine
+        0, // context
+        1, // vector
+        KI_IPL_IPI, // ipl
+        FALSE, // edgetriggered
+        FALSE, // sharevector
+        procid, // procid
+    )
+
+    // Manually insert in PRB.
+
+    prb^.IrqDispatchTable[1] = int
+#END
 
     // Enable interrupts.
 
