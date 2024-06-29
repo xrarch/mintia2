@@ -239,28 +239,6 @@ EXTERN FN KiReleaseSpinlock (
     IN spinlock : ^KiSpinlock,
 )
 
-#MACRO KiAcquireDpcQueue () [
-    KiDisableInterrupts ()
-    prb := KI_CURRENT_PRB
-    KiAcquireSpinlock ( &prb^.DpcQueueLock )
-]
-
-#MACRO KiReleaseDpcQueue ( oldstate ) [
-    prb := KI_CURRENT_PRB
-    KiReleaseSpinlock ( &prb^.DpcQueueLock )
-    KiRestoreInterrupts ( oldstate )
-]
-
-#MACRO KiAcquireOtherDpcQueue ( prb ) [
-    KiDisableInterrupts ()
-    KiAcquireSpinlock ( &(prb)^.DpcQueueLock )
-]
-
-#MACRO KiReleaseOtherDpcQueue ( prb, oldstate ) [
-    KiReleaseSpinlock ( &(prb)^.DpcQueueLock )
-    KiRestoreInterrupts ( oldstate )
-]
-
 #MACRO KiAcquireReadyQueueLow () [
     KiRaiseIpl ( KI_IPL_DPC )
     prb := KI_CURRENT_PRB
@@ -284,22 +262,6 @@ EXTERN FN KiReleaseSpinlock (
 ]
 
 #ELSE
-
-#MACRO KiAcquireDpcQueue () [
-    KiDisableInterrupts ()
-]
-
-#MACRO KiReleaseDpcQueue ( oldstate ) [
-    KiRestoreInterrupts ( oldstate )
-]
-
-#MACRO KiAcquireOtherDpcQueue ( prb ) [
-    KiDisableInterrupts ()
-]
-
-#MACRO KiReleaseOtherDpcQueue ( prb, oldstate ) [
-    KiRestoreInterrupts ( oldstate )
-]
 
 #MACRO KiAcquireReadyQueueLow () [
     KiRaiseIpl ( KI_IPL_DPC )
