@@ -239,40 +239,4 @@ EXTERN FN KiReleaseSpinlock (
     IN spinlock : ^KiSpinlock,
 )
 
-#MACRO KiAcquireReadyQueueLow () [
-    KiRaiseIpl ( KI_IPL_DPC )
-    prb := KI_CURRENT_PRB
-    KiAcquireSpinlock ( &prb^.ReadyQueueLock )
-]
-
-#MACRO KiReleaseReadyQueueLow ( oldstate ) [
-    prb := KI_CURRENT_PRB
-    KiReleaseSpinlock ( &prb^.ReadyQueueLock )
-    KiLowerIpl ( oldstate )
-]
-
-#MACRO KiAcquireReadyQueueElevated () [
-    prb := KI_CURRENT_PRB
-    KiAcquireSpinlock ( &(prb)^.ReadyQueueLock )
-]
-
-#MACRO KiReleaseReadyQueueElevated () [
-    prb := KI_CURRENT_PRB
-    KiReleaseSpinlock ( &(prb)^.ReadyQueueLock )
-]
-
-#ELSE
-
-#MACRO KiAcquireReadyQueueLow () [
-    KiRaiseIpl ( KI_IPL_DPC )
-]
-
-#MACRO KiReleaseReadyQueueLow ( oldstate ) [
-    KiLowerIpl ( oldstate )
-]
-
-#MACRO KiAcquireReadyQueueElevated () []
-
-#MACRO KiReleaseReadyQueueElevated () []
-
 #END
