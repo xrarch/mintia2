@@ -66,3 +66,26 @@ EXTERN FN HalpReleaseSpinlock (
 #END
 
 EXTERN FN HalpInitializeConsole ()
+
+#DEFINE HALP_LSIC_GAP 32
+
+STRUCT PACKED HalpLsic
+    Mask0 : ULONG,
+    Mask1 : ULONG,
+    Pending0 : ULONG,
+    Pending1 : ULONG,
+    ClaimComplete : ULONG,
+    Ipl : ULONG,
+    Reserved0 : ULONG,
+    Reserved1 : ULONG,
+END
+
+STRUCT PACKED HalpTimer
+    CmdPort : ULONG,
+    DataPort : ULONG,
+END
+
+EXTERN FN (KeInterruptF) HalpTimerInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)

@@ -10,6 +10,9 @@
 #DEFINE KI_IPL_LOW 0
 #DEFINE KI_IPL_APC 1
 #DEFINE KI_IPL_DPC 2
+#DEFINE KI_IPL_CLOCK 29
+#DEFINE KI_IPL_IPI 30
+#DEFINE KI_IPL_HIGH 31
 #DEFINE KI_IPL_MAX 32
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
@@ -23,6 +26,8 @@
     TYPE KiSpinlock : ULONG
 
     #DEFINE KI_CACHE_ALIGN 16
+
+    #DEFINE KI_INITIAL_SPINLOCK 0
 
 #ELSEIF ( STRCMP ARCHITECTURE "fox32" )
     // Fox32 is always uniprocessor.
@@ -42,7 +47,7 @@
 // minimum 4KB. It contains all per-processor information.
 
 STRUCT KiPrb
-    IdleStack : UBYTE[3072],
+    IdleStack : UBYTE[2048],
 
 #IF BLD_MP
     // Give the spinlocks their own cache lines.
@@ -60,6 +65,10 @@ STRUCT KiPrb
 #IF ( STRCMP PLATFORM "XRstation" )
     LsicBase : ^VOID,
 #END
+
+    IrqDispatchTable : ^KeInterrupt[HAL_VECTOR_MAX],
+
+    TimerInterrupt : KeInterrupt,
 
     ClockTicks : RtlUquad,
     DpcTimeMs : RtlUquad,
@@ -162,6 +171,8 @@ EXTERN FN KiRestoreInterrupts (
     IN oldstate : UWORD,
 )
 
+EXTERN FN KiEnableInterrupts ()
+
 EXTERN FN KiWaitForInterrupt ()
 
 EXTERN FN KiCurrentProcessor () : UWORD
@@ -205,6 +216,8 @@ EXTERN FN KiClockTick (
     IN usermode : UWORD,
     IN previpl : UWORD,
 )
+
+EXTERN KiUnexpectedInterruptObject : KeInterrupt
 
 #IF BLD_MP
 

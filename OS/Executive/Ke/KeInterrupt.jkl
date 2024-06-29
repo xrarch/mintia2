@@ -1,0 +1,48 @@
+//
+// Implements support for the interrupt object.
+//
+
+#INCLUDE "Ki.hjk"
+
+FN (KeInterruptF) KiUnexpectedInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+    KeCrash ( "Unexpected interrupt\n" )
+END
+
+#SECTION "text"
+PUBLIC KiUnexpectedInterruptObject : KeInterrupt = {
+    [Routine] = &KiUnexpectedInterrupt,
+    [Ipl] = KI_IPL_HIGH,
+    [Spinlock] = KI_INITIAL_SPINLOCK,
+}
+
+EXPORT FN KeInitializeInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN routine : KeInterruptF,
+    IN context : UWORD,
+    IN vector : UWORD,
+    IN ipl : UWORD,
+    IN edgetriggered : UWORD,
+    IN sharevector : UWORD,
+    IN procid : UWORD,
+)
+
+    // Initialize an interrupt object.
+
+    interrupt^.Routine = routine
+    interrupt^.Context = context
+    interrupt^.Vector = vector
+    interrupt^.Ipl = ipl
+    interrupt^.EdgeTriggered = edgetriggered
+    interrupt^.ShareVector = sharevector
+    interrupt^.ProcessorId = procid
+    interrupt^.Connected = FALSE
+
+#IF BLD_MP
+    KiInitializeSpinlock ( &interrupt^.Spinlock )
+#END
+
+END

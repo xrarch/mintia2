@@ -5,9 +5,104 @@
 #INCLUDE "Halp.hjk"
 #INCLUDE "<ll>/System/OsContext.hjk"
 
+HalpIplToLsicIpl : UBYTE[32] = {
+    [0] = 63,
+    [1] = 63,
+    [2] = 63,
+    [3] = 63,
+    [HAL_IPL_INTERACTIVE] = 47,
+    [HAL_IPL_BOARDS] = 15,
+    [HAL_IPL_SERIAL] = 3,
+    [HAL_IPL_DISK] = 2,
+    [8] = 2,
+    [9] = 2,
+    [10] = 2,
+    [11] = 2,
+    [12] = 2,
+    [13] = 2,
+    [14] = 2,
+    [15] = 2,
+    [16] = 2,
+    [17] = 2,
+    [18] = 2,
+    [19] = 2,
+    [20] = 2,
+    [21] = 2,
+    [22] = 2,
+    [23] = 2,
+    [24] = 2,
+    [25] = 2,
+    [26] = 2,
+    [27] = 2,
+    [28] = 2,
+    [KI_IPL_CLOCK] = 1,
+    [KI_IPL_IPI] = 0,
+    [KI_IPL_HIGH] = 0,
+}
+
 FN HalInterrupt (
     IN context : ^OsContext,
 )
 
-    RtlPrint ( "Sup " )
+    prb := KI_CURRENT_PRB
+
+    lsic := CAST prb^.LsicBase TO ^HalpLsic
+
+    vector := lsic^.ClaimComplete
+    BARRIER
+
+    // Immediately complete the interrupt.
+
+    lsic^.ClaimComplete = vector
+    BARRIER
+
+    int := prb^.IrqDispatchTable[vector]
+
+    // Set the LSIC IPL.
+
+    lsic^.Ipl = HalpIplToLsicIpl[int^.Ipl]
+    BARRIER
+
+    // Capture old IPL and set new in PRB.
+
+    oldipl := prb^.Ipl
+    prb^.Ipl = int^.Ipl
+
+    // Re-enable interrupts.
+
+    KiEnableInterrupts ()
+
+    context^.OldIpl = oldipl
+
+    // Call the routine.
+
+    int^.Routine (
+        int, // interrupt
+        context, // context
+    )
+
+    // Disable interrupts.
+
+    oldstate := KiDisableInterrupts ()
+
+    // Reset the LSIC IPL.
+
+    lsic^.Ipl = HalpIplToLsicIpl[oldipl]
+    BARRIER
+
+    // Reset the PRB IPL.
+
+    prb^.Ipl = oldipl
+END
+
+FN (KeInterruptF) HalpTimerInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+    KiClockTick (
+        HAL_TIMER_INTERVAL, // intervalms
+        context^.Rs & 1, // usermode
+        context^.OldIpl, // previpl
+    )
 END

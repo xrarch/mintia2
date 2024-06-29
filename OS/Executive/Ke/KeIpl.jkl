@@ -76,6 +76,7 @@ FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
     KiDisableInterrupts ()
 END
 
+#SECTION "text"
 KiSoftwareInterruptPriorityTable : KiSoftwareInterruptHandlerF[8] = {
     [0] = NULLPTR,
     [1] = NULLPTR,
@@ -205,13 +206,11 @@ FN KiClockTick (
     IF NOT q THEN
         prb^.QuantumEnd = TRUE
 
-#IF BLD_MP
+        // Have to use an atomic OR here in case an IPI comes in.
+
         KeOrUlong (
             &prb^.PendingSoftwareInterrupts, // ptr
             1 << KI_IPL_DPC, // bitset
         )
-#ELSE
-        prb^.PendingSoftwareInterrupts |= 1 << KI_IPL_DPC
-#END
     END
 END

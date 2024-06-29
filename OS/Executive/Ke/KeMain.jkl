@@ -59,6 +59,14 @@ FN KiInitializePrb (
 #END
 
     prb^.Ipl = KI_IPL_LOW
+
+    i := 0
+
+    WHILE i < HAL_VECTOR_MAX DO
+        prb^.IrqDispatchTable[i] = &KiUnexpectedInterruptObject
+
+        i += 1
+    END
 END
 
 FNPTR DbgMainF ()

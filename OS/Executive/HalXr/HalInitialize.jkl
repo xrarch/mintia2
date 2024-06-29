@@ -4,36 +4,6 @@
 
 #INCLUDE "Halp.hjk"
 
-#ASM [
-
-HalpEnableInterrupts:
-    mfcr t0, rs
-    ori  t0, t0, 2
-    mtcr rs, t0
-    ret
-
-]
-
-EXTERN FN HalpEnableInterrupts ()
-
-#DEFINE HALP_LSIC_GAP 32
-
-STRUCT PACKED HalpLsic
-    Mask0 : ULONG,
-    Mask1 : ULONG,
-    Pending0 : ULONG,
-    Pending1 : ULONG,
-    ClaimComplete : ULONG,
-    Ipl : ULONG,
-    Reserved0 : ULONG,
-    Reserved1 : ULONG,
-END
-
-STRUCT PACKED HalpTimer
-    CmdPort : ULONG,
-    DataPort : ULONG,
-END
-
 #SECTION "INIT$text"
 FN HalpConfigureTimer ()
 
@@ -82,9 +52,28 @@ FN HalpInitializeLsic (
     lsic^.Mask1 = 0xFFFFFFFF
     BARRIER
 
+    // Initialize the timer interrupt object.
+
+    timerint := &prb^.TimerInterrupt
+
+    KeInitializeInterrupt (
+        timerint, // interrupt
+        &HalpTimerInterrupt, // routine
+        0, // context
+        2, // vector
+        KI_IPL_CLOCK, // ipl
+        FALSE, // edgetriggered
+        FALSE, // sharevector
+        procid, // procid
+    )
+
+    // Manually insert in PRB.
+
+    prb^.IrqDispatchTable[2] = timerint
+
     // Enable interrupts.
 
-    HalpEnableInterrupts ()
+    KiEnableInterrupts ()
 END
 
 #SECTION "INIT$text"

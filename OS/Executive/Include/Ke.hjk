@@ -107,3 +107,42 @@ EXTERN FN KeEnqueueDpc (
     IN context1 : UWORD,
     IN context2 : UWORD,
 ) : UWORD
+
+FNPTR KeInterruptF (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+STRUCT KeInterrupt
+    Entry : RtlListEntry,
+
+    Routine : KeInterruptF,
+    Context : UWORD,
+    Vector : UWORD,
+    ProcessorId : UWORD,
+    Spinlock : UWORD,
+
+    ShareVector : UBYTE,
+    EdgeTriggered : UBYTE,
+    Ipl : UBYTE,
+    Connected : UBYTE,
+END
+
+EXTERN FN KeInitializeInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN routine : KeInterruptF,
+    IN context : UWORD,
+    IN vector : UWORD,
+    IN ipl : UWORD,
+    IN edgetriggered : UWORD,
+    IN sharevector : UWORD,
+    IN procid : UWORD,
+)
+
+EXTERN FN KeConnectInterrupt (
+    IN interrupt : ^KeInterrupt,
+) : UWORD
+
+EXTERN FN KeDisconnectInterrupt (
+    IN interrupt : ^KeInterrupt,
+) : UWORD

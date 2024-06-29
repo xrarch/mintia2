@@ -1,0 +1,59 @@
+//
+// Implements the architecture-specific part of interrupt object support.
+//
+
+#INCLUDE "../Ki.hjk"
+
+EXTERN FN HalEnableInterrupt (
+    IN vector : UWORD,
+)
+
+EXTERN FN HalDisableInterrupt (
+    IN vector : UWORD,
+)
+
+EXPORT FN KeConnectInterrupt (
+    IN interrupt : ^KeInterrupt,
+) : UWORD
+
+    // Connect the interrupt object so that the routine is called whenever the
+    // specified interrupt is raised.
+    //
+    // NOTE: No attempt is made to synchronize against an interrupt object being
+    //       connected multiple times concurrently.
+
+    IF interrupt^.Connected THEN
+        // Already connected.
+
+        RETURN FALSE
+    END
+
+    // Properly implementing this requires CPU pinning support which requires
+    // the scheduler to be implemented.
+
+    KeCrash ( "NYI KeConnectInterrupt\n" )
+
+    interrupt^.Connected = TRUE
+
+    RETURN TRUE
+END
+
+EXPORT FN KeDisconnectInterrupt (
+    IN interrupt : ^KeInterrupt,
+) : UWORD
+
+    // Disconnect the interrupt so that the routine is no longer called.
+
+    IF NOT interrupt^.Connected THEN
+        RETURN FALSE
+    END
+
+    // Properly implementing this requires CPU pinning support which requires
+    // the scheduler to be implemented.
+
+    KeCrash ( "NYI KeDisconnectInterrupt\n" )
+
+    interrupt^.Connected = FALSE
+
+    RETURN TRUE
+END
