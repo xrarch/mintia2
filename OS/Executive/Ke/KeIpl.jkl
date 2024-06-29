@@ -140,12 +140,7 @@ FN KiClockTick (
 
     // Check if the earliest timer has expired.
 
-#IF ( == BLD_BITS 64 )
-    IF prb^.ClockTicks.Uquad >= prb^.EarliestTimerTick THEN
-#ELSE
-    IF prb^.ClockTicks.Low >= prb^.EarliestTimerTick THEN
-#END
-
+    IF RtlUquadGteqUquad ( &prb^.ClockTicks, &prb^.EarliestTimerTick ) THEN
         // Enqueue the timer expiration DPC.
 
         KeEnqueueDpc (

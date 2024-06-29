@@ -50,6 +50,14 @@ FN KiInitializePrb (
         &KiTimerExpiration, // function
     )
 
+#IF ( == BLD_BITS 64 )
+    prb^.EarliestTimerTick.Quad = 0xFFFFFFFFFFFFFFFF
+
+#ELSE
+    prb^.EarliestTimerTick.Low = 0xFFFFFFFF
+    prb^.EarliestTimerTick.High = 0xFFFFFFFF
+#END
+
     prb^.Ipl = KI_IPL_LOW
 END
 
