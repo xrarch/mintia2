@@ -195,14 +195,26 @@ EXTERN FN KiReleaseSpinlock (
     IN spinlock : ^KiSpinlock,
 )
 
+EXTERN FN KiAcquireSpinlockRaise (
+    IN spinlock : ^KiSpinlock,
+) : UWORD
+
+EXTERN FN KiAcquireSpinlockInPrb (
+    IN offset : UWORD,
+    OUT prb : ^KiPrb,
+) : UWORD
+
+EXTERN FN KiReleaseSpinlockLower (
+    IN spinlock : ^KiSpinlock,
+    IN oldipl : UWORD,
+)
+
 #MACRO KiAcquireObject ( object ) [
-    KiRaiseIpl ( KI_IPL_DPC )
-    KiAcquireSpinlock ( &(object)^.Spinlock )
+    KiAcquireSpinlockRaise ( &(object)^.Spinlock )
 ]
 
 #MACRO KiReleaseObject ( object, ipl ) [
-    KiReleaseSpinlock ( &(object)^.Spinlock )
-    KiLowerIpl ( ipl )
+    KiReleaseSpinlockLower ( &(object)^.Spinlock, ipl )
 ]
 
 #MACRO KiAcquireObjectElevated ( object ) [

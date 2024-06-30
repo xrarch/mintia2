@@ -1,0 +1,120 @@
+//
+// Implements spinlocks for the kernel.
+//
+
+#INCLUDE "../Ki.hjk"
+
+#IF BLD_MP
+
+#ASM [
+
+// a0 - offset
+// outputs:
+// a3 - oldipl
+// a2 - prb
+KiAcquireSpinlockInPrb:
+.global KiAcquireSpinlockInPrb
+
+	// Note that we access the Prb through a per-processor mapping via the wired
+	// TB entries on XR17032. Therefore we can get a pointer to it before we
+	// raise IPL and that's safe, allowing us to order it with the following
+	// fall-through. Also note that the address of the Prb is calculated twice;
+	// avoiding this isn't worth the extra icache cost.
+	
+	subi a2, zero, 4096             // Acquire a pointer to the Prb.
+	add  a0, a0, a2                 // Calculate the pointer of the spinlock.
+
+	// Fall through.
+
+// a0 - spinlock
+// outputs:
+// a3 - oldipl
+KiAcquireSpinlockRaise:
+.global KiAcquireSpinlockRaise
+
+	// Inline KiRaiseIpl here.
+
+    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    mov  a3, byte [t0 + KiPrb_Ipl]  // Load the old IPL.
+    mov  byte [t0 + KiPrb_Ipl], 2   // Store the new IPL.
+
+	// Fall through.
+
+// a0 - spinlock
+KiAcquireSpinlock:
+.global KiAcquireSpinlock
+
+	// Common case: non-contended.
+
+.retry:
+	ll   t0, a0
+	bne  t0, .spin
+	sc   t0, a0, a0
+	beq  t0, .spin
+
+	// Memory barrier to ensure reads in the critical section don't see stale
+	// junk.
+
+	mb
+
+	ret
+
+	// Spin until free without using LL since it brings the cache line in
+	// exclusive which is overzealous.
+
+.spin:
+	mov  t0, long [a0]
+	bne  t0, .spin
+	b    .retry
+
+// a0 - spinlock
+KiReleaseSpinlock:
+.global KiReleaseSpinlock
+
+	// Memory barrier to ensure old writes are committed.
+
+	wmb
+
+	// Set spinlock un-owned.
+
+	mov  long [a0], zero
+
+	ret
+
+// a0 - spinlock
+// a1 - oldipl
+KiReleaseSpinlockLower:
+.global KiReleaseSpinlockLower
+
+	// Memory barrier to ensure old writes are committed.
+
+	wmb
+
+	// Set spinlock un-owned.
+
+	mov  long [a0], zero
+
+	// Inline KiLowerIpl here.
+
+    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.
+    mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
+    rsh  t2, t1, a1                 // Right shift pending by new IPL.
+    beq  t2, .skip                  // If zero, none pending at new IPL.
+
+    subi sp, sp, 4
+    mov  long [sp], lr
+
+    mov  a0, a1
+    jal  KiDispatchSoftwareInterrupts
+
+    mov  lr, long [sp]
+    addi sp, sp, 4
+
+.skip:
+
+    ret
+
+]
+
+#END

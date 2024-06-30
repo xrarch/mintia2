@@ -7,24 +7,28 @@
 #IF BLD_MP
 
 #MACRO KiAcquireTimerTree ( prb ) [
-    KiRaiseIpl ( KI_IPL_DPC )
-    NOTHING (prb) = KI_CURRENT_PRB
-    KiAcquireSpinlock ( &(prb)^.TimerTreeLock )
+    KiAcquireSpinlockInPrb (
+        OFFSETOF KiPrb.TimerTreeLock, // offset
+        OUT prb, // prb
+    )
 ]
 
 #MACRO KiReleaseTimerTree ( prb, ipl ) [
-    KiReleaseSpinlock ( &(prb)^.TimerTreeLock )
-    KiLowerIpl ( ipl )
+    KiReleaseSpinlockLower (
+        &(prb)^.TimerTreeLock, // spinlock
+        ipl, // oldipl
+    )
 ]
 
 #MACRO KiAcquireOtherTimerTree ( prb ) [
-    KiRaiseIpl ( KI_IPL_DPC )
-    KiAcquireSpinlock ( &(prb)^.TimerTreeLock )
+    KiAcquireSpinlockRaise ( &(prb)^.TimerTreeLock )
 ]
 
 #MACRO KiReleaseOtherTimerTree ( prb, ipl ) [
-    KiReleaseSpinlock ( &(prb)^.TimerTreeLock )
-    KiLowerIpl ( ipl )
+    KiReleaseSpinlockLower (
+        &(prb)^.TimerTreeLock, // spinlock
+        ipl, // oldipl
+    )
 ]
 
 #MACRO KiAcquireTimerTreeElevated ( prb ) [

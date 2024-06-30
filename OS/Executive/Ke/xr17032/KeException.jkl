@@ -248,6 +248,8 @@ DbgExcEnd:
 // a3 - oldipl
 KiRaiseIpl:
 .global KiRaiseIpl
+
+    // Note: This routine is inlined at KiAcquireSpinlockRaise.
     
     subi t0, zero, 4096             // Acquire a pointer to the Prb.
     mov  a3, byte [t0 + KiPrb_Ipl]  // Load the old IPL.
@@ -259,13 +261,22 @@ KiRaiseIpl:
 KiLowerIpl:
 .global KiLowerIpl
 
+    // Note: This routine is inlined at KiReleaseSpinlockLower.
+
     subi t0, zero, 4096             // Acquire a pointer to the Prb.
     mov  byte [t0 + KiPrb_Ipl], a0  // Store the new IPL.
     mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a0                 // Right shift pending by new IPL.
     beq  t2, .skip                  // If zero, none pending at new IPL.
 
+    subi sp, sp, 4
+    mov  long [sp], lr
+
+    mov  a0, a1
     jal  KiDispatchSoftwareInterrupts
+
+    mov  lr, long [sp]
+    addi sp, sp, 4
 
 .skip:
 

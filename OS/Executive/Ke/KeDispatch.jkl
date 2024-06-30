@@ -6,41 +6,42 @@
 
 #IF BLD_MP
 
-#MACRO KiAcquireReadyQueueLow () [
-    KiRaiseIpl ( KI_IPL_DPC )
-    prb := KI_CURRENT_PRB
-    KiAcquireSpinlock ( &prb^.ReadyQueueLock )
+#MACRO KiAcquireReadyQueueLow ( prb ) [
+    KiAcquireSpinlockInPrb (
+        OFFSETOF KiPrb.ReadyQueueLock, // offset
+        OUT prb, // prb
+    )
 ]
 
-#MACRO KiReleaseReadyQueueLow ( oldstate ) [
-    prb := KI_CURRENT_PRB
-    KiReleaseSpinlock ( &prb^.ReadyQueueLock )
-    KiLowerIpl ( oldstate )
+#MACRO KiReleaseReadyQueueLow ( prb, oldipl ) [
+    KiReleaseSpinlockLower (
+        &(prb)^.ReadyQueueLock, // spinlock
+        oldipl, // oldipl
+    )
 ]
 
-#MACRO KiAcquireReadyQueueElevated () [
-    prb := KI_CURRENT_PRB
+#MACRO KiAcquireReadyQueueElevated ( prb ) [
     KiAcquireSpinlock ( &(prb)^.ReadyQueueLock )
 ]
 
-#MACRO KiReleaseReadyQueueElevated () [
-    prb := KI_CURRENT_PRB
+#MACRO KiReleaseReadyQueueElevated ( prb ) [
     KiReleaseSpinlock ( &(prb)^.ReadyQueueLock )
 ]
 
 #ELSE
 
-#MACRO KiAcquireReadyQueueLow () [
+#MACRO KiAcquireReadyQueueLow ( prb ) [
     KiRaiseIpl ( KI_IPL_DPC )
+    NOTHING (prb) = KI_CURRENT_PRB
 ]
 
-#MACRO KiReleaseReadyQueueLow ( oldstate ) [
-    KiLowerIpl ( oldstate )
+#MACRO KiReleaseReadyQueueLow ( prb, oldipl ) [
+    KiLowerIpl ( oldipl )
 ]
 
-#MACRO KiAcquireReadyQueueElevated () []
+#MACRO KiAcquireReadyQueueElevated ( prb ) []
 
-#MACRO KiReleaseReadyQueueElevated () []
+#MACRO KiReleaseReadyQueueElevated ( prb ) []
 
 #END
 
