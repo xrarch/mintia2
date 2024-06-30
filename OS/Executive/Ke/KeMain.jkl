@@ -51,11 +51,11 @@ FN KiInitializePrb (
     )
 
 #IF ( == BLD_BITS 64 )
-    prb^.EarliestTimerTick.Quad = 0xFFFFFFFFFFFFFFFF
+    prb^.EarliestTimerMs.Quad = 0xFFFFFFFFFFFFFFFF
 
 #ELSE
-    prb^.EarliestTimerTick.Low = 0xFFFFFFFF
-    prb^.EarliestTimerTick.High = 0xFFFFFFFF
+    prb^.EarliestTimerMs.Low = 0xFFFFFFFF
+    prb^.EarliestTimerMs.High = 0xFFFFFFFF
 #END
 
     prb^.Ipl = KI_IPL_LOW
@@ -67,6 +67,57 @@ FN KiInitializePrb (
 
         i += 1
     END
+END
+
+KiTestTimer : KeTimer
+KiTestTimer2 : KeTimer
+KiTestTimer3 : KeTimer
+
+FN (KeDpcF) KiTestTimerDpc (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    IF NOT context1 THEN
+        RtlPrint ( "1000 " )
+
+    ELSEIF context1 == 1 THEN
+        RtlPrint ( "500  " )
+
+    ELSEIF context1 == 2 THEN
+        RtlPrint ( "250  " )
+    END
+
+    interval : RtlUquad
+
+    interval.High = 0
+    interval.Low = 1000
+
+    KeEnqueueTimer (
+        &KiTestTimer, // timer
+        &interval, // interval
+        0, // context1
+        0, // context2
+    )
+
+    interval.Low = 500
+
+    KeEnqueueTimer (
+        &KiTestTimer2, // timer
+        &interval, // interval
+        1, // context1
+        0, // context2
+    )
+
+    interval.Low = 250
+
+    KeEnqueueTimer (
+        &KiTestTimer3, // timer
+        &interval, // interval
+        2, // context1
+        0, // context2
+    )
 END
 
 FNPTR DbgMainF ()
@@ -142,6 +193,55 @@ EXPORT FN KeMain (
     // Announce ourselves.
 
     RtlPrint ( "KeMain(): MINTIA is awake!\n" )
+
+    dpc : KeDpc
+    dpc2 : KeDpc
+    dpc3 : KeDpc
+
+    KeInitializeDpc (
+        &dpc, // dpc
+        &KiTestTimerDpc, // func
+    )
+
+    KeInitializeDpc (
+        &dpc2, // dpc
+        &KiTestTimerDpc, // func
+    )
+
+    KeInitializeDpc (
+        &dpc3, // dpc
+        &KiTestTimerDpc, // func
+    )
+
+    KeInitializeTimer (
+        &KiTestTimer, // timer
+        &dpc, // dpc
+        "TestTimer", // name
+    )
+
+    KeInitializeTimer (
+        &KiTestTimer2, // timer
+        &dpc2, // dpc
+        "TestTimer2", // name
+    )
+
+    KeInitializeTimer (
+        &KiTestTimer3, // timer
+        &dpc3, // dpc
+        "TestTimer3", // name
+    )
+
+    interval : RtlUquad
+
+    interval.High = 0
+    interval.Low = 1000
+
+    KeEnqueueTimer (
+        &KiTestTimer, // timer
+        &interval, // interval
+        0, // context1
+        0, // context2
+    )
 
     WHILE TRUE DO
         KiWaitForInterrupt ()

@@ -4,11 +4,362 @@
 
 #INCLUDE "Ki.hjk"
 
+#IF BLD_MP
+
+#MACRO KiAcquireTimerTree () [
+    KiRaiseIpl ( KI_IPL_DPC )
+    prb := KI_CURRENT_PRB
+    KiAcquireSpinlock ( &prb^.TimerTreeLock )
+]
+
+#MACRO KiReleaseTimerTree ( ipl ) [
+    prb := KI_CURRENT_PRB
+    KiReleaseSpinlock ( &prb^.TimerTreeLock )
+    KiLowerIpl ( ipl )
+]
+
+#MACRO KiAcquireOtherTimerTree ( prb ) [
+    KiRaiseIpl ( KI_IPL_DPC )
+    KiAcquireSpinlock ( &(prb)^.TimerTreeLock )
+]
+
+#MACRO KiReleaseOtherTimerTree ( prb, ipl ) [
+    KiReleaseSpinlock ( &(prb)^.TimerTreeLock )
+    KiLowerIpl ( ipl )
+]
+
+#MACRO KiAcquireTimerTreeElevated ( prb ) [
+    KiAcquireSpinlock ( &(prb)^.TimerTreeLock )
+]
+
+#MACRO KiReleaseTimerTreeElevated ( prb ) [
+    KiReleaseSpinlock ( &(prb)^.TimerTreeLock )
+]
+
+#ELSE
+
+#MACRO KiAcquireTimerTree () [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseTimerTree ( ipl ) [
+    KiLowerIpl ( ipl )
+]
+
+#MACRO KiAcquireOtherTimerTree ( prb ) [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseOtherTimerTree ( prb, ipl ) [
+    KiLowerIpl ( ipl )
+]
+
+#MACRO KiAcquireTimerTreeElevated ( prb ) []
+
+#MACRO KiReleaseTimerTreeElevated ( prb ) []
+
+#END
+
+#IF ( == BLD_BITS 32 )
+
+#MACRO KiCaptureCurrentTicks ( prb, uquad ) [
+    oldstate := KiDisableInterrupts ()
+
+    NOTHING (uquad)^.High = (prb)^.ClockTicks.High
+    NOTHING (uquad)^.Low = (prb)^.ClockTicks.Low
+
+    KiRestoreInterrupts ( oldstate )
+]
+
+#ELSE
+
+#MACRO KiCaptureCurrentTicks ( prb, uquad ) [
+    NOTHING (uquad)^.Quad = (prb)^.ClockTicks.Quad
+]
+
+#END
+
+FN (RtlLessThanF) KiCompareTimers (
+    IN a : ^RtlHeapEntry,
+    IN b : ^RtlHeapEntry,
+) : UWORD
+
+    timera := CONTAINEROF a TO KeTimer.Entry
+    timerb := CONTAINEROF b TO KeTimer.Entry
+
+    RETURN RtlUquadLtUquad ( &timera^.ExpiryTime, &timerb^.ExpiryTime )
+END
+
+EXPORT FN KeInitializeTimer (
+    IN timer : ^KeTimer,
+    IN dpc : ^KeDpc,
+    IN name : ^UBYTE,
+)
+
+    // Initialize a timer object.
+    // NOTE: If a DPC is associated with the timer, it is fully in the
+    //       custody of the timer package and should never be enqueued on its
+    //       own.
+
+    KiInitializeDispatchObject (
+        &timer^.Header, // header
+        name, // name
+        KI_DISPATCH_TIMER, // type
+    )
+
+    timer^.EnqueuedTo = NULLPTR
+    timer^.Dpc = dpc
+END
+
+EXPORT FN KeEnqueueTimer (
+    IN timer : ^KeTimer,
+    IN interval : ^RtlUquad,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+    // Enqueue a timer object. Return TRUE if successfully enqueued, FALSE
+    // otherwise.
+
+    ipl := KiAcquireTimerTree ()
+
+    KiAcquireObjectElevated ( &timer^.Header )
+
+    IF timer^.EnqueuedTo THEN
+        // It was already inserted in a timer tree.
+
+        KiReleaseObjectElevated ( &timer^.Header )
+
+        KiReleaseTimerTree ( ipl )
+
+        RETURN FALSE
+    END
+
+    prb := KI_CURRENT_PRB
+    timer^.EnqueuedTo = prb
+
+    // Capture the current time.
+
+    KiCaptureCurrentTicks (
+        prb, // prb
+        &timer^.ExpiryTime, // uquad
+    )
+
+    // We need to check the next UQUAD add for overflow, so save the current
+    // value.
+
+    previousvalue : RtlUquad
+
+    RtlMoveUquad (
+        &previousvalue, // destquad
+        &timer^.ExpiryTime, // srcquad
+    )
+
+    // Add the interval.
+
+    RtlAddUquadToUquad (
+        &timer^.ExpiryTime, // destuquad
+        interval, // srcuquad
+    )
+
+    // Check overflow.
+
+    IF RtlUquadLtUquad ( &timer^.ExpiryTime, &previousvalue ) THEN
+        // Only way the new value < old value is if overflow occurred.
+        // Note that since ticks count milliseconds and they are 64 bits, this
+        // can only occur once every 500 million years of system uptime with
+        // reasonably small intervals. Along with making sure the Planet of the
+        // Apes can still enjoy MINTIA, this is mostly to stop malicious code
+        // from enqueuing timers in the past and causing the expiration DPC to
+        // be enqueued erroneously a bunch.
+
+        timer^.EnqueuedTo = NULLPTR
+
+        KiReleaseObjectElevated ( &timer^.Header )
+
+        KiReleaseTimerTree ( ipl )
+
+        RETURN FALSE
+    END
+
+    // Insert it in the timer tree structure.
+
+    RtlInsertIntoHeap (
+        &KiCompareTimers, // comparisonfunc
+        &prb^.TimerTreeRoot, // rootptr
+        &timer^.Entry, // entry
+    )
+
+    IF RtlUquadLtUquad ( &timer^.ExpiryTime, &prb^.EarliestTimerMs ) THEN
+        // Set new earliest expiry.
+        // Don't synchronize with the timer interrupt since it catching us
+        // halfway thru an update is harmless (and extremely rare).
+
+        RtlMoveUquad (
+            &prb^.EarliestTimerMs, // destquad
+            &timer^.ExpiryTime, // srcquad
+        )
+    END
+
+    // Capture the DPC context.
+
+    IF timer^.Dpc THEN
+        timer^.Dpc^.Context1 = context1
+        timer^.Dpc^.Context2 = context2
+    END
+
+    KiReleaseObjectElevated ( &timer^.Header )
+
+    KiReleaseTimerTree ( ipl )
+
+    RETURN TRUE
+END
+
+EXPORT FN KeDequeueTimer (
+    IN timer : ^KeTimer,
+) : UWORD
+
+    // Dequeue the timer. Return TRUE if dequeued, FALSE otherwise.
+
+@Retry
+
+    // Get the PRB it was enqueued to.
+
+    trgprb := timer^.EnqueuedTo
+
+    IF NOT trgprb THEN
+        // It wasn't enqueued to a PRB.
+
+        RETURN FALSE
+    END
+
+    // Lock the PRB's timer queue.
+
+    ipl := KiAcquireOtherTimerTree ( trgprb )
+
+    IF timer^.EnqueuedTo != trgprb THEN
+        // It changed while we were checking.
+        // Retry.
+
+        KiReleaseOtherTimerTree ( trgprb, ipl )
+
+        GOTO Retry
+    END
+
+    // Acquire the timer's object lock.
+
+    KiAcquireObjectElevated ( &timer^.Header )
+
+    // Remove it from the timer tree structure.
+
+    RtlRemoveFromHeap (
+        &KiCompareTimers, // comparisonfunc
+        &trgprb^.TimerTreeRoot, // rootptr
+        &timer^.Entry, // entry
+    )
+
+    // Set dequeued.
+
+    timer^.EnqueuedTo = NULLPTR
+
+    // Release the timer's object lock.
+
+    KiReleaseObjectElevated ( &timer^.Header )
+
+    // Release the timer tree lock.
+
+    KiReleaseOtherTimerTree ( trgprb, ipl )
+END
+
 FN (KeDpcF) KiTimerExpiration (
     IN dpc : ^KeDpc,
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
-    KeCrash ( "NYI KiTimerExpiration\n" )
+    currentticks : RtlUquad
+
+    prb := KI_CURRENT_PRB
+
+    // Capture the current time.
+
+    KiCaptureCurrentTicks (
+        prb, // prb
+        &currentticks, // uquad
+    )
+
+    // Pop items from the timer tree until we hit one that hasn't expired yet.
+
+    WHILE TRUE DO
+        KiAcquireTimerTreeElevated ( prb )
+
+        entry := prb^.TimerTreeRoot
+
+        IF NOT entry THEN
+            // No more timers to process.
+
+            KiReleaseTimerTreeElevated ( prb )
+
+            BREAK
+        END
+
+        timer := CONTAINEROF entry TO KeTimer.Entry
+
+        IF RtlUquadGtUquad ( &timer^.ExpiryTime, &currentticks ) THEN
+            // Expires later than the current time. No more timers to process.
+
+            KiReleaseTimerTreeElevated ( prb )
+
+            BREAK
+        END
+
+        // Acquire the object lock of the timer.
+
+        KiAcquireObjectElevated ( &timer^.Header )
+
+        // Remove from the structure.
+
+        RtlRemoveFromHeap (
+            &KiCompareTimers, // comparisonfunc
+            &prb^.TimerTreeRoot, // rootptr
+            entry, // entry
+        )
+
+        timer^.EnqueuedTo = NULLPTR
+
+        // Release the timer tree lock now. Not strictly necessary, just to
+        // reduce the hold time.
+
+        KiReleaseTimerTreeElevated ( prb )
+
+        // Signal the timer if there are wait blocks.
+
+        IF NOT RtlEmptyList ( &timer^.Header.WaitListHead ) THEN
+            KeCrash ( "TODO Signal.\n" )
+        END
+
+        // Capture DPC information.
+
+        timerdpc := timer^.Dpc
+
+        IF timerdpc THEN
+            context1 = timerdpc^.Context1
+            context2 = timerdpc^.Context2
+        END
+
+        // Release the timer's object lock.
+
+        KiReleaseObjectElevated ( &timer^.Header ) 
+
+        // Execute the DPC function. This MUST be done outside of any spinlocks,
+        // just like any other DPC function.
+
+        IF timerdpc THEN
+            timerdpc^.Function (
+                timerdpc, // dpc
+                context1, // context1
+                context2, // context2
+            )
+        END
+    END
 END

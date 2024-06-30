@@ -7,14 +7,6 @@
 #IF BLD_MP
 
 // a0 - spinlock
-KiInitializeSpinlock:
-.global KiInitializeSpinlock
-
-	mov  long [a0], zero
-
-	ret
-
-// a0 - spinlock
 KiAcquireSpinlock:
 .global KiAcquireSpinlock
 

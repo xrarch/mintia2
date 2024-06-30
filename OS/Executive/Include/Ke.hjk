@@ -2,7 +2,7 @@
 // Public header file for the Kernel (Ke) component of the MINTIA Executive.
 //
 
-TYPE KeSpinlock : ULONG
+TYPE KiSpinlock : ULONG
 
 EXTERN FN KeFindResource (
     IN name : ^UBYTE,
@@ -38,6 +38,66 @@ EXTERN FN KeFetchAndSetUlong (
     IN ptr : ^ULONG,
     IN newvalue : ULONG,
 ) : ULONG
+
+#IF ( == BLD_BITS 64 )
+
+#MACRO KeIncrementPtr ( ptr, inc ) [
+    KeIncrementUquad ( CAST (ptr) TO ^VOID, inc )
+]
+
+#MACRO KeCompareSwapPtr ( ptr, newvalue, expectedvalue ) [
+    KeCompareSwapUquad (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO UQUAD,
+        CAST (expectedvalue) TO UQUAD,
+    )
+]
+
+#MACRO KeMaskPtr ( ptr, mask ) [
+    KeMaskUquad ( CAST (ptr) TO ^VOID, mask )
+]
+
+#MACRO KeOrPtr ( ptr, bitset ) [
+    KeOrUquad ( CAST (ptr) TO ^VOID, bitset )
+]
+
+#MACRO KeFetchAndSetPtr ( ptr, newvalue ) [
+    KeFetchAndSetUquad (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO UQUAD,
+    )
+]
+
+#ELSE
+
+#MACRO KeIncrementPtr ( ptr, inc ) [
+    KeIncrementUlong ( CAST (ptr) TO ^VOID, inc )
+]
+
+#MACRO KeCompareSwapPtr ( ptr, newvalue, expectedvalue ) [
+    KeCompareSwapUlong (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO ULONG,
+        CAST (expectedvalue) TO ULONG,
+    )
+]
+
+#MACRO KeMaskPtr ( ptr, mask ) [
+    KeMaskUlong ( CAST (ptr) TO ^VOID, mask )
+]
+
+#MACRO KeOrPtr ( ptr, bitset ) [
+    KeOrUlong ( CAST (ptr) TO ^VOID, bitset )
+]
+
+#MACRO KeFetchAndSetPtr ( ptr, newvalue ) [
+    KeFetchAndSetUlong (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO ULONG,
+    )
+]
+
+#END
 
 EXTERN FN KeCrash (
     IN fmt : ^UBYTE,
@@ -123,7 +183,7 @@ STRUCT KeInterrupt
     Vector : UWORD,
     ProcessorId : UWORD,
 
-    Spinlock : KeSpinlock,
+    Spinlock : KiSpinlock,
 
     ShareVector : UBYTE,
     EdgeTriggered : UBYTE,
@@ -148,4 +208,51 @@ EXTERN FN KeConnectInterrupt (
 
 EXTERN FN KeDisconnectInterrupt (
     IN interrupt : ^KeInterrupt,
+) : UWORD
+
+// This is here instead of Ki.hjk so that the size is known in this header.
+// That doesn't mean it should be manipulated outside of Ke.
+
+ENUM KiDispatchType : UBYTE
+    KI_DISPATCH_NULL,
+
+    KI_DISPATCH_TIMER,
+    KI_DISPATCH_MUTEX,
+    KI_DISPATCH_EVENT_NOTIF,
+    KI_DISPATCH_EVENT_SYNCH,
+    KI_DISPATCH_SEMAPHORE,
+END
+
+STRUCT KiDispatchHeader
+    WaitListHead : RtlListEntry,
+    Name : ^UBYTE,
+    SignalCount : ULONG,
+    Spinlock : KiSpinlock,
+    Type : KiDispatchType,
+END
+
+STRUCT KeTimer
+    Header : KiDispatchHeader,
+
+    EnqueuedTo : ^KiPrb,
+    Entry : RtlHeapEntry,
+    ExpiryTime : RtlUquad,
+    Dpc : ^KeDpc,
+END
+
+EXTERN FN KeInitializeTimer (
+    IN timer : ^KeTimer,
+    IN dpc : ^KeDpc,
+    IN name : ^UBYTE,
+)
+
+EXTERN FN KeEnqueueTimer (
+    IN timer : ^KeTimer,
+    IN interval : ^RtlUquad,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+EXTERN FN KeDequeueTimer (
+    IN timer : ^KeTimer,
 ) : UWORD

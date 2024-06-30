@@ -133,7 +133,7 @@ FN KiClockTick (
 
     // Increment count of clock ticks on this processor.
 
-    RtlAddUlongToUquad ( &prb^.ClockTicks, 1 )
+    RtlAddUlongToUquad ( &prb^.ClockTicks, intervalms )
 
     // Update time spent at previous IPL on this processor.
 
@@ -141,7 +141,7 @@ FN KiClockTick (
 
     // Check if the earliest timer has expired.
 
-    IF RtlUquadGteqUquad ( &prb^.ClockTicks, &prb^.EarliestTimerTick ) THEN
+    IF RtlUquadGteqUquad ( &prb^.ClockTicks, &prb^.EarliestTimerMs ) THEN
         // Enqueue the timer expiration DPC.
 
         KeEnqueueDpc (
