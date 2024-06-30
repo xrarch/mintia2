@@ -15,15 +15,15 @@
 KiAcquireSpinlockInPrb:
 .global KiAcquireSpinlockInPrb
 
-	// Note that we access the Prb through a per-processor mapping via the wired
-	// TB entries on XR17032. Therefore we can get a pointer to it before we
-	// raise IPL and that's safe, allowing us to order it with the following
-	// fall-through.
-	
-	subi a0, a0, 4096               // Calculate the pointer of the spinlock
-	                                // within the Prb.
+    // Note that we access the Prb through a per-processor mapping via the wired
+    // TB entries on XR17032. Therefore we can get a pointer to it before we
+    // raise IPL and that's safe, allowing us to order it with the following
+    // fall-through.
+    
+    subi a0, a0, 4096               // Calculate the pointer of the spinlock
+                                    // within the Prb.
 
-	// Fall through.
+    // Fall through.
 
 // a0 - spinlock
 // outputs:
@@ -31,69 +31,69 @@ KiAcquireSpinlockInPrb:
 KiAcquireSpinlockRaise:
 .global KiAcquireSpinlockRaise
 
-	// Inline KiRaiseIpl here.
+    // Inline KiRaiseIpl here.
 
     subi a2, zero, 4096             // Acquire a pointer to the Prb.
     mov  a3, byte [a2 + KiPrb_Ipl]  // Load the old IPL.
     mov  byte [a2 + KiPrb_Ipl], 2   // Store the new IPL.
 
-	// Fall through.
+    // Fall through.
 
 // a0 - spinlock
 KiAcquireSpinlock:
 .global KiAcquireSpinlock
 
-	// Common case: non-contended.
+    // Common case: non-contended.
 
 .retry:
-	ll   t0, a0
-	bne  t0, .spin
-	sc   t0, a0, a0
-	beq  t0, .spin
+    ll   t0, a0
+    bne  t0, .spin
+    sc   t0, a0, a0
+    beq  t0, .spin
 
-	// Memory barrier to ensure reads in the critical section don't see stale
-	// junk.
+    // Memory barrier to ensure reads in the critical section don't see stale
+    // junk.
 
-	mb
+    mb
 
-	ret
+    ret
 
-	// Spin until free without using LL since it brings the cache line in
-	// exclusive which is overzealous.
+    // Spin until free without using LL since it brings the cache line in
+    // exclusive which is overzealous.
 
 .spin:
-	mov  t0, long [a0]
-	bne  t0, .spin
-	b    .retry
+    mov  t0, long [a0]
+    bne  t0, .spin
+    b    .retry
 
 // a0 - spinlock
 KiReleaseSpinlock:
 .global KiReleaseSpinlock
 
-	// Memory barrier to ensure old writes are committed.
+    // Memory barrier to ensure old writes are committed.
 
-	wmb
+    wmb
 
-	// Set spinlock un-owned.
+    // Set spinlock un-owned.
 
-	mov  long [a0], zero
+    mov  long [a0], zero
 
-	ret
+    ret
 
 // a0 - spinlock
 // a1 - oldipl
 KiReleaseSpinlockLower:
 .global KiReleaseSpinlockLower
 
-	// Memory barrier to ensure old writes are committed.
+    // Memory barrier to ensure old writes are committed.
 
-	wmb
+    wmb
 
-	// Set spinlock un-owned.
+    // Set spinlock un-owned.
 
-	mov  long [a0], zero
+    mov  long [a0], zero
 
-	// Inline KiLowerIpl here.
+    // Inline KiLowerIpl here.
 
     subi t0, zero, 4096             // Acquire a pointer to the Prb.
     mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.

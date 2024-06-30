@@ -12,53 +12,53 @@
 HalpAcquireSpinlock:
 .global HalpAcquireSpinlock
 
-	// First, disable interrupts.
+    // First, disable interrupts.
 
-	mfcr a3, rs
-	subi t0, zero, 3
-	and  t0, a3, t0
-	mtcr rs, t0
+    mfcr a3, rs
+    subi t0, zero, 3
+    and  t0, a3, t0
+    mtcr rs, t0
 
-	// Common case: non-contended.
+    // Common case: non-contended.
 
 .retry:
-	ll   t0, a0
-	bne  t0, .spin
-	sc   t0, a0, a0
-	beq  t0, .spin
+    ll   t0, a0
+    bne  t0, .spin
+    sc   t0, a0, a0
+    beq  t0, .spin
 
-	// Memory barrier to ensure reads in the critical section don't see stale
-	// junk.
+    // Memory barrier to ensure reads in the critical section don't see stale
+    // junk.
 
-	mb
+    mb
 
-	ret
+    ret
 
-	// Spin until free without using LL since it brings the cache line in
-	// exclusive which is overzealous.
+    // Spin until free without using LL since it brings the cache line in
+    // exclusive which is overzealous.
 
 .spin:
-	mov  t0, long [a0]
-	bne  t0, .spin
-	b    .retry
+    mov  t0, long [a0]
+    bne  t0, .spin
+    b    .retry
 
 // a0 - spinlock
 // a1 - oldstate
 HalpReleaseSpinlock:
 .global HalpReleaseSpinlock
 
-	// Memory barrier to ensure old writes are committed.
+    // Memory barrier to ensure old writes are committed.
 
-	wmb
+    wmb
 
-	// Set spinlock un-owned.
+    // Set spinlock un-owned.
 
-	mov  long [a0], zero
+    mov  long [a0], zero
 
-	// Restore interrupt state.
+    // Restore interrupt state.
 
-	mtcr rs, a1
+    mtcr rs, a1
 
-	ret
+    ret
 
 #END

@@ -11,20 +11,20 @@
 KiDisableInterrupts:
 .global KiDisableInterrupts
 
-	mfcr a3, rs                     // Load current value of RS.
-	subi t0, zero, 3                // t0 = 0xFFFFFFFD
-	and  t0, a3, t0                 // Mask out the INT bit.
-	mtcr rs, t0                     // Write new RS.
+    mfcr a3, rs                     // Load current value of RS.
+    subi t0, zero, 3                // t0 = 0xFFFFFFFD
+    and  t0, a3, t0                 // Mask out the INT bit.
+    mtcr rs, t0                     // Write new RS.
 
-	ret
+    ret
 
 // a0 - old interrupt state
 KiRestoreInterrupts:
 .global KiRestoreInterrupts
 
-	mtcr rs, a0                     // Write new RS.
+    mtcr rs, a0                     // Write new RS.
 
-	ret
+    ret
 
 KiEnableInterrupts:
 .global KiEnableInterrupts
@@ -41,9 +41,9 @@ KiEnableInterrupts:
 KiWaitForInterrupt:
 .global KiWaitForInterrupt
 
-	hlt
+    hlt
 
-	ret
+    ret
 
 // outputs:
 // a3 - processor id
@@ -67,10 +67,10 @@ KeIncrementUlong:
 #END
 
 .retry:
-	ll   a3, a0                     // Load-locked the location.
-	add  t1, a3, a1                 // Add the increment.
-	sc   t1, a0, t1                 // Conditionally store the new value.
-	beq  t1, .retry                 // If store failed, retry.
+    ll   a3, a0                     // Load-locked the location.
+    add  t1, a3, a1                 // Add the increment.
+    sc   t1, a0, t1                 // Conditionally store the new value.
+    beq  t1, .retry                 // If store failed, retry.
 
 #IF BLD_MP
     mb                              // Ensure coherence with other processors.
@@ -89,21 +89,21 @@ KeCompareSwapUlong:
 .retry:
 
 #IF BLD_MP
-	mb                              // Ensure coherence with other processors.
+    mb                              // Ensure coherence with other processors.
 #END
 
-	ll   a3, a0                     // Load-locked the location.
-	sub  t0, a3, a2                 // Compare equality with expected value.
-	bne  t0, .exit                  // Not equal, leave.
-	sc   t0, a0, a1                 // Conditionally store the new value.
-	beq  t0, .retry                 // If store failed, retry.
+    ll   a3, a0                     // Load-locked the location.
+    sub  t0, a3, a2                 // Compare equality with expected value.
+    bne  t0, .exit                  // Not equal, leave.
+    sc   t0, a0, a1                 // Conditionally store the new value.
+    beq  t0, .retry                 // If store failed, retry.
 
 #IF BLD_MP
-	mb                              // Ensure coherence with other processors.
+    mb                              // Ensure coherence with other processors.
 #END
 
 .exit:
-	ret
+    ret
 
 // a0 - ptr
 // a1 - mask
