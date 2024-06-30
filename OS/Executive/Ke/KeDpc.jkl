@@ -98,13 +98,18 @@ EXPORT FN KeEnqueueDpc (
 
     // Set the DPC interrupt pending.
 
+    // Note that we subtract 1 from the IPL shift so that we can do a right
+    // shift by IPL to check for pending bits later (which is the hotter path).
+    // Also this assumes interrupts disabled.
+
 #IF BLD_MP
     KeOrUlong (
         &prb^.PendingSoftwareInterrupts, // ptr
-        1 << KI_IPL_DPC, // bitset
+        1 << (KI_IPL_DPC - 1), // bitset
     )
+
 #ELSE
-    prb^.PendingSoftwareInterrupts |= 1 << KI_IPL_DPC
+    prb^.PendingSoftwareInterrupts |= 1 << (KI_IPL_DPC - 1)
 #END
 
     // Release the DPC queue lock.
