@@ -298,6 +298,13 @@ FN (KeDpcF) KiTimerExpiration (
         IF NOT entry THEN
             // No more timers to process.
 
+#IF ( == BLD_BITS 64 )
+            prb^.EarliestTimerMs.Quad = 0xFFFFFFFFFFFFFFFF
+#ELSE
+            prb^.EarliestTimerMs.High = 0xFFFFFFFF
+            prb^.EarliestTimerMs.Low = 0xFFFFFFFF
+#END
+
             KiReleaseTimerTreeElevated ( prb )
 
             BREAK
@@ -307,6 +314,17 @@ FN (KeDpcF) KiTimerExpiration (
 
         IF RtlUquadGtUquad ( &timer^.ExpiryTime, &currentticks ) THEN
             // Expires later than the current time. No more timers to process.
+
+            // Set new earliest time to this timer's time.
+            // It's possible for the timer ISR to see a skewed value here but
+            // it's harmless.
+
+            RtlMoveUquad (
+                &prb^.EarliestTimerMs, // destquad
+                &timer^.ExpiryTime, // srcquad
+            )
+
+            // Release the timer tree lock.
 
             KiReleaseTimerTreeElevated ( prb )
 

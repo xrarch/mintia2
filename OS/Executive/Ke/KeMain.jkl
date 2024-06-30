@@ -72,6 +72,9 @@ END
 KiTestTimer : KeTimer
 KiTestTimer2 : KeTimer
 KiTestTimer3 : KeTimer
+KiTestTimer4 : KeTimer
+KiTestTimer5 : KeTimer
+KiTestTimer6 : KeTimer
 
 FN (KeDpcF) KiTestTimerDpc (
     IN dpc : ^KeDpc,
@@ -80,19 +83,28 @@ FN (KeDpcF) KiTestTimerDpc (
 )
 
     IF NOT context1 THEN
-        RtlPrint ( "1000 " )
+        RtlPrint ( "8000 " )
 
     ELSEIF context1 == 1 THEN
-        RtlPrint ( "500  " )
+        RtlPrint ( "4000 " )
 
     ELSEIF context1 == 2 THEN
+        RtlPrint ( "2000 " )
+    
+    ELSEIF context1 == 3 THEN
+        RtlPrint ( "1000 " )
+
+    ELSEIF context1 == 4 THEN
+        RtlPrint ( "500  " )
+
+    ELSEIF context1 == 5 THEN
         RtlPrint ( "250  " )
     END
 
     interval : RtlUquad
 
     interval.High = 0
-    interval.Low = 1000
+    interval.Low = 8000
 
     KeEnqueueTimer (
         &KiTestTimer, // timer
@@ -101,7 +113,7 @@ FN (KeDpcF) KiTestTimerDpc (
         0, // context2
     )
 
-    interval.Low = 500
+    interval.Low = 4000
 
     KeEnqueueTimer (
         &KiTestTimer2, // timer
@@ -110,12 +122,39 @@ FN (KeDpcF) KiTestTimerDpc (
         0, // context2
     )
 
-    interval.Low = 250
+    interval.Low = 2000
 
     KeEnqueueTimer (
         &KiTestTimer3, // timer
         &interval, // interval
         2, // context1
+        0, // context2
+    )
+
+    interval.Low = 1000
+
+    KeEnqueueTimer (
+        &KiTestTimer4, // timer
+        &interval, // interval
+        3, // context1
+        0, // context2
+    )
+
+    interval.Low = 500
+
+    KeEnqueueTimer (
+        &KiTestTimer5, // timer
+        &interval, // interval
+        4, // context1
+        0, // context2
+    )
+
+    interval.Low = 250
+
+    KeEnqueueTimer (
+        &KiTestTimer6, // timer
+        &interval, // interval
+        5, // context1
         0, // context2
     )
 END
@@ -197,6 +236,9 @@ EXPORT FN KeMain (
     dpc : KeDpc
     dpc2 : KeDpc
     dpc3 : KeDpc
+    dpc4 : KeDpc
+    dpc5 : KeDpc
+    dpc6 : KeDpc
 
     KeInitializeDpc (
         &dpc, // dpc
@@ -210,6 +252,21 @@ EXPORT FN KeMain (
 
     KeInitializeDpc (
         &dpc3, // dpc
+        &KiTestTimerDpc, // func
+    )
+
+    KeInitializeDpc (
+        &dpc4, // dpc
+        &KiTestTimerDpc, // func
+    )
+
+    KeInitializeDpc (
+        &dpc5, // dpc
+        &KiTestTimerDpc, // func
+    )
+
+    KeInitializeDpc (
+        &dpc6, // dpc
         &KiTestTimerDpc, // func
     )
 
@@ -229,6 +286,24 @@ EXPORT FN KeMain (
         &KiTestTimer3, // timer
         &dpc3, // dpc
         "TestTimer3", // name
+    )
+
+    KeInitializeTimer (
+        &KiTestTimer4, // timer
+        &dpc4, // dpc
+        "TestTimer4", // name
+    )
+
+    KeInitializeTimer (
+        &KiTestTimer5, // timer
+        &dpc5, // dpc
+        "TestTimer5", // name
+    )
+
+    KeInitializeTimer (
+        &KiTestTimer6, // timer
+        &dpc6, // dpc
+        "TestTimer6", // name
     )
 
     interval : RtlUquad
