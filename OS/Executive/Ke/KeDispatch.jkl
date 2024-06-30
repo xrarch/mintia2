@@ -4,6 +4,9 @@
 
 #INCLUDE "Ki.hjk"
 
+#INCLUDE "<ll>/System/OsStatus.hjk"
+#INCLUDE "<ll>/System/OsSignal.hjk"
+
 #IF BLD_MP
 
 #MACRO KiAcquireReadyQueueLow ( prb ) [
@@ -28,20 +31,122 @@
     KiReleaseSpinlock ( &(prb)^.ReadyQueueLock )
 ]
 
+#MACRO KiAcquireThread ( thread ) [
+    KiAcquireSpinlockRaise ( &(thread)^.Spinlock )
+]
+
+#MACRO KiReleaseThread ( thread, oldipl ) [
+    KiReleaseSpinlockLower (
+        &(thread)^.Spinlock, // spinlock
+        oldipl, // oldipl
+    )
+]
+
+#MACRO KiAcquireThreadElevated ( thread ) [
+    KiAcquireSpinlock ( &(thread)^.Spinlock )
+]
+
+#MACRO KiReleaseThreadElevated ( thread ) [
+    KiReleaseSpinlock ( &(thread)^.Spinlock )
+]
+
 #ELSE
 
-#MACRO KiAcquireReadyQueueLow ( prb ) [
+#MACRO KiAcquireReadyQueue ( prb ) [
     KiRaiseIpl ( KI_IPL_DPC )
     NOTHING (prb) = KI_CURRENT_PRB
 ]
 
-#MACRO KiReleaseReadyQueueLow ( prb, oldipl ) [
+#MACRO KiReleaseReadyQueue ( prb, oldipl ) [
     KiLowerIpl ( oldipl )
 ]
 
 #MACRO KiAcquireReadyQueueElevated ( prb ) []
 
 #MACRO KiReleaseReadyQueueElevated ( prb ) []
+
+#MACRO KiAcquireThread ( thread ) [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseThread ( thread, oldipl ) [
+    KiLowerIpl ( oldipl )
+]
+
+#MACRO KiAcquireThreadElevated ( thread ) []
+
+#MACRO KiReleaseThreadElevated ( thread ) []
+
+#END
+
+#MACRO KiCheckWaitInterruptingEvents ( thread, ipl, alertable, waitmode ) [
+    IF ipl == KI_IPL_LOW THEN
+        // IPL >= KI_IPL_APC masks out all events.
+
+        IF NOT alertable THEN
+            IF waitmode == KE_USER_MODE AND
+                thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+
+                // Unalertable usermode waits are only interrupted by
+                // termination.
+
+                KiReleaseThread ( thread, ipl )
+
+                RETURN OS_STATUS_KILLED
+            END
+
+        ELSEIF waitmode == KE_KERNEL_MODE THEN
+            IF NOT thread^.IgnoreEventCount AND
+                thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+
+                // Alertable kernel mode waits are only interrupted by
+                // termination.
+
+                KiReleaseThread ( thread, ipl )
+
+                RETURN OS_STATUS_KILLED
+            END
+
+        ELSEIF NOT RtlEmptyList ( &thread^.UserApcListHead ) THEN
+
+            // There are pending usermode APCs.
+
+            thread^.UserApcTriggered = TRUE
+            thread^.UserInterrupt = TRUE
+
+            KiReleaseThread ( thread, ipl )
+
+            RETURN OS_STATUS_USER_APC
+
+        ELSEIF thread^.SignalMask &
+            thread^.SignalAcceptMask &
+            thread^.SignalDeliverOnWaitMask THEN
+
+            // There are pending signals.
+
+            thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
+            thread^.UserInterrupt = TRUE
+
+            KiReleaseThread ( thread, ipl )
+
+            RETURN OS_STATUS_SIGNALED
+        END
+    END
+]
+
+#IF ( == BLD_BITS 64 )
+
+#MACRO KiFiniteTimeout ( timeout ) [
+    ((RtlUlongNeqUquad ( 0, timeout )) AND
+    ((timeout)^.Quad != 0xFFFFFFFFFFFFFFFF))
+]
+
+#ELSE
+
+#MACRO KiFiniteTimeout ( timeout ) [
+    ((RtlUlongNeqUquad ( 0, timeout )) AND
+    ((timeout)^.High != 0xFFFFFFFF OR (timeout)^.Low != 0xFFFFFFFF))
+]
 
 #END
 
@@ -57,4 +162,305 @@ FN KiQuantumEnd (
 )
 
     KeCrash ( "NYI KiQuantumEnd\n" )
+END
+
+FN KiWaitThread (
+    IN thread : ^KeThread,
+    IN waitipl : UWORD,
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+) : OsStatus
+
+    // This function is entered with the thread lock held (IPLDPC).
+
+    KeCrash ( "NYI KiThreadWait\n" )
+END
+
+FN KeWaitForObjects (
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+    IN timeout : ^RtlUquad,
+    IN objectcount : UWORD,
+    IN objecttable : ^KiDispatchHeader,
+    IN waitblocktable : ^KiWaitBlock,
+) : OsStatus
+
+#IF BLD_CHK
+    IF KiCurrentIpl () >= KI_IPL_DPC THEN
+        KeCrash ( "KeWaitForObjects: IPL >= KI_IPL_DPC\n" )
+    END
+
+#IF ( == BLD_BITS 64 )
+    IF objectcount > 0xFFFFFFFF THEN
+        KeCrash ( "KeWaitForObjects: objectcount > ULONG size\n" )
+    END
+#END
+#END
+
+    IF NOT objectcount THEN
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    thread := KeCurrentThread ()
+
+    IF NOT waitblocktable THEN
+#IF BLD_CHK
+        IF objectcount > KI_THREAD_WAIT_BLOCKS THEN
+            KeCrash ( "objectcount > KI_THREAD_WAIT_BLOCKS\n" )
+        END
+#END
+
+        // Use the integral wait blocks of the thread.
+        // This mechanism exists to remove dependency on allocation.
+
+        waitblocktable = &thread^.WaitBlocks[0]
+    END
+
+@Retry
+
+    // Acquire the thread lock.
+
+    ipl := KiAcquireThread ( thread )
+
+    // Before we start, check for events that would interrupt the wait.
+    // This is a macro that can return from the function for us (after
+    // dropping the thread lock).
+
+    KiCheckWaitInterruptingEvents (
+        thread, // thread
+        ipl, // ipl
+        alertable, // alertable
+        waitmode, // waitmode
+    )
+
+    // Store the wait block table in the thread.
+
+    thread^.WaitBlockTable = waitblocktable
+    thread^.WaitCount = objectcount
+
+    // Set the thread to wait-try.
+    //
+    // Note that this wait-try tactic was derived from an explanation given
+    // by Arun Kishan in an interview about how the Windows kernel team
+    // broke up the dispatcher spinlock.
+
+    thread^.WaitAttempt = KI_THREAD_WAIT_TRY
+
+    // Release the thread lock. Only lower to KI_IPL_APC, otherwise a kernel
+    // APC coming in inbetween would cause mayhem if it tried to wait.
+
+    KiReleaseThread ( thread, KI_IPL_APC )
+
+    waitblock : ^KiWaitBlock
+    timer : ^KeTimer
+    i := 0
+    status : OsStatus
+    object : ^KiDispatchHeader
+    hastimeout := FALSE
+
+    WHILE i < objectcount DO
+        waitblock = &waitblocktable[i]
+
+        // Initialize fields of the waitblock outside the object lock.
+
+        object = &objecttable[i]
+
+        waitblock^.Thread = thread
+        waitblock^.Object = object
+        waitblock^.WakeStatus = i
+
+        // Acquire the object lock.
+
+        KiAcquireObject ( object )
+
+        IF object^.SignalCount THEN
+            // Already signaled. Our wait has been satisfied before it
+            // began.
+
+            IF object^.Type != KI_DISPATCH_EVENT_NOTIF THEN
+                // Consume the signal count.
+
+                object^.SignalCount -= 1
+            END
+
+            // Release the object lock.
+
+            KiReleaseObjectElevated ( object )
+
+            // Acquire the thread lock.
+
+            KiAcquireThreadElevated ( thread )
+
+            IF thread^.WaitAttempt == KI_THREAD_WAIT_TRY THEN
+                // Abort the wait.
+
+                thread^.WaitStatus = i
+                thread^.WaitAttempt = KI_THREAD_WAIT_ABORTED
+            END
+
+            // Don't release the thread lock. The abort codepath will do it.
+
+            GOTO Abort
+        END
+
+        // Enqueue our wait block to the object.
+
+        RtlInsertAtTailList (
+            &object^.WaitListHead, // head
+            &waitblock^.Entry, // entry
+        )
+
+        // Release the object lock.
+
+        KiReleaseObject ( object, KI_IPL_APC )
+
+        i += 1
+    END
+
+    hastimeout = KiFiniteTimeout ( timeout )
+
+    IF hastimeout THEN
+        // Start the timeout.
+        // NOTE: The timer object and the timeout wait block have been
+        //       initialized by KeInitializeThread already.
+
+        waitblock = &thread^.TimeoutWaitBlock
+        timer = &thread^.Timeout
+
+        // Set the thread field to indicate in use.
+
+        waitblock^.Thread = thread
+
+        // Insert the wait block in the timer's list.
+        // This is safe to do without a lock because only we ever mess with
+        // this timer in the context of this thread.
+
+        RtlInsertAtTailList (
+            &timer^.Header.WaitListHead, // head
+            &waitblock^.Entry, // entry
+        )
+
+        // Enqueue the timer.
+
+        KeEnqueueTimer (
+            timer, // timer
+            timeout, // interval
+            0, // context1
+            0, // context2
+        )
+    END
+
+    // Lock our thread.
+
+    KiAcquireThread ( thread )
+
+    // See if our wait has gone through.
+
+    IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED OR
+        RtlUlongEqUquad ( 0, timeout ) THEN
+
+@Abort
+
+        // Nope! We have to dequeue all our wait blocks and return.
+
+        // Capture the status before lowering IPL.
+
+        IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED THEN
+            // We were aborted. The guy who aborted us left our status in
+            // our thread struct.
+
+            status = thread^.WaitStatus
+
+        ELSE
+            // Timeout of zero - caller was just checking to see if any of
+            // these objects were signaled. They weren't.
+
+            status = OS_STATUS_UNSATISFIED
+        END
+
+        // Release the thread lock so we don't violate the object->thread
+        // lock ordering.
+
+        KiReleaseThread ( thread, KI_IPL_APC )
+
+        // Remove our wait block from every object we enqueued it to.
+
+        j := 0
+
+        WHILE j < i DO
+            waitblock = &waitblocktable[j]
+
+            object = waitblock^.Object
+
+            // Acquire the object lock.
+
+            KiAcquireObject ( object )
+
+            // Remove the wait block.
+
+            RtlRemoveEntryList ( &waitblock^.Entry )
+
+            // Release the object lock.
+
+            KiReleaseObject ( object, KI_IPL_APC )
+
+            j += 1
+        END
+
+        IF hastimeout THEN
+            // We need to get rid of the timer.
+
+            waitblock = &thread^.TimeoutWaitBlock
+            timer = &thread^.Timeout
+
+            // Dequeue it.
+
+            KeDequeueTimer ( timer )
+
+            // Acquire its lock.
+
+            KiAcquireObject ( &timer^.Header )
+
+            // Remove the wait block.
+
+            RtlRemoveEntryList ( &waitblock^.Entry )
+
+            // Release the timer's lock. We also lower IPL back to what it
+            // was when we entered the function.
+
+            thread^.WaitAttempt = KI_THREAD_WAIT_NONE
+
+            KiReleaseObject ( &timer^.Header, ipl )
+
+        ELSE
+            thread^.WaitAttempt = KI_THREAD_WAIT_NONE
+
+            IF ipl != KI_IPL_APC THEN
+                KiLowerIpl ( ipl )
+            END
+        END
+
+        RETURN status
+    END
+
+    // The wait shall proceed.
+
+    thread^.WaitAttempt = KI_THREAD_WAIT_COMMITTED
+
+    status = KiWaitThread (
+        thread, // thread
+        ipl, // waitipl
+        waitmode, // waitmode
+        alertable, // alertable
+    )
+
+    // KiThreadWait returns at the specified IPL and with the thread lock
+    // released. All of our wait blocks have been dequeued, timer dequeued,
+    // etc.
+
+    IF status == OS_STATUS_KERNEL_APC THEN
+        GOTO Retry
+    END
+
+    RETURN status
 END

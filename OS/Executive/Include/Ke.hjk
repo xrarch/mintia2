@@ -4,6 +4,9 @@
 
 TYPE KiSpinlock : ULONG
 
+#DEFINE KE_KERNEL_MODE 1
+#DEFINE KE_USER_MODE 2
+
 EXTERN FN KeFindResource (
     IN name : ^UBYTE,
     OUT data : ^VOID,
@@ -131,15 +134,7 @@ FNPTR KeDebuggerEntryF (
 
 EXTERN KeDebuggerEntry : KeDebuggerEntryF
 
-STRUCT KeThread
-    ApcListHead : RtlListEntry,
-
-    UserTimeMs : RtlUquad,
-    DpcTimeMs : RtlUquad,
-    SystemTimeMs : RtlUquad,
-
-    RemainingQuantum : UBYTE,
-END
+EXTERN FN KeCurrentThread () : ^KeThread
 
 FNPTR KeDpcF (
     IN dpc : ^KeDpc,
@@ -231,6 +226,13 @@ STRUCT KiDispatchHeader
     Type : KiDispatchType,
 END
 
+STRUCT KiWaitBlock
+    Entry : RtlListEntry,
+    Thread : ^KeThread,
+    Object : ^KiDispatchHeader,
+    WakeStatus : UWORD,
+END
+
 STRUCT KeTimer
     Header : KiDispatchHeader,
 
@@ -256,3 +258,39 @@ EXTERN FN KeEnqueueTimer (
 EXTERN FN KeDequeueTimer (
     IN timer : ^KeTimer,
 ) : UWORD
+
+#DEFINE KI_THREAD_WAIT_BLOCKS 4
+
+#DEFINE KI_THREAD_WAIT_NONE 0
+#DEFINE KI_THREAD_WAIT_TRY 1
+#DEFINE KI_THREAD_WAIT_ABORTED 2
+#DEFINE KI_THREAD_WAIT_COMMITTED 3
+
+STRUCT KeThread
+    ApcListHead : RtlListEntry,
+    UserApcListHead : RtlListEntry,
+
+    UserTimeMs : RtlUquad,
+    DpcTimeMs : RtlUquad,
+    SystemTimeMs : RtlUquad,
+
+    WaitBlockTable : ^KiWaitBlock,
+
+    WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
+    TimeoutWaitBlock : KiWaitBlock,
+    Timeout : KeTimer,
+
+    Spinlock : KiSpinlock,
+
+    SignalMask : ULONG,
+    SignalAcceptMask : ULONG,
+    SignalDeliverOnWaitMask : ULONG,
+    IgnoreEventCount : ULONG,
+    WaitStatus : ULONG,
+
+    RemainingQuantum : UBYTE,
+    WaitAttempt : UBYTE,
+    UserApcTriggered : UBYTE,
+    UserInterrupt : UBYTE,
+    WaitCount : UBYTE,
+END

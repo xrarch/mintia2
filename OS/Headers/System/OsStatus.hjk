@@ -1,0 +1,34 @@
+//
+// Status codes for the MINTIA system.
+//
+
+TYPE OsStatus : ULONG
+
+// Status codes are 32 bit values. The uppermost two bits indicate the severity.
+
+#DEFINE OS_SEVERITY_SUCCESS 0x80000000
+#DEFINE OS_SEVERITY_ERROR 0xC0000000
+
+// Successful statuses should use only the upper 32 bits to allow loading them
+// with a single LUI instruction on RISC platforms.
+
+#DEFINE OS_STATUS_SUCCESS 0x80010000
+
+// Error statuses.
+
+#DEFINE OS_STATUS_WAIT_TIMEOUT 0xC0010000
+#DEFINE OS_STATUS_KERNEL_APC 0xC0020000
+#DEFINE OS_STATUS_USER_APC 0xC0030000
+#DEFINE OS_STATUS_KILLED 0xC0040000
+#DEFINE OS_STATUS_SIGNALED 0xC0050000
+#DEFINE OS_STATUS_UNSATISFIED 0xC0060000
+
+// Macros for dealing with statuses.
+
+#MACRO OsSuccessful ( status ) [
+    ((status) & OS_SEVERITY_ERROR == OS_SEVERITY_SUCCESS)
+]
+
+#MACRO OsError ( status ) [
+    ((status) & OS_SEVERITY_ERROR == OS_SEVERITY_ERROR)
+]
