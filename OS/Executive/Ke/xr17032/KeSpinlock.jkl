@@ -18,11 +18,10 @@ KiAcquireSpinlockInPrb:
 	// Note that we access the Prb through a per-processor mapping via the wired
 	// TB entries on XR17032. Therefore we can get a pointer to it before we
 	// raise IPL and that's safe, allowing us to order it with the following
-	// fall-through. Also note that the address of the Prb is calculated twice;
-	// avoiding this isn't worth the extra icache cost.
+	// fall-through.
 	
-	subi a2, zero, 4096             // Acquire a pointer to the Prb.
-	add  a0, a0, a2                 // Calculate the pointer of the spinlock.
+	subi a0, a0, 4096               // Calculate the pointer of the spinlock
+	                                // within the Prb.
 
 	// Fall through.
 
@@ -34,9 +33,9 @@ KiAcquireSpinlockRaise:
 
 	// Inline KiRaiseIpl here.
 
-    subi t0, zero, 4096             // Acquire a pointer to the Prb.
-    mov  a3, byte [t0 + KiPrb_Ipl]  // Load the old IPL.
-    mov  byte [t0 + KiPrb_Ipl], 2   // Store the new IPL.
+    subi a2, zero, 4096             // Acquire a pointer to the Prb.
+    mov  a3, byte [a2 + KiPrb_Ipl]  // Load the old IPL.
+    mov  byte [a2 + KiPrb_Ipl], 2   // Store the new IPL.
 
 	// Fall through.
 
