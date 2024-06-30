@@ -96,7 +96,7 @@ STRUCT KiPrb
 
     Id : UINT,
 
-    Ipl : UBYTE,
+    Ipl : UBYTE, // ASM routines assume this is a byte size.
     QuantumEnd : UBYTE,
     DpcActive : UBYTE,
 END
@@ -119,48 +119,6 @@ END
 // Otherwise, it's sane if the architecture provides a way to wire the Prb into
 // the same address across all cores. If neither of the above hold, it's insane!
 
-#IF KI_DIRECT_PRB
-
-#MACRO KiRaiseIpl ( newipl ) [
-    KI_CURRENT_PRB^.Ipl
-
-    #IF BLD_CHK
-        oldipl := KI_CURRENT_PRB^.Ipl
-
-        IF newipl < oldipl THEN
-            KeCrash ( "IPL not greater or equal (%d, %d)", oldipl, newipl )
-
-        ELSEIF newipl > KI_IPL_DPC THEN
-            KeCrash ( "Hardware IPL %d", newipl )
-        END
-    #END
-
-    NOTHING KI_CURRENT_PRB^.Ipl = newipl
-]
-
-#MACRO KiLowerIpl ( newipl ) [
-    prb := KI_CURRENT_PRB
-
-    oldipl := prb^.Ipl
-
-    #IF BLD_CHK
-        IF newipl > oldipl THEN
-            KeCrash ( "IPL not less or equal (%d, %d)", oldipl, newipl )
-
-        ELSEIF oldipl > KI_IPL_DPC THEN
-            KeCrash ( "Hardware old IPL %d", oldipl )
-        END
-    #END
-
-    prb^.Ipl = newipl
-
-    IF prb^.PendingSoftwareInterrupts & (0xF << newipl) THEN
-        KiDispatchSoftwareInterrupts ( newipl )
-    END
-]
-
-#ELSE
-
 EXTERN FN KiRaiseIpl (
     IN newipl : UWORD,
 ) : UWORD
@@ -168,8 +126,6 @@ EXTERN FN KiRaiseIpl (
 EXTERN FN KiLowerIpl (
     IN newipl : UWORD,
 )
-
-#END
 
 EXTERN FN KiDisableInterrupts () : UWORD
 

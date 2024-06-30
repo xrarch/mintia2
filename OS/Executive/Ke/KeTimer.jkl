@@ -6,15 +6,14 @@
 
 #IF BLD_MP
 
-#MACRO KiAcquireTimerTree () [
+#MACRO KiAcquireTimerTree ( prb ) [
     KiRaiseIpl ( KI_IPL_DPC )
-    prb := KI_CURRENT_PRB
-    KiAcquireSpinlock ( &prb^.TimerTreeLock )
+    NOTHING (prb) = KI_CURRENT_PRB
+    KiAcquireSpinlock ( &(prb)^.TimerTreeLock )
 ]
 
-#MACRO KiReleaseTimerTree ( ipl ) [
-    prb := KI_CURRENT_PRB
-    KiReleaseSpinlock ( &prb^.TimerTreeLock )
+#MACRO KiReleaseTimerTree ( prb, ipl ) [
+    KiReleaseSpinlock ( &(prb)^.TimerTreeLock )
     KiLowerIpl ( ipl )
 ]
 
@@ -38,11 +37,12 @@
 
 #ELSE
 
-#MACRO KiAcquireTimerTree () [
+#MACRO KiAcquireTimerTree ( prb ) [
     KiRaiseIpl ( KI_IPL_DPC )
+    NOTHING (prb) = KI_CURRENT_PRB
 ]
 
-#MACRO KiReleaseTimerTree ( ipl ) [
+#MACRO KiReleaseTimerTree ( prb, ipl ) [
     KiLowerIpl ( ipl )
 ]
 
@@ -121,7 +121,9 @@ EXPORT FN KeEnqueueTimer (
     // Enqueue a timer object. Return TRUE if successfully enqueued, FALSE
     // otherwise.
 
-    ipl := KiAcquireTimerTree ()
+    prb : ^KiPrb
+
+    ipl := KiAcquireTimerTree ( prb )
 
     KiAcquireObjectElevated ( &timer^.Header )
 
@@ -130,12 +132,11 @@ EXPORT FN KeEnqueueTimer (
 
         KiReleaseObjectElevated ( &timer^.Header )
 
-        KiReleaseTimerTree ( ipl )
+        KiReleaseTimerTree ( prb, ipl )
 
         RETURN FALSE
     END
 
-    prb := KI_CURRENT_PRB
     timer^.EnqueuedTo = prb
 
     // Capture the current time.
@@ -177,7 +178,7 @@ EXPORT FN KeEnqueueTimer (
 
         KiReleaseObjectElevated ( &timer^.Header )
 
-        KiReleaseTimerTree ( ipl )
+        KiReleaseTimerTree ( prb, ipl )
 
         RETURN FALSE
     END
@@ -210,7 +211,7 @@ EXPORT FN KeEnqueueTimer (
 
     KiReleaseObjectElevated ( &timer^.Header )
 
-    KiReleaseTimerTree ( ipl )
+    KiReleaseTimerTree ( prb, ipl )
 
     RETURN TRUE
 END
@@ -351,6 +352,11 @@ FN (KeDpcF) KiTimerExpiration (
         KiReleaseTimerTreeElevated ( prb )
 
         // Signal the timer if there are wait blocks.
+        // XXX This is wrong but I'm keeping it like this for a bit til the
+        //     dispatcher is implemented - if there are no waiters we still
+        //     need to set the SignalCount. This could either be done inline
+        //     here or we can do it in whatever subroutine we call to deal with
+        //     signaling the object; we'll see.
 
         IF NOT RtlEmptyList ( &timer^.Header.WaitListHead ) THEN
             KeCrash ( "TODO Signal.\n" )

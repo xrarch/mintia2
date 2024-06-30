@@ -52,7 +52,7 @@ FN (KiHighLevelHandlerF) KiHandleInterrupt (
 
     currentipl := prb^.Ipl
 
-    IF prb^.PendingSoftwareInterrupts & (0xF << currentipl) THEN
+    IF prb^.PendingSoftwareInterrupts >> currentipl THEN
         KiDispatchSoftwareInterrupts ( currentipl )
     END
 END
@@ -242,6 +242,34 @@ KiExceptionHandler:
 
 DbgExcEnd:
 .export DbgExcEnd
+
+// a0 - newipl
+// outputs:
+// a3 - oldipl
+KiRaiseIpl:
+.global KiRaiseIpl
+    
+    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    mov  a3, byte [t0 + KiPrb_Ipl]  // Load the old IPL.
+    mov  byte [t0 + KiPrb_Ipl], a0  // Store the new IPL.
+
+    ret
+
+// a0 - newipl
+KiLowerIpl:
+.global KiLowerIpl
+
+    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    mov  byte [t0 + KiPrb_Ipl], a0  // Store the new IPL.
+    mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
+    rsh  t2, t1, a0                 // Right shift pending by new IPL.
+    beq  t2, .skip                  // If zero, none pending at new IPL.
+
+    jal  KiDispatchSoftwareInterrupts
+
+.skip:
+
+    ret
 
 ]
 
