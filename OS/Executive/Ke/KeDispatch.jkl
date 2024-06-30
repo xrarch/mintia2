@@ -190,16 +190,16 @@ FN KeWaitForObjects (
         KeCrash ( "KeWaitForObjects: IPL >= KI_IPL_DPC\n" )
     END
 
+    IF NOT objectcount THEN
+        KeCrash ( "KeWaitForObjects: objectcount == 0\n" )
+    END
+
 #IF ( == BLD_BITS 64 )
     IF objectcount > 0xFFFFFFFF THEN
         KeCrash ( "KeWaitForObjects: objectcount > ULONG size\n" )
     END
 #END
 #END
-
-    IF NOT objectcount THEN
-        RETURN OS_STATUS_SUCCESS
-    END
 
     thread := KeCurrentThread ()
 
@@ -246,10 +246,9 @@ FN KeWaitForObjects (
 
     thread^.WaitAttempt = KI_THREAD_WAIT_TRY
 
-    // Release the thread lock. Only lower to KI_IPL_APC, otherwise a kernel
-    // APC coming in inbetween would cause mayhem if it tried to wait.
+    // Release the thread lock.
 
-    KiReleaseThread ( thread, KI_IPL_APC )
+    KiReleaseThreadElevated ( thread )
 
     waitblock : ^KiWaitBlock
     timer : ^KeTimer
@@ -271,7 +270,7 @@ FN KeWaitForObjects (
 
         // Acquire the object lock.
 
-        KiAcquireObject ( object )
+        KiAcquireObjectElevated ( object )
 
         IF object^.SignalCount THEN
             // Already signaled. Our wait has been satisfied before it
@@ -312,7 +311,7 @@ FN KeWaitForObjects (
 
         // Release the object lock.
 
-        KiReleaseObject ( object, KI_IPL_APC )
+        KiReleaseObjectElevated ( object )
 
         i += 1
     END
@@ -352,7 +351,7 @@ FN KeWaitForObjects (
 
     // Lock our thread.
 
-    KiAcquireThread ( thread )
+    KiAcquireThreadElevated ( thread )
 
     // See if our wait has gone through.
 
@@ -381,7 +380,7 @@ FN KeWaitForObjects (
         // Release the thread lock so we don't violate the object->thread
         // lock ordering.
 
-        KiReleaseThread ( thread, KI_IPL_APC )
+        KiReleaseThreadElevated ( thread )
 
         // Remove our wait block from every object we enqueued it to.
 
@@ -394,7 +393,7 @@ FN KeWaitForObjects (
 
             // Acquire the object lock.
 
-            KiAcquireObject ( object )
+            KiAcquireObjectElevated ( object )
 
             // Remove the wait block.
 
@@ -402,7 +401,7 @@ FN KeWaitForObjects (
 
             // Release the object lock.
 
-            KiReleaseObject ( object, KI_IPL_APC )
+            KiReleaseObjectElevated ( object )
 
             j += 1
         END
@@ -417,28 +416,17 @@ FN KeWaitForObjects (
 
             KeDequeueTimer ( timer )
 
-            // Acquire its lock.
-
-            KiAcquireObject ( &timer^.Header )
-
             // Remove the wait block.
+            // We *still* don't need the lock because we've been nonpreemptible
+            // and blocking out the expiration DPC for this processor the whole
+            // time.
 
             RtlRemoveEntryList ( &waitblock^.Entry )
-
-            // Release the timer's lock. We also lower IPL back to what it
-            // was when we entered the function.
-
-            thread^.WaitAttempt = KI_THREAD_WAIT_NONE
-
-            KiReleaseObject ( &timer^.Header, ipl )
-
-        ELSE
-            thread^.WaitAttempt = KI_THREAD_WAIT_NONE
-
-            IF ipl != KI_IPL_APC THEN
-                KiLowerIpl ( ipl )
-            END
         END
+
+        thread^.WaitAttempt = KI_THREAD_WAIT_NONE
+
+        KiLowerIpl ( ipl )
 
         RETURN status
     END
