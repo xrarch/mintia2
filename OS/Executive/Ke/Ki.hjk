@@ -6,6 +6,7 @@
 #INCLUDE "<inc>/Hal.hjk"
 #INCLUDE "<inc>/Ke.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
+#INCLUDE "<ll>/System/OsProcess.hjk"
 
 #DEFINE KI_IPL_LOW 0
 #DEFINE KI_IPL_APC 1
@@ -74,6 +75,48 @@ STRUCT KiPrb
 
     IrqDispatchTable : ^KeInterrupt[HAL_VECTOR_MAX],
 
+    // Inspired by ULE of FreeBSD:
+    //
+    // The real time list heads are indexed by thread priority, with all ready
+    // threads of the same priority being chained together off of that list
+    // head. The scheduler will *always* select the highest priority available
+    // thread from the real time ready queues if one exists.
+    //
+    // The threads in this queue come from those with "real time priority", and
+    // also those with lower priority that have been temporarily designated as
+    // as "interactive" in order to increase responsiveness.
+
+    RealTimeListHeads : RtlListEntry[OS_PRIORITY_MAX],
+
+    // The calendar list heads form a "clock" whose hand ticks once every 20ms,
+    // or the length of the system tick, whichever is greater. When the real
+    // time queues are empty, the next thread to run is taken from the queue
+    // pointed to by the CalendarRunIndex. After all threads are emptied from
+    // this queue (i.e. they have all gotten a chance to run), the
+    // CalendarRunIndex is incremented to the next queue which contains threads,
+    // in order to make sure the processor doesn't waste time idling.
+    //
+    // The CalendarEnqueueIndex is the ticking hand. Newly enqueued threads are
+    // inserted into the queue pointed to by:
+    //
+    //   CalendarEnqueueIndex + OS_PRIORITY_LOW_REALTIME - thread^.Priority
+    //
+    // That is, threads are placed into a "further" queue when they have lower
+    // priority. This accomplishes a relative ratio of CPU time granted to each
+    // thread based on their priorities.
+    //
+    // If CalendarRunIndex is incremented and equals CalendarEnqueueIndex, the
+    // latter is incremented in order to make sure the queue being run is
+    // flushed before more stuff is put on it.
+    //
+    // Threads on these lists are called "timeshared threads".
+
+    CalendarListHeads : RtlListEntry[OS_PRIORITY_LOW_REALTIME],
+
+    // Idle threads (priority 0) go on this list.
+
+    IdleListHead : RtlListEntry,
+
     TimerInterrupt : KeInterrupt,
 
     ClockTicks : RtlUquad,
@@ -94,11 +137,21 @@ STRUCT KiPrb
 
     PendingSoftwareInterrupts : ULONG,
 
+    // 32-bit mask of which real time queues have at least one thread.
+
+    RealTimeReady : ULONG,
+
+    // 32-bit mask of which timeshared queues have at least one thread.
+
+    CalendarReady : ULONG,
+
     Id : UINT,
 
     Ipl : UBYTE, // ASM routines assume this is a byte size.
     QuantumEnd : UBYTE,
     DpcActive : UBYTE,
+    CalendarRunIndex : UBYTE,
+    CalendarEnqueueIndex : UBYTE,
 END
 
 // KiRaiseIpl and KiLowerIpl may only be used to move between the software IPLs:
@@ -247,6 +300,8 @@ EXTERN FN KiReleaseSpinlockLower (
     RtlInitializeList ( &(hdr)^.WaitListHead )
     NOTHING (hdr)^.Name = (name)
     NOTHING (hdr)^.SignalCount = 0
+#IF BLD_MP
     KiInitializeSpinlock ( &(hdr)^.Spinlock )
+#END
     NOTHING (hdr)^.Type = (type)
 ]

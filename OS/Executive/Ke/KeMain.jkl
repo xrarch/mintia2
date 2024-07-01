@@ -60,6 +60,8 @@ FN KiInitializePrb (
 
     prb^.Ipl = KI_IPL_LOW
 
+    // Initialize the IRQ dispatch table.
+
     i := 0
 
     WHILE i < HAL_VECTOR_MAX DO
@@ -67,6 +69,30 @@ FN KiInitializePrb (
 
         i += 1
     END
+
+    // Initialize the real time scheduler queues.
+
+    i = 0
+
+    WHILE i < OS_PRIORITY_MAX DO
+        RtlInitializeList ( &prb^.RealTimeListHeads[i] )
+
+        i += 1
+    END
+
+    // Initialize the timeshared scheduler queues.
+
+    i = 0
+
+    WHILE i < OS_PRIORITY_LOW_REALTIME DO
+        RtlInitializeList ( &prb^.CalendarListHeads[i] )
+
+        i += 1
+    END
+
+    // Initialize the idle scheduler queue.
+
+    RtlInitializeList ( &prb^.IdleListHead )
 END
 
 KiTestTimer : KeTimer

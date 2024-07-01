@@ -16,7 +16,9 @@ END
 PUBLIC KiUnexpectedInterruptObject : KeInterrupt = {
     [Routine] = &KiUnexpectedInterrupt,
     [Ipl] = KI_IPL_HIGH,
+#IF BLD_MP
     [Spinlock] = KI_INITIAL_SPINLOCK,
+#END
 }
 
 EXPORT FN KeInitializeInterrupt (

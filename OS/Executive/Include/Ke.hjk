@@ -2,7 +2,11 @@
 // Public header file for the Kernel (Ke) component of the MINTIA Executive.
 //
 
+#IF BLD_MP
+
 TYPE KiSpinlock : ULONG
+
+#END
 
 #DEFINE KE_KERNEL_MODE 1
 #DEFINE KE_USER_MODE 2
@@ -178,7 +182,9 @@ STRUCT KeInterrupt
     Vector : UWORD,
     ProcessorId : UWORD,
 
+#IF BLD_MP
     Spinlock : KiSpinlock,
+#END
 
     ShareVector : UBYTE,
     EdgeTriggered : UBYTE,
@@ -222,7 +228,9 @@ STRUCT KiDispatchHeader
     WaitListHead : RtlListEntry,
     Name : ^UBYTE,
     SignalCount : ULONG,
+#IF BLD_MP
     Spinlock : KiSpinlock,
+#END
     Type : KiDispatchType,
 END
 
@@ -280,7 +288,9 @@ STRUCT KeThread
     TimeoutWaitBlock : KiWaitBlock,
     Timeout : KeTimer,
 
+#IF BLD_MP
     Spinlock : KiSpinlock,
+#END
 
     SignalMask : ULONG,
     SignalAcceptMask : ULONG,
@@ -293,4 +303,6 @@ STRUCT KeThread
     UserApcTriggered : UBYTE,
     UserInterrupt : UBYTE,
     WaitCount : UBYTE,
+    Priority : UBYTE,
+    BasePriority : UBYTE,
 END
