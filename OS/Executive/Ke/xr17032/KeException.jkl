@@ -13,7 +13,7 @@ KiUpdateAsidLock : KiSpinlock = KI_INITIAL_SPINLOCK
 #END
 
 KiAsidSequenceNumber : RtlUquad
-KiNextAsid := 1
+KiNextAsid : UWORD
 
 // The exact interface to the HAL for interrupts is private to the architecture.
 
@@ -530,6 +530,10 @@ FN KiInitializeArchitecture (
         // We modified the instruction stream, so flush the icache.
 
         KiFlushMyIcache ()
+
+        // Initialize the next ASID.
+
+        KiNextAsid = 1
     END
 
     // Initialize the ID field of the PRB.
