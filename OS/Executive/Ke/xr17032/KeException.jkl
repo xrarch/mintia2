@@ -265,7 +265,29 @@ KiRaiseIpl:
     mov  a3, byte [t0 + KiPrb_Ipl]  // Load the old IPL.
     mov  byte [t0 + KiPrb_Ipl], a0  // Store the new IPL.
 
+#IF BLD_CHK
+
+    slt  t0, a0, a3                 // Test newipl < oldipl.
+    bne  t0, .badraise              // If lower, this is a bad request.
+
+#END
+
     ret
+
+#IF BLD_CHK
+
+.badraise:
+    // Create stack frame for debugger traces.
+
+    subi sp, sp, 4
+    mov  long [sp], lr
+
+    la   a0, KiBadRaiseMessage
+    li   a1, 0
+    li   a2, 0
+    jal  KeCrash
+
+#END
 
 // a0 - newipl
 KiLowerIpl:
@@ -274,22 +296,49 @@ KiLowerIpl:
     // Note: This routine is inlined at KiReleaseSpinlockLower.
 
     subi t0, zero, 4096             // Acquire a pointer to the Prb.
+
+#IF BLD_CHK
+
+    mov  t1, byte [t0 + KiPrb_Ipl]  // Load old IPL.
+    slt  t1, t1, a0                 // Compare oldipl < newipl
+    bne  t1, .badlower              // If lower, this is a bad request.
+
+#END
+
     mov  byte [t0 + KiPrb_Ipl], a0  // Store the new IPL.
     mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a0                 // Right shift pending by new IPL.
-    beq  t2, .skip                  // If zero, none pending at new IPL.
+    bne  t2, .dispatch              // If zero, none pending at new IPL.
+
+    ret
+
+.dispatch:
+    j    KiDispatchSoftwareInterrupts
+
+#IF BLD_CHK
+
+.badlower:
+    // Create stack frame for debugger traces.
 
     subi sp, sp, 4
     mov  long [sp], lr
 
-    jal  KiDispatchSoftwareInterrupts
+    la   a0, KiBadLowerMessage
+    li   a1, 0
+    li   a2, 0
+    jal  KeCrash
 
-    mov  lr, long [sp]
-    addi sp, sp, 4
+KiBadRaiseMessage:
+    .ds "KiRaiseIpl: oldipl > newipl\n"
+    .db 0
 
-.skip:
+KiBadLowerMessage:
+    .ds "KiLowerIpl: newipl > oldipl\n"
+    .db 0
 
-    ret
+.align 4
+
+#END
 
 // a0 - newthread
 // a1 - oldthread
@@ -606,6 +655,8 @@ FN KiSwitchAddressSpace (
     IF RtlUquadNeqUquad ( &process^.AsidSequenceNumber, globalseq ) THEN
         // The ASIDs rolled over at some point, so we have to give this
         // process a new one.
+
+        KeCrash ( "Test ASID reassignment\n" )
         
         // Re-enable interrupts before acquiring the ASID lock. Otherwise, the
         // holder of the lock might IPI us, but since we are spinning with
