@@ -107,9 +107,9 @@
                 RETURN OS_STATUS_KILLED
             END
 
-        ELSEIF NOT RtlEmptyList ( &thread^.UserApcListHead ) THEN
+        ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
 
-            // There are pending usermode APCs.
+            // There are pending usermode APCs and this is a KE_USER_MODE wait.
 
             thread^.UserApcTriggered = TRUE
             thread^.UserInterrupt = TRUE
@@ -122,7 +122,7 @@
             thread^.SignalAcceptMask &
             thread^.SignalDeliverOnWaitMask THEN
 
-            // There are pending signals.
+            // There are pending signals and this is a KE_USER_MODE wait.
 
             thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
             thread^.UserInterrupt = TRUE
@@ -164,6 +164,101 @@ FN KiQuantumEnd (
     KeCrash ( "NYI KiQuantumEnd\n" )
 END
 
+FN KiSwitchThread (
+    IN current : ^KeThread,
+    IN thread : ^KeThread,
+)
+
+    // The current thread is locked, unless it is NULLPTR (in which case this is
+    // the first thread switch in the lifetime of the system).
+    //
+    // The target thread is not locked as it has been removed from the ready
+    // queue and is in our custody.
+
+#IF BLD_CHK
+    IF KiCurrentIpl () != KI_IPL_DPC THEN
+        KeCrash ( "KiSwitchThread: IPL != KI_IPL_DPC\n" )
+    END
+
+    IF current == thread THEN
+        KeCrash ( "KiSwitchThread: same thread\n" )
+    END
+
+    IF NOT current THEN
+        KeCrash ( "KiSwitchThread: current == 0\n" )
+    END
+
+    IF NOT thread THEN
+        KeCrash ( "KiSwitchThread: thread == 0\n" )
+    END
+#END
+
+    thread^.Status = KI_THREAD_RUNNING
+
+    oldcontext : ^^OsContext
+
+    oldstate : UWORD
+
+    IF NOT current THEN
+        // Give a space on the stack to stash it into.
+
+        initialctx : ^OsContext[1]
+
+        oldcontext = &initialctx[0]
+
+        // Make sure interrupts are disabled before we switch.
+
+        oldstate = KiDisableInterrupts ()
+
+    ELSE
+        oldcontext = &thread^.Context
+
+        nextproc := thread^.Process
+
+        // Disable interrupts *before* switching address space because we have
+        // to block out ASID rollover IPIs on some architectures.
+
+        oldstate = KiDisableInterrupts ()
+
+        IF nextproc^.PageDirectoryPfn != current^.Process^.PageDirectoryPfn THEN
+            // Switch to the address space of the new process.
+
+            KiSwitchAddressSpace ( nextproc )
+        END
+    END
+
+    prb := KI_CURRENT_PRB
+
+    prb^.CurrentThread = thread
+    prb^.KernelStackTop = thread^.KernelStackTop
+
+    // Note that KiSwitchContext releases the old thread's lock.
+    // It is not reacquired before switching back in.
+
+    KiSwitchContext (
+        current, // oldthread
+        thread^.Context, // newcontext
+    )
+
+    KiRestoreInterrupts ( oldstate )
+
+    // We're back in the context of the "current" thread.
+    // Check for pending Kernel APCs that need to be dispatched. Note that we
+    // don't need to acquire our thread lock for that since the act of checking
+    // (RtlEmptyList) does not touch any pointers.
+
+    IF NOT RtlEmptyList ( &current^.KapcListHead ) THEN
+        // Grab a new PRB pointer since we might not be on the same processor
+        // as when we grabbed the first one anymore.
+
+#IF ( NOT KI_DIRECT_PRB )
+        prb = KI_CURRENT_PRB
+#END
+
+        KiSoftInterruptSelf ( prb, KI_IPL_APC )
+    END
+END
+
 FN KiWaitThread (
     IN thread : ^KeThread,
     IN waitipl : UWORD,
@@ -172,6 +267,10 @@ FN KiWaitThread (
 ) : OsStatus
 
     // This function is entered with the thread lock held (IPLDPC).
+
+    thread^.Alertable = alertable
+    thread^.WaitMode = waitmode
+    thread^.WaitIpl = waitipl
 
     KeCrash ( "NYI KiThreadWait\n" )
 END

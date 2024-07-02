@@ -5,6 +5,16 @@
 #INCLUDE "../Ki.hjk"
 #INCLUDE "<ll>/System/OsContext.hjk"
 
+#IF BLD_MP
+
+KiAsidLock : KiSpinlock = KI_INITIAL_SPINLOCK
+KiUpdateAsidLock : KiSpinlock = KI_INITIAL_SPINLOCK
+
+#END
+
+KiAsidSequenceNumber : RtlUquad
+KiNextAsid := 1
+
 // The exact interface to the HAL for interrupts is private to the architecture.
 
 EXTERN FN HalInterrupt (
@@ -282,9 +292,129 @@ KiLowerIpl:
 
     ret
 
+// a0 - oldthread
+// a1 - newcontext
+KiSwitchContext:
+.global KiSwitchContext
+    
+    // Save the current context and restore the new.
+    // We only need to save the callee-saved registers as this has the same
+    // considerations as a function call that trashes them all.
+    // We must also release the old thread's thread lock on our way out, after
+    // we have fully left its context.
+
+    subi sp, sp, OsContext__SIZEOF
+    mov  long [sp + OsContext_Lr], lr
+    mov  long [sp + OsContext_S0], s0
+    mov  long [sp + OsContext_S1], s1
+    mov  long [sp + OsContext_S2], s2
+    mov  long [sp + OsContext_S3], s3
+    mov  long [sp + OsContext_S4], s4
+    mov  long [sp + OsContext_S5], s5
+    mov  long [sp + OsContext_S6], s6
+    mov  long [sp + OsContext_S7], s7
+    mov  long [sp + OsContext_S8], s8
+    mov  long [sp + OsContext_S9], s9
+    mov  long [sp + OsContext_S10], s10
+    mov  long [sp + OsContext_S11], s11
+    mov  long [sp + OsContext_S12], s12
+    mov  long [sp + OsContext_S13], s13
+    mov  long [sp + OsContext_S14], s14
+    mov  long [sp + OsContext_S15], s15
+    mov  long [sp + OsContext_S16], s16
+    mov  long [sp + OsContext_S17], s17
+    mov  long [sp + OsContext_Tp], tp
+
+    // Switch to new stack.
+
+    mov  long [a0 + KeThread_Context], sp
+    mov  sp, a1
+
+    // Release thread lock. Inline KiReleaseSpinlock here for speed.
+
+#IF BLD_MP
+    
+    // Memory barrier to ensure old writes are committed.
+
+    wmb
+
+    // Set spinlock un-owned.
+
+    mov  long [a0 + KeThread_Spinlock], zero
+
+#END
+
+    // Restore context of new thread.
+
+    mov  lr, long [sp + OsContext_Lr]
+    mov  s0, long [sp + OsContext_S0]
+    mov  s1, long [sp + OsContext_S1]
+    mov  s2, long [sp + OsContext_S2]
+    mov  s3, long [sp + OsContext_S3]
+    mov  s4, long [sp + OsContext_S4]
+    mov  s5, long [sp + OsContext_S5]
+    mov  s6, long [sp + OsContext_S6]
+    mov  s7, long [sp + OsContext_S7]
+    mov  s8, long [sp + OsContext_S8]
+    mov  s9, long [sp + OsContext_S9]
+    mov  s10, long [sp + OsContext_S10]
+    mov  s11, long [sp + OsContext_S11]
+    mov  s12, long [sp + OsContext_S12]
+    mov  s13, long [sp + OsContext_S13]
+    mov  s14, long [sp + OsContext_S14]
+    mov  s15, long [sp + OsContext_S15]
+    mov  s16, long [sp + OsContext_S16]
+    mov  s17, long [sp + OsContext_S17]
+    mov  tp, long [sp + OsContext_Tp]
+    addi sp, sp, OsContext__SIZEOF
+
+    // Return into the new thread.
+
+    ret
+
+// a0 - pgtb
+// a1 - asid
+KiSwitchMapCode:
+
+    // Set the new page directory in DTB entry 0.
+
+    mfcr t1, dtbindex
+    mtcr dtbindex, zero
+
+    la   t0, (0xB02C0000 >> 12)
+    mtcr dtbtag, t0
+
+    mov  t0, a0
+    rshi t0, t0, 12
+    lshi t0, t0, 5
+    ori  t0, t0, 0x17
+    mtcr dtbpte, t0
+
+    mtcr dtbindex, t1
+
+    // Set the ASID for both TBs.
+
+    lshi a1, a1, 20
+    mtcr itbtag, a1
+    mtcr dtbtag, a1
+
+    ret
+
+KiSwitchMapCodeEnd:
+
 ]
 
 EXTERN FN KiExceptionHandler ()
+
+EXTERN KiSwitchMapCode : UBYTE
+EXTERN KiSwitchMapCodeEnd : UBYTE
+
+FNPTR KiSwitchMapF (
+    IN pgtb : UWORD,
+    IN asid : UWORD,
+)
+
+KiSwitchMap : KiSwitchMapF
 
 #SECTION "INIT$text"
 FN KiInitializeArchitecture (
@@ -297,10 +427,10 @@ FN KiInitializeArchitecture (
     procid := KiCurrentProcessor ()
 
     IF procid == 0 THEN
-        // Construct a jump instruction that just jumps to our exception handler,
-        // and then copy it to the first instruction of each entry of the exception
-        // block, except for the TB miss handlers, which have already been set up by
-        // Loader.
+        // Construct a jump instruction that just jumps to our exception
+        // handler, and then copy it to the first instruction of each entry of
+        // the exception block, except for the TB miss handlers, which have
+        // already been set up by Loader.
 
         eb := CAST ExLoaderBlock.U.Xr.ExceptionBlock TO ^ULONG
 
@@ -319,9 +449,22 @@ FN KiInitializeArchitecture (
             eb += 256
         END
 
+        // Copy KiSwitchMap into the zeroth vector. We do this because exception
+        // 0 is permanently reserved by the architecture, making it a convenient
+        // place to stash this function which *cannot* cause a TB miss during
+        // execution.
+
+        RtlCopyBytes (
+            ExLoaderBlock.U.Xr.ExceptionBlock, // dest
+            &KiSwitchMapCode, // src
+            &KiSwitchMapCodeEnd - &KiSwitchMapCode, // sz
+        )
+
+        KiSwitchMap = CAST eb TO KiSwitchMapF
+
         // Copy the syscall handler into the exception block.
-        // This one is special because it doesn't need to save as much as the others
-        // do.
+        // This one is special because it doesn't need to save as much as the
+        // others do.
 
         // ... TODO ...
 
@@ -333,4 +476,201 @@ FN KiInitializeArchitecture (
     // Initialize the ID field of the PRB.
 
     prb^.Id = procid
+END
+
+#IF BLD_MP
+
+FN (KiIpiF) KiUpdateAsidTarget (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Upon entry to this routine, the requesting processor is holding the
+    // global KiAsidLock. Because this is a synchronous request, we could act as
+    // if we held it too, if it weren't for pesky other processors. So, there's
+    // another KiUpdateAsidLock that we take to synchronize against those guys.
+    // This other spinlock is needed or we'd get weird deadlocks.
+
+    prb := KI_CURRENT_PRB
+
+    current := prb^.CurrentThread
+
+#IF BLD_CHK
+    IF NOT current THEN
+        KeCrash ( "KiUpdateAsidTarget: no current thread\n" )
+    END
+#END
+
+    process := current^.Process
+
+    IF process^.PageDirectoryPfn == ExLoaderBlock.SystemPageDirectoryPfn THEN
+        // We're in the system address space, which has a fixed ASID of 0, so
+        // don't worry about it.
+
+        LEAVE
+    END
+
+    KiAcquireSpinlock ( &KiUpdateAsidLock )
+
+    // We need to update the ASID we're currently running under.
+
+    asid := process^.Asid
+
+    IF RtlUquadNeqUquad ( &process^.AsidSequenceNumber,
+        &KiAsidSequenceNumber ) THEN
+
+        // We need to assign a new ASID to the process. We can't tolerate a
+        // nested ASID rollover so here we assume that can't happen. Since the
+        // KiAsidLock is held by someone, the ASID count cannot currently be
+        // incremented except by processors servicing this IPI. Therefore we
+        // would need more than 4096 processors to overflow the ASID count here.
+        // This is impossible on XR/computer systems which only allow up to 8
+        // by design.
+
+        asid = KiNextAsid
+        KiNextAsid = asid + 1
+
+#IF BLD_CHK
+        IF asid == 0xFFF THEN
+            KeCrash ( "KiUpdateAsidTarget: ASID wrap\n" )
+        END
+#END
+
+        process^.Asid = asid
+    END
+
+    // Doesn't actually switch the page table, just the ASID. We're switching
+    // into the same page table we were already in.
+
+    KiSwitchMap (
+        process^.PageDirectoryPfn, // pgtb
+        asid, // asid
+    )
+
+    KiReleaseSpinlock ( &KiUpdateAsidLock )
+END
+
+FN KiUpdateAsids ()
+
+    // Send the IPI which causes all processors to execute KiUpdateAsidTarget.
+    // Wait for completion.
+
+    KeCrash ( "NYI KiUpdateAsids\n" )
+END
+
+#END
+
+FN KiSwitchAddressSpace (
+    IN process : ^KeProcess,
+)
+
+    // On entry to this function we are holding the current thread's spinlock
+    // and interrupts are totally disabled (to block out ASID rollover IPIs).
+
+    IF process^.PageDirectoryPfn == ExLoaderBlock.SystemPageDirectoryPfn THEN
+        // Just switch, don't bother dealing with ASIDs since ASID 0 is reserved
+        // for the system address space.
+
+        KiSwitchMap (
+            process^.PageDirectoryPfn << 12, // pgtb
+            0, // asid
+        )
+
+        LEAVE
+    END
+
+    globalseq := &KiAsidSequenceNumber
+
+    // Check for roll-over. If we happen to catch it, we have to try to claim
+    // the ASID lock and give the process a new ASID. This seems racey but note
+    // that if another processor is the one who ends up dealing with this, they
+    // will IPI us and we will receive their IPI before we go on with our stale
+    // ASID, so this is all good.
+    //
+    // Note that skew is unimportant when we read the 64-bit sequence number
+    // without holding a lock like this, because either part of the sequence
+    // number being different is indicative of a rollover.
+
+    IF RtlUquadNeqUquad ( &process^.AsidSequenceNumber, globalseq ) THEN
+        // The ASIDs rolled over at some point, so we have to give this
+        // process a new one.
+        
+        // Re-enable interrupts before acquiring the ASID lock. Otherwise, the
+        // holder of the lock might IPI us, but since we are spinning with
+        // interrupts disabled, we can't accept the IPI. He will then spin
+        // forever waiting for us to accept his IPI which will never happen,
+        // causing deadlock. Note that we're still at KI_IPL_DPC though, so
+        // preemption is blocked out.
+
+#IF BLD_MP
+        KiEnableInterrupts ()
+
+        KiAcquireSpinlock ( &KiAsidLock )
+#END
+
+        // Re-check for roll-over; another thread of this same process might
+        // have updated the ASID. Nothing stops that from happening on
+        // another processor because the only lock held right now is the
+        // current thread's lock.
+
+#IF BLD_MP
+        IF RtlUquadNeqUquad ( &process^.AsidSequenceNumber, globalseq ) THEN
+#END
+
+            asid := KiNextAsid
+            KiNextAsid = asid + 1
+
+#IF BLD_MP
+            rolled := FALSE
+#END
+
+            // NOTE: Per the architecture manual we don't use ASID 0xFFF,
+            //       so we roll over when we get that one.
+
+            IF asid == 0xFFF THEN
+                // Roll over. Flush TBs on all processors and increment
+                // the sequence number.
+
+                asid = 1
+                KiNextAsid = 2
+
+                RtlAddUlongToUquad (
+                    globalseq, // quad
+                    1, // ulong
+                )
+
+#IF BLD_MP
+                rolled = TRUE
+#END
+            END
+
+            process^.Asid = asid
+
+            RtlMoveUquad (
+                &process^.AsidSequenceNumber, // destquad
+                globalseq, // srcquad
+            )
+
+#IF BLD_MP
+            IF rolled THEN
+                // Flush all TBs. Actually this does an extra thing which is
+                // to ensure the ASIDs of the currently running threads are
+                // updated on all processors.
+
+                KiUpdateAsids ()
+            END
+        END
+
+        KiDisableInterrupts ()
+
+        KiReleaseSpinlock ( &KiAsidLock )
+#END
+    END
+
+    // Switch address spaces finally.
+
+    KiSwitchMap (
+        process^.PageDirectoryPfn << 12, // pgtb
+        process^.Asid, // asid
+    )
 END

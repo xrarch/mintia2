@@ -103,12 +103,13 @@ EXPORT FN KeEnqueueDpc (
     // Also this assumes interrupts disabled.
 
 #IF BLD_MP
-    KeOrUlong (
-        &prb^.PendingSoftwareInterrupts, // ptr
-        1 << (KI_IPL_DPC - 1), // bitset
-    )
+
+    KiSoftInterruptSelf ( prb, KI_IPL_DPC )
 
 #ELSE
+    // On UP this can be a direct read-modify-write since we already have
+    // interrupts disabled and no other processors can touch it.
+
     prb^.PendingSoftwareInterrupts |= 1 << (KI_IPL_DPC - 1)
 #END
 
@@ -198,7 +199,9 @@ FN KiDispatchDpcQueue (
         RtlRemoveEntryList ( &dpc^.Entry )
         dpc^.EnqueuedTo = NULLPTR
 
-        // Capture the context.
+        // Capture the context before unlocking the queue, or the DPC could get
+        // re-enqueued again from an interrupt or another processor, destroying
+        // the context.
 
         context1 := dpc^.Context1
         context2 := dpc^.Context2

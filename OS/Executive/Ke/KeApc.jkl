@@ -4,6 +4,27 @@
 
 #INCLUDE "Ki.hjk"
 
+// APCs are functions that can be targeted to run in the context of a particular
+// arbitrary thread.
+//
+// There are three kinds of APCs.
+//
+// Kernel APCs: These are dispatched whenever IPL is below KI_IPL_APC on a
+//              processor. They can take page faults and can acquire locks that
+//              have been marked as KAPC-acquirable.
+//
+// Lazy APCs:   These are dispatched whenever a processor is executing in
+//              usermode, upon return to usermode from the kernel, and whenever
+//              the kernel takes a KE_USER_MODE wait. They can take page faults
+//              and can acquire any lock.
+//
+// User APCs:   UAPCs are special as they cause code to be executed in usermode
+//              instead of kernel mode. They are dispatched only when the kernel
+//              takes a KE_USER_MODE wait, upon which time they cause an early
+//              exit from the current system service with an OS_STATUS_USER_APC
+//              return value. The thread then executes a callback in usermode
+//              before returning to the caller of the system service.
+
 FN KiDispatchApcQueue (
     IN current : ^KeThread,
 )

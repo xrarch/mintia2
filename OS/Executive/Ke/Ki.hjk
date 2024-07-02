@@ -8,6 +8,8 @@
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 #INCLUDE "<ll>/System/OsProcess.hjk"
 
+EXTERN KiIdleProcess : KeProcess
+
 #DEFINE KI_IPL_LOW 0
 #DEFINE KI_IPL_APC 1
 #DEFINE KI_IPL_DPC 2
@@ -222,6 +224,15 @@ EXTERN FN KiQuantumEnd (
     IN prb : ^KiPrb,
 )
 
+EXTERN FN KiSwitchAddressSpace (
+    IN process : ^KeProcess,
+)
+
+EXTERN FN KiSwitchContext (
+    IN oldthread : ^KeThread,
+    IN newcontext : ^OsContext,
+)
+
 EXTERN FN (KeDpcF) KiTimerExpiration (
     IN dpc : ^KeDpc,
     IN context1 : UWORD,
@@ -235,6 +246,20 @@ EXTERN FN KiClockTick (
 )
 
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
+
+FNPTR KiIpiF (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+#MACRO KiSoftInterruptSelf ( prb, ipl ) [
+    IF (prb)^.PendingSoftwareInterrupts & (1 << ipl) == 0 THEN
+        KeOrUlong (
+            &(prb)^.PendingSoftwareInterrupts, // ptr
+            1 << (ipl - 1), // bitset
+        )
+    END
+]
 
 #IF BLD_MP
 

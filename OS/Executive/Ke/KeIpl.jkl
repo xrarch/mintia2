@@ -221,9 +221,6 @@ FN KiClockTick (
 
         // Have to use an atomic OR here in case an IPI comes in.
 
-        KeOrUlong (
-            &prb^.PendingSoftwareInterrupts, // ptr
-            1 << (KI_IPL_DPC - 1), // bitset
-        )
+        KiSoftInterruptSelf ( prb, KI_IPL_DPC )
     END
 END

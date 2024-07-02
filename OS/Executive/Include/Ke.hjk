@@ -267,6 +267,18 @@ EXTERN FN KeDequeueTimer (
     IN timer : ^KeTimer,
 ) : UWORD
 
+STRUCT KeProcess
+    PageDirectoryPfn : UWORD,
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    Asid : UWORD,
+    AsidSequenceNumber : RtlUquad,
+#IF BLD_MP
+    AsidLock : KiSpinlock,
+#END
+#END
+END
+
 #DEFINE KI_THREAD_WAIT_BLOCKS 4
 
 #DEFINE KI_THREAD_WAIT_NONE 0
@@ -274,15 +286,23 @@ EXTERN FN KeDequeueTimer (
 #DEFINE KI_THREAD_WAIT_ABORTED 2
 #DEFINE KI_THREAD_WAIT_COMMITTED 3
 
+#DEFINE KI_THREAD_RUNNING 1
+#DEFINE KI_THREAD_READY 2
+#DEFINE KI_THREAD_WAITING 3
+
 STRUCT KeThread
-    ApcListHead : RtlListEntry,
-    UserApcListHead : RtlListEntry,
+    KapcListHead : RtlListEntry,
+    LapcListHead : RtlListEntry,
+    UapcListHead : RtlListEntry,
 
     UserTimeMs : RtlUquad,
     DpcTimeMs : RtlUquad,
     SystemTimeMs : RtlUquad,
 
     WaitBlockTable : ^KiWaitBlock,
+    Context : ^OsContext,
+    Process : ^KeProcess,
+    KernelStackTop : ^VOID,
 
     WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
     TimeoutWaitBlock : KiWaitBlock,
@@ -305,4 +325,8 @@ STRUCT KeThread
     WaitCount : UBYTE,
     Priority : UBYTE,
     BasePriority : UBYTE,
+    Status : UBYTE,
+    Alertable : UBYTE,
+    WaitMode : UBYTE,
+    WaitIpl : UBYTE,
 END
