@@ -337,7 +337,7 @@ FN KiExecuteOnEveryoneElse (
         BARRIER
     END
 
-    // Now release the broadcast table entry.
+    // Now release the sender table entry.
 
     KeMaskUlong (
         &KiSendTableSet, // ptr
@@ -366,7 +366,7 @@ FN KiServiceIpi ()
         // There are pending IPIs.
 
         // Atomically fetch the bit set of pending senders and set to zero.
-        // Any broadcast IPIs sent after we do this we will catch on the next
+        // Any IPIs sent after we do this we will catch on the next
         // IPI which will remain pending until we exit here.
 
         pendingset := KeFetchAndSetUlong (
