@@ -50,6 +50,10 @@
     KiReleaseSpinlock ( &(thread)^.Spinlock )
 ]
 
+#MACRO KiSetWaitAttempt ( thread, state ) [
+    NOTHING (thread)^.WaitAttempt = (state)
+]
+
 #ELSE
 
 #MACRO KiAcquireReadyQueue ( prb ) [
@@ -76,6 +80,8 @@
 #MACRO KiAcquireThreadElevated ( thread ) []
 
 #MACRO KiReleaseThreadElevated ( thread ) []
+
+#MACRO KiSetWaitAttempt ( thread, state ) []
 
 #END
 
@@ -133,22 +139,6 @@
         END
     END
 ]
-
-#IF ( == BLD_BITS 64 )
-
-#MACRO KiFiniteTimeout ( timeout ) [
-    ((RtlUlongNeqUquad ( 0, timeout )) AND
-    ((timeout)^.Quad != 0xFFFFFFFFFFFFFFFF))
-]
-
-#ELSE
-
-#MACRO KiFiniteTimeout ( timeout ) [
-    ((RtlUlongNeqUquad ( 0, timeout )) AND
-    ((timeout)^.High != 0xFFFFFFFF OR (timeout)^.Low != 0xFFFFFFFF))
-]
-
-#END
 
 FN KiPreemptThread (
     IN prb : ^KiPrb,
@@ -343,9 +333,9 @@ FN KeWaitForObjects (
     // by Arun Kishan in an interview about how the Windows kernel team
     // broke up the dispatcher spinlock.
 
-    thread^.WaitAttempt = KI_THREAD_WAIT_TRY
+    KiSetWaitAttempt ( thread, KI_THREAD_WAIT_TRY )
 
-    // Release the thread lock.
+    // Release the thread lock but stay at KI_IPL_DPC.
 
     KiReleaseThreadElevated ( thread )
 
@@ -367,39 +357,62 @@ FN KeWaitForObjects (
         waitblock^.Object = object
         waitblock^.WakeStatus = i
 
-        // Acquire the object lock.
+        // Capture the current signal count.
 
-        KiAcquireObjectElevated ( object )
+        signal := object^.SignalCount
 
-        IF object^.SignalCount THEN
-            // Already signaled. Our wait has been satisfied before it
-            // began.
+@RecheckObject
+
+        IF signal THEN
+            // Already signaled. Our wait has been satisfied before it began.
+
+            // If this isn't a notification event, consume the count.
 
             IF object^.Type != KI_DISPATCH_EVENT_NOTIF THEN
-                // Consume the signal count.
+#IF BLD_MP
+                IF KeCompareSwapUlong (
+                    &object^.SignalCount, // ptr
+                    signal - 1, // newvalue
+                    signal, // expectedvalue
+                ) != signal THEN
 
-                object^.SignalCount -= 1
+                    // Signal count changed. Recheck the object.
+
+                    signal = object^.SignalCount
+
+                    GOTO RecheckObject
+                END
+#ELSE
+                object^.SignalCount = signal - 1
+#END
             END
-
-            // Release the object lock.
-
-            KiReleaseObjectElevated ( object )
 
             // Acquire the thread lock.
 
             KiAcquireThreadElevated ( thread )
 
-            IF thread^.WaitAttempt == KI_THREAD_WAIT_TRY THEN
-                // Abort the wait.
-
-                thread^.WaitStatus = i
-                thread^.WaitAttempt = KI_THREAD_WAIT_ABORTED
-            END
+            status = i
 
             // Don't release the thread lock. The abort codepath will do it.
 
             GOTO Abort
         END
+
+        // Acquire the object lock.
+
+        KiAcquireObjectElevated ( object )
+
+#IF BLD_MP
+        signal = object^.SignalCount
+
+        IF signal THEN
+            // Got signaled since we checked. Recheck the object.
+
+            KiReleaseObjectElevated ( object )
+
+            GOTO RecheckObject
+        END
+#END
 
         // Enqueue our wait block to the object.
 
@@ -415,7 +428,7 @@ FN KeWaitForObjects (
         i += 1
     END
 
-    hastimeout = KiFiniteTimeout ( timeout )
+    hastimeout = timeout AND RtlUlongNeqUquad ( 0, timeout )
 
     IF hastimeout THEN
         // Start the timeout.
@@ -454,27 +467,30 @@ FN KeWaitForObjects (
 
     // See if our wait has gone through.
 
-    IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED OR
-        RtlUlongEqUquad ( 0, timeout ) THEN
+    zerotimeout := timeout AND RtlUlongEqUquad ( 0, timeout )
 
-@Abort
+#IF BLD_MP
+    IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED OR zerotimeout THEN
+#ELSE
+    IF zerotimeout THEN
+#END
+
+        status = OS_STATUS_UNSATISFIED
 
         // Nope! We have to dequeue all our wait blocks and return.
 
         // Capture the status before lowering IPL.
 
+#IF BLD_MP
         IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED THEN
             // We were aborted. The guy who aborted us left our status in
             // our thread struct.
 
             status = thread^.WaitStatus
-
-        ELSE
-            // Timeout of zero - caller was just checking to see if any of
-            // these objects were signaled. They weren't.
-
-            status = OS_STATUS_UNSATISFIED
         END
+#END
+
+@Abort
 
         // Release the thread lock so we don't violate the object->thread
         // lock ordering.
@@ -523,7 +539,7 @@ FN KeWaitForObjects (
             RtlRemoveEntryList ( &waitblock^.Entry )
         END
 
-        thread^.WaitAttempt = KI_THREAD_WAIT_NONE
+        KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
 
         KiLowerIpl ( ipl )
 
@@ -532,7 +548,7 @@ FN KeWaitForObjects (
 
     // The wait shall proceed.
 
-    thread^.WaitAttempt = KI_THREAD_WAIT_COMMITTED
+    KiSetWaitAttempt ( thread, KI_THREAD_WAIT_COMMITTED )
 
     status = KiWaitThread (
         thread, // thread
