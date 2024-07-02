@@ -186,6 +186,8 @@ END
                 // Unalertable usermode waits are only interrupted by
                 // termination.
 
+                KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
                 KiLowerIpl ( ipl )
 
                 RETURN OS_STATUS_KILLED
@@ -198,6 +200,8 @@ END
                 // Alertable kernel mode waits are only interrupted by
                 // termination.
 
+                KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
                 KiLowerIpl ( ipl )
 
                 RETURN OS_STATUS_KILLED
@@ -206,6 +210,8 @@ END
         ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
 
             // There are pending usermode APCs and this is a KE_USER_MODE wait.
+
+            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
 
             thread^.UserApcTriggered = TRUE
             thread^.UserInterrupt = TRUE
@@ -220,7 +226,21 @@ END
 
             // There are pending signals and this is a KE_USER_MODE wait.
 
+            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+#IF BLD_MP
+            // Use an atomic in case someone saw our wait attempt state at TRY
+            // and is also currently trying to clear these bits in the deliver-
+            // -on-wait mask.
+
+            KeMaskUlong (
+                &thread^.SignalDeliverOnWaitMask, // ptr
+                ~thread^.SignalMask, // mask
+            )
+#ELSE
             thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
+#END
+
             thread^.UserInterrupt = TRUE
 
             KiLowerIpl ( ipl )
