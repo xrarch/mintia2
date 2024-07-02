@@ -45,9 +45,6 @@ FN KiInitializePrb (
     KiInitializeSpinlock ( &prb^.DpcQueueLock )
     KiInitializeSpinlock ( &prb^.ReadyQueueLock )
     KiInitializeSpinlock ( &prb^.TimerTreeLock )
-    KiInitializeSpinlock ( &prb^.IpiLock )
-
-    RtlInitializeList ( &prb^.IpiListHead )
 #END
 
     KeInitializeDpc (
@@ -198,6 +195,8 @@ END
 
 FNPTR DbgMainF ()
 
+#IF BLD_MP
+
 FN (KiIpiF) TestIpi (
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -205,6 +204,8 @@ FN (KiIpiF) TestIpi (
 
     RtlPrint ( "Sup I'm an IPI! %d %d\n", context1, context2 )
 END
+
+#END
 
 #SECTION "INIT$text"
 EXPORT FN KeMain (
@@ -366,12 +367,30 @@ EXPORT FN KeMain (
 #IF BLD_MP
     HalTriggerIpi ( KI_CURRENT_PRB )
 
+    oldipl := KiRaiseIpl ( KI_IPL_DPC )
+
     KiExecuteOnOtherProcessor (
         KI_CURRENT_PRB, // target
         &TestIpi, // function
         10, // context1
         15, // context2
     )
+
+    KiExecuteOnOtherProcessor (
+        KI_CURRENT_PRB, // target
+        &TestIpi, // function
+        11, // context1
+        15, // context2
+    )
+
+    KiExecuteOnOtherProcessor (
+        KI_CURRENT_PRB, // target
+        &TestIpi, // function
+        13, // context1
+        15, // context2
+    )
+
+    KiLowerIpl ( oldipl )
 
     RtlPrint ( "Cool I sent an IPI" )
 #END

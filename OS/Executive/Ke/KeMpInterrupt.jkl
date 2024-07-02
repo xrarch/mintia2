@@ -13,8 +13,8 @@ KiFrozenProcessorCount : ULONG = 0
 
 #DEFINE KI_BROADCAST_MAX 8
 
-KiBroadcastTable : ^KiPrb[KI_BROADCAST_MAX]
-KiBroadcastSet : ULONG = 0
+KiSendTable : ^KiPrb[KI_BROADCAST_MAX]
+KiSendTableSet : ULONG = 0
 
 #SECTION "text"
 KiIndexFirstBitClear : UBYTE[256] = {
@@ -165,6 +165,12 @@ FN KiExecuteOnOtherProcessor (
     // Actually this works even for self-IPIs but hopefully we aren't taking any
     // of those because that is not very efficient.
 
+#IF BLD_CHK
+    IF KiCurrentIpl () != KI_IPL_DPC THEN
+        KeCrash ( "KiExecuteOnOtherProcessor: IPL != KI_IPL_DPC\n" )
+    END
+#END
+
     prb := KI_CURRENT_PRB
 
     // Initialize our IPI context.
@@ -175,28 +181,59 @@ FN KiExecuteOnOtherProcessor (
 
     prb^.IpiSpin = 1
 
-    // Now disable interrupts.
+@Retry
 
-    oldstate := KiDisableInterrupts ()
+    // Acquire a sender table entry. The allocation state is described by a
+    // set of 8 bits, the KiSendTableSet. This lets us be O(1) and not take any
+    // locks here. Since there are 8, thats how many IPIs can occur in parallel
+    // before someone has to spin here.
 
-    // Acquire the target's IPI spinlock.
+    mask := KiSendTableSet
 
-    KiAcquireSpinlock ( &target^.IpiLock )
+    WHILE mask == 0xFF DO
+        // 0xFF means theres no clear bits; no free table slots. Spin-wait for
+        // a free table slot.
+        
+        // Use a language BARRIER to stop this loop from being optimized out.
 
-    // Enqueue us to it.
+        BARRIER
 
-    RtlInsertAtTailList (
-        &target^.IpiListHead, // head
-        &prb^.IpiListEntry, // entry
+        mask = KiSendTableSet
+    END
+
+    // There's at least one bit free in the set, so find the index of the lowest
+    // one with the lookup table.
+
+    index := KiIndexFirstBitClear[mask]
+
+    // Set the bit to allocate the table entry.
+
+    newmask := mask | (1 << index)
+
+    // Try to atomic CAS the new bit set.
+
+    IF KeCompareSwapUlong (
+        &KiSendTableSet, // ptr
+        newmask, // newvalue
+        mask, // expectedvalue
+    ) != mask THEN
+
+        // Someone else modified it inbetween (rare case). Retry.
+
+        GOTO Retry
+    END
+
+    // We've successfully allocated a table entry for our IPI.
+    // Store our Prb in the table.
+
+    KiSendTable[index] = prb
+
+    // Mark pending.
+
+    KeOrUlong (
+        &target^.IpiPendingSet, // ptr
+        1 << index, // bitset
     )
-
-    // Release the spinlock.
-
-    KiReleaseSpinlock ( &target^.IpiLock )
-
-    // Re-enable interrupts.
-
-    KiRestoreInterrupts ( oldstate )
 
     // Trigger the IPI.
 
@@ -239,12 +276,12 @@ FN KiExecuteOnEveryoneElse (
 
 @Retry
 
-    // Acquire a broadcast table entry. The allocation state is described by a
-    // set of 8 bits, the KiBroadcastSet. This lets us be O(1) and not take any
-    // locks here. Since there are 8, thats how many broadcast IPIs can occur in
-    // parallel before someone has to spin here.
+    // Acquire a sender table entry. The allocation state is described by a
+    // set of 8 bits, the KiSendTableSet. This lets us be O(1) and not take any
+    // locks here. Since there are 8, thats how many IPIs can occur in parallel
+    // before someone has to spin here.
 
-    mask := KiBroadcastSet
+    mask := KiSendTableSet
 
     WHILE mask == 0xFF DO
         // 0xFF means theres no clear bits; no free table slots. Spin-wait for
@@ -254,7 +291,7 @@ FN KiExecuteOnEveryoneElse (
 
         BARRIER
 
-        mask = KiBroadcastSet
+        mask = KiSendTableSet
     END
 
     // There's at least one bit free in the set, so find the index of the lowest
@@ -269,7 +306,7 @@ FN KiExecuteOnEveryoneElse (
     // Try to atomic CAS the new bit set.
 
     IF KeCompareSwapUlong (
-        &KiBroadcastSet, // ptr
+        &KiSendTableSet, // ptr
         newmask, // newvalue
         mask, // expectedvalue
     ) != mask THEN
@@ -279,10 +316,10 @@ FN KiExecuteOnEveryoneElse (
         GOTO Retry
     END
 
-    // We've successfully allocated a table entry for our broadcast.
+    // We've successfully allocated a table entry for our IPI.
     // Store our Prb in the table.
 
-    KiBroadcastTable[index] = prb
+    KiSendTable[index] = prb
 
     i := 0
 
@@ -296,10 +333,10 @@ FN KiExecuteOnEveryoneElse (
         // Don't IPI the processor if it's me.
 
         IF targetprb^.Id != selfid THEN
-            // Mark broadcast pending.
+            // Mark pending.
 
             KeOrUlong (
-                &targetprb^.BroadcastPending, // ptr
+                &targetprb^.IpiPendingSet, // ptr
                 1 << index, // bitset
             )
 
@@ -323,7 +360,7 @@ FN KiExecuteOnEveryoneElse (
     // Now release the broadcast table entry.
 
     KeMaskUlong (
-        &KiBroadcastSet, // ptr
+        &KiSendTableSet, // ptr
         ~(1 << index), // mask
     )
 END
@@ -343,77 +380,45 @@ FN KiServiceIpi ()
     // to a newly readied thread for which we were selected, to dispatch signals
     // in usermode, etc.
 
-    requestingprb : ^KiPrb
     prb := KI_CURRENT_PRB
 
-    listhead := &prb^.IpiListHead
-
-    WHILE NOT RtlEmptyList ( listhead ) DO
-        KiAcquireSpinlock ( &prb^.IpiLock )
-
-        listentry := listhead^.Next
-
-        IF listentry == listhead THEN
-            // Empty!
-
-            KiReleaseSpinlock ( &prb^.IpiLock )
-
-            BREAK
-        END
-
-        requestingprb = CONTAINEROF listentry TO KiPrb.IpiListEntry
-
-        RtlRemoveEntryList ( &requestingprb^.IpiListEntry )
-
-        KiReleaseSpinlock ( &prb^.IpiLock )
-
-        // Call the requesting processor's function.
-
-        requestingprb^.IpiFunction (
-            requestingprb^.IpiContext1, // context1
-            requestingprb^.IpiContext2, // context2
-        )
-
-        // Release him from his spin.
-
-        requestingprb^.IpiSpin = 0
-    END
-
-    IF prb^.BroadcastPending THEN
-        // There are pending broadcast IPIs.
+    IF prb^.IpiPendingSet THEN
+        // There are pending IPIs.
 
         // Atomically fetch the bit set of pending senders and set to zero.
         // Any broadcast IPIs sent after we do this we will catch on the next
         // IPI which will remain pending until we exit here.
 
-        broadcastset := KeFetchAndSetUlong (
-            &prb^.BroadcastPending, // ptr
+        pendingset := KeFetchAndSetUlong (
+            &prb^.IpiPendingSet, // ptr
             0, // newvalue
         )
 
-        // For each bit set, execute the broadcasted IPI function.
+        // For each bit set, execute the IPI function.
 
         index := 0
 
-        WHILE broadcastset DO
-            requestingprb = KiBroadcastTable[index]
+        WHILE pendingset DO
+            IF pendingset & 1 THEN
+                requestingprb := KiSendTable[index]
 
-            // Call the requesting processor's function.
+                // Call the requesting processor's function.
 
-            requestingprb^.IpiFunction (
-                requestingprb^.IpiContext1, // context1
-                requestingprb^.IpiContext2, // context2
-            )
+                requestingprb^.IpiFunction (
+                    requestingprb^.IpiContext1, // context1
+                    requestingprb^.IpiContext2, // context2
+                )
 
-            // Release him from his spin.
+                // Release him from his spin.
 
-            KeIncrementUlong (
-                &requestingprb^.IpiSpin, // ptr
-                0xFFFFFFFF, // inc
-            )
+                KeIncrementUlong (
+                    &requestingprb^.IpiSpin, // ptr
+                    0xFFFFFFFF, // inc
+                )
+            END
 
             index += 1
-            broadcastset >>= 1
+            pendingset >>= 1
         END
     END
 
