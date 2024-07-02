@@ -168,16 +168,9 @@ END
 
 FN KiWaitThread (
     IN thread : ^KeThread,
-    IN waitipl : UWORD,
-    IN waitmode : UWORD,
-    IN alertable : UWORD,
 ) : OsStatus
 
     // This function is entered with the thread lock held (IPLDPC).
-
-    thread^.Alertable = alertable
-    thread^.WaitMode = waitmode
-    thread^.WaitIpl = waitipl
 
     KeCrash ( "NYI KiThreadWait\n" )
 END
@@ -193,7 +186,7 @@ END
                 // Unalertable usermode waits are only interrupted by
                 // termination.
 
-                KiReleaseThread ( thread, ipl )
+                KiLowerIpl ( ipl )
 
                 RETURN OS_STATUS_KILLED
             END
@@ -205,7 +198,7 @@ END
                 // Alertable kernel mode waits are only interrupted by
                 // termination.
 
-                KiReleaseThread ( thread, ipl )
+                KiLowerIpl ( ipl )
 
                 RETURN OS_STATUS_KILLED
             END
@@ -217,7 +210,7 @@ END
             thread^.UserApcTriggered = TRUE
             thread^.UserInterrupt = TRUE
 
-            KiReleaseThread ( thread, ipl )
+            KiLowerIpl ( ipl )
 
             RETURN OS_STATUS_USER_APC
 
@@ -230,7 +223,7 @@ END
             thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
             thread^.UserInterrupt = TRUE
 
-            KiReleaseThread ( thread, ipl )
+            KiLowerIpl ( ipl )
 
             RETURN OS_STATUS_SIGNALED
         END
@@ -286,13 +279,27 @@ FN KeWaitForObjects (
 
 @Retry
 
-    // Acquire the thread lock.
+    // Raise IPL.
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+    // Set the wait values in the thread.
+
+    thread^.Alertable = alertable
+    thread^.WaitMode = waitmode
+    thread^.WaitIpl = ipl
+
+    // Set the thread to wait-try.
+    //
+    // Note that this wait-try tactic was derived from an explanation given
+    // by Arun Kishan in an interview about how the Windows kernel team
+    // broke up the dispatcher spinlock.
+
+    KiSetWaitAttempt ( thread, KI_THREAD_WAIT_TRY )
 
     // Before we start, check for events that would interrupt the wait.
     // This is a macro that can return from the function for us (after
-    // dropping the thread lock).
+    // dropping IPL).
 
     KiCheckWaitInterruptingEvents (
         thread, // thread
@@ -305,18 +312,6 @@ FN KeWaitForObjects (
 
     thread^.WaitBlockTable = waitblocktable
     thread^.WaitCount = objectcount
-
-    // Set the thread to wait-try.
-    //
-    // Note that this wait-try tactic was derived from an explanation given
-    // by Arun Kishan in an interview about how the Windows kernel team
-    // broke up the dispatcher spinlock.
-
-    KiSetWaitAttempt ( thread, KI_THREAD_WAIT_TRY )
-
-    // Release the thread lock but stay at KI_IPL_DPC.
-
-    KiReleaseThreadElevated ( thread )
 
     waitblock : ^KiWaitBlock
     timer : ^KeTimer
@@ -362,8 +357,8 @@ FN KeWaitForObjects (
             // Back out of the wait by simply removing our wait blocks from all
             // of the objects that we enqueued them to.
             //
-            // Note the label above - on MP we GOTO here if another
-            // processor aborted our wait.
+            // Note the label above - on MP we GOTO here if another processor
+            // rudely aborted our wait.
             //
             // At this point "i" is equivalent to the maximum object index we
             // reached before we aborted, and "status" is equivalent to whatever
@@ -465,13 +460,14 @@ FN KeWaitForObjects (
         )
     END
 
+#IF BLD_MP
     // Lock our thread.
 
     KiAcquireThreadElevated ( thread )
 
-#IF BLD_MP
-    // See if our wait was aborted by another processor while we were enqueuing
-    // objects.
+    // Check if an interrupting event (such as the object being signaled, a user
+    // APC, etc) from another processor aborted our wait while we were enqueuing
+    // wait blocks.
 
     IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED THEN
         // It was aborted. We have to dequeue all our wait blocks and return.
@@ -506,18 +502,13 @@ FN KeWaitForObjects (
 
         GOTO Abort
     END
+
+    thread^.WaitAttempt = KI_THREAD_WAIT_COMMITTED
 #END
 
     // The wait shall proceed.
 
-    KiSetWaitAttempt ( thread, KI_THREAD_WAIT_COMMITTED )
-
-    status = KiWaitThread (
-        thread, // thread
-        ipl, // waitipl
-        waitmode, // waitmode
-        alertable, // alertable
-    )
+    status = KiWaitThread ( thread )
 
     // KiWaitThread returns at the specified IPL and with the thread lock
     // released. All of our wait blocks have been dequeued, timer dequeued,
