@@ -320,20 +320,13 @@ FN KeWaitForObjects (
 
     WHILE i < objectcount DO
         waitblock = &waitblocktable[i]
-
-        // Initialize fields of the waitblock outside the object lock.
-
         object = &objecttable[i]
-
-        waitblock^.Thread = thread
-        waitblock^.Object = object
-        waitblock^.WakeStatus = i
 
         // Capture the current signal count.
 
-        signal := object^.SignalCount
-
 @RecheckObject
+
+        signal := object^.SignalCount
 
         IF signal THEN
             // Already signaled. Our wait has been satisfied before it began.
@@ -350,8 +343,6 @@ FN KeWaitForObjects (
 
                     // Signal count changed. Recheck the object.
 
-                    signal = object^.SignalCount
-
                     GOTO RecheckObject
                 END
 #ELSE
@@ -359,25 +350,23 @@ FN KeWaitForObjects (
 #END
             END
 
-            // Acquire the thread lock.
-
-            KiAcquireThreadElevated ( thread )
-
             status = i
-
-            // Don't release the thread lock. The abort codepath will do it.
 
             GOTO Abort
         END
+
+        // Initialize the fields of the wait block outside the object lock.
+
+        waitblock^.Thread = thread
+        waitblock^.Object = object
+        waitblock^.WakeStatus = i
 
         // Acquire the object lock.
 
         KiAcquireObjectElevated ( object )
 
 #IF BLD_MP
-        signal = object^.SignalCount
-
-        IF signal THEN
+        IF object^.SignalCount THEN
             // Got signaled since we checked. Recheck the object.
 
             KiReleaseObjectElevated ( object )
@@ -441,11 +430,11 @@ FN KeWaitForObjects (
 
     zerotimeout := timeout AND RtlUlongEqUquad ( 0, timeout )
 
+    IF zerotimeout
 #IF BLD_MP
-    IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED OR zerotimeout THEN
-#ELSE
-    IF zerotimeout THEN
+        OR thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED
 #END
+        THEN
 
         status = OS_STATUS_UNSATISFIED
 
@@ -462,12 +451,12 @@ FN KeWaitForObjects (
         END
 #END
 
-@Abort
-
         // Release the thread lock so we don't violate the object->thread
         // lock ordering.
 
         KiReleaseThreadElevated ( thread )
+
+@Abort
 
         // Remove our wait block from every object we enqueued it to.
 
