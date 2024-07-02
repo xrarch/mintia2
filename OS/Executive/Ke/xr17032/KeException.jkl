@@ -516,8 +516,9 @@ FN (KiIpiF) KiUpdateAsidTarget (
 
     asid := process^.Asid
 
-    IF RtlUquadNeqUquad ( &process^.AsidSequenceNumber,
-        &KiAsidSequenceNumber ) THEN
+    globalseq := &KiAsidSequenceNumber
+
+    IF RtlUquadNeqUquad ( &process^.AsidSequenceNumber, globalseq ) THEN
 
         // We need to assign a new ASID to the process. We can't tolerate a
         // nested ASID rollover so here we assume that can't happen. Since the
@@ -537,6 +538,11 @@ FN (KiIpiF) KiUpdateAsidTarget (
 #END
 
         process^.Asid = asid
+
+        RtlMoveUquad (
+            &process^.AsidSequenceNumber, // destquad
+            globalseq, // srcquad
+        )
     END
 
     // Doesn't actually switch the page table, just the ASID. We're switching
