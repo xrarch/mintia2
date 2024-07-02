@@ -246,10 +246,17 @@ FN KeWaitForObjects (
     IN waitblocktable : ^KiWaitBlock,
 ) : OsStatus
 
+    // Wait for any of multiple objects to enter a signaled state. A timeout
+    // interval in milliseconds can be supplied. If it is NULLPTR, the timeout
+    // is infinite.
+
 #IF BLD_CHK
     IF KiCurrentIpl () >= KI_IPL_DPC THEN
         KeCrash ( "KeWaitForObjects: IPL >= KI_IPL_DPC\n" )
     END
+
+    // The following parameters should never be given by executive callers and
+    // should have been rejected by the object manager.
 
     IF NOT objectcount THEN
         KeCrash ( "KeWaitForObjects: objectcount == 0\n" )
@@ -316,7 +323,6 @@ FN KeWaitForObjects (
     i := 0
     status : OsStatus
     object : ^KiDispatchHeader
-    hastimeout := FALSE
 
     WHILE i < objectcount DO
         waitblock = &waitblocktable[i]
@@ -352,7 +358,44 @@ FN KeWaitForObjects (
 
             status = i
 
-            GOTO Abort
+@Abort
+
+            // Note the label above - on MP we GOTO here if another
+            // processor aborted our wait.
+
+            // At this point "i" is equivalent to the maximum object index we
+            // reached before we aborted, and "status" is equivalent to whatever
+            // we should return when we leave.
+            
+            // Remove our wait blocks from every object we enqueued them to.
+
+            j := 0
+
+            WHILE j < i DO
+                waitblock = &waitblocktable[j]
+
+                object = waitblock^.Object
+
+                // Acquire the object lock.
+
+                KiAcquireObjectElevated ( object )
+
+                // Remove the wait block.
+
+                RtlRemoveEntryList ( &waitblock^.Entry )
+
+                // Release the object lock.
+
+                KiReleaseObjectElevated ( object )
+
+                j += 1
+            END
+
+            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+            KiLowerIpl ( ipl )
+
+            RETURN status
         END
 
         // Initialize the fields of the wait block outside the object lock.
@@ -389,9 +432,7 @@ FN KeWaitForObjects (
         i += 1
     END
 
-    hastimeout = timeout AND RtlUlongNeqUquad ( 0, timeout )
-
-    IF hastimeout THEN
+    IF timeout THEN
         // Start the timeout.
         // NOTE: The timer object and the timeout wait block have been
         //       initialized by KeInitializeThread already.
@@ -426,63 +467,18 @@ FN KeWaitForObjects (
 
     KiAcquireThreadElevated ( thread )
 
+#IF BLD_MP
     // See if our wait has gone through.
 
-    zerotimeout := timeout AND RtlUlongEqUquad ( 0, timeout )
-
-    IF zerotimeout
-#IF BLD_MP
-        OR thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED
-#END
-        THEN
-
-        status = OS_STATUS_UNSATISFIED
-
+    IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED THEN
         // Nope! We have to dequeue all our wait blocks and return.
-
-        // Capture the status before lowering IPL.
-
-#IF BLD_MP
-        IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED THEN
-            // We were aborted. The guy who aborted us left our status in
-            // our thread struct.
-
-            status = thread^.WaitStatus
-        END
-#END
 
         // Release the thread lock so we don't violate the object->thread
         // lock ordering.
 
         KiReleaseThreadElevated ( thread )
 
-@Abort
-
-        // Remove our wait block from every object we enqueued it to.
-
-        j := 0
-
-        WHILE j < i DO
-            waitblock = &waitblocktable[j]
-
-            object = waitblock^.Object
-
-            // Acquire the object lock.
-
-            KiAcquireObjectElevated ( object )
-
-            // Remove the wait block.
-
-            RtlRemoveEntryList ( &waitblock^.Entry )
-
-            // Release the object lock.
-
-            KiReleaseObjectElevated ( object )
-
-            j += 1
-        END
-
-        IF hastimeout THEN
+        IF timeout THEN
             // We need to get rid of the timer.
 
             waitblock = &thread^.TimeoutWaitBlock
@@ -500,12 +496,13 @@ FN KeWaitForObjects (
             RtlRemoveEntryList ( &waitblock^.Entry )
         END
 
-        KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+        // The guy who aborted us left our status in our thread struct.
 
-        KiLowerIpl ( ipl )
+        status = thread^.WaitStatus
 
-        RETURN status
+        GOTO Abort
     END
+#END
 
     // The wait shall proceed.
 
