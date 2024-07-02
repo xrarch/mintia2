@@ -200,22 +200,24 @@ FN KiExecuteOnOtherProcessor (
     END
 
     // We've successfully allocated a table entry for our IPI.
-    // Store our Prb in the table.
+    
+    // Note that the following operations MUST be done in this order.
+    // 1. Store our Prb in the table.
 
     KiSendTable[index] = prb
 
-    // Mark pending.
+    // 2. Mark pending.
 
     KeOrUlong (
         &target^.IpiPendingSet, // ptr
         1 << index, // bitset
     )
 
-    // Trigger the IPI.
+    // 3. Trigger the IPI.
 
     HalTriggerIpi ( target )
 
-    // Spin-wait for execution of our callback.
+    // 4. Spin-wait for execution of our callback.
 
     WHILE prb^.IpiSpin DO
         // Do a language BARRIER so that this loop isn't optimized out.
@@ -223,7 +225,7 @@ FN KiExecuteOnOtherProcessor (
         BARRIER
     END
 
-    // Now release the sender table entry.
+    // 5. Now release the sender table entry.
 
     KeMaskUlong (
         &KiSendTableSet, // ptr
@@ -300,7 +302,8 @@ FN KiExecuteOnEveryoneElse (
     END
 
     // We've successfully allocated a table entry for our IPI.
-    // Store our Prb in the table.
+    // Store our Prb in the table. This MUST be done before we set any pending
+    // bits or send any IPIs.
 
     KiSendTable[index] = prb
 
@@ -316,14 +319,15 @@ FN KiExecuteOnEveryoneElse (
         // Don't IPI the processor if it's me.
 
         IF targetprb^.Id != selfid THEN
-            // Mark pending.
+            // The order of the following operations is important.
+            // 1. Mark pending.
 
             KeOrUlong (
                 &targetprb^.IpiPendingSet, // ptr
                 1 << index, // bitset
             )
 
-            // Trigger the IPI.
+            // 2. Trigger the IPI.
 
             HalTriggerIpi ( targetprb )
         END
