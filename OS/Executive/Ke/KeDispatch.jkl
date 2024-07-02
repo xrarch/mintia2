@@ -9,14 +9,14 @@
 
 #IF BLD_MP
 
-#MACRO KiAcquireReadyQueueLow ( prb ) [
+#MACRO KiAcquireReadyQueue ( prb ) [
     KiAcquireSpinlockInPrb (
         OFFSETOF KiPrb.ReadyQueueLock, // offset
         OUT prb, // prb
     )
 ]
 
-#MACRO KiReleaseReadyQueueLow ( prb, oldipl ) [
+#MACRO KiReleaseReadyQueue ( prb, oldipl ) [
     KiReleaseSpinlockLower (
         &(prb)^.ReadyQueueLock, // spinlock
         oldipl, // oldipl
@@ -84,61 +84,6 @@
 #MACRO KiSetWaitAttempt ( thread, state ) []
 
 #END
-
-#MACRO KiCheckWaitInterruptingEvents ( thread, ipl, alertable, waitmode ) [
-    IF ipl == KI_IPL_LOW THEN
-        // IPL >= KI_IPL_APC masks out all events.
-
-        IF NOT alertable THEN
-            IF waitmode == KE_USER_MODE AND
-                thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
-
-                // Unalertable usermode waits are only interrupted by
-                // termination.
-
-                KiReleaseThread ( thread, ipl )
-
-                RETURN OS_STATUS_KILLED
-            END
-
-        ELSEIF waitmode == KE_KERNEL_MODE THEN
-            IF NOT thread^.IgnoreEventCount AND
-                thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
-
-                // Alertable kernel mode waits are only interrupted by
-                // termination.
-
-                KiReleaseThread ( thread, ipl )
-
-                RETURN OS_STATUS_KILLED
-            END
-
-        ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
-
-            // There are pending usermode APCs and this is a KE_USER_MODE wait.
-
-            thread^.UserApcTriggered = TRUE
-            thread^.UserInterrupt = TRUE
-
-            KiReleaseThread ( thread, ipl )
-
-            RETURN OS_STATUS_USER_APC
-
-        ELSEIF thread^.SignalMask &
-            thread^.SignalAcceptMask &
-            thread^.SignalDeliverOnWaitMask THEN
-
-            // There are pending signals and this is a KE_USER_MODE wait.
-
-            thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
-            thread^.UserInterrupt = TRUE
-
-            KiReleaseThread ( thread, ipl )
-
-            RETURN OS_STATUS_SIGNALED
-        END
-    END
-]
 
 FN KiPreemptThread (
     IN prb : ^KiPrb,
@@ -264,6 +209,61 @@ FN KiWaitThread (
 
     KeCrash ( "NYI KiThreadWait\n" )
 END
+
+#MACRO KiCheckWaitInterruptingEvents ( thread, ipl, alertable, waitmode ) [
+    IF ipl == KI_IPL_LOW THEN
+        // IPL >= KI_IPL_APC masks out all events.
+
+        IF NOT alertable THEN
+            IF waitmode == KE_USER_MODE AND
+                thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+
+                // Unalertable usermode waits are only interrupted by
+                // termination.
+
+                KiReleaseThread ( thread, ipl )
+
+                RETURN OS_STATUS_KILLED
+            END
+
+        ELSEIF waitmode == KE_KERNEL_MODE THEN
+            IF NOT thread^.IgnoreEventCount AND
+                thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+
+                // Alertable kernel mode waits are only interrupted by
+                // termination.
+
+                KiReleaseThread ( thread, ipl )
+
+                RETURN OS_STATUS_KILLED
+            END
+
+        ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
+
+            // There are pending usermode APCs and this is a KE_USER_MODE wait.
+
+            thread^.UserApcTriggered = TRUE
+            thread^.UserInterrupt = TRUE
+
+            KiReleaseThread ( thread, ipl )
+
+            RETURN OS_STATUS_USER_APC
+
+        ELSEIF thread^.SignalMask &
+            thread^.SignalAcceptMask &
+            thread^.SignalDeliverOnWaitMask THEN
+
+            // There are pending signals and this is a KE_USER_MODE wait.
+
+            thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
+            thread^.UserInterrupt = TRUE
+
+            KiReleaseThread ( thread, ipl )
+
+            RETURN OS_STATUS_SIGNALED
+        END
+    END
+]
 
 FN KeWaitForObjects (
     IN waitmode : UWORD,
