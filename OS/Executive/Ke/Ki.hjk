@@ -49,10 +49,14 @@ EXTERN KiIdleProcess : KeProcess
 
 #DEFINE KI_QUANTUM_PER_TICK ( / HAL_TIMER_INTERVAL 5 )
 
+#IF BLD_MP
+
 FNPTR KiIpiF (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
+
+#END
 
 // The per-processor block (Prb) is an architectural page size, but is at
 // minimum 4KB. It contains all per-processor information.
@@ -85,7 +89,9 @@ STRUCT KiPrb
     IpiContext1 : UWORD,
     IpiContext2 : UWORD,
 
-    IpiSpin : UWORD,
+    IpiSpin : ULONG,
+
+    BroadcastPending : ULONG,
 #END
 
 #IF ( STRCMP PLATFORM "XRstation" )
@@ -223,6 +229,22 @@ EXTERN FN KiInitializeArchitecture (
 
 EXTERN FN KiFlushMyIcache ()
 
+EXTERN FN KiFlushMyDcache ()
+
+EXTERN FN KiFlushMyTb ()
+
+EXTERN FN KiFlushMyTbAddress (
+    IN address : ^VOID,
+)
+
+EXTERN FN KiFlushMyIcacheByPhys (
+    IN pfn : UWORD,
+)
+
+EXTERN FN KiFlushMyDcacheByPhys (
+    IN pfn : UWORD,
+)
+
 EXTERN FN KiDispatchSoftwareInterrupts (
     IN newipl : UWORD,
 )
@@ -266,15 +288,6 @@ EXTERN FN KiClockTick (
 
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
 
-EXTERN FN KiServiceIpi ()
-
-EXTERN FN KiExecuteOnOtherProcessor (
-    IN target : ^KiPrb,
-    IN function : KiIpiF,
-    IN context1 : UWORD,
-    IN context2 : UWORD,
-)
-
 #MACRO KiSoftInterruptSelf ( prb, ipl ) [
     IF (prb)^.PendingSoftwareInterrupts & (1 << ipl) == 0 THEN
         KeOrUlong (
@@ -289,6 +302,21 @@ EXTERN FN KiExecuteOnOtherProcessor (
 EXTERN FN KiFreezeOtherProcessors ()
 
 EXTERN FN KiUnfreezeOtherProcessors ()
+
+EXTERN FN KiServiceIpi ()
+
+EXTERN FN KiExecuteOnOtherProcessor (
+    IN target : ^KiPrb,
+    IN function : KiIpiF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN KiExecuteOnEveryoneElse (
+    IN function : KiIpiF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
 
 EXTERN FN KiAcquireSpinlock (
     IN spinlock : ^KiSpinlock,

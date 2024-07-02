@@ -6,8 +6,55 @@
 
 #INCLUDE "Ki.hjk"
 
+KiBroadcastLock : KiSpinlock = KI_INITIAL_SPINLOCK
+
 KiFreezeCount : ULONG = 0
 KiFrozenProcessorCount : ULONG = 0
+
+#DEFINE KI_BROADCAST_MAX 8
+
+KiBroadcastTable : ^KiPrb[KI_BROADCAST_MAX]
+KiBroadcastSet : ULONG = 0
+
+#SECTION "text"
+KiIndexFirstBitClear : UBYTE[256] = {
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 5, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 6, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 5, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 7, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 5, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 6, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 5, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 
+    0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 8,
+}
+
+#SECTION "text"
+KiIndexFirstBitSet : UBYTE[256] = {
+    8, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    6, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    7, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    6, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+}
 
 #DEFINE KI_FREEZE_SPIN 10000000
 #DEFINE KI_FREEZE_RETRY 5
@@ -140,7 +187,7 @@ FN KiExecuteOnOtherProcessor (
 
     RtlInsertAtTailList (
         &target^.IpiListHead, // head
-        &target^.IpiListEntry, // entry
+        &prb^.IpiListEntry, // entry
     )
 
     // Release the spinlock.
@@ -164,6 +211,123 @@ FN KiExecuteOnOtherProcessor (
     END
 END
 
+FN KiExecuteOnEveryoneElse (
+    IN function : KiIpiF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Execute the specified function on every other processor.
+
+#IF BLD_CHK
+    IF KiCurrentIpl () != KI_IPL_DPC THEN
+        KeCrash ( "KiExecuteOnEveryoneElse: IPL != KI_IPL_DPC\n" )
+    END
+#END
+
+    count := ExLoaderBlock.ProcessorCount
+
+    prb := KI_CURRENT_PRB
+
+    // Initialize our IPI context.
+
+    prb^.IpiFunction = function
+    prb^.IpiContext1 = context1
+    prb^.IpiContext2 = context2
+
+    prb^.IpiSpin = count - 1
+
+@Retry
+
+    // Acquire a broadcast table entry. The allocation state is described by a
+    // set of 8 bits, the KiBroadcastSet. This lets us be O(1) and not take any
+    // locks here. Since there are 8, thats how many broadcast IPIs can occur in
+    // parallel before someone has to spin here.
+
+    mask := KiBroadcastSet
+
+    WHILE mask == 0xFF DO
+        // 0xFF means theres no clear bits; no free tables slots. Spin-wait for
+        // a free table slot.
+        
+        // Use a language BARRIER to stop this loop from being optimized out.
+
+        BARRIER
+
+        mask = KiBroadcastSet
+    END
+
+    // There's at least one bit free in the set, so find the index of the lowest
+    // one with the lookup table.
+
+    index := KiIndexFirstBitClear[mask]
+
+    // Set the bit to allocate the table entry.
+
+    newmask := mask | (1 << index)
+
+    // Try to atomic CAS the new bit set.
+
+    IF KeCompareSwapUlong (
+        &KiBroadcastSet, // ptr
+        newmask, // newvalue
+        mask, // expectedvalue
+    ) != mask THEN
+
+        // Someone else modified it inbetween (rare case). Retry.
+
+        GOTO Retry
+    END
+
+    // We've successfully allocated a table entry for our broadcast.
+    // Store our Prb in the table.
+
+    KiBroadcastTable[index] = prb
+
+    i := 0
+
+    selfid := prb^.Id
+
+    targetprb := CAST ExLoaderBlock.VirtualPrbBase TO ^KiPrb
+
+    // Now send IPIs to all of the processors in the system (other than me).
+
+    WHILE i < count DO
+        // Don't IPI the processor if it's me.
+
+        IF targetprb^.Id != selfid THEN
+            // Mark broadcast pending.
+
+            KeOrUlong (
+                &targetprb^.BroadcastPending, // ptr
+                1 << index, // bitset
+            )
+
+            // Trigger the IPI.
+
+            HalTriggerIpi ( targetprb )
+        END
+
+        i += 1
+        targetprb += SIZEOF KiPrb
+    END
+
+    // Spin-wait for execution of our callback.
+
+    WHILE prb^.IpiSpin DO
+        // Do a language BARRIER so that this loop isn't optimized out.
+
+        BARRIER
+    END
+
+    // Now release the broadcast table entry.
+
+    KeMaskUlong (
+        &KiBroadcastSet, // ptr
+        ~(1 << index), // mask
+    )
+END
+
 FN KiServiceIpi ()
 
     // An IPI interrupt has been delivered. Walk all of the PRBs and see who
@@ -179,6 +343,7 @@ FN KiServiceIpi ()
     // to a newly readied thread for which we were selected, to dispatch signals
     // in usermode, etc.
 
+    requestingprb : ^KiPrb
     prb := KI_CURRENT_PRB
 
     listhead := &prb^.IpiListHead
@@ -196,7 +361,7 @@ FN KiServiceIpi ()
             BREAK
         END
 
-        requestingprb := CONTAINEROF listentry TO KiPrb.IpiListEntry
+        requestingprb = CONTAINEROF listentry TO KiPrb.IpiListEntry
 
         RtlRemoveEntryList ( &requestingprb^.IpiListEntry )
 
@@ -212,6 +377,44 @@ FN KiServiceIpi ()
         // Release him from his spin.
 
         requestingprb^.IpiSpin = 0
+    END
+
+    IF prb^.BroadcastPending THEN
+        // There are pending broadcast IPIs.
+
+        // Atomically fetch the bit set of pending senders and set to zero.
+        // Any broadcast IPIs sent after we do this we will catch on the next
+        // IPI which will remain pending until we exit here.
+
+        broadcastset := KeFetchAndSetUlong (
+            &prb^.BroadcastPending, // ptr
+            0, // newvalue
+        )
+
+        // For each bit set, execute the broadcasted IPI function.
+
+        index := 0
+
+        WHILE broadcastset DO
+            requestingprb = KiBroadcastTable[index]
+
+            // Call the requesting processor's function.
+
+            requestingprb^.IpiFunction (
+                requestingprb^.IpiContext1, // context1
+                requestingprb^.IpiContext2, // context2
+            )
+
+            // Release him from his spin.
+
+            KeIncrementUlong (
+                &requestingprb^.IpiSpin, // ptr
+                0xFFFFFFFF, // inc
+            )
+
+            index += 1
+            broadcastset >>= 1
+        END
     END
 
     IF KiFreezeCount THEN

@@ -383,8 +383,7 @@ KiSwitchMapCode:
     la   t0, (0xB02C0000 >> 12)
     mtcr dtbtag, t0
 
-    mov  t0, a0
-    rshi t0, t0, 12
+    rshi t0, a0, 12
     lshi t0, t0, 5
     ori  t0, t0, 0x17
     mtcr dtbpte, t0
@@ -552,15 +551,11 @@ FN (KiIpiF) KiUpdateAsidTarget (
         asid, // asid
     )
 
+    // Flush my whole TB.
+
+    KiFlushMyTb ()
+
     KiReleaseSpinlock ( &KiUpdateAsidLock )
-END
-
-FN KiUpdateAsids ()
-
-    // Send the IPI which causes all processors to execute KiUpdateAsidTarget.
-    // Wait for completion.
-
-    KeCrash ( "NYI KiUpdateAsids\n" )
 END
 
 #END
@@ -662,7 +657,11 @@ FN KiSwitchAddressSpace (
                 // to ensure the ASIDs of the currently running threads are
                 // updated on all processors.
 
-                KiUpdateAsids ()
+                KiExecuteOnEveryoneElse (
+                    &KiUpdateAsidTarget, // function
+                    0, // context1
+                    0, // context2
+                )
             END
         END
 

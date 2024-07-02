@@ -210,4 +210,75 @@ KiFlushMyIcache:
 
     ret
 
+KiFlushMyDcache:
+.global KiFlushMyDcache
+    
+    li   t0, 3
+    mtcr dcachectrl, t0
+
+    ret
+
+KiFlushMyTb:
+.global KiFlushMyTb
+
+    li   t0, 2
+    mtcr itbctrl, t0
+    mtcr dtbctrl, t0
+
+    ret
+
+
+// inputs:
+// a0 - address
+KiFlushMyTbAddress:
+.global KiFlushMyTbAddress
+
+    // Ensure zeroes in the low 12 bits.
+
+    subi t0, zero, 4096
+    and  a0, a0, t0
+
+    mtcr itbctrl, a0                // Flush the ITB page.
+    mtcr dtbctrl, a0                // Flush the DTB page.
+
+    ret
+
+// inputs:
+// a0 - pfn
+KiFlushMyIcacheByPhys:
+.global KiFlushMyIcacheByPhys
+
+    // Flush a physical page from the icache.
+
+    lshi a0, a0, 12
+
+    // OR the command bits in.
+
+    ori  a0, a0, 2
+
+    // Flush the page.
+
+    mtcr icachectrl, a0
+
+    ret
+
+// inputs:
+// a0 - pfn
+KiFlushMyDcacheByPhys:
+.global KiFlushMyDcacheByPhys
+
+    // Flush a physical page from the dcache.
+
+    lshi a0, a0, 12
+
+    // OR the command bits in.
+
+    ori  a0, a0, 2
+
+    // Flush the page.
+
+    mtcr dcachectrl, a0
+
+    ret
+
 ]
