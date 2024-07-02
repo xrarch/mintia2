@@ -226,6 +226,13 @@ FN KiExecuteOnOtherProcessor (
 
         BARRIER
     END
+
+    // Now release the sender table entry.
+
+    KeMaskUlong (
+        &KiSendTableSet, // ptr
+        ~(1 << index), // mask
+    )
 END
 
 FN KiExecuteOnEveryoneElse (
