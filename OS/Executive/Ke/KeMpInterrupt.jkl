@@ -1,0 +1,235 @@
+//
+// Implements support for multiprocessor communication (IPIs).
+//
+
+#IF BLD_MP
+
+#INCLUDE "Ki.hjk"
+
+KiFreezeCount : ULONG = 0
+KiFrozenProcessorCount : ULONG = 0
+
+#DEFINE KI_FREEZE_SPIN 10000000
+#DEFINE KI_FREEZE_RETRY 5
+
+FN KiFreezeOtherProcessors ()
+
+    // Freeze all other processors in the system in place.
+    // Assumes interrupts are disabled on this processor and that they will
+    // remain disabled until freezing is over (otherwise we might take an IPI
+    // that makes us freeze too).
+    //
+    // This will jam up spinlocks and mutexes at random so this is primarily for
+    // debugging and crash time and not for willy nilly usage.
+
+    // First increment the global freeze count.
+
+    oldcount := KeIncrementUlong (
+        &KiFreezeCount, // ptr
+        1, // ulong
+    )
+
+    IF oldcount THEN
+        // Already frozen.
+
+        LEAVE
+    END
+
+    // Now send IPIs to all of the processors in the system (other than me).
+
+    selfid := KiCurrentProcessor ()
+
+    j := 0
+
+    WHILE j < KI_FREEZE_RETRY DO
+        prb := CAST ExLoaderBlock.VirtualPrbBase TO ^KiPrb
+
+        count := ExLoaderBlock.ProcessorCount
+        i := 0
+
+        WHILE i < count DO
+            // Don't IPI the processor if it's me.
+
+            IF prb^.Id != selfid THEN
+                // Trigger an IPI.
+
+                HalTriggerIpi ( prb )
+            END
+
+            i += 1
+            prb += SIZEOF KiPrb
+        END
+
+        // Now wait for everyone except for me to freeze.
+
+        expected := count - 1
+        spincount := KI_FREEZE_SPIN
+
+        WHILE KiFrozenProcessorCount != expected AND spincount DO
+            // Language BARRIER so this loop isn't optimized out.
+
+            BARRIER
+
+            spincount -= 1
+        END
+
+        IF NOT spincount THEN
+            // We ran out of spins. Try IPI'ing everyone again.
+
+            j += 1
+
+            CONTINUE
+        END
+
+        BREAK
+    END
+
+    IF j == KI_FREEZE_RETRY THEN
+        // We failed to freeze everyone but we're going to just print a warning
+        // and proceed anyway. Someone's probably frozen somewhere anyway and
+        // can't hurt us, hopefully.
+
+        RtlPrint ( "KiFreezeOtherProcessors: FAILED! Timeout.\n" )
+    END
+
+    // Reset the frozen processor count. They're all in place (or we gave up).
+
+    KiFrozenProcessorCount = 0
+END
+
+FN KiUnfreezeOtherProcessors ()
+
+    // Unfreeze the processors in the system.
+
+    KeIncrementUlong (
+        &KiFreezeCount, // ptr
+        0xFFFFFFFF, // ulong
+    )
+END
+
+FN KiExecuteOnOtherProcessor (
+    IN target : ^KiPrb,
+    IN function : KiIpiF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Execute the specified function on another processor.
+    // Actually this works even for self-IPIs but hopefully we aren't taking any
+    // of those because that is not very efficient.
+
+    prb := KI_CURRENT_PRB
+
+    // Initialize our IPI context.
+
+    prb^.IpiFunction = function
+    prb^.IpiContext1 = context1
+    prb^.IpiContext2 = context2
+
+    prb^.IpiSpin = 1
+
+    // Now disable interrupts.
+
+    oldstate := KiDisableInterrupts ()
+
+    // Acquire the target's IPI spinlock.
+
+    KiAcquireSpinlock ( &target^.IpiLock )
+
+    // Enqueue us to it.
+
+    RtlInsertAtTailList (
+        &target^.IpiListHead, // head
+        &target^.IpiListEntry, // entry
+    )
+
+    // Release the spinlock.
+
+    KiReleaseSpinlock ( &target^.IpiLock )
+
+    // Re-enable interrupts.
+
+    KiRestoreInterrupts ( oldstate )
+
+    // Trigger the IPI.
+
+    HalTriggerIpi ( target )
+
+    // Spin-wait for execution of our callback.
+
+    WHILE prb^.IpiSpin DO
+        // Do a language BARRIER so that this loop isn't optimized out.
+
+        BARRIER
+    END
+END
+
+FN KiServiceIpi ()
+
+    // An IPI interrupt has been delivered. Walk all of the PRBs and see who
+    // wants our attention. Note that this interrupt is the highest priority in
+    // the system so we should try to keep it brief - nothing can happen while
+    // we are here, not even the timer can tick, and the reason for that is to
+    // make sure IPI response times are high so we don't tie up other processors
+    // waiting for us to release them from a spin wait.
+    //
+    // Not all IPIs cause waits on behalf of the requesting processor. Some of
+    // them are perfectly happy being asynchronous such as requesting a software
+    // interrupt in order to get us to service our APC or DPC queue or to switch
+    // to a newly readied thread for which we were selected, to dispatch signals
+    // in usermode, etc.
+
+    prb := KI_CURRENT_PRB
+
+    listhead := &prb^.IpiListHead
+
+    WHILE NOT RtlEmptyList ( listhead ) DO
+        KiAcquireSpinlock ( &prb^.IpiLock )
+
+        listentry := listhead^.Next
+
+        IF listentry == listhead THEN
+            // Empty!
+
+            KiReleaseSpinlock ( &prb^.IpiLock )
+
+            BREAK
+        END
+
+        requestingprb := CONTAINEROF listentry TO KiPrb.IpiListEntry
+
+        RtlRemoveEntryList ( &requestingprb^.IpiListEntry )
+
+        KiReleaseSpinlock ( &prb^.IpiLock )
+
+        // Call the requesting processor's function.
+
+        requestingprb^.IpiFunction (
+            requestingprb^.IpiContext1, // context1
+            requestingprb^.IpiContext2, // context2
+        )
+
+        // Release him from his spin.
+
+        requestingprb^.IpiSpin = 0
+    END
+
+    IF KiFreezeCount THEN
+        // Oh snap! Lock up until the freeze count reaches zero.
+
+        // Increment this count so that the freezer knows when we froze.
+
+        KeIncrementUlong (
+            &KiFrozenProcessorCount, // ptr
+            1, // inc
+        )
+
+        WHILE KiFreezeCount DO
+            // Do a language BARRIER so that this loop isn't optimized out.
+
+            BARRIER
+        END
+    END
+END
+
+#END

@@ -566,10 +566,13 @@ FN BlInitializeMemory ()
 
     // Allocate the PRBs.
 
+    prbtotalsize := BlInfoBlock.ProcessorCount << BL_PRB_SHIFT
+    prbpages := (prbtotalsize + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
+
     desc : ^BlMemoryDescriptor
 
     BlInfoBlock.VirtualPrbBase = BlAllocateMappedRange (
-        BlInfoBlock.ProcessorCount, // pages
+        prbpages, // pages
         BL_KERNEL_STRUCTURES, // preferredva
         FALSE, // fixed
         BL_MEMORY_USED, // type
@@ -582,7 +585,7 @@ FN BlInitializeMemory ()
 
     RtlFillMemoryWithUlong (
         BlInfoBlock.VirtualPrbBase, // ptr
-        BlInfoBlock.ProcessorCount << RTL_PAGE_SHIFT, // sz
+        prbtotalsize, // sz
         0, // ulong
     )
 

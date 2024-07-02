@@ -75,6 +75,14 @@ FN HalInterrupt (
 
     context^.OldIpl = oldipl
 
+    // Acquire the interrupt object's spinlock. This synchronizes against
+    // other processors which have a driver trying to run code that is
+    // synchronized against their ISR, to access some shared data.
+
+#IF BLD_MP
+    KiAcquireSpinlock ( &int^.Spinlock )
+#END
+
     // Call the routine.
 
     int^.Routine (
@@ -82,9 +90,13 @@ FN HalInterrupt (
         context, // context
     )
 
+#IF BLD_MP
+    KiReleaseSpinlock ( &int^.Spinlock )
+#END
+
     // Disable interrupts.
 
-    oldstate := KiDisableInterrupts ()
+    KiDisableInterrupts ()
 
     // Reset the LSIC IPL.
 
@@ -110,12 +122,26 @@ END
 
 #IF BLD_MP
 
+FN HalTriggerIpi (
+    IN target : ^KiPrb,
+)
+
+    // Acquire the stashed LSIC pointer.
+
+    lsic := CAST target^.LsicBase TO ^HalpLsic
+
+    // Write the IPI interrupt into the LSIC interrupt pending register for the
+    // target processor. This will atomically OR it in.
+
+    lsic^.Pending0 = (1 << 1)
+END
+
 FN (KeInterruptF) HalpIpiInterrupt (
     IN interrupt : ^KeInterrupt,
     IN context : ^OsContext,
 )
 
-    KeCrash ( "NYI HalpIpiInterrupt\n" )
+    KiServiceIpi ()
 END
 
 #END

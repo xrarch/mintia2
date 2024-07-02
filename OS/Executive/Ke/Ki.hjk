@@ -35,7 +35,8 @@ EXTERN KiIdleProcess : KeProcess
     ]
 
 #ELSEIF ( STRCMP ARCHITECTURE "fox32" )
-    // Fox32 is always uniprocessor.
+    // Fox32 is always uniprocessor, so the Prb is mapped in a convenient and
+    // constant spot with a real page table entry.
 
     #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
     #DEFINE KI_DIRECT_PRB 1
@@ -47,6 +48,11 @@ EXTERN KiIdleProcess : KeProcess
 // Try to make ticks represent 5ms intervals.
 
 #DEFINE KI_QUANTUM_PER_TICK ( / HAL_TIMER_INTERVAL 5 )
+
+FNPTR KiIpiF (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
 
 // The per-processor block (Prb) is an architectural page size, but is at
 // minimum 4KB. It contains all per-processor information.
@@ -66,7 +72,20 @@ STRUCT KiPrb
     TimerTreeLock : KiSpinlock,
     CacheAlign3 : UBYTE[KI_CACHE_ALIGN - SIZEOF KiSpinlock],
 
+    IpiLock : KiSpinlock,
+    CacheAlign4 : UBYTE[KI_CACHE_ALIGN - SIZEOF KiSpinlock],
+
     IpiInterrupt : KeInterrupt,
+
+    IpiListHead : RtlListEntry,
+    IpiListEntry : RtlListEntry,
+
+    IpiFunction : KiIpiF,
+
+    IpiContext1 : UWORD,
+    IpiContext2 : UWORD,
+
+    IpiSpin : UWORD,
 #END
 
 #IF ( STRCMP PLATFORM "XRstation" )
@@ -247,7 +266,11 @@ EXTERN FN KiClockTick (
 
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
 
-FNPTR KiIpiF (
+EXTERN FN KiServiceIpi ()
+
+EXTERN FN KiExecuteOnOtherProcessor (
+    IN target : ^KiPrb,
+    IN function : KiIpiF,
     IN context1 : UWORD,
     IN context2 : UWORD,
 )

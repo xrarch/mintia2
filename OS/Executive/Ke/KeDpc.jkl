@@ -183,15 +183,23 @@ FN KiDispatchDpcQueue (
 
     prb^.DpcActive = TRUE
 
-    // Lock the DPC queue.
-
-    ipl := KiAcquireDpcQueue ()
-
     // Pop items from the list until it's emptied.
 
     head := &prb^.DpcListHead
 
-    WHILE NOT RtlEmptyList ( head ) DO
+    WHILE TRUE DO
+        ipl := KiAcquireDpcQueue ()
+
+        listentry := head^.Next
+
+        IF listentry == head THEN
+            // Queue's empty.
+
+            KiReleaseDpcQueue ( ipl )
+
+            BREAK
+        END
+
         dpc := CONTAINEROF head^.Next TO KeDpc.Entry
 
         // Remove from the list.
@@ -217,15 +225,7 @@ FN KiDispatchDpcQueue (
             context1, // context1
             context2, // context2
         )
-
-        // Re-lock the queue.
-
-        ipl = KiAcquireDpcQueue ()
     END
-
-    // Unlock the DPC queue.
-
-    KiReleaseDpcQueue ( ipl )
 
     prb^.DpcActive = FALSE
 END
