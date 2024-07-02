@@ -130,67 +130,39 @@ FN KiSwitchThread (
 
     thread^.Status = KI_THREAD_RUNNING
 
-    oldcontext : ^^OsContext
+    nextproc := thread^.Process
 
-    oldstate : UWORD
+    // Disable interrupts *before* switching address space because we have to
+    // block out ASID rollover IPIs on some architectures.
 
-    IF NOT current THEN
-        // Give a space on the stack to stash it into.
+    oldstate := KiDisableInterrupts ()
 
-        initialctx : ^OsContext[1]
+    IF nextproc^.PageDirectoryPfn != current^.Process^.PageDirectoryPfn THEN
+        // Switch to the address space of the new process.
 
-        oldcontext = &initialctx[0]
-
-        // Make sure interrupts are disabled before we switch.
-
-        oldstate = KiDisableInterrupts ()
-
-    ELSE
-        oldcontext = &thread^.Context
-
-        nextproc := thread^.Process
-
-        // Disable interrupts *before* switching address space because we have
-        // to block out ASID rollover IPIs on some architectures.
-
-        oldstate = KiDisableInterrupts ()
-
-        IF nextproc^.PageDirectoryPfn != current^.Process^.PageDirectoryPfn THEN
-            // Switch to the address space of the new process.
-
-            KiSwitchAddressSpace ( nextproc )
-        END
+        KiSwitchAddressSpace ( nextproc )
     END
-
-    prb := KI_CURRENT_PRB
-
-    prb^.CurrentThread = thread
-    prb^.KernelStackTop = thread^.KernelStackTop
 
     // Note that KiSwitchContext releases the old thread's lock.
     // It is not reacquired before switching back in.
 
     KiSwitchContext (
+        thread, // newthread
         current, // oldthread
-        thread^.Context, // newcontext
     )
 
     KiRestoreInterrupts ( oldstate )
 
-    // We're back in the context of the "current" thread.
+    // We're back in the context of the "current" thread. This is always where
+    // the hole that the gopher pops back out of is, except in the case of a
+    // newly created thread being dispatched for the first time.
+    //
     // Check for pending Kernel APCs that need to be dispatched. Note that we
     // don't need to acquire our thread lock for that since the act of checking
     // (RtlEmptyList) does not touch any pointers.
 
     IF NOT RtlEmptyList ( &current^.KapcListHead ) THEN
-        // Grab a new PRB pointer since we might not be on the same processor
-        // as when we grabbed the first one anymore.
-
-#IF ( NOT KI_DIRECT_PRB )
-        prb = KI_CURRENT_PRB
-#END
-
-        KiSoftInterruptSelf ( prb, KI_IPL_APC )
+        KiSoftInterruptSelf ( KI_CURRENT_PRB, KI_IPL_APC )
     END
 END
 

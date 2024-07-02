@@ -291,8 +291,8 @@ KiLowerIpl:
 
     ret
 
-// a0 - oldthread
-// a1 - newcontext
+// a0 - newthread
+// a1 - oldthread
 KiSwitchContext:
 .global KiSwitchContext
     
@@ -324,10 +324,7 @@ KiSwitchContext:
     mov  long [sp + OsContext_S17], s17
     mov  long [sp + OsContext_Tp], tp
 
-    // Switch to new stack.
-
-    mov  long [a0 + KeThread_Context], sp
-    mov  sp, a1
+    mov  long [a1 + KeThread_Context], sp
 
     // Release thread lock. Inline KiReleaseSpinlock here for speed.
 
@@ -339,11 +336,26 @@ KiSwitchContext:
 
     // Set spinlock un-owned.
 
-    mov  long [a0 + KeThread_Spinlock], zero
+    mov  long [a1 + KeThread_Spinlock], zero
 
 #END
 
+    // Fall through.
+
+// a0 - thread
+KiJumpIntoThread:
+.global KiJumpIntoThread
+
+    // Set new thread parameters in Prb.
+
+    subi t0, zero, 4096
+    mov  long [t0 + KiPrb_CurrentThread], a0
+    mov  t1, long [a0 + KeThread_KernelStackTop]
+    mov  long [t0 + KiPrb_KernelStackTop], t1
+
     // Restore context of new thread.
+
+    mov  sp, long [a0 + KeThread_Context]
 
     mov  lr, long [sp + OsContext_Lr]
     mov  s0, long [sp + OsContext_S0]
