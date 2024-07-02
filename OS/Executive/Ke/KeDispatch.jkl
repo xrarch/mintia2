@@ -328,15 +328,14 @@ FN KeWaitForObjects (
         waitblock = &waitblocktable[i]
         object = &objecttable[i]
 
-        // Capture the current signal count.
-
 @RecheckObject
+
+        // Capture the current signal count.
 
         signal := object^.SignalCount
 
         IF signal THEN
             // Already signaled. Our wait has been satisfied before it began.
-
             // If this isn't a notification event, consume the count.
 
             IF object^.Type != KI_DISPATCH_EVENT_NOTIF THEN
@@ -362,11 +361,11 @@ FN KeWaitForObjects (
 
             // Note the label above - on MP we GOTO here if another
             // processor aborted our wait.
-
+            //
             // At this point "i" is equivalent to the maximum object index we
             // reached before we aborted, and "status" is equivalent to whatever
             // we should return when we leave.
-            
+            //
             // Remove our wait blocks from every object we enqueued them to.
 
             j := 0
@@ -468,11 +467,12 @@ FN KeWaitForObjects (
     KiAcquireThreadElevated ( thread )
 
 #IF BLD_MP
-    // See if our wait has gone through.
+    // See if our wait was aborted by another processor while we were enqueuing
+    // objects.
 
     IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED THEN
-        // Nope! We have to dequeue all our wait blocks and return.
-
+        // It was aborted. We have to dequeue all our wait blocks and return.
+        //
         // Release the thread lock so we don't violate the object->thread
         // lock ordering.
 
@@ -489,9 +489,10 @@ FN KeWaitForObjects (
             KeDequeueTimer ( timer )
 
             // Remove the wait block.
-            // We *still* don't need the lock because we've been nonpreemptible
-            // and blocking out the expiration DPC for this processor the whole
-            // time.
+            // We don't need the timer's object lock because we've been
+            // nonpreemptible and blocking out the expiration DPC for this
+            // processor since we enqueued it. Therefore it is still in our
+            // custody.
 
             RtlRemoveEntryList ( &waitblock^.Entry )
         END
