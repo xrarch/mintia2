@@ -48,3 +48,31 @@ EXPORT FN KeInitializeInterrupt (
 #END
 
 END
+
+EXPORT FN KeSynchronizeWithInterrupt (
+    IN interrupt : ^KeInterrupt,
+) : UWORD
+
+    // Synchronize with the ISR by raising IPL to match its level and
+    // acquiring its spinlock.
+
+    oldipl := HalRaiseHardwareIpl ( interrupt^.Ipl )
+
+#IF BLD_MP
+    KiAcquireSpinlock ( &interrupt^.Spinlock )
+#END
+END
+
+EXPORT FN KeDesynchronizeFromInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN oldipl : UWORD,
+) : UWORD
+
+    // Desynchronize from the ISR by releasing its spinlock and lowering IPL.
+
+#IF BLD_MP
+    KiReleaseSpinlock ( &interrupt^.Spinlock )
+#END
+
+    HalLowerHardwareIpl ( oldipl )
+END

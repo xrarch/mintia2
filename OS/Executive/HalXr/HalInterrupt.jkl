@@ -41,6 +41,77 @@ HalpIplToLsicIpl : UBYTE[32] = {
     [KI_IPL_HIGH] = 0,
 }
 
+FN HalRaiseHardwareIpl (
+    IN ipl : UWORD,
+) : UWORD
+
+    // Raise the hardware IPL by programming the LSIC.
+    // This isn't part of KiRaiseIpl since that is written in a tightly
+    // optimized manner around the most common usage (changing between software
+    // IPLs, which need not reprogram the hardware interrupt masks).
+
+    // Block out preemption to make sure we don't switch to another processor.
+
+#IF BLD_MP
+    oldstate := KiDisableInterrupts ()
+#END
+
+    prb := KI_CURRENT_PRB
+
+    lsic := CAST prb^.LsicBase TO ^HalpLsic
+
+    lsic^.Ipl = HalpIplToLsicIpl[ipl]
+    BARRIER
+
+    oldipl := prb^.Ipl
+    prb^.Ipl = ipl
+
+#IF BLD_MP
+    KiRestoreInterrupts ( oldstate )
+#END
+
+    RETURN oldipl
+END
+
+FN HalLowerHardwareIpl (
+    IN ipl : UWORD,
+)
+
+    // Set the hardware IPL by programming the LSIC.
+    // This isn't part of KiLowerIpl since that is written in a tightly
+    // optimized manner around the most common usage (changing between software
+    // IPLs, which need not reprogram the hardware interrupt masks).
+
+    // Block out preemption to make sure we don't switch to another processor.
+
+#IF BLD_MP
+    oldstate := KiDisableInterrupts ()
+#END
+
+    prb := KI_CURRENT_PRB
+
+    lsic := CAST prb^.LsicBase TO ^HalpLsic
+
+    lsic^.Ipl = HalpIplToLsicIpl[ipl]
+    BARRIER
+
+    prb^.Ipl = ipl
+
+#IF BLD_MP
+    KiRestoreInterrupts ( oldstate )
+#END
+
+    // We don't need to check this in the disabled interrupts section because if
+    // we get a stale PendingSoftwareInterrupts value from another processor, we
+    // will harmlessly call KiDispatchSoftwareInterrupts which does nothing. And
+    // we can't "miss" any since all events that switch us to another processor
+    // will cause software interrupt dispatch anyway.
+
+    IF prb^.PendingSoftwareInterrupts >> ipl THEN
+        KiDispatchSoftwareInterrupts ( ipl )
+    END
+END
+
 FN HalInterrupt (
     IN context : ^OsContext,
 )
@@ -64,7 +135,7 @@ FN HalInterrupt (
     lsic^.Ipl = HalpIplToLsicIpl[int^.Ipl]
     BARRIER
 
-    // Capture old IPL and set new in PRB.
+    // Capture old IPL and set new in Prb.
 
     oldipl := prb^.Ipl
     prb^.Ipl = int^.Ipl
@@ -103,7 +174,7 @@ FN HalInterrupt (
     lsic^.Ipl = HalpIplToLsicIpl[oldipl]
     BARRIER
 
-    // Reset the PRB IPL.
+    // Reset the Prb IPL.
 
     prb^.Ipl = oldipl
 END

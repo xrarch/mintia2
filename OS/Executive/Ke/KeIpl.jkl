@@ -5,24 +5,24 @@
 #INCLUDE "Ki.hjk"
 
 #MACRO KiAcknowledgeSoftwareInterrupt ( prb, ipl ) [
-    #IF BLD_CHK
-        IF NOT ipl THEN
-            KeCrash ( "KiASI IPL = 0\n" )
-        END
-    #END
+#IF BLD_CHK
+    IF NOT ipl THEN
+        KeCrash ( "KiASI IPL = 0\n" )
+    END
+#END
 
     // Note that we subtract 1 from the IPL shift so that we can do a right
     // shift by IPL to check for pending bits later (which is the hotter path).
     // Also this assumes interrupts disabled.
 
-    #IF BLD_MP
-        KeMaskUlong (
-            &prb^.PendingSoftwareInterrupts, // ptr
-            ~(1 << (ipl - 1)), // mask
-        )
-    #ELSE
-        NOTHING (prb)^.PendingSoftwareInterrupts &= ~(1 << (ipl - 1))
-    #END
+#IF BLD_MP
+    KeMaskUlong (
+        &prb^.PendingSoftwareInterrupts, // ptr
+        ~(1 << (ipl - 1)), // mask
+    )
+#ELSE
+    NOTHING (prb)^.PendingSoftwareInterrupts &= ~(1 << (ipl - 1))
+#END
 ]
 
 FNPTR KiSoftwareInterruptHandlerF (

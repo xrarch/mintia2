@@ -14,8 +14,6 @@ FN (KeStartThreadF) KiThreadedMain ()
     // This is the first code that runs in the context of a thread during the
     // lifetime of the system.
 
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
-
     RtlPrint ( "Hi from a thread\n" )
 
     WHILE TRUE DO
@@ -123,117 +121,12 @@ FN KiInitializePrb (
         0, // context1
         0, // context2
     )
-END
 
-KiTestTimer : KeTimer
-KiTestTimer2 : KeTimer
-KiTestTimer3 : KeTimer
-KiTestTimer4 : KeTimer
-KiTestTimer5 : KeTimer
-KiTestTimer6 : KeTimer
-
-FN (KeDpcF) KiTestTimerDpc (
-    IN dpc : ^KeDpc,
-    IN context1 : UWORD,
-    IN context2 : UWORD,
-)
-
-    IF NOT context1 THEN
-        RtlPrint ( "8000 " )
-
-    ELSEIF context1 == 1 THEN
-        RtlPrint ( "4000 " )
-
-    ELSEIF context1 == 2 THEN
-        RtlPrint ( "2000 " )
-    
-    ELSEIF context1 == 3 THEN
-        RtlPrint ( "1000 " )
-
-    ELSEIF context1 == 4 THEN
-        RtlPrint ( "500  " )
-
-    ELSEIF context1 == 5 THEN
-        RtlPrint ( "250  " )
-    END
-
-    interval : RtlUquad
-
-    interval.High = 0
-    interval.Low = 8000
-
-    KeEnqueueTimer (
-        &KiTestTimer, // timer
-        &interval, // interval
-        0, // context1
-        0, // context2
-    )
-
-    interval.Low = 4000
-
-    KeEnqueueTimer (
-        &KiTestTimer2, // timer
-        &interval, // interval
-        1, // context1
-        0, // context2
-    )
-
-    interval.Low = 2000
-
-    KeEnqueueTimer (
-        &KiTestTimer3, // timer
-        &interval, // interval
-        2, // context1
-        0, // context2
-    )
-
-    interval.Low = 1000
-
-    KeEnqueueTimer (
-        &KiTestTimer4, // timer
-        &interval, // interval
-        3, // context1
-        0, // context2
-    )
-
-    interval.Low = 500
-
-    KeEnqueueTimer (
-        &KiTestTimer5, // timer
-        &interval, // interval
-        4, // context1
-        0, // context2
-    )
-
-    interval.Low = 250
-
-    KeEnqueueTimer (
-        &KiTestTimer6, // timer
-        &interval, // interval
-        5, // context1
-        0, // context2
-    )
-
-    KeDequeueTimer ( &KiTestTimer5 )
-
-    KeDequeueTimer ( &KiTestTimer2 )
-
-    KeDequeueTimer ( &KiTestTimer4 )
+    prb^.IdleThread.Priority = OS_PRIORITY_IDLE
+    prb^.IdleThread.BasePriority = OS_PRIORITY_IDLE
 END
 
 FNPTR DbgMainF ()
-
-#IF BLD_MP
-
-FN (KiIpiF) TestIpi (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
-)
-
-    RtlPrint ( "Sup I'm an IPI! %d %d\n", context1, context2 )
-END
-
-#END
 
 #SECTION "INIT$text"
 EXPORT FN KeMain (
@@ -316,129 +209,7 @@ EXPORT FN KeMain (
 
     // Switch into our idle thread.
 
-    KiJumpIntoThread (
-        &prb^.IdleThread, // thread
-    )
+    KiJumpIntoThread ( &prb^.IdleThread )
 
-    RtlPrint ( "%d\n", SIZEOF KiPrb )
-
-    dpc : KeDpc
-    dpc2 : KeDpc
-    dpc3 : KeDpc
-    dpc4 : KeDpc
-    dpc5 : KeDpc
-    dpc6 : KeDpc
-
-    KeInitializeDpc (
-        &dpc, // dpc
-        &KiTestTimerDpc, // func
-    )
-
-    KeInitializeDpc (
-        &dpc2, // dpc
-        &KiTestTimerDpc, // func
-    )
-
-    KeInitializeDpc (
-        &dpc3, // dpc
-        &KiTestTimerDpc, // func
-    )
-
-    KeInitializeDpc (
-        &dpc4, // dpc
-        &KiTestTimerDpc, // func
-    )
-
-    KeInitializeDpc (
-        &dpc5, // dpc
-        &KiTestTimerDpc, // func
-    )
-
-    KeInitializeDpc (
-        &dpc6, // dpc
-        &KiTestTimerDpc, // func
-    )
-
-    KeInitializeTimer (
-        &KiTestTimer, // timer
-        &dpc, // dpc
-        "TestTimer", // name
-    )
-
-    KeInitializeTimer (
-        &KiTestTimer2, // timer
-        &dpc2, // dpc
-        "TestTimer2", // name
-    )
-
-    KeInitializeTimer (
-        &KiTestTimer3, // timer
-        &dpc3, // dpc
-        "TestTimer3", // name
-    )
-
-    KeInitializeTimer (
-        &KiTestTimer4, // timer
-        &dpc4, // dpc
-        "TestTimer4", // name
-    )
-
-    KeInitializeTimer (
-        &KiTestTimer5, // timer
-        &dpc5, // dpc
-        "TestTimer5", // name
-    )
-
-    KeInitializeTimer (
-        &KiTestTimer6, // timer
-        &dpc6, // dpc
-        "TestTimer6", // name
-    )
-
-    interval : RtlUquad
-
-    interval.High = 0
-    interval.Low = 1000
-
-    KeEnqueueTimer (
-        &KiTestTimer, // timer
-        &interval, // interval
-        0, // context1
-        0, // context2
-    )
-
-#IF BLD_MP
-    HalTriggerIpi ( KI_CURRENT_PRB )
-
-    oldipl := KiRaiseIpl ( KI_IPL_DPC )
-
-    KiExecuteOnOtherProcessor (
-        KI_CURRENT_PRB, // target
-        &TestIpi, // function
-        10, // context1
-        15, // context2
-    )
-
-    KiExecuteOnOtherProcessor (
-        KI_CURRENT_PRB, // target
-        &TestIpi, // function
-        11, // context1
-        15, // context2
-    )
-
-    KiExecuteOnOtherProcessor (
-        KI_CURRENT_PRB, // target
-        &TestIpi, // function
-        13, // context1
-        15, // context2
-    )
-
-    KiLowerIpl ( oldipl )
-
-    RtlPrint ( "Cool I sent an IPI" )
-#END
-
-    WHILE TRUE DO
-        KiWaitForInterrupt ()
-    END
+    KeCrash ( "KiJumpIntoThread returned\n" )
 END
