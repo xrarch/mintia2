@@ -65,6 +65,17 @@ KeCurrentThread:
     ret
 
 // outputs:
+// a3 - process
+KeCurrentProcess:
+.export KeCurrentProcess
+
+    subi t0, zero, 4096             // Load PRB pointer.
+    mov  a3, long [t0 + KiPrb_CurrentThread]
+    mov  a3, long [a3 + KeThread_Process]
+
+    ret
+
+// outputs:
 // a3 - current ipl
 KiCurrentIpl:
 .global KiCurrentIpl

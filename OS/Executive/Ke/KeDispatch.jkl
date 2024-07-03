@@ -128,8 +128,6 @@ FN KiSwitchThread (
     END
 #END
 
-    thread^.Status = KI_THREAD_RUNNING
-
     nextproc := thread^.Process
 
     // Disable interrupts *before* switching address space because we have to
@@ -207,8 +205,20 @@ END
                 RETURN OS_STATUS_KILLED
             END
 
-        ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
+        ELSEIF NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
+            // There are pending lazy APCs and this is a KE_USER_MODE wait.
 
+            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+            thread^.LazyApcTriggered = TRUE
+
+            KiSoftInterruptSelf ( KI_CURRENT_PRB, KI_IPL_APC )
+
+            KiLowerIpl ( ipl )
+
+            GOTO Retry
+
+        ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
             // There are pending usermode APCs and this is a KE_USER_MODE wait.
 
             KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )

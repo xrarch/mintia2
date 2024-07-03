@@ -1,0 +1,132 @@
+//
+// Implements support for kernel Process objects.
+//
+
+#INCLUDE "Ki.hjk"
+#INCLUDE "<ll>/System/OsStatus.hjk"
+#INCLUDE "<ll>/System/OsSignal.hjk"
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+
+EXTERN KiAsidSequenceNumber : RtlUquad
+
+#END
+
+#SECTION "PAGE$text"
+FN KeInitializeProcess (
+    IN process : ^KeProcess,
+    IN name : ^UBYTE,
+)
+
+    // Initialize a KeProcess object.
+
+    RtlCopyString (
+        &process^.Name[0], // dest
+        name, // src
+        KE_DEBUG_NAME_LENGTH, // bufsize
+    )
+
+    RtlInitializeList ( &process^.ThreadListHead )
+
+    process^.ThreadCount = 0
+    process^.SignalThread = NULLPTR
+    process^.Terminated = FALSE
+    process^.TerminationStatus = 0
+    process^.PageDirectoryPfn = 0
+    process^.SwapListNext = NULLPTR
+    process^.ResidentStackCount = 0
+    process^.DeferredThreadListHead = NULLPTR
+    process^.MemoryState = KE_PROCESS_RESIDENT
+
+    KeInitializePushlock ( &process^.Pushlock )
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    process^.Asid = 0
+
+    // Cause the process to get assigned a new ASID when its first thread is
+    // scheduled in by giving it a sequence number of 2^64 - 1. This could cause
+    // a problem if the system lifetime exceeds geological timescales.
+
+    process^.AsidSequenceNumber.High = 0xFFFFFFFF
+    process^.AsidSequenceNumber.Low = 0xFFFFFFFF
+#END
+END
+
+#SECTION "PAGE$text"
+FN KeSignalProcess (
+    IN process : ^KeProcess,
+    IN signal : UWORD,
+)
+
+    // Signal the given process. If the signal is OS_SIGNAL_KILL, we broadcast
+    // it to all of the threads of the process. Otherwise, we send it to the
+    // signal thread of the process.
+
+#IF BLD_CHK
+    IF signal == 0 THEN
+        KeCrash ( "KeSignalProcess: signal == 0\n" )
+    END
+
+    IF signal >= 32 THEN
+        KeCrash ( "KeSignalProcess: signal >= 32\n" )
+    END
+#END
+
+    KeAcquirePushlockShared ( &process^.Pushlock )
+
+    IF NOT process^.SignalThread THEN
+        // This process has no threads.
+
+        KeReleasePushlock ( &process^.Pushlock )
+
+        LEAVE
+    END
+
+    IF signal == OS_SIGNAL_KILL THEN
+        // Mark the process terminated.
+
+        process^.Terminated = TRUE
+
+        // Iterate each thread and send the kill signal.
+
+        head := &process^.ThreadListHead
+        listentry := head^.Next
+
+        WHILE listentry != head DO
+            thread := CONTAINEROF listentry TO KeThread.ProcessListEntry
+
+            KeSignalThread (
+                thread, // thread
+                OS_SIGNAL_KILL, // signal
+            )
+
+            listentry = listentry^.Next
+        END
+
+    ELSE
+        KeSignalThread (
+            process^.SignalThread, // thread
+            signal, // signal
+        )
+    END
+
+    KeReleasePushlock ( &process^.Pushlock )
+END
+
+FN KeAttachProcess (
+    IN process : ^KeProcess,
+    IN try : UWORD,
+) : UWORD
+
+    // Switch the current thread to this process's address space. It will be
+    // able to fault upon its userspace and so on.
+
+    KeCrash ( "NYI KeAttachProcess\n" )
+END
+
+FN KeDetachProcess (
+    IN oldipl : UWORD,
+)
+
+    KeCrash ( "NYI KeDetachProcess\n" )
+END

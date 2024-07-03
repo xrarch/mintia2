@@ -1,0 +1,126 @@
+//
+// Implements support for kernel Thread objects.
+//
+
+#INCLUDE "Ki.hjk"
+#INCLUDE "<ll>/System/OsStatus.hjk"
+
+#SECTION "PAGE$text"
+FN KeInitializeThread (
+    IN process : ^KeProcess,
+    IN thread : ^KeThread,
+    IN name : ^UBYTE,
+    IN kstack : ^VOID,
+    IN kstacksize : UWORD,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Initialize a thread object.
+
+    RtlCopyString (
+        &thread^.Name[0], // dest
+        name, // src
+        KE_DEBUG_NAME_LENGTH, // bufsize
+    )
+
+    thread^.Status = KI_THREAD_INITIALIZED
+
+    thread^.ActualProcess = process
+    thread^.Process = process
+
+    thread^.BasePriority = OS_PRIORITY_DEFAULT
+
+    // Initialize the context on the kernel stack.
+
+    thread^.Context = KiInitializeContext (
+        process, // process
+        kstack + kstacksize, // kstack
+        startfunc, // startfunc
+        context1, // context1
+        context2, // context2
+    )
+
+    thread^.KernelStackTop = kstack + kstacksize
+
+    thread^.RemainingQuantum = KI_DEFAULT_QUANTUM
+
+    thread^.SwapListNext = NULLPTR
+    thread^.KernelStackCanBeSwapped = TRUE
+    thread^.KernelStackResident = TRUE
+    thread^.InSwapList = FALSE
+
+    // Initialize the APC list heads.
+
+    RtlInitializeList ( &thread^.KapcListHead )
+    RtlInitializeList ( &thread^.LapcListHead )
+    RtlInitializeList ( &thread^.UapcListHead )
+
+    // Initialize the time counters.
+
+    RtlSetUquadToUlong ( &thread^.UserTimeMs, 0 )
+    RtlSetUquadToUlong ( &thread^.DpcTimeMs, 0 )
+    RtlSetUquadToUlong ( &thread^.SystemTimeMs, 0 )
+
+    // Initialize the timer.
+
+    KeInitializeTimer (
+        &thread^.Timeout, // timer
+        NULLPTR, // dpc
+        "Timeout", // name
+    )
+
+    thread^.TimeoutWaitBlock.Object = &thread^.Timeout.Header
+    thread^.TimeoutWaitBlock.WakeStatus = OS_STATUS_WAIT_TIMEOUT
+    thread^.TimeoutWaitBlock.Thread = NULLPTR
+
+    // Initialize the thread lock.
+
+#IF BLD_MP
+    KiInitializeSpinlock ( &thread^.Spinlock )
+
+    thread^.WaitAttempt = KI_THREAD_WAIT_NONE
+#END
+
+    thread^.IgnoreEventCount = 0
+
+    // Initialize signal state.
+
+    thread^.SignalMask = 0
+    thread^.SignalAcceptMask = 0
+    thread^.SignalDeliverOnWaitMask = 0
+
+    thread^.UserInterrupt = FALSE
+    thread^.UserApcTriggered = FALSE
+    thread^.LazyApcTriggered = FALSE
+
+    // Add to the process's thread list.
+
+    IF NOT process^.SignalThread THEN
+        // This is synchronized by the process's CreateDelete lock.
+
+        process^.SignalThread = thread
+    END
+
+    // NYI pushlocks!
+    // KeAcquirePushlockExclusive ( &process^.Pushlock )
+
+    RtlInsertAtTailList (
+        &process^.ThreadListHead, // head
+        &thread^.ProcessListEntry, // entry
+    )
+
+    process^.ThreadCount += 1
+    process^.ResidentStackCount += 1
+
+    // KeReleasePushlock ( &process^.Pushlock )
+END
+
+FN KeSignalThread (
+    IN thread : ^KeThread,
+    IN signal : UWORD,
+)
+
+    KeCrash ( "NYI KeSignalThread\n" )
+END

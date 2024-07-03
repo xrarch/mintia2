@@ -9,6 +9,21 @@ PUBLIC KiIdleProcess : KeProcess
 EXPORT ExLoaderBlock : BlInfoRecord
 
 #SECTION "INIT$text"
+FN (KeStartThreadF) KiThreadedMain ()
+
+    // This is the first code that runs in the context of a thread during the
+    // lifetime of the system.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+    RtlPrint ( "Hi from a thread\n" )
+
+    WHILE TRUE DO
+        KiWaitForInterrupt ()
+    END
+END
+
+#SECTION "INIT$text"
 FN KiFixupLoaderBlockLists ()
 
     // Fix up the circular lists in the loader block so that they still point to
@@ -95,6 +110,19 @@ FN KiInitializePrb (
     // Initialize the idle scheduler queue.
 
     RtlInitializeList ( &prb^.IdleListHead )
+
+    // Initialize the idle thread.
+
+    KeInitializeThread (
+        &KiIdleProcess, // process
+        &prb^.IdleThread, // thread
+        "IdleThread", // name
+        &prb^.IdleStack[0], // kstack
+        KI_IDLE_STACK_SIZE, // kstacksize
+        &KiThreadedMain, // startfunc
+        0, // context1
+        0, // context2
+    )
 END
 
 KiTestTimer : KeTimer
@@ -250,6 +278,13 @@ EXPORT FN KeMain (
 
     KiFixupLoaderBlockLists ()
 
+    // Initialize the idle process.
+
+    KeInitializeProcess (
+        &KiIdleProcess, // process
+        "Idle", // name
+    )
+
     // Initialize the boot processor's PRB.
 
     prb := KI_CURRENT_PRB
@@ -278,6 +313,14 @@ EXPORT FN KeMain (
     // Announce ourselves.
 
     RtlPrint ( "KeMain(): MINTIA is awake!\n" )
+
+    // Switch into our idle thread.
+
+    KiJumpIntoThread (
+        &prb^.IdleThread, // thread
+    )
+
+    RtlPrint ( "%d\n", SIZEOF KiPrb )
 
     dpc : KeDpc
     dpc2 : KeDpc

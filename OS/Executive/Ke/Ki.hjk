@@ -49,6 +49,10 @@ EXTERN KiIdleProcess : KeProcess
 
 #DEFINE KI_QUANTUM_PER_TICK ( / HAL_TIMER_INTERVAL 5 )
 
+// Default quantum is 30ms.
+
+#DEFINE KI_DEFAULT_QUANTUM 6
+
 #IF BLD_MP
 
 FNPTR KiIpiF (
@@ -61,8 +65,10 @@ FNPTR KiIpiF (
 // The per-processor block (Prb) is an architectural page size, but is at
 // minimum 4KB. It contains all per-processor information.
 
+#DEFINE KI_IDLE_STACK_SIZE 2048
+
 STRUCT KiPrb
-    IdleStack : UBYTE[2048],
+    IdleStack : UBYTE[KI_IDLE_STACK_SIZE],
 
 #IF BLD_MP
     // Give the spinlocks their own cache lines.
@@ -95,6 +101,8 @@ STRUCT KiPrb
     TimerTreeRoot : ^RtlHeapEntry,
 
     IrqDispatchTable : ^KeInterrupt[HAL_VECTOR_MAX],
+
+    IdleThread : KeThread,
 
     // Inspired by ULE of FreeBSD:
     //
@@ -247,6 +255,10 @@ EXTERN FN KiDispatchApcQueue (
     IN current : ^KeThread,
 )
 
+EXTERN FN KiDispatchUserApcQueue (
+    IN current : ^KeThread,
+)
+
 EXTERN FN KiDispatchDpcQueue (
     IN prb : ^KiPrb,
 )
@@ -287,12 +299,10 @@ EXTERN FN KiClockTick (
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
 
 #MACRO KiSoftInterruptSelf ( prb, ipl ) [
-    IF (prb)^.PendingSoftwareInterrupts & (1 << ipl) == 0 THEN
-        KeOrUlong (
-            &(prb)^.PendingSoftwareInterrupts, // ptr
-            1 << (ipl - 1), // bitset
-        )
-    END
+    KeOrUlong (
+        &(prb)^.PendingSoftwareInterrupts, // ptr
+        1 << (ipl - 1), // bitset
+    )
 ]
 
 #IF BLD_MP
@@ -379,3 +389,11 @@ EXTERN FN KiReleaseSpinlockLower (
 #END
     NOTHING (hdr)^.Type = (type)
 ]
+
+EXTERN FN KiInitializeContext (
+    IN process : ^KeProcess,
+    IN kstack : ^VOID,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : ^OsContext

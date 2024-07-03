@@ -8,6 +8,8 @@ TYPE KiSpinlock : ULONG
 
 #END
 
+TYPE KePushlock : ^VOID
+
 #DEFINE KE_KERNEL_MODE 1
 #DEFINE KE_USER_MODE 2
 
@@ -140,6 +142,8 @@ EXTERN KeDebuggerEntry : KeDebuggerEntryF
 
 EXTERN FN KeCurrentThread () : ^KeThread
 
+EXTERN FN KeCurrentProcess () : ^KeProcess
+
 FNPTR KeDpcF (
     IN dpc : ^KeDpc,
     IN context1 : UWORD,
@@ -267,16 +271,57 @@ EXTERN FN KeDequeueTimer (
     IN timer : ^KeTimer,
 ) : UWORD
 
+EXTERN FN KeInitializeProcess (
+    IN process : ^KeProcess,
+    IN name : ^UBYTE,
+)
+
+FNPTR KeStartThreadF ()
+
+EXTERN FN KeInitializeThread (
+    IN process : ^KeProcess,
+    IN thread : ^KeThread,
+    IN name : ^UBYTE,
+    IN kstack : ^VOID,
+    IN kstacksize : UWORD,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+#DEFINE KE_DEBUG_NAME_LENGTH 32
+
+#DEFINE KE_PROCESS_THREAD_MAX 65536
+
+#DEFINE KE_PROCESS_RESIDENT 1
+#DEFINE KE_PROCESS_TRANSITION 2
+#DEFINE KE_PROCESS_OUTSWAPPED 3
+
 STRUCT KeProcess
+    Name : UBYTE[KE_DEBUG_NAME_LENGTH],
+
+    ThreadListHead : RtlListEntry,
+
+    DeferredThreadListHead : ^KeThread,
+    SignalThread : ^KeThread,
+    SwapListNext : ^KeProcess,
+
+    Pushlock : KePushlock,
+
     PageDirectoryPfn : UWORD,
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     Asid : UWORD,
     AsidSequenceNumber : RtlUquad,
-#IF BLD_MP
-    AsidLock : KiSpinlock,
 #END
-#END
+
+    TerminationStatus : ULONG,
+
+    ThreadCount : UINT,
+    ResidentStackCount : UINT,
+
+    MemoryState : UBYTE,
+    Terminated : UBYTE,
 END
 
 #DEFINE KI_THREAD_WAIT_BLOCKS 4
@@ -289,8 +334,14 @@ END
 #DEFINE KI_THREAD_RUNNING 1
 #DEFINE KI_THREAD_READY 2
 #DEFINE KI_THREAD_WAITING 3
+#DEFINE KI_THREAD_INITIALIZED 4
 
 STRUCT KeThread
+    Name : UBYTE[KE_DEBUG_NAME_LENGTH],
+
+    ProcessListEntry : RtlListEntry,
+    ReadyEntry : RtlListEntry,
+
     KapcListHead : RtlListEntry,
     LapcListHead : RtlListEntry,
     UapcListHead : RtlListEntry,
@@ -302,7 +353,9 @@ STRUCT KeThread
     WaitBlockTable : ^KiWaitBlock,
     Context : ^OsContext,
     Process : ^KeProcess,
+    ActualProcess : ^KeProcess,
     KernelStackTop : ^VOID,
+    SwapListNext : ^KeThread,
 
     WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
     TimeoutWaitBlock : KiWaitBlock,
@@ -331,4 +384,32 @@ STRUCT KeThread
     Alertable : UBYTE,
     WaitMode : UBYTE,
     WaitIpl : UBYTE,
+    LazyApcTriggered : UBYTE,
+    KernelStackCanBeSwapped : UBYTE,
+    KernelStackResident : UBYTE,
+    InSwapList : UBYTE,
 END
+
+EXTERN FN KeSignalThread (
+    IN thread : ^KeThread,
+    IN signal : UWORD,
+)
+
+#MACRO KeInitializePushlock ( pushlock ) [
+    NOTHING (pushlock)^ = 0
+]
+
+EXTERN FN KeAcquirePushlockShared (
+    IN pushlock : ^KePushlock,
+)
+EXTERN FN KeAcquirePushlockExclusive (
+    IN pushlock : ^KePushlock,
+)
+
+EXTERN FN KeReleasePushlock (
+    IN pushlock : ^KePushlock,
+)
+
+EXTERN FN KeConvertPushlockToShared (
+    IN pushlock : ^KePushlock,
+)

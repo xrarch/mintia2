@@ -12,7 +12,7 @@ KiUpdateAsidLock : KiSpinlock = KI_INITIAL_SPINLOCK
 
 #END
 
-KiAsidSequenceNumber : RtlUquad
+PUBLIC KiAsidSequenceNumber : RtlUquad
 KiNextAsid : UWORD
 
 // The exact interface to the HAL for interrupts is private to the architecture.
@@ -402,6 +402,10 @@ KiJumpIntoThread:
     mov  t1, long [a0 + KeThread_KernelStackTop]
     mov  long [t0 + KiPrb_KernelStackTop], t1
 
+    // Set thread to RUNNING.
+
+    mov  byte [a0 + KeThread_Status], KI_THREAD_RUNNING
+
     // Restore context of new thread.
 
     mov  sp, long [a0 + KeThread_Context]
@@ -461,7 +465,35 @@ KiSwitchMapCode:
 
 KiSwitchMapCodeEnd:
 
+KiThreadTrampoline:
+
+    // This is where a new thread begins execution.
+    // s0 contains the start function, s1 and s2 contain context pointers.
+
+    // Interrupts are disabled. Enable them.
+
+    mfcr t0, rs
+    ori  t0, t0, 2
+    mtcr rs, t0
+
+    // We're also at KI_IPL_DPC, so lower that now.
+
+    li   a0, KI_IPL_LOW
+    jal  KiLowerIpl
+
+    // Set LR to 0 so that stack traces terminate here.
+
+    mov  lr, zero
+
+    // Jump to the start function.
+
+    mov  a0, s1
+    mov  a1, s2
+    jalr zero, s0, 0
+
 ]
+
+EXTERN FN KiThreadTrampoline ()
 
 EXTERN FN KiExceptionHandler ()
 
@@ -744,4 +776,25 @@ FN KiSwitchAddressSpace (
         process^.PageDirectoryPfn << 12, // pgtb
         process^.Asid, // asid
     )
+END
+
+FN KiInitializeContext (
+    IN process : ^KeProcess,
+    IN kstack : ^VOID,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : ^OsContext
+
+    // Initialize the context for a thread that is about to begin execution.
+
+    context := CAST (kstack - SIZEOF OsContext) TO ^OsContext
+
+    context^.S0 = CAST startfunc TO ULONG
+    context^.S1 = CAST context1 TO ULONG
+    context^.S2 = CAST context2 TO ULONG
+
+    context^.Lr = CAST &KiThreadTrampoline TO ULONG
+
+    RETURN context
 END
