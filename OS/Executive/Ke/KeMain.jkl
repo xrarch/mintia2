@@ -101,6 +101,11 @@ FN KiInitializePrb (
 
     prb^.Ipl = KI_IPL_LOW
 
+    // On some architectures, the thing we get from KI_CURRENT_PRB is not a
+    // globally visible address for this Prb.
+
+    prb^.RealVirtual = KiPrbFromNumber ( KiCurrentProcessor () )
+
     // Initialize the IRQ dispatch table.
 
     i := 0

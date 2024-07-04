@@ -104,6 +104,8 @@ STRUCT KiPrb
 
     IdleThread : KeThread,
 
+    RealVirtual : ^KiPrb,
+
     // Inspired by ULE of FreeBSD:
     //
     // The real time list heads are indexed by thread priority, with all ready
@@ -379,6 +381,10 @@ EXTERN FN KiReleaseSpinlockLower (
 #MACRO KiReleaseObjectElevated ( object ) []
 
 #END
+
+#MACRO KiPrbFromNumber ( procid ) [
+    (ExLoaderBlock.VirtualPrbBase + (procid) * BL_PRB_SIZE)
+]
 
 #MACRO KiInitializeDispatchObject ( hdr, name, type ) [
     RtlInitializeList ( &(hdr)^.WaitListHead )
