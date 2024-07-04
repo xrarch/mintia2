@@ -47,6 +47,11 @@ FN (KeStartThreadF) KiIdleLoop (
     IN context2 : UWORD,
 )
 
+    ipl := KiAcquireAnnounce ()
+
+    RtlPrint ( "KiIdleLoop(): Processor %u idling\n", KiCurrentProcessor () )
+
+    KiReleaseAnnounce ( ipl )
 
 #IF BLD_MP
     // Atomically decrement the initialization count to indicate to the boot
@@ -57,12 +62,6 @@ FN (KeStartThreadF) KiIdleLoop (
         0xFFFFFFFF, // ulong
     )
 #END
-
-    ipl := KiAcquireAnnounce ()
-
-    RtlPrint ( "KiIdleLoop(): Processor %u alive\n", KiCurrentProcessor () )
-
-    KiReleaseAnnounce ( ipl )
 
     WHILE TRUE DO
         KiWaitForInterrupt ()
@@ -314,10 +313,6 @@ EXPORT FN KeMain (
 
         dbgmain ()
     END
-
-    // Announce ourselves.
-
-    RtlPrint ( "KeMain(): MINTIA is awake!\n" )
 
 #IF BLD_MP
     // We're ready to pull the other processors into the system.
