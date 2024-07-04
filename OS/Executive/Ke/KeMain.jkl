@@ -8,13 +8,61 @@ PUBLIC KiIdleProcess : KeProcess
 
 EXPORT ExLoaderBlock : BlInfoRecord
 
-#SECTION "INIT$text"
-FN (KeStartThreadF) KiThreadedMain ()
+FNPTR DbgMainF ()
 
-    // This is the first code that runs in the context of a thread during the
-    // lifetime of the system.
+#IF BLD_MP
 
-    RtlPrint ( "Hi from a thread\n" )
+KiInitializeCount : ULONG
+
+KiAnnounceSpinlock : KiSpinlock = KI_INITIAL_SPINLOCK
+
+#MACRO KiAcquireAnnounce () [
+    KiAcquireSpinlockRaise ( &KiAnnounceSpinlock )
+]
+
+#MACRO KiReleaseAnnounce ( oldipl ) [
+    KiReleaseSpinlockLower ( &KiAnnounceSpinlock, oldipl )
+]
+
+#ELSE
+
+#MACRO KiAcquireAnnounce () [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseAnnounce ( oldipl ) [
+    KiLowerIpl ( oldipl )
+]
+
+#END
+
+// FORWARD
+EXTERN FN (KeStartThreadF) KiThreadedMain (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+FN (KeStartThreadF) KiIdleLoop (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+
+#IF BLD_MP
+    // Atomically decrement the initialization count to indicate to the boot
+    // processor that we made it into our idle thread.
+
+    KeIncrementUlong (
+        &KiInitializeCount, // ptr
+        0xFFFFFFFF, // ulong
+    )
+#END
+
+    ipl := KiAcquireAnnounce ()
+
+    RtlPrint ( "KiIdleLoop(): Processor %u alive\n", KiCurrentProcessor () )
+
+    KiReleaseAnnounce ( ipl )
 
     WHILE TRUE DO
         KiWaitForInterrupt ()
@@ -22,30 +70,9 @@ FN (KeStartThreadF) KiThreadedMain ()
 END
 
 #SECTION "INIT$text"
-FN KiFixupLoaderBlockLists ()
-
-    // Fix up the circular lists in the loader block so that they still point to
-    // the newly relocated list heads.
-
-    listhead := &ExLoaderBlock.ResourceListHead
-
-    listhead^.Next^.Prev = listhead
-    listhead^.Prev^.Next = listhead
-
-    listhead = &ExLoaderBlock.DllListHead
-
-    listhead^.Next^.Prev = listhead
-    listhead^.Prev^.Next = listhead
-
-    listhead = &ExLoaderBlock.DescriptorListHead
-
-    listhead^.Next^.Prev = listhead
-    listhead^.Prev^.Next = listhead
-END
-
-#SECTION "INIT$text"
 FN KiInitializePrb (
     IN prb : ^KiPrb,
+    IN bootprocessor : UWORD,
 )
 
     // Initialize this PRB. It has already been filled with zeroes by the Loader
@@ -111,13 +138,22 @@ FN KiInitializePrb (
 
     // Initialize the idle thread.
 
+    startfunc : KeStartThreadF
+
+    IF bootprocessor THEN
+        startfunc = &KiThreadedMain
+
+    ELSE
+        startfunc = &KiIdleLoop
+    END
+
     KeInitializeThread (
         &KiIdleProcess, // process
         &prb^.IdleThread, // thread
         "IdleThread", // name
         &prb^.IdleStack[0], // kstack
         KI_IDLE_STACK_SIZE, // kstacksize
-        &KiThreadedMain, // startfunc
+        startfunc, // startfunc
         0, // context1
         0, // context2
     )
@@ -126,7 +162,78 @@ FN KiInitializePrb (
     prb^.IdleThread.BasePriority = OS_PRIORITY_IDLE
 END
 
-FNPTR DbgMainF ()
+#IF BLD_MP
+
+#SECTION "INIT$text"
+FN (BlStartProcessorF) KiStartOtherProcessor ()
+
+    // This is the first code that runs in the context of a non-boot processor.
+    // We assume any context required to access the Prb has been set up by the
+    // Loader. We have to initialize ourselves and then jump into our idle
+    // thread to wait for work.
+
+    // Initialize the current processor's PRB.
+
+    prb := KI_CURRENT_PRB
+
+    KiInitializePrb (
+        prb, // prb
+        FALSE, // bootprocessor
+    )
+
+    // Initialize architectural support.
+
+    KiInitializeArchitecture ( prb )
+
+    // Initialize HAL.
+
+    HalProcessorInitialize ( prb )
+
+    // Switch into our idle thread.
+
+    KiJumpIntoThread ( &prb^.IdleThread )
+END
+
+#END
+
+#SECTION "INIT$text"
+FN (KeStartThreadF) KiThreadedMain (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // This is the first code that runs in thread context during the lifetime of
+    // the system. We need to perform phase 0 initialization of the Executive.
+
+    // Go into the idle loop.
+
+    KiIdleLoop (
+        context1, // context1
+        context2, // context2
+    )
+END
+
+#SECTION "INIT$text"
+FN KiFixupLoaderBlockLists ()
+
+    // Fix up the circular lists in the loader block so that they still point to
+    // the newly relocated list heads.
+
+    listhead := &ExLoaderBlock.ResourceListHead
+
+    listhead^.Next^.Prev = listhead
+    listhead^.Prev^.Next = listhead
+
+    listhead = &ExLoaderBlock.DllListHead
+
+    listhead^.Next^.Prev = listhead
+    listhead^.Prev^.Next = listhead
+
+    listhead = &ExLoaderBlock.DescriptorListHead
+
+    listhead^.Next^.Prev = listhead
+    listhead^.Prev^.Next = listhead
+END
 
 #SECTION "INIT$text"
 EXPORT FN KeMain (
@@ -182,7 +289,10 @@ EXPORT FN KeMain (
 
     prb := KI_CURRENT_PRB
 
-    KiInitializePrb ( prb )
+    KiInitializePrb (
+        prb, // prb
+        TRUE, // bootprocessor
+    )
 
     // Initialize architectural support.
 
@@ -195,6 +305,8 @@ EXPORT FN KeMain (
 
     HalEarlyInitialize ()
 
+    HalProcessorInitialize ( prb )
+
     // Perform early initialization of the debugger.
 
     IF ExLoaderBlock.DbgMain THEN
@@ -206,6 +318,29 @@ EXPORT FN KeMain (
     // Announce ourselves.
 
     RtlPrint ( "KeMain(): MINTIA is awake!\n" )
+
+#IF BLD_MP
+    // We're ready to pull the other processors into the system.
+
+    KiInitializeCount = ExLoaderBlock.ProcessorCount - 1
+
+    // Call the Loader to do platform-specific stuff to start the processors.
+    // Some platforms require calling the firmware with paging disabled. We
+    // can't do that from here, but on those platforms Loader lives in an
+    // identity mapping of low memory, so he can do that just fine.
+
+    ExLoaderBlock.StartProcessors (
+        &KiStartOtherProcessor, // startfunc
+    )
+
+    // Wait for them to signal that they've been initialized.
+
+    WHILE KiInitializeCount DO
+        // Language BARRIER to stop this loop from being optimized out.
+
+        BARRIER
+    END
+#END
 
     // Switch into our idle thread.
 

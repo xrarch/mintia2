@@ -18,6 +18,7 @@
 
 STRUCT BlInfoRecordXrStation
     ExceptionBlock : ^VOID,
+    ExceptionBlockPhys : ^VOID,
     CitronBase : ^VOID,
     LsicBase : ^VOID,
     NvramBase : ^VOID,
@@ -26,6 +27,12 @@ END
 UNION BlInfoUnion
     Xr : BlInfoRecordXrStation,
 END
+
+FNPTR BlStartProcessorF ()
+
+FNPTR BlStartProcessorsF (
+    IN startfunc : BlStartProcessorF,
+)
 
 #DEFINE BL_BOOT_NAME_MAX 64
 
@@ -39,6 +46,11 @@ STRUCT BlInfoRecord
     VirtualPrbBase : ^VOID,
     PhysicalPrbBase : ^VOID,
     DbgMain : ^VOID,
+
+#IF BLD_MP
+    StartProcessors : BlStartProcessorsF,
+#END
+
     SystemPageDirectoryPfn : UWORD,
 
     U : BlInfoUnion,

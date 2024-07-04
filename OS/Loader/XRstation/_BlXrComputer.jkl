@@ -150,6 +150,24 @@ FwReadDisk:
     mov  s0, long [SavedS0]
     ret
 
+FwKickProcessor:
+    mov  long [SavedS0], s0, tmp=t0
+    mov  long [SavedLR], lr, tmp=t0
+
+    mfcr s0, rs
+    andi t0, s0, 0xFFF8
+    mtcr rs, t0
+
+    mov  t0, long [FwApiTable]
+    mov  t0, long [t0 + 16]
+    jalr lr, t0, 0
+
+    mtcr rs, s0
+
+    mov  lr, long [SavedLR]
+    mov  s0, long [SavedS0]
+    ret
+
 BxDtbMissHandler:
     mfcr zero, dtbaddr
     mov  zero, long [zero]
@@ -243,6 +261,12 @@ BxStartSystem:
     li   t0, 3
     mtcr icachectrl, t0
 
+    // Ensure any ITB misses that are going to happen on this routine have
+    // already happened by jumping to the end and back here.
+
+    b    .itbmiss
+.back:
+
     // Insert the zeroth Prb into DTB reserved entry #1.
 
     mfcr t0, dtbindex
@@ -274,6 +298,9 @@ BxStartSystem:
 .hang:
     b    .hang
 
+.itbmiss:
+    b    .back
+
 // a0 - vaddr
 BxFlushPage:
 
@@ -300,6 +327,12 @@ EXTERN FN (FwApiReadDiskF) FwReadDisk (
     IN sector : ULONG,
     IN count : ULONG,
 ) : UWORD
+
+EXTERN FN (FwApiKickProcessorF) FwKickProcessor (
+    IN number : UWORD,
+    IN context : ^VOID,
+    IN callback : FwKickProcessorCallbackF,
+)
 
 FwApiTable : ^FwApiTableRecord
 FwDeviceDatabase : ^FwDeviceDatabaseRecord
@@ -538,6 +571,7 @@ FN BxInitializeMemoryMapping ()
     )
 
     BlInfoBlock.U.Xr.ExceptionBlock = excva
+    BlInfoBlock.U.Xr.ExceptionBlockPhys = excblock
 
     // Copy TB miss routines into the exception block.
 
@@ -1056,3 +1090,56 @@ FN BxInitializeIo (
         BlInfoBlock.BootFbHeight = fwfb^.Height
     END
 END
+
+#IF BLD_MP
+
+FN (FwKickProcessorCallbackF) BxStartProcessor (
+    IN number : UWORD,
+    IN context : ^VOID,
+)
+
+    // We're a non-boot processor. We need to turn on paging and stuff and then
+    // jump into the Executive.
+
+    // First turn on virtual addressing.
+
+    BxEnableVirtualAddressing (
+        BlInfoBlock.U.Xr.ExceptionBlock, // excva
+        BlInfoBlock.U.Xr.ExceptionBlockPhys, // excblock
+    )
+
+    // Calculate the physical address of our Prb.
+
+    prbphys := BlInfoBlock.PhysicalPrbBase + (number * BL_PRB_SIZE)
+
+    // Now enter the system.
+
+    BxStartSystem (
+        context, // entrypoint
+        prbphys, // prb
+    )
+
+    WHILE TRUE DO END
+END
+
+FN BxStartProcessors (
+    IN startfunc : BlStartProcessorF,
+)
+
+    // Call FwKickProcessor on each processor in sequence to get it to execute
+    // our initialization code.
+
+    i := 1
+
+    WHILE i < BlInfoBlock.ProcessorCount DO
+        FwKickProcessor (
+            i, // number
+            startfunc, // context
+            &BxStartProcessor, // callback
+        )
+
+        i += 1
+    END
+END
+
+#END
