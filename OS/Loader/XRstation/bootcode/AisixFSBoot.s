@@ -93,12 +93,12 @@ AisixFSBoot:
 	mov  s2, long [s1 + INode_StartBlock]
 
 // iterate the FAT chain until we see a 0xFFFFFFFF (-1) and load OSLoader.a4x
-// starting at 0x3200.
+// starting at 0x4200.
 
 	subi s3, zero, 1
 	subi s6, zero, 1
 
-	li   s4, 0x3200
+	li   s4, 0x4200
 
 .loadloop:
 
@@ -140,7 +140,7 @@ AisixFSBoot:
 
 // check for the a4x program signature
 
-	li   t0, 0x3200
+	li   t0, 0x4200
 
 	la   t1, 0x676F646E
 	mov  t2, long [t0]
