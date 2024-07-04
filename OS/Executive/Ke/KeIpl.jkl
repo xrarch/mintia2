@@ -195,6 +195,13 @@ FN KiClockTick (
         LEAVE
     END
 
+    IF thread == &prb^.IdleThread THEN
+        // If we're in the idle thread there's nothing to switch to and we'd
+        // only waste CPU cycles trying.
+
+        LEAVE
+    END
+
     // Decrement thread quantum.
 
     q := thread^.RemainingQuantum
