@@ -11,6 +11,8 @@
         OFFSETOF KiPrb.TimerTreeLock, // offset
         OUT prb, // prb
     )
+
+    KI_TO_GLOBAL_PRB ( prb )
 ]
 
 #MACRO KiReleaseTimerTree ( prb, ipl ) [
@@ -227,17 +229,17 @@ EXPORT FN KeDequeueTimer (
 
 @Retry
 
-    // Get the PRB it was enqueued to.
+    // Get the Prb it was enqueued to.
 
     trgprb := timer^.EnqueuedTo
 
     IF NOT trgprb THEN
-        // It wasn't enqueued to a PRB.
+        // It wasn't enqueued to a Prb.
 
         RETURN FALSE
     END
 
-    // Lock the PRB's timer queue.
+    // Lock the Prb's timer queue.
 
     ipl := KiAcquireOtherTimerTree ( trgprb )
 
@@ -286,6 +288,8 @@ FN (KeDpcF) KiTimerExpiration (
     prb := KI_CURRENT_PRB
 
     // Capture the current time.
+
+    RtlPrint ( "%u", KiCurrentProcessor () )
 
     KiCaptureCurrentTicks (
         prb, // prb

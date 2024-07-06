@@ -8,12 +8,12 @@
 
 #MACRO KiAcquireDpcQueue () [
     KiDisableInterrupts ()
-    prb := KI_CURRENT_PRB
+    prb := KI_CURRENT_PRB_LOCAL
     KiAcquireSpinlock ( &prb^.DpcQueueLock )
 ]
 
 #MACRO KiReleaseDpcQueue ( oldstate ) [
-    prb := KI_CURRENT_PRB
+    prb := KI_CURRENT_PRB_LOCAL
     KiReleaseSpinlock ( &prb^.DpcQueueLock )
     KiRestoreInterrupts ( oldstate )
 ]
@@ -84,7 +84,7 @@ EXPORT FN KeEnqueueDpc (
     dpc^.Context1 = context1
     dpc^.Context2 = context2
 
-    // Capture the PRB into the DPC.
+    // Capture the Prb into the DPC.
 
     prb := KI_CURRENT_PRB
     dpc^.EnqueuedTo = prb
@@ -136,17 +136,17 @@ EXPORT FN KeDequeueDpc (
 
 @Retry
 
-    // Get the PRB it was enqueued to.
+    // Get the Prb it was enqueued to.
 
     trgprb := dpc^.EnqueuedTo
 
     IF NOT trgprb THEN
-        // It wasn't enqueued to a PRB.
+        // It wasn't enqueued to a Prb.
 
         RETURN FALSE
     END
 
-    // Lock the PRB's DPC queue.
+    // Lock the Prb's DPC queue.
 
     ipl := KiAcquireOtherDpcQueue ( trgprb )
 

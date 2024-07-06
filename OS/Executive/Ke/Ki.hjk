@@ -23,8 +23,7 @@ EXTERN KiIdleProcess : KeProcess
     // a wired entry in each DTB. This location is -4096 in order to allow the
     // address to be loaded with a single SUBI instruction.
 
-    #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
-    #DEFINE KI_DIRECT_PRB 1
+    #DEFINE KI_CURRENT_PRB_LOCAL [(CAST 0xFFFFF000 TO ^KiPrb)]
 
     #DEFINE KI_CACHE_ALIGN 16
 
@@ -34,15 +33,42 @@ EXTERN KiIdleProcess : KeProcess
         NOTHING (spinlock)^ = 0
     ]
 
+    #IF BLD_MP
+
+    #DEFINE KI_CURRENT_PRB [((CAST 0xFFFFF000 TO ^KiPrb)^.RealVirtual)]
+    #DEFINE KI_VIRTUAL_PRB 1
+
+    #ELSE
+
+    #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
+    #DEFINE KI_VIRTUAL_PRB 0
+
+    #END
+
 #ELSEIF ( STRCMP ARCHITECTURE "fox32" )
     // Fox32 is always uniprocessor, so the Prb is mapped in a convenient and
     // constant spot with a real page table entry.
 
+    #DEFINE KI_CURRENT_PRB_LOCAL [(CAST 0xFFFFF000 TO ^KiPrb)]
     #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
-    #DEFINE KI_DIRECT_PRB 1
+    #DEFINE KI_VIRTUAL_PRB 0
 
 #ELSE
     #ERROR ( STRCAT "Unknown architecture " ARCHITECTURE )
+#END
+
+#DEFINE KI_VOLATILE_LOCAL_PRB ( AND ( NOT KI_VIRTUAL_PRB ) BLD_MP )
+
+#IF KI_VIRTUAL_PRB
+
+#MACRO KI_TO_GLOBAL_PRB ( prb ) [
+    NOTHING (prb) = (prb)^.RealVirtual
+]
+
+#ELSE
+
+#MACRO KI_TO_GLOBAL_PRB ( prb ) []
+
 #END
 
 // Try to make ticks represent 5ms intervals.
@@ -104,7 +130,11 @@ STRUCT KiPrb
 
     IdleThread : KeThread,
 
+#IF KI_VIRTUAL_PRB
     RealVirtual : ^KiPrb,
+#END
+
+    FrozenContext : ^OsContext,
 
     // Inspired by ULE of FreeBSD:
     //
@@ -313,7 +343,9 @@ EXTERN FN KiFreezeOtherProcessors ()
 
 EXTERN FN KiUnfreezeOtherProcessors ()
 
-EXTERN FN KiServiceIpi ()
+EXTERN FN KiServiceIpi (
+    IN context : ^OsContext,
+)
 
 EXTERN FN KiExecuteOnOtherProcessor (
     IN target : ^KiPrb,
@@ -383,7 +415,7 @@ EXTERN FN KiReleaseSpinlockLower (
 #END
 
 #MACRO KiPrbFromNumber ( procid ) [
-    (ExLoaderBlock.VirtualPrbBase + (procid) * BL_PRB_SIZE)
+    (CAST ExLoaderBlock.VirtualPrbBase + (procid) * BL_PRB_SIZE TO ^KiPrb)
 ]
 
 #MACRO KiInitializeDispatchObject ( hdr, name, type ) [

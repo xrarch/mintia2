@@ -47,6 +47,7 @@ FN (KeStartThreadF) KiIdleLoop (
     IN context2 : UWORD,
 )
 
+
     ipl := KiAcquireAnnounce ()
 
     RtlPrint ( "KiIdleLoop(): Processor %u idling\n", KiCurrentProcessor () )
@@ -72,7 +73,7 @@ END
 FN KiInitializePrb (
     IN prb : ^KiPrb,
     IN bootprocessor : UWORD,
-)
+) : ^KiPrb
 
     // Initialize this PRB. It has already been filled with zeroes by the Loader
     // so avoid doing that again for those fields where zeroes (and NULLPTR) are
@@ -83,6 +84,17 @@ FN KiInitializePrb (
     idword := (CAST prb TO ^UWORD)[0]
 
     prb^.Id = idword
+
+    // On some architectures, the thing we get from KI_CURRENT_PRB is not a
+    // globally visible address for this Prb.
+
+#IF KI_VIRTUAL_PRB
+    prb^.RealVirtual = KiPrbFromNumber ( KiCurrentProcessor () )
+#END
+
+    // Make sure from now on we're dealing with a global Prb pointer.
+
+    KI_TO_GLOBAL_PRB ( prb )
 
     RtlInitializeList ( &prb^.DpcListHead )
 
@@ -106,11 +118,6 @@ FN KiInitializePrb (
 #END
 
     prb^.Ipl = KI_IPL_LOW
-
-    // On some architectures, the thing we get from KI_CURRENT_PRB is not a
-    // globally visible address for this Prb.
-
-    prb^.RealVirtual = KiPrbFromNumber ( KiCurrentProcessor () )
 
     // Initialize the IRQ dispatch table.
 
@@ -170,6 +177,8 @@ FN KiInitializePrb (
 
     prb^.IdleThread.Priority = OS_PRIORITY_IDLE
     prb^.IdleThread.BasePriority = OS_PRIORITY_IDLE
+
+    RETURN prb
 END
 
 #IF BLD_MP
@@ -182,11 +191,11 @@ FN (BlStartProcessorF) KiStartOtherProcessor ()
     // Loader. We have to initialize ourselves and then jump into our idle
     // thread to wait for work.
 
-    // Initialize the current processor's PRB.
+    // Initialize the current processor's Prb.
 
-    prb := KI_CURRENT_PRB
+    prb := KI_CURRENT_PRB_LOCAL
 
-    KiInitializePrb (
+    prb = KiInitializePrb (
         prb, // prb
         FALSE, // bootprocessor
     )
@@ -297,9 +306,9 @@ EXPORT FN KeMain (
 
     // Initialize the boot processor's PRB.
 
-    prb := KI_CURRENT_PRB
+    prb := KI_CURRENT_PRB_LOCAL
 
-    KiInitializePrb (
+    prb = KiInitializePrb (
         prb, // prb
         TRUE, // bootprocessor
     )

@@ -56,7 +56,7 @@ FN HalRaiseHardwareIpl (
     oldstate := KiDisableInterrupts ()
 #END
 
-    prb := KI_CURRENT_PRB
+    prb := KI_CURRENT_PRB_LOCAL
 
     lsic := CAST prb^.LsicBase TO ^HalpLsic
 
@@ -88,7 +88,7 @@ FN HalLowerHardwareIpl (
     oldstate := KiDisableInterrupts ()
 #END
 
-    prb := KI_CURRENT_PRB
+    prb := KI_CURRENT_PRB_LOCAL
 
     lsic := CAST prb^.LsicBase TO ^HalpLsic
 
@@ -116,7 +116,7 @@ FN HalInterrupt (
     IN context : ^OsContext,
 )
 
-    prb := KI_CURRENT_PRB
+    prb := KI_CURRENT_PRB_LOCAL
 
     lsic := CAST prb^.LsicBase TO ^HalpLsic
 
@@ -214,7 +214,7 @@ FN (KeInterruptF) HalpIpiInterrupt (
     IN context : ^OsContext,
 )
 
-    KiServiceIpi ()
+    KiServiceIpi ( context )
 END
 
 #END

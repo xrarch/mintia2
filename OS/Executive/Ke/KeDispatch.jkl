@@ -14,6 +14,8 @@
         OFFSETOF KiPrb.ReadyQueueLock, // offset
         OUT prb, // prb
     )
+
+    KI_TO_GLOBAL_PRB ( prb )
 ]
 
 #MACRO KiReleaseReadyQueue ( prb, oldipl ) [
@@ -160,7 +162,7 @@ FN KiSwitchThread (
     // (RtlEmptyList) does not touch any pointers.
 
     IF NOT RtlEmptyList ( &current^.KapcListHead ) THEN
-        KiSoftInterruptSelf ( KI_CURRENT_PRB, KI_IPL_APC )
+        KiSoftInterruptSelf ( KI_CURRENT_PRB_LOCAL, KI_IPL_APC )
     END
 END
 
@@ -212,7 +214,7 @@ END
 
             thread^.LazyApcTriggered = TRUE
 
-            KiSoftInterruptSelf ( KI_CURRENT_PRB, KI_IPL_APC )
+            KiSoftInterruptSelf ( KI_CURRENT_PRB_LOCAL, KI_IPL_APC )
 
             KiLowerIpl ( ipl )
 

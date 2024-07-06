@@ -204,7 +204,7 @@ FN KiExecuteOnOtherProcessor (
     // Note that the following operations MUST be done in this order.
     // 1. Store our Prb in the table.
 
-    KiSendTable[index] = prb^.RealVirtual
+    KiSendTable[index] = prb
 
     // 2. Mark pending.
 
@@ -305,7 +305,7 @@ FN KiExecuteOnEveryoneElse (
     // Store our Prb in the table. This MUST be done before we set any pending
     // bits or send any IPIs.
 
-    KiSendTable[index] = prb^.RealVirtual
+    KiSendTable[index] = prb
 
     i := 0
 
@@ -352,7 +352,9 @@ FN KiExecuteOnEveryoneElse (
     )
 END
 
-FN KiServiceIpi ()
+FN KiServiceIpi (
+    IN context : ^OsContext,
+)
 
     // An IPI interrupt has been delivered. Walk all of the PRBs and see who
     // wants our attention. Note that this interrupt is the highest priority in
@@ -411,6 +413,10 @@ FN KiServiceIpi ()
 
     IF KiFreezeCount THEN
         // Oh snap! Lock up until the freeze count reaches zero.
+
+        // Set our context in our Prb for the debugger.
+
+        prb^.FrozenContext = context
 
         // Increment this count so that the freezer knows when we froze.
 

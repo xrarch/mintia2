@@ -3,6 +3,7 @@
 //
 
 #INCLUDE "Dbg.hjk"
+#INCLUDE "<ll>/System/OsContext.hjk"
 
 #DEFINE DBG_TOKEN_BUFFER_SIZE 128
 #DEFINE DBG_MONITOR_HEIGHT 24
@@ -354,6 +355,60 @@ FN (DbgCommandF) DbgCommandSym ()
     RtlPrint ( "%s!%s = %p\n", dllname, &name[0], value )
 END
 
+FN (DbgCommandF) DbgCommandCpu ()
+
+    num : UBYTE[32]
+
+    IF NOT DbgNextToken (
+        &num[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: cpu [num]\n" )
+
+        LEAVE
+    END
+
+    numval : UWORD
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        32, // bufsize
+        OUT numval, // num
+    ) THEN
+
+        RtlPrint ( "Usage: cpu [num]\n" )
+
+        LEAVE
+    END
+
+    IF numval >= ExLoaderBlock.ProcessorCount THEN
+        RtlPrint ( "No such CPU\n" )
+
+        LEAVE
+    END
+
+    prb := KiPrbFromNumber ( numval )
+
+    context := prb^.FrozenContext
+
+    // Check for validity.
+
+    IF NOT MmIsVirtualValid ( context ) THEN
+        RtlPrint ( "Context lies in invalid virtual space - not switched\n" )
+
+        LEAVE
+    END
+
+    IF NOT MmIsVirtualValid ( context + SIZEOF OsContext ) THEN
+        RtlPrint ( "Context ends in invalid virtual space - not switched\n" )
+
+        LEAVE
+    END
+
+    DbgCurrentContext = context
+END
+
 #SECTION "text"
 DbgCommandTable : DbgCommand[] = {
     {
@@ -405,6 +460,11 @@ DbgCommandTable : DbgCommand[] = {
         [Name] = "sym",
         [Function] = &DbgCommandSym,
         [Help] = "Look up the value of a symbol by name.",
+    },
+    {
+        [Name] = "cpu",
+        [Function] = &DbgCommandCpu,
+        [Help] = "Switch to examining the specified CPU's context.",
     },
 
     // Sentinel.

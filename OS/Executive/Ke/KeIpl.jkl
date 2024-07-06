@@ -69,6 +69,8 @@ FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
 
     KiRestoreInterrupts ( oldstate )
 
+    KI_TO_GLOBAL_PRB ( prb )
+
     IF NOT RtlEmptyList ( &prb^.DpcListHead ) THEN
         KiDispatchDpcQueue ( prb )
     END
@@ -107,7 +109,7 @@ FN KiDispatchSoftwareInterrupts (
 
     oldstate := KiDisableInterrupts ()
 
-    prb := KI_CURRENT_PRB
+    prb := KI_CURRENT_PRB_LOCAL
     pending := prb^.PendingSoftwareInterrupts & (0xF << newipl)
 
     WHILE pending DO
@@ -116,11 +118,11 @@ FN KiDispatchSoftwareInterrupts (
             oldstate, // oldstate
         )
 
-#IF ( NOT KI_DIRECT_PRB )
+#IF KI_VOLATILE_LOCAL_PRB
         // Recapture the Prb since it might have changed due to activity of the
         // scheduler while interrupts were enabled.
 
-        prb = KI_CURRENT_PRB
+        prb = KI_CURRENT_PRB_LOCAL
 #END
 
         pending = prb^.PendingSoftwareInterrupts & (0xF << newipl)
