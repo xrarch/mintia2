@@ -178,6 +178,11 @@ FN KiInitializePrb (
     prb^.IdleThread.Priority = OS_PRIORITY_IDLE
     prb^.IdleThread.BasePriority = OS_PRIORITY_IDLE
 
+    // Initialize frozen context to zero so that the debugger doesn't try to
+    // read it if we failed to freeze.
+
+    prb^.FrozenContext = NULLPTR
+
     RETURN prb
 END
 
@@ -323,6 +328,12 @@ EXPORT FN KeMain (
     // throughout the lifetime of the system and at any IPL.
 
     HalEarlyInitialize ()
+
+#IF BLD_CHK
+    IF SIZEOF KiPrb > BL_PRB_SIZE THEN
+        KeCrash ( "KiPrb > BL_PRB_SIZE\n" )
+    END
+#END
 
     HalProcessorInitialize ( prb )
 

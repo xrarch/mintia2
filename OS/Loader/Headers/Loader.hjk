@@ -13,7 +13,16 @@
 // The Prb (per-processor block) will be the greater of this size and the
 // architectural page size.
 
-#DEFINE BL_PRB_SHIFT 12
+#IF ( == BLD_BITS 32 )
+    // 4KB on 32 bits.
+
+    #DEFINE BL_PRB_SHIFT 12
+#ELSE
+    // 8KB on 64 bits.
+
+    #DEFINE BL_PRB_SHIFT 13
+#END
+
 #DEFINE BL_PRB_SIZE ( << 1 BL_PRB_SHIFT )
 
 STRUCT BlInfoRecordXrStation
