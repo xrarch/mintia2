@@ -133,15 +133,7 @@ FN (KiHighLevelHandlerF) KiHandleBreakpoint (
 
     ELSE
         IF KeDebuggerEntry THEN
-#IF BLD_MP
-            KiFreezeOtherProcessors ()
-#END
-
             KeDebuggerEntry ( context )
-
-#IF BLD_MP
-            KiUnfreezeOtherProcessors ()
-#END
 
             IF ecause == EXC_BRK AND context^.Epc == &KeBreakpoint THEN
                 // Skip over the explicit breakpoint.

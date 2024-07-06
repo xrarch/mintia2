@@ -12,15 +12,23 @@ FN (KeDebuggerEntryF) DbgEntrypoint (
     IN context : ^OsContext,
 )
 
+    old := HalSetDebugConsole ( TRUE )
+
+#IF BLD_MP
+    KiFreezeOtherProcessors ()
+#END
+
     // All other processors on the system have been frozen.
 
     NOTHING KI_CURRENT_PRB_LOCAL^.FrozenContext = context
 
     DbgCurrentContext = context
 
-    old := HalSetDebugConsole ( TRUE )
-
     DbgPrompt ()
+
+#IF BLD_MP
+    KiUnfreezeOtherProcessors ()
+#END
 
     HalSetDebugConsole ( old )
 
