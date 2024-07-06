@@ -37,6 +37,43 @@ FNPTR KiHighLevelHandlerF (
 #DEFINE EXC_PGF 12
 #DEFINE EXC_PFW 13
 
+KiCauseNames : ^UBYTE[16] = {
+    "EXC0",
+    "INTERRUPT",
+    "SYSCALL",
+    "FWCALL",
+    "BUSERROR",
+    "EXC5",
+    "BREAKPOINT",
+    "INVALIDINSTRUCTION",
+    "PRIVILEGEVIOLATION",
+    "UNALIGNEDADDR",
+    "EXC10",
+    "EXC11",
+    "PAGEFAULT(READ)",
+    "PAGEFAULT(WRITE)",
+    "EXC14",
+    "EXC15",
+}
+
+FN KiFaultCrash (
+    IN context : ^OsContext,
+    IN badaddr : ^VOID,
+)
+
+    prb := KI_CURRENT_PRB
+
+    KeCrash (
+        "FAULT! PROC=%d IPL=%d ERS=%08x BADADDR=%08x EPC=%08x\n       ECAUSE=%s\n", // fmt
+        prb^.Id,
+        prb^.Ipl,
+        context^.Rs,
+        badaddr,
+        context^.Epc,
+        KiCauseNames[context^.Rs >> 28],
+    )
+END
+
 FN (KiHighLevelHandlerF) KiSpuriousException (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
@@ -77,8 +114,8 @@ FN (KiHighLevelHandlerF) KiHandleError (
     //
     // If it happened in usermode, generate a signal to the thread.
 
-    RtlPrint ( "%u %p\n", context^.Rs >> 28, badaddr )
-    KeCrash ( "KiHandleError Unimplemented\n" )
+    // NYI KiHandleError
+    KiFaultCrash ( context, badaddr )
 END
 
 FN (KiHighLevelHandlerF) KiHandleBreakpoint (
@@ -123,7 +160,8 @@ FN (KiHighLevelHandlerF) KiHandlePageFault (
     IN badaddr : ^VOID,
 )
 
-    KeCrash ( "KiHandlePageFault Unimplemented\n" )
+    // NYI KiHandlePageFault
+    KiFaultCrash ( context, badaddr )
 END
 
 #SECTION "text"
