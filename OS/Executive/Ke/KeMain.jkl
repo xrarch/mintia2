@@ -78,6 +78,12 @@ FN KiInitializePrb (
     // so avoid doing that again for those fields where zeroes (and NULLPTR) are
     // the initial state.
 
+    // First thing to do is to put the ID stashed by Loader in its proper field.
+
+    idword := (CAST prb TO ^UWORD)[0]
+
+    prb^.Id = idword
+
     RtlInitializeList ( &prb^.DpcListHead )
 
 #IF BLD_MP

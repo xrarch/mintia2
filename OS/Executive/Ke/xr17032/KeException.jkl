@@ -517,60 +517,60 @@ FN KiInitializeArchitecture (
 
     procid := KiCurrentProcessor ()
 
-    IF procid == 0 THEN
-        // Construct a jump instruction that just jumps to our exception
-        // handler, and then copy it to the first instruction of each entry of
-        // the exception block, except for the TB miss handlers, which have
-        // already been set up by Loader.
+    IF procid != 0 THEN
+        // Only the boot processor does something here.
 
-        eb := CAST ExLoaderBlock.U.Xr.ExceptionBlock TO ^ULONG
-
-        jmpinstruction := CAST &KiExceptionHandler TO ULONG
-
-        jmpinstruction >>= 2
-        jmpinstruction <<= 3
-        jmpinstruction |= 6
-
-        i := 0
-
-        WHILE i < 14 DO
-            eb^ = jmpinstruction
-
-            i += 1
-            eb += 256
-        END
-
-        // Copy KiSwitchMap into the zeroth vector. We do this because exception
-        // 0 is permanently reserved by the architecture, making it a convenient
-        // place to stash this function which *cannot* cause a TB miss during
-        // execution.
-
-        RtlCopyBytes (
-            ExLoaderBlock.U.Xr.ExceptionBlock, // dest
-            &KiSwitchMapCode, // src
-            &KiSwitchMapCodeEnd - &KiSwitchMapCode, // sz
-        )
-
-        KiSwitchMap = CAST eb TO KiSwitchMapF
-
-        // Copy the syscall handler into the exception block.
-        // This one is special because it doesn't need to save as much as the
-        // others do.
-
-        // ... TODO ...
-
-        // We modified the instruction stream, so flush the icache.
-
-        KiFlushMyIcache ()
-
-        // Initialize the next ASID.
-
-        KiNextAsid = 1
+        LEAVE
     END
 
-    // Initialize the ID field of the PRB.
+    // Construct a jump instruction that just jumps to our exception
+    // handler, and then copy it to the first instruction of each entry of
+    // the exception block, except for the TB miss handlers, which have
+    // already been set up by Loader.
 
-    prb^.Id = procid
+    eb := CAST ExLoaderBlock.U.Xr.ExceptionBlock TO ^ULONG
+
+    jmpinstruction := CAST &KiExceptionHandler TO ULONG
+
+    jmpinstruction >>= 2
+    jmpinstruction <<= 3
+    jmpinstruction |= 6
+
+    i := 0
+
+    WHILE i < 14 DO
+        eb^ = jmpinstruction
+
+        i += 1
+        eb += 256
+    END
+
+    // Copy KiSwitchMap into the zeroth vector. We do this because exception
+    // 0 is permanently reserved by the architecture, making it a convenient
+    // place to stash this function which *cannot* cause a TB miss during
+    // execution.
+
+    RtlCopyBytes (
+        ExLoaderBlock.U.Xr.ExceptionBlock, // dest
+        &KiSwitchMapCode, // src
+        &KiSwitchMapCodeEnd - &KiSwitchMapCode, // sz
+    )
+
+    KiSwitchMap = CAST eb TO KiSwitchMapF
+
+    // Copy the syscall handler into the exception block.
+    // This one is special because it doesn't need to save as much as the
+    // others do.
+
+    // ... TODO ...
+
+    // We modified the instruction stream, so flush the icache.
+
+    KiFlushMyIcache ()
+
+    // Initialize the next ASID.
+
+    KiNextAsid = 1
 END
 
 #IF BLD_MP

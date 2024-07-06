@@ -564,7 +564,7 @@ FN BlInitializeMemory ()
 
     BlInitializePfnDatabase ()
 
-    // Allocate the PRBs.
+    // Allocate the Prbs.
 
     prbtotalsize := BlInfoBlock.ProcessorCount << BL_PRB_SHIFT
     prbpages := (prbtotalsize + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
@@ -591,6 +591,20 @@ FN BlInitializeMemory ()
 
     BlInfoBlock.PhysicalPrbBase =
         CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID
+
+    // Stash the processor ID at the zeroth word of each Prb.
+
+    i := 0
+    prbva := BlInfoBlock.VirtualPrbBase
+
+    WHILE i < BlInfoBlock.ProcessorCount DO
+        idword := CAST prbva TO ^UWORD
+
+        idword[0] = i
+
+        prbva += BL_PRB_SIZE
+        i += 1
+    END
 
 #IF BLD_CHK
     // BlDumpDescriptors ()
