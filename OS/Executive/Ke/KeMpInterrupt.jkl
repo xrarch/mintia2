@@ -32,8 +32,8 @@ KiIndexFirstBitClear : UBYTE[256] = {
     0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 8,
 }
 
-#DEFINE KI_FREEZE_SPIN 10000000
-#DEFINE KI_FREEZE_RETRY 5
+#DEFINE KI_FREEZE_SPIN 5000000
+#DEFINE KI_FREEZE_RETRY 3
 
 EXPORT FN KiFreezeOtherProcessors ()
 
@@ -57,6 +57,8 @@ EXPORT FN KiFreezeOtherProcessors ()
 
         LEAVE
     END
+
+    KiFrozenProcessorCount = 0
 
     // Now send IPIs to all of the processors in the system (other than me).
 
@@ -114,20 +116,26 @@ EXPORT FN KiFreezeOtherProcessors ()
 
         RtlPrint ( "KiFreezeOtherProcessors: FAILED! Timeout.\n" )
     END
-
-    // Reset the frozen processor count. They're all in place (or we gave up).
-
-    KiFrozenProcessorCount = 0
 END
 
 EXPORT FN KiUnfreezeOtherProcessors ()
 
     // Unfreeze the processors in the system.
 
-    KeIncrementUlong (
+    old := KeIncrementUlong (
         &KiFreezeCount, // ptr
         0xFFFFFFFF, // ulong
     )
+
+    IF old == 1 THEN
+        // It's zero now, they've been released. Wait for them.
+
+        WHILE KiFrozenProcessorCount DO
+            // Language BARRIER so this loop isn't optimized out.
+
+            BARRIER
+        END
+    END
 END
 
 FN KiExecuteOnOtherProcessor (
@@ -430,6 +438,13 @@ FN KiServiceIpi (
 
             BARRIER
         END
+
+        // Decrement the count on the way out.
+
+        KeIncrementUlong (
+            &KiFrozenProcessorCount, // ptr
+            0xFFFFFFFF, // inc
+        )
 
         prb^.FrozenContext = NULLPTR
     END

@@ -8,17 +8,35 @@ DbgStackTraceCallback : KeCrashCallback
 
 PUBLIC DbgCauseCrash := FALSE
 
+DbgEntryCount : ULONG
+
 FN (KeDebuggerEntryF) DbgEntrypoint (
     IN context : ^OsContext,
 )
+
+    // Assumes interrupts are disabled on entry.
+
+    cnt := KeIncrementUlong (
+        &DbgEntryCount, // ptr
+        1, // inc
+    )
+
+    IF cnt != 0 THEN
+        // Nested entry. Ignore.
+
+        KeIncrementUlong (
+            &DbgEntryCount, // ptr
+            0xFFFFFFFF, // inc
+        )
+
+        LEAVE
+    END
 
     old := HalSetDebugConsole ( TRUE )
 
 #IF BLD_MP
     KiFreezeOtherProcessors ()
 #END
-
-    // All other processors on the system have been frozen.
 
     NOTHING KI_CURRENT_PRB_LOCAL^.FrozenContext = context
 
@@ -31,6 +49,11 @@ FN (KeDebuggerEntryF) DbgEntrypoint (
 #END
 
     HalSetDebugConsole ( old )
+
+    KeIncrementUlong (
+        &DbgEntryCount, // ptr
+        0xFFFFFFFF, // inc
+    )
 
     IF DbgCauseCrash THEN
         KeCrash ( "Debug\n" )

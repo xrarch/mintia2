@@ -19,8 +19,8 @@ PUBLIC HalpConsoleLock : HalSpinlock
 
 #END
 
-#DEFINE HAL_CONSOLE_FG 0xFF
-#DEFINE HAL_CONSOLE_BG 0x04
+#DEFINE HAL_CONSOLE_FG 0x00
+#DEFINE HAL_CONSOLE_BG 0xFF
 
 FN HalpDrawCharacter (
     IN c : UWORD,
@@ -438,9 +438,8 @@ EXPORT FN HalSetDebugConsole (
     IN new : UWORD,
 ) : UWORD
 
-    old := HalpDebugConsole
-
-    HalpDebugConsole = new
-
-    RETURN old
+    RETURN KeFetchAndSetUlong (
+        &HalpDebugConsole, // ptr
+        new, // newvalue
+    )
 END
