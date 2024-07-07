@@ -132,11 +132,6 @@ FN KiSwitchThread (
 
     nextproc := thread^.Process
 
-    // Disable interrupts *before* switching address space because we have to
-    // block out ASID rollover IPIs on some architectures.
-
-    oldstate := KiDisableInterrupts ()
-
     IF nextproc^.PageDirectoryPfn != current^.Process^.PageDirectoryPfn THEN
         // Switch to the address space of the new process.
 
@@ -150,8 +145,6 @@ FN KiSwitchThread (
         thread, // newthread
         current, // oldthread
     )
-
-    KiRestoreInterrupts ( oldstate )
 
     // We're back in the context of the "current" thread. This is always where
     // the hole that the gopher pops back out of is, except in the case of a

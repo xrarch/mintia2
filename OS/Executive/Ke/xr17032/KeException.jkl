@@ -460,6 +460,13 @@ KiJumpIntoThread:
 // a1 - asid
 KiSwitchMapCode:
 
+    // Disable interrupts.
+
+    mfcr t2, rs                     // Load current value of RS.
+    subi t0, zero, 3                // t0 = 0xFFFFFFFD
+    and  t0, t2, t0                 // Mask out the INT bit.
+    mtcr rs, t0                     // Write new RS.
+
     // Set the new page directory in DTB entry 0.
 
     mfcr t1, dtbindex
@@ -481,6 +488,10 @@ KiSwitchMapCode:
     mtcr itbtag, a1
     mtcr dtbtag, a1
 
+    // Restore interrupts.
+
+    mtcr rs, t2
+
     ret
 
 KiSwitchMapCodeEnd:
@@ -490,13 +501,7 @@ KiThreadTrampoline:
     // This is where a new thread begins execution.
     // s0 contains the start function, s1 and s2 contain context pointers.
 
-    // Interrupts are disabled. Enable them.
-
-    mfcr t0, rs
-    ori  t0, t0, 2
-    mtcr rs, t0
-
-    // We're also at KI_IPL_DPC, so lower that now.
+    // We're at KI_IPL_DPC, so lower that now.
 
     li   a0, KI_IPL_LOW
     jal  KiLowerIpl
