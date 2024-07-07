@@ -348,7 +348,13 @@ FN KeWaitForObjects (
         waitblock = &waitblocktable[i]
         object = &objecttable[i]
 
-@RecheckObject
+        // Initialize the fields of the wait block outside the object lock.
+
+        waitblock^.Thread = thread
+        waitblock^.Object = object
+        waitblock^.WakeStatus = i
+
+        KiAcquireObjectElevated ( object )
 
         // Capture the current signal count.
 
@@ -359,21 +365,10 @@ FN KeWaitForObjects (
             // If this isn't a notification event, consume the count.
 
             IF object^.Type != KI_DISPATCH_EVENT_NOTIF THEN
-#IF BLD_MP
-                IF KeCompareSwapUlong (
-                    &object^.SignalCount, // ptr
-                    signal - 1, // newvalue
-                    signal, // expectedvalue
-                ) != signal THEN
-
-                    // Signal count changed. Recheck the object.
-
-                    GOTO RecheckObject
-                END
-#ELSE
                 object^.SignalCount = signal - 1
-#END
             END
+
+            KiReleaseObjectElevated ( object )
 
             status = i
 
@@ -420,26 +415,6 @@ FN KeWaitForObjects (
             RETURN status
         END
 
-        // Initialize the fields of the wait block outside the object lock.
-
-        waitblock^.Thread = thread
-        waitblock^.Object = object
-        waitblock^.WakeStatus = i
-
-        // Acquire the object lock.
-
-        KiAcquireObjectElevated ( object )
-
-#IF BLD_MP
-        IF object^.SignalCount THEN
-            // Got signaled since we checked. Recheck the object.
-
-            KiReleaseObjectElevated ( object )
-
-            GOTO RecheckObject
-        END
-#END
-
         // Enqueue our wait block to the object.
 
         RtlInsertAtTailList (
@@ -485,11 +460,11 @@ FN KeWaitForObjects (
         )
     END
 
-#IF BLD_MP
     // Lock our thread.
 
     KiAcquireThreadElevated ( thread )
 
+#IF BLD_MP
     // Check if an interrupting event (such as the object being signaled, a user
     // APC, etc) from another processor aborted our wait while we were enqueuing
     // wait blocks.
