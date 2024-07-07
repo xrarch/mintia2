@@ -41,14 +41,29 @@ FN KeInitializeProcess (
     KeInitializePushlock ( &process^.Pushlock )
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
-    process^.Asid = 0
+    // We assume the AsidTable pointer was already set by the caller.
+    // If its NULLPTR this must be a process that lives in the system address
+    // space such as the idle process or system process.
 
-    // Cause the process to get assigned a new ASID when its first thread is
-    // scheduled in by giving it a sequence number of 2^64 - 1. This could cause
-    // a problem if the system lifetime exceeds geological timescales.
+    asidtable := process^.AsidTable
 
-    process^.AsidSequenceNumber.High = 0xFFFFFFFF
-    process^.AsidSequenceNumber.Low = 0xFFFFFFFF
+    IF asidtable THEN
+        i := 0
+        max := ExLoaderBlock.ProcessorCount
+
+        WHILE i < max DO
+            // Cause the process to get assigned a new ASID when its first
+            // thread is scheduled in on this processor by giving it a
+            // sequence number of 2^64 - 1. This could cause a problem if the
+            // system lifetime exceeds geological timescales.
+
+            asidtable[i].Asid = 0
+            asidtable[i].AsidSequenceNumber.High = 0xFFFFFFFF
+            asidtable[i].AsidSequenceNumber.Low = 0xFFFFFFFF
+
+            i += 1
+        END
+    END
 #END
 END
 

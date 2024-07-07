@@ -19,39 +19,49 @@ EXTERN KiIdleProcess : KeProcess
 #DEFINE KI_IPL_MAX 32
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
-    // The Prb is mapped in the same location on all processors on XR/17032 via
-    // a wired entry in each DTB. This location is -4096 in order to allow the
-    // address to be loaded with a single SUBI instruction.
 
-    #DEFINE KI_CURRENT_PRB_LOCAL [(CAST 0xFFFFF000 TO ^KiPrb)]
+// The Prb is mapped in the same location on all processors on XR/17032 via
+// a wired entry in each DTB. This location is -4096 in order to allow the
+// address to be loaded with a single SUBI instruction.
 
-    #DEFINE KI_CACHE_ALIGN 16
+#DEFINE KI_CURRENT_PRB_LOCAL [(CAST 0xFFFFF000 TO ^KiPrb)]
 
-    #DEFINE KI_INITIAL_SPINLOCK 0
+#DEFINE KI_CACHE_ALIGN 16
 
-    #MACRO KiInitializeSpinlock ( spinlock ) [
-        NOTHING (spinlock)^ = 0
-    ]
+#DEFINE KI_INITIAL_SPINLOCK 0
 
-    #IF BLD_MP
+#MACRO KiInitializeSpinlock ( spinlock ) [
+    NOTHING (spinlock)^ = 0
+]
 
-    #DEFINE KI_CURRENT_PRB [((CAST 0xFFFFF000 TO ^KiPrb)^.RealVirtual)]
-    #DEFINE KI_VIRTUAL_PRB 1
+#IF BLD_MP
 
-    #ELSE
+#DEFINE KI_CURRENT_PRB [((CAST 0xFFFFF000 TO ^KiPrb)^.RealVirtual)]
+#DEFINE KI_VIRTUAL_PRB 1
 
-    #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
-    #DEFINE KI_VIRTUAL_PRB 0
+#ELSE
 
-    #END
+#DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
+#DEFINE KI_VIRTUAL_PRB 0
+
+#END
+
+// This is the per-processor entry in the ASID table attached to each KeProcess
+// object.
+
+STRUCT KiAsidInfoEntry
+    AsidSequenceNumber : RtlUquad,
+    Asid : UWORD,
+END
 
 #ELSEIF ( STRCMP ARCHITECTURE "fox32" )
-    // Fox32 is always uniprocessor, so the Prb is mapped in a convenient and
-    // constant spot with a real page table entry.
 
-    #DEFINE KI_CURRENT_PRB_LOCAL [(CAST 0xFFFFF000 TO ^KiPrb)]
-    #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
-    #DEFINE KI_VIRTUAL_PRB 0
+// Fox32 is always uniprocessor, so the Prb is mapped in a convenient and
+// constant spot with a real page table entry.
+
+#DEFINE KI_CURRENT_PRB_LOCAL [(CAST 0xFFFFF000 TO ^KiPrb)]
+#DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
+#DEFINE KI_VIRTUAL_PRB 0
 
 #ELSE
     #ERROR ( STRCAT "Unknown architecture " ARCHITECTURE )
@@ -187,6 +197,11 @@ STRUCT KiPrb
     EarliestTimerMs : RtlUquad,
 
     IplTimes : RtlUquad[KI_IPL_MAX],
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    AsidSequenceNumber : RtlUquad,
+    NextAsid : UINT,
+#END
 
     KernelStackTop : ^VOID,
     CurrentThread : ^KeThread,
