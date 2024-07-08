@@ -222,7 +222,6 @@ ENUM KiDispatchType : UBYTE
     KI_DISPATCH_NULL,
 
     KI_DISPATCH_TIMER,
-    KI_DISPATCH_MUTEX,
     KI_DISPATCH_EVENT_NOTIF,
     KI_DISPATCH_EVENT_SYNCH,
     KI_DISPATCH_SEMAPHORE,
@@ -337,6 +336,8 @@ END
 #DEFINE KI_THREAD_READY 2
 #DEFINE KI_THREAD_WAITING 3
 #DEFINE KI_THREAD_INITIALIZED 4
+#DEFINE KI_THREAD_STANDBY 5
+#DEFINE KI_THREAD_INFLIGHT 6
 
 STRUCT KeThread
     Name : UBYTE[KE_DEBUG_NAME_LENGTH],
@@ -358,6 +359,8 @@ STRUCT KeThread
     ActualProcess : ^KeProcess,
     KernelStackTop : ^VOID,
     SwapListNext : ^KeThread,
+    AffinityPrb : ^KiPrb,
+    ReadyInPrb : ^KiPrb,
 
     WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
     TimeoutWaitBlock : KiWaitBlock,
@@ -390,6 +393,7 @@ STRUCT KeThread
     KernelStackCanBeSwapped : UBYTE,
     KernelStackResident : UBYTE,
     InSwapList : UBYTE,
+    Interactive : UBYTE,
 END
 
 EXTERN FN KeSignalThread (

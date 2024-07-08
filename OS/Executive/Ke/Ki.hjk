@@ -89,6 +89,15 @@ END
 
 #DEFINE KI_DEFAULT_QUANTUM 6
 
+// Number of timeshared ready queues.
+
+#DEFINE KI_TIMESHARED_QUEUES 32
+
+// Distance from the enqueue pointer to place a thread at priority zero into the
+// circular timeshared ready queues.
+
+#DEFINE KI_TIMESHARED_DISTANCE OS_PRIORITY_LOW_REALTIME
+
 #IF BLD_MP
 
 FNPTR KiIpiF (
@@ -170,7 +179,7 @@ STRUCT KiPrb
     // The CalendarEnqueueIndex is the ticking hand. Newly enqueued threads are
     // inserted into the queue pointed to by:
     //
-    //   CalendarEnqueueIndex + OS_PRIORITY_LOW_REALTIME - thread^.Priority
+    //   CalendarEnqueueIndex + KI_TIMESHARED_DISTANCE - thread^.Priority
     //
     // That is, threads are placed into a "further" queue when they have lower
     // priority. This accomplishes a relative ratio of CPU time granted to each
@@ -182,7 +191,7 @@ STRUCT KiPrb
     //
     // Threads on these lists are called "timeshared threads".
 
-    CalendarListHeads : RtlListEntry[OS_PRIORITY_LOW_REALTIME],
+    CalendarListHeads : RtlListEntry[KI_TIMESHARED_QUEUES],
 
     // Idle threads (priority 0) go on this list.
 
@@ -374,6 +383,21 @@ EXTERN FN KiExecuteOnEveryoneElse (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
+
+#MACRO KiSoftInterruptOther ( targetprb, ipl ) [
+    // Cause a software interrupt on another processor.
+
+    oldvalue := KeOrUlong (
+        &(targetprb)^.PendingSoftwareInterrupts, // ptr
+        1 << ((ipl) - 1), // bitset
+    )
+
+    IF oldvalue & ((ipl) - 1) == 0 THEN
+        // We just set it, so we should send an IPI to get him to check it.
+
+        HalTriggerIpi ( targetprb )
+    END
+]
 
 EXTERN FN KiAcquireSpinlock (
     IN spinlock : ^KiSpinlock,

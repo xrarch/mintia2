@@ -9,22 +9,6 @@
 
 #IF BLD_MP
 
-#MACRO KiAcquireReadyQueue ( prb ) [
-    KiAcquireSpinlockInPrb (
-        OFFSETOF KiPrb.ReadyQueueLock, // offset
-        OUT prb, // prb
-    )
-
-    KI_TO_GLOBAL_PRB ( prb )
-]
-
-#MACRO KiReleaseReadyQueue ( prb, oldipl ) [
-    KiReleaseSpinlockLower (
-        &(prb)^.ReadyQueueLock, // spinlock
-        oldipl, // oldipl
-    )
-]
-
 #MACRO KiAcquireReadyQueueElevated ( prb ) [
     KiAcquireSpinlock ( &(prb)^.ReadyQueueLock )
 ]
@@ -58,15 +42,6 @@
 
 #ELSE
 
-#MACRO KiAcquireReadyQueue ( prb ) [
-    KiRaiseIpl ( KI_IPL_DPC )
-    NOTHING (prb) = KI_CURRENT_PRB
-]
-
-#MACRO KiReleaseReadyQueue ( prb, oldipl ) [
-    KiLowerIpl ( oldipl )
-]
-
 #MACRO KiAcquireReadyQueueElevated ( prb ) []
 
 #MACRO KiReleaseReadyQueueElevated ( prb ) []
@@ -86,20 +61,6 @@
 #MACRO KiSetWaitAttempt ( thread, state ) []
 
 #END
-
-FN KiPreemptThread (
-    IN prb : ^KiPrb,
-)
-
-    KeCrash ( "NYI KiPreemptThread\n" )
-END
-
-FN KiQuantumEnd (
-    IN prb : ^KiPrb,
-)
-
-    KeCrash ( "NYI KiQuantumEnd\n" )
-END
 
 FN KiSwitchThread (
     IN current : ^KeThread,
@@ -130,6 +91,15 @@ FN KiSwitchThread (
     END
 #END
 
+    // Set affinity to this processor.
+
+    prb := KI_CURRENT_PRB
+
+    thread^.AffinityPrb = prb
+    thread^.ReadyInPrb = NULLPTR
+
+    // See if we have to switch address spaces.
+
     nextproc := thread^.Process
 
     IF nextproc^.PageDirectoryPfn != current^.Process^.PageDirectoryPfn THEN
@@ -155,7 +125,589 @@ FN KiSwitchThread (
     // (RtlEmptyList) does not touch any pointers.
 
     IF NOT RtlEmptyList ( &current^.KapcListHead ) THEN
-        KiSoftInterruptSelf ( KI_CURRENT_PRB_LOCAL, KI_IPL_APC )
+        KiSoftInterruptSelf ( prb, KI_IPL_APC )
+    END
+END
+
+FN KiReadyThread (
+    IN prb : ^KiPrb,
+    IN thread : ^KeThread,
+    IN other : UWORD,
+)
+
+    // Insert a thread into the appropriate ready queue of the given processor.
+    // We *don't* try to synchronize against this thread being readied by
+    // multiple processors at once, so there should be a well defined and
+    // exclusive custody of the thread object by the caller at this point. Also
+    // the ready queue of the processor should be locked. Also the thread lock
+    // is held.
+
+    // TODO check if stack swapped out goes here
+
+    thread^.Status = KI_THREAD_READY
+    thread^.ReadyInPrb = prb
+
+    current := prb^.CurrentThread
+    next := prb^.NextThread
+
+    compare := next
+
+    IF NOT compare THEN
+        compare = current
+    END
+
+    IF thread^.Priority >= OS_PRIORITY_LOW_REALTIME OR
+        thread^.Interactive THEN
+
+        // It's either one of the forced real time priorities or we've deemed it
+        // interactive. Either way it goes in the real time queue or preempts
+        // the current thread.
+
+        IF (compare^.Priority >= OS_PRIORITY_LOW_REALTIME OR
+            compare^.Interactive) AND thread^.Priority <= compare^.Priority THEN
+
+            // Go on the back of the queue.
+
+            RtlInsertAtTailList (
+                &prb^.RealTimeListHeads[thread^.Priority], // head
+                &thread^.ReadyEntry, // entry
+            )
+
+            // Indicate that an item exists in this queue.
+
+            prb^.RealTimeReady |= 1 << thread^.Priority
+
+            LEAVE
+        END
+
+    ELSE
+        // It's a timeshared or idle thread. There's only one thing these can
+        // preempt - the idle thread.
+
+        IF compare != &prb^.IdleThread THEN
+            // No preemption. Just place on the appropriate queue.
+
+            IF thread^.Priority == OS_PRIORITY_IDLE THEN
+                // Idle queue.
+
+                RtlInsertAtTailList (
+                    &prb^.IdleListHead, // head
+                    &thread^.ReadyEntry, // entry
+                )
+
+                LEAVE
+            END
+
+            // Timeshared queue.
+
+            insertat := prb^.CalendarEnqueueIndex
+
+            // Bias the index by the inverse of the priority, so that higher
+            // priority timeshared threads are scheduled sooner.
+
+            insertat += KI_TIMESHARED_DISTANCE - thread^.Priority
+
+            insertat %= KI_TIMESHARED_QUEUES
+
+            // Go on the back of the queue.
+
+            RtlInsertAtTailList (
+                &prb^.CalendarListHeads[insertat], // head
+                &thread^.ReadyEntry, // entry
+            )
+
+            // Indicate that an item exists in this queue.
+
+            prb^.CalendarReady |= 1 << insertat
+
+            LEAVE
+        END
+    END
+
+    // Cause a preemption.
+
+    thread^.Status = KI_THREAD_STANDBY
+
+    prb^.NextThread = thread
+
+    IF next THEN
+        // Recursively re-ready the preempted NextThread. Don't fear - this can
+        // only nest one level deep.
+
+        KiReadyThread (
+            prb, // prb
+            next, // thread
+            other, // other
+        )
+
+    ELSE
+        // Trigger a software interrupt.
+
+#IF BLD_MP
+        IF other THEN
+            // This was a remote Prb; may have to send an IPI.
+
+            KiSoftInterruptOther (
+                prb, // targetprb
+                KI_IPL_DPC, // ipl
+            )
+
+            LEAVE
+        END
+#END
+
+        KiSoftInterruptSelf (
+            prb, // targetprb
+            KI_IPL_DPC, // ipl
+        )
+    END
+END
+
+FN KiSelectRealTimeThread (
+    IN prb : ^KiPrb,
+) : ^KeThread
+
+    // Return a thread to switch into from the given processor's real time ready
+    // queues. The processor's ready queue lock is held.
+
+    readybits := prb^.RealTimeReady
+
+    i := OS_PRIORITY_MAX
+
+    WHILE i DO
+        i -= 1
+
+        IF (readybits >> i) & 1 THEN
+            // There's a thread in this queue. Unlink and return it.
+
+            queue := &prb^.RealTimeListHeads[i]
+
+            thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
+
+            RtlRemoveEntryList ( &thread^.ReadyEntry )
+
+            IF RtlEmptyList ( queue ) THEN
+                // The queue is empty now. Clear the bit.
+
+                prb^.RealTimeReady = readybits & ~(1 << i)
+            END
+
+            RETURN thread
+        END
+    END
+
+    RETURN NULLPTR
+END
+
+FN KiSelectTimesharedThread (
+    IN prb : ^KiPrb,
+) : ^KeThread
+
+    // Return a thread to switch into from the given processor's calendar ready
+    // queues. The processor's ready queue lock is held.
+
+    readybits := prb^.CalendarReady
+
+    count := KI_TIMESHARED_QUEUES
+    k := prb^.CalendarRunIndex
+
+    WHILE count DO
+        IF k == KI_TIMESHARED_QUEUES THEN
+            k = 0
+        END
+
+        IF (readybits >> k) & 1 THEN
+            // There's a thread in this queue. Unlink and return it.
+
+            // Set the run index to consume threads from this queue entry.
+
+            prb^.CalendarRunIndex = k
+
+            IF k == prb^.CalendarEnqueueIndex THEN
+                // Make sure the enqueue index is one ahead of the run index.
+
+                IF k == KI_TIMESHARED_QUEUES - 1 THEN
+                    prb^.CalendarEnqueueIndex = 0
+
+                ELSE
+                    prb^.CalendarEnqueueIndex = k + 1
+                END
+            END
+
+            queue := &prb^.CalendarListHeads[k]
+
+            thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
+
+            RtlRemoveEntryList ( &thread^.ReadyEntry )
+
+            IF RtlEmptyList ( queue ) THEN
+                // The queue is empty now. Clear the bit.
+
+                prb^.CalendarReady = readybits & ~(1 << k)
+            END
+
+            RETURN thread
+        END
+
+        k += 1
+        count -= 1
+    END
+
+    RETURN NULLPTR
+END
+
+FN KiSelectThread (
+    IN prb : ^KiPrb,
+    IN current : ^KeThread,
+    IN exclusive : UWORD,
+) : ^KeThread
+
+    // Return a thread to switch into from the given processor's queues.
+    // A thread lock is held, or we are otherwise at KI_IPL_DPC. Ready queue
+    // lock is held.
+    // If a current thread is given, we only return threads that can preempt it.
+
+    next := prb^.NextThread
+
+    IF next THEN
+        // There's already a next thread selected, return that.
+
+        prb^.NextThread = NULLPTR
+        next^.Status = KI_THREAD_INFLIGHT
+
+        RETURN next
+    END
+
+    minimumpriority := 0
+    interactive := FALSE
+
+    IF current THEN
+        minimumpriority = current^.Priority
+        interactive = current^.Interactive
+
+        IF exclusive THEN
+            minimumpriority += 1
+        END
+    END
+
+    // Check the real time bitmap.
+
+    readybits := prb^.RealTimeReady
+
+    IF readybits >> minimumpriority THEN
+        // We're taking a thread off the real time queues.
+
+        next = KiSelectRealTimeThread ( prb )
+
+        RETURN next
+    END
+
+    IF interactive OR minimumpriority >= OS_PRIORITY_LOW_REALTIME THEN
+        // Can't be preempted by anybody timeshared.
+    
+        RETURN NULLPTR
+    END
+
+    // Check the calendar queue (timeshared) bitmap.
+
+    readybits = prb^.CalendarReady
+
+    IF readybits THEN
+        // We're taking a thread off the timeshared queues.
+
+        next = KiSelectTimesharedThread ( prb )
+
+        RETURN next
+    END
+
+    IF minimumpriority > OS_PRIORITY_IDLE THEN
+        // Can't be preempted by an idle thread.
+    
+        RETURN NULLPTR
+    END
+
+    // Check the idle thread queue.
+
+    IF NOT RtlEmptyList ( &prb^.IdleListHead ) THEN
+        // We're taking a thread off the idle queue.
+
+        next = CONTAINEROF prb^.IdleListHead.Next TO KeThread.ReadyEntry
+
+        RtlRemoveEntryList ( &next^.ReadyEntry )
+
+        RETURN next
+    END
+
+    // Nothing to run.
+
+    RETURN NULLPTR
+END
+
+FN KiPreemptThread (
+    IN prb : ^KiPrb,
+)
+
+    // Called at KI_IPL_DPC when theres a thread we've been preempted by and
+    // it's time to switch into it.
+
+    // Grab the next thread with the ready queue lock held.
+
+    KiAcquireReadyQueueElevated ( prb )
+
+    next := prb^.NextThread
+    prb^.NextThread = NULLPTR
+    next^.Status = KI_THREAD_INFLIGHT
+
+    KiReleaseReadyQueueElevated ( prb )
+
+    // If there's somehow no next thread, just return.
+
+    IF NOT next THEN
+        LEAVE
+    END
+
+    current := prb^.CurrentThread
+
+    IF current != &prb^.IdleThread THEN
+        // Ready the current thread.
+
+        KiAcquireThreadElevated ( current )
+        KiAcquireReadyQueueElevated ( prb )
+
+        KiReadyThread (
+            prb, // prb
+            current, // thread
+            FALSE, // other
+        )
+
+        KiReleaseReadyQueueElevated ( prb )
+        KiReleaseThreadElevated ( current )
+    END
+
+    // Acquire the thread lock.
+
+    KiAcquireThreadElevated ( current )
+
+    // Switch into the thread.
+
+    KiSwitchThread (
+        current, // current
+        next, // thread
+    )
+
+    // KiSwitchThread returns with the thread lock released.
+END
+
+FN KiSetPriorityThread (
+    IN thread : ^KeThread,
+    IN priority : UWORD,
+)
+
+    // Set the new priority for a thread.
+
+#IF BLD_CHK
+    IF KiCurrentIpl () != KI_IPL_DPC THEN
+        KeCrash ( "KiSetPriorityThread: IPL != KI_IPL_DPC\n" )
+    END
+#END
+
+#IF BLD_MP
+    // Lock the thread and any processor ready queue that it is enqueued to.
+
+    KiAcquireThreadElevated ( thread )
+
+    prb := thread^.ReadyInPrb
+
+    IF prb THEN
+        KiAcquireReadyQueueElevated ( prb )
+    END
+
+    other := (prb != KI_CURRENT_PRB)
+
+#ELSE
+    prb := thread^.ReadyInPrb
+    other := FALSE
+#END
+
+    curpri := thread^.Priority
+
+    IF curpri == priority THEN
+        // Nothing changed.
+
+        GOTO Exit
+    END
+
+    thread^.Priority = priority
+
+    IF thread^.Status == KI_THREAD_READY THEN
+        // We changed the priority level, so the thread is now on the wrong
+        // ready queue. Manually unlink it from the queue, and then re-ready
+        // it to place it on the correct one.
+
+        RtlRemoveEntryList ( &thread^.ReadyEntry )
+
+        KiReadyThread (
+            prb, // prb
+            thread, // thread
+            other, // other
+        )
+
+        GOTO Exit
+    END
+
+    IF priority >= curpri THEN
+        // We raised priority, so there's nothing left to do.
+
+        GOTO Exit
+    END
+
+    // Priority was dropped. It may need to be preempted.
+
+    next : ^KeThread
+
+    IF thread^.Status == KI_THREAD_STANDBY THEN
+        // This is the next thread, so check if we have a higher priority
+        // thread we should switch to instead, now that we have dropped its
+        // priority.
+
+        next = KiSelectThread (
+            prb, // prb
+            thread, // current
+            TRUE, // exclusive
+        )
+
+        IF NOT next THEN
+            GOTO Exit
+        END
+
+        next^.Status = KI_THREAD_STANDBY
+        prb^.NextThread = next
+
+        // Re-ready our thread to place it on the normal ready queue.
+
+        KiReadyThread (
+            prb, // prb
+            thread, // thread
+            other, // other
+        )
+
+        GOTO Exit
+    END
+
+    IF thread^.Status == KI_THREAD_RUNNING THEN
+        // This is the running thread, so we should see if there's now a
+        // higher priority thread that should preempt it.
+
+        IF prb^.NextThread THEN
+            // A next thread was already selected.
+
+            GOTO Exit
+        END
+
+        next = KiSelectThread (
+            prb, // prb
+            thread, // current
+            TRUE, // exclusive
+        )
+
+        IF NOT next THEN
+            GOTO Exit
+        END
+
+        // Cause a preemption.
+
+        next^.Status = KI_THREAD_STANDBY
+        prb^.NextThread = next
+
+#IF BLD_MP
+        IF other THEN
+            // This was a remote Prb; may have to send an IPI.
+
+            KiSoftInterruptOther (
+                prb, // targetprb
+                KI_IPL_DPC, // ipl
+            )
+
+            LEAVE
+        END
+#END
+
+        KiSoftInterruptSelf (
+            prb, // targetprb
+            KI_IPL_DPC, // ipl
+        )
+    END
+
+@Exit
+
+#IF BLD_MP
+    IF prb THEN
+        KiReleaseReadyQueueElevated ( prb )
+    END
+
+    KiReleaseThreadElevated ( thread )
+#END
+
+END
+
+FN KiQuantumEnd (
+    IN prb : ^KiPrb,
+)
+
+    // A quantum end has been detected on the current processor.
+
+    current := prb^.CurrentThread
+
+#IF BLD_CHK
+    IF current == &prb^.IdleThread THEN
+        KeCrash ( "KiQuantumEnd: idle thread\n" )
+    END
+#END
+
+    // Replenish the quantum of the thread.
+
+    current^.RemainingQuantum = KI_DEFAULT_QUANTUM
+
+    // Decay interactivity score by one since this thread went a full quantum
+    // without blocking.
+
+    IF current^.Interactive THEN
+        current^.Interactive -= 1
+    END
+
+    // Decay priority by one.
+
+    IF current^.Priority > current^.BasePriority THEN
+        // If this thread should be preempted, this function will find by whom.
+
+        KiSetPriorityThread (
+            current, // thread
+            current^.Priority - 1, // priority
+        )
+
+    ELSE
+        // Lock the ready queue.
+
+        KiAcquireReadyQueueElevated ( prb )
+
+        IF NOT prb^.NextThread THEN
+            // Try to find a thread to preempt this one with.
+
+            next := KiSelectThread (
+                prb, // prb
+                current, // current
+                FALSE, // exclusive
+            )
+
+            IF next THEN
+                // Found one. Set it as the next thread.
+
+                next^.Status = KI_THREAD_STANDBY
+                prb^.NextThread = next
+            END
+        END
+
+        KiReleaseReadyQueueElevated ( prb )
     END
 END
 
@@ -165,7 +717,46 @@ FN KiWaitThread (
 
     // This function is entered with the thread lock held (IPLDPC).
 
-    KeCrash ( "NYI KiThreadWait\n" )
+    // Set the thread status to WAITING.
+
+    thread^.Status = KI_THREAD_WAITING
+
+    // Try to find a thread to switch into.
+
+    prb := KI_CURRENT_PRB
+
+    KiAcquireReadyQueueElevated ( prb )
+
+    next := KiSelectThread (
+        prb, // prb
+        NULLPTR, // current
+        FALSE, // exclusive
+    )
+
+    KiReleaseReadyQueueElevated ( prb )
+
+    IF next THEN
+        // Switch into it.
+
+        KiSwitchThread (
+            thread, // current
+            next, // thread
+        )
+
+    ELSE
+        // Switch to the idle thread.
+
+        KiSwitchThread (
+            thread, // current
+            &prb^.IdleThread, // thread
+        )
+    END
+
+    // KiSwitchThread returns with the thread lock released.
+
+    // We're back! Return the status.
+
+    RETURN thread^.WaitStatus
 END
 
 #MACRO KiCheckWaitInterruptingEvents ( thread, ipl, alertable, waitmode ) [
@@ -260,7 +851,7 @@ FN KeWaitForObjects (
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
     IN objectcount : UWORD,
-    IN objecttable : ^KiDispatchHeader,
+    IN objecttable : ^^KiDispatchHeader,
     IN waitblocktable : ^KiWaitBlock,
 ) : OsStatus
 
@@ -346,7 +937,7 @@ FN KeWaitForObjects (
 
     WHILE i < objectcount DO
         waitblock = &waitblocktable[i]
-        object = &objecttable[i]
+        object = objecttable[i]
 
         // Initialize the fields of the wait block outside the object lock.
 
