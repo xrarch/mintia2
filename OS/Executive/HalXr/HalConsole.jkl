@@ -279,11 +279,13 @@ FN HalPutCharacter (
 
     oldstate : UWORD
 
-    IF NOT HalpDebugConsole THEN
+    dbg := HalpDebugConsole
+
+    IF NOT dbg THEN
         oldstate = HalpAcquireConsole ()
     END
 
-    IF HalpUseFramebuffer AND NOT HalpDebugConsole THEN
+    IF HalpUseFramebuffer AND NOT dbg THEN
         // Write to the framebuffer console.
 
         IF byte == '\n' OR HalpCursorX >= HalpWidth THEN
@@ -313,7 +315,7 @@ FN HalPutCharacter (
         HalDebugWrite ( byte )
     END
 
-    IF NOT HalpDebugConsole THEN
+    IF NOT dbg THEN
         HalpReleaseConsole ( oldstate )
     END
 END

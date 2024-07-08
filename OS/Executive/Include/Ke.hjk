@@ -339,6 +339,10 @@ END
 #DEFINE KI_THREAD_STANDBY 5
 #DEFINE KI_THREAD_INFLIGHT 6
 
+#DEFINE KI_IDLE_QUEUE 1
+#DEFINE KI_TIMESHARED_QUEUE 2
+#DEFINE KI_REAL_TIME_QUEUE 3
+
 STRUCT KeThread
     Name : UBYTE[KE_DEBUG_NAME_LENGTH],
 
@@ -360,7 +364,7 @@ STRUCT KeThread
     KernelStackTop : ^VOID,
     SwapListNext : ^KeThread,
     AffinityPrb : ^KiPrb,
-    ReadyInPrb : ^KiPrb,
+    CurrentPrb : ^KiPrb,
 
     WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
     TimeoutWaitBlock : KiWaitBlock,
@@ -394,6 +398,8 @@ STRUCT KeThread
     KernelStackResident : UBYTE,
     InSwapList : UBYTE,
     Interactive : UBYTE,
+    CurrentQueue : UBYTE,
+    Pinned : UBYTE,
 END
 
 EXTERN FN KeSignalThread (

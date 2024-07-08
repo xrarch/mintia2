@@ -189,15 +189,16 @@ FN KiClockTick (
 
     // Increment the timeshared enqueue index.
 
-    index := prb^.CalendarEnqueueIndex + 1
+    ridx := prb^.CalendarRunIndex
+    idx := prb^.CalendarEnqueueIndex
 
-    IF index == prb^.CalendarRunIndex THEN
-        // Keep it one ahead of the run index.
+    IF idx == ridx THEN
+        prb^.CalendarEnqueueIndex = (idx + 1) % KI_TIMESHARED_QUEUES
 
-        index += 1
+        IF RtlEmptyList ( &prb^.CalendarListHeads[ridx] ) THEN
+            prb^.CalendarRunIndex = prb^.CalendarEnqueueIndex
+        END
     END
-
-    prb^.CalendarEnqueueIndex = index % KI_TIMESHARED_QUEUES
 
     IF NOT thread THEN
         // No thread yet. This can happen during early init.

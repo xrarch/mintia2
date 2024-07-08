@@ -96,7 +96,7 @@ END
 // Distance from the enqueue pointer to place a thread at priority zero into the
 // circular timeshared ready queues.
 
-#DEFINE KI_TIMESHARED_DISTANCE OS_PRIORITY_LOW_REALTIME
+#DEFINE KI_TIMESHARED_DISTANCE [(OS_PRIORITY_HIGH_USER + 1)]
 
 #IF BLD_MP
 
@@ -130,6 +130,8 @@ STRUCT KiPrb
     IpiInterrupt : KeInterrupt,
 
     IpiFunction : KiIpiF,
+
+    IdlePrbListEntry : RtlListEntry,
 
     IpiContext1 : UWORD,
     IpiContext2 : UWORD,
@@ -340,6 +342,10 @@ EXTERN FN KiJumpIntoThread (
     IN thread : ^KeThread,
 )
 
+EXTERN FN KiJumpIntoIdleThread (
+    IN prb : ^KiPrb,
+)
+
 EXTERN FN (KeDpcF) KiTimerExpiration (
     IN dpc : ^KeDpc,
     IN context1 : UWORD,
@@ -436,6 +442,8 @@ EXTERN FN KiReleaseSpinlockLower (
 #MACRO KiReleaseObjectElevated ( object ) [
     KiReleaseSpinlock ( &(object)^.Spinlock )
 ]
+
+EXTERN KiIdleProcessorListHead : RtlListEntry
 
 #ELSE
 
