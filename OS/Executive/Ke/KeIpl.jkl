@@ -27,12 +27,10 @@
 
 FNPTR KiSoftwareInterruptHandlerF (
     IN prb : ^KiPrb,
-    IN oldstate : UWORD,
 )
 
 FN (KiSoftwareInterruptHandlerF) KiApcInterrupt (
     IN prb : ^KiPrb,
-    IN oldstate : UWORD,
 )
 
     // Atomically clear the pending APC interrupt.
@@ -46,7 +44,7 @@ FN (KiSoftwareInterruptHandlerF) KiApcInterrupt (
 
     prb^.Ipl = KI_IPL_APC
 
-    KiRestoreInterrupts ( oldstate )
+    KiEnableInterrupts ()
 
     KiDispatchApcQueue ( current )
 
@@ -55,7 +53,6 @@ END
 
 FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
     IN prb : ^KiPrb,
-    IN oldstate : UWORD,
 )
 
     // Atomically clear the pending DPC interrupt.
@@ -67,7 +64,7 @@ FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
 
     prb^.Ipl = KI_IPL_DPC
 
-    KiRestoreInterrupts ( oldstate )
+    KiEnableInterrupts ()
 
     KI_TO_GLOBAL_PRB ( prb )
 
@@ -115,7 +112,6 @@ FN KiDispatchSoftwareInterrupts (
     WHILE pending DO
         KiSoftwareInterruptPriorityTable[pending] (
             prb, // prb
-            oldstate, // oldstate
         )
 
 #IF KI_VOLATILE_LOCAL_PRB
