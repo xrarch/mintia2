@@ -55,6 +55,8 @@ FN (KeStartThreadF) KiIdleLoop (
     KiReleaseAnnounce ( ipl )
 
 #IF BLD_MP
+    prb := KI_CURRENT_PRB_LOCAL
+
     // Atomically decrement the initialization count to indicate to the boot
     // processor that we made it into our idle thread.
 
@@ -66,6 +68,16 @@ FN (KeStartThreadF) KiIdleLoop (
 
     WHILE TRUE DO
         KiWaitForInterrupt ()
+
+#IF BLD_MP
+        IF prb^.StealCount == 0 THEN
+            // Time to try stealing work.
+
+            prb^.StealCount = KI_WORK_STEAL_INTERVAL
+
+            KiStealWork ()
+        END
+#END
     END
 END
 

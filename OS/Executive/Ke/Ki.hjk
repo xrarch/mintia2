@@ -98,6 +98,14 @@ END
 
 #DEFINE KI_TIMESHARED_DISTANCE [(OS_PRIORITY_HIGH_USER + 1)]
 
+// Millisecond interval between attempts to steal work by the idle thread.
+
+#DEFINE KI_WORK_STEAL_INTERVAL 200
+
+// Minimum load to steal threads from a processor.
+
+#DEFINE KI_STEAL_LOAD 2
+
 #IF BLD_MP
 
 FNPTR KiIpiF (
@@ -224,13 +232,26 @@ STRUCT KiPrb
 
     PendingSoftwareInterrupts : ULONG,
 
-    // 32-bit mask of which real time queues have at least one thread.
+    // 32-bit mask where a set bit indicates a real time queue that has at least
+    // one thread.
 
     RealTimeReady : ULONG,
 
-    // 32-bit mask of which timeshared queues have at least one thread.
+    // 32-bit mask where a set bit indicates a timeshared queue that has at
+    // least one thread.
 
     CalendarReady : ULONG,
+
+#IF BLD_MP
+    // 32-bit count of threads enqueued ready on this processor.
+
+    Load : ULONG,
+
+    // 32-bit countdown of milliseconds until we should scan to steal work
+    // while idle.
+
+    StealCount : ULONG,
+#END
 
     Id : UINT,
 
@@ -444,6 +465,8 @@ EXTERN FN KiReleaseSpinlockLower (
 ]
 
 EXTERN KiIdleProcessorListHead : RtlListEntry
+
+EXTERN FN KiStealWork ()
 
 #ELSE
 

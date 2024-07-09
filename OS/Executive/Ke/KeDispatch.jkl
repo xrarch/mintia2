@@ -14,6 +14,7 @@ PUBLIC KiIdleProcessorListHead : RtlListEntry
 KiIdleProcessorSpinlock : KiSpinlock = KI_INITIAL_SPINLOCK
 
 KiProcessorScanIndex : ULONG
+KiIdleProcessorScanIndex : ULONG
 
 #MACRO KiAcquireReadyQueueElevated ( prb ) [
     KiAcquireSpinlock ( &(prb)^.ReadyQueueLock )
@@ -204,6 +205,10 @@ FN KiInsertThread (
 
 #IF BLD_MP
     thread^.CurrentPrb = prb
+
+    // Increment count of ready threads on this processor.
+
+    prb^.Load += 1
 #END
 
     current := prb^.CurrentThread
@@ -298,6 +303,13 @@ FN KiInsertThread (
             LEAVE
         END
     END
+
+#IF BLD_MP
+    // Decrement count of ready threads. We don't count standby and running
+    // threads in this counter.
+
+    prb^.Load -= 1
+#END
 
     // Cause a preemption.
 
@@ -438,6 +450,7 @@ FN KiReadyThread (
 
         i := 0
         max := ExLoaderBlock.ProcessorCount
+        index %= max
 
         WHILE i < max DO
             IF index >= max THEN
@@ -503,6 +516,7 @@ END
 
 FN KiSelectRealTimeThread (
     IN prb : ^KiPrb,
+    IN migrate : UWORD,
 ) : ^KeThread
 
     // Return a thread to switch into from the given processor's real time ready
@@ -522,15 +536,27 @@ FN KiSelectRealTimeThread (
 
             thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
 
-            RtlRemoveEntryList ( &thread^.ReadyEntry )
+#IF BLD_MP
+            IF NOT thread^.Pinned OR NOT migrate THEN
+#END
+                RtlRemoveEntryList ( &thread^.ReadyEntry )
 
-            IF RtlEmptyList ( queue ) THEN
-                // The queue is empty now. Clear the bit.
+                IF RtlEmptyList ( queue ) THEN
+                    // The queue is empty now. Clear the bit.
 
-                prb^.RealTimeReady = readybits & ~(1 << i)
+                    prb^.RealTimeReady = readybits & ~(1 << i)
+                END
+
+#IF BLD_MP
+                // Decrement count of ready threads.
+
+                prb^.Load -= 1
+#END
+
+                RETURN thread
+#IF BLD_MP
             END
-
-            RETURN thread
+#END
         END
     END
 
@@ -540,6 +566,7 @@ END
 FN KiSelectTimesharedThread (
     IN prb : ^KiPrb,
     IN current : ^KeThread,
+    IN migrate : UWORD,
 ) : ^KeThread
 
     // Return a thread to switch into from the given processor's calendar ready
@@ -561,21 +588,33 @@ FN KiSelectTimesharedThread (
 
         thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
 
-        RtlRemoveEntryList ( &thread^.ReadyEntry )
+#IF BLD_MP
+        IF NOT thread^.Pinned OR NOT migrate THEN
+#END
+            RtlRemoveEntryList ( &thread^.ReadyEntry )
 
-        IF RtlEmptyList ( queue ) THEN
-            // The queue is empty now. Clear the bit.
+            IF RtlEmptyList ( queue ) THEN
+                // The queue is empty now. Clear the bit.
 
-            prb^.CalendarReady = readybits & ~(1 << k)
+                prb^.CalendarReady = readybits & ~(1 << k)
 
-            // Advance the run index.
+                // Advance the run index.
 
-            IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex THEN
-                prb^.CalendarRunIndex = (k + 1) % KI_TIMESHARED_QUEUES
+                IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex THEN
+                    prb^.CalendarRunIndex = (k + 1) % KI_TIMESHARED_QUEUES
+                END
             END
-        END
 
-        RETURN thread
+#IF BLD_MP
+            // Decrement count of ready threads.
+
+            prb^.Load -= 1
+#END
+
+            RETURN thread
+#IF BLD_MP
+        END
+#END
     END
 
     RETURN NULLPTR
@@ -585,6 +624,7 @@ FN KiSelectThread (
     IN prb : ^KiPrb,
     IN current : ^KeThread,
     IN exclusive : UWORD,
+    IN migrate : UWORD,
 ) : ^KeThread
 
     // Return a thread to switch into from the given processor's queues.
@@ -594,7 +634,7 @@ FN KiSelectThread (
 
     next := prb^.NextThread
 
-    IF next THEN
+    IF NOT migrate AND next THEN
         // There's already a next thread selected, return that.
 
         prb^.NextThread = NULLPTR
@@ -622,9 +662,18 @@ FN KiSelectThread (
     IF readybits >> minimumpriority THEN
         // We're taking a thread off the real time queues.
 
-        next = KiSelectRealTimeThread ( prb )
+        next = KiSelectRealTimeThread (
+            prb, // prb
+            migrate, // migrate
+        )
 
+#IF BLD_MP
+        IF NOT migrate OR next != NULLPTR THEN
+            RETURN next
+        END
+#ELSE
         RETURN next
+#END
     END
 
     IF interactive OR minimumpriority >= OS_PRIORITY_LOW_REALTIME THEN
@@ -643,9 +692,16 @@ FN KiSelectThread (
         next = KiSelectTimesharedThread (
             prb, // prb
             current, // current
+            migrate, // migrate
         )
 
+#IF BLD_MP
+        IF NOT migrate OR next != NULLPTR THEN
+            RETURN next
+        END
+#ELSE
         RETURN next
+#END
     END
 
     IF minimumpriority > OS_PRIORITY_IDLE THEN
@@ -662,6 +718,12 @@ FN KiSelectThread (
         next = CONTAINEROF prb^.IdleListHead.Next TO KeThread.ReadyEntry
 
         RtlRemoveEntryList ( &next^.ReadyEntry )
+
+#IF BLD_MP
+        // Decrement count of ready threads.
+
+        prb^.Load -= 1
+#END
 
         RETURN next
     END
@@ -815,6 +877,7 @@ FN KiSetPriorityThread (
             prb, // prb
             thread, // current
             TRUE, // exclusive
+            FALSE, // migrate
         )
 
         IF NOT next THEN
@@ -849,6 +912,7 @@ FN KiSetPriorityThread (
             prb, // prb
             thread, // current
             TRUE, // exclusive
+            FALSE, // migrate
         )
 
         IF NOT next THEN
@@ -938,6 +1002,7 @@ FN KiQuantumEnd (
                 prb, // prb
                 current, // current
                 FALSE, // exclusive
+                FALSE, // migrate
             )
 
             IF next THEN
@@ -958,13 +1023,19 @@ FN KiWaitThread (
 
     // This function is entered with the thread lock held (IPLDPC).
 
+    prb := KI_CURRENT_PRB
+
+#IF BLD_CHK
+    IF thread == &prb^.IdleThread THEN
+        KeCrash ( "KiWaitThread: idle wait\n" )
+    END
+#END
+
     // Set the thread status to WAITING.
 
     thread^.Status = KI_THREAD_WAITING
 
     // Try to find a thread to switch into.
-
-    prb := KI_CURRENT_PRB
 
     KiAcquireReadyQueueElevated ( prb )
 
@@ -972,6 +1043,7 @@ FN KiWaitThread (
         prb, // prb
         NULLPTR, // current
         FALSE, // exclusive
+        FALSE, // migrate
     )
 
     KiReleaseReadyQueueElevated ( prb )
@@ -985,6 +1057,12 @@ FN KiWaitThread (
         )
 
     ELSE
+#IF BLD_MP
+        // Before committing to an idle, try to steal work.
+
+        prb^.StealCount = 0
+#END
+
         // Switch to the idle thread.
 
         KiSwitchThread (
@@ -999,6 +1077,112 @@ FN KiWaitThread (
 
     RETURN thread^.WaitStatus
 END
+
+#IF BLD_MP
+
+FN KiStealWork ()
+
+    // This is called periodically (once every 200ms) by the idle thread of each
+    // processor. We want to find the most heavily loaded processor and steal
+    // a thread off his queues.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+    index := KeIncrementUlong (
+        &KiIdleProcessorScanIndex, // ptr
+        1, // ulong
+    )
+
+    i := 0
+    max := ExLoaderBlock.ProcessorCount
+    index %= max
+
+    myprb := KI_CURRENT_PRB
+
+    loadedprb : ^KiPrb = NULLPTR
+
+    WHILE i < max DO
+        IF index >= max THEN
+            index = 0
+        END
+
+        prb := KiPrbFromNumber ( i )
+
+        IF NOT loadedprb THEN
+            loadedprb = prb
+
+        ELSEIF prb^.Load > loadedprb^.Load THEN
+            loadedprb = prb
+        END
+
+        index += 1
+        i += 1
+        prb += BL_PRB_SIZE
+    END
+
+    IF loadedprb == myprb THEN
+        KiLowerIpl ( ipl )
+
+        LEAVE
+    END
+
+    IF loadedprb^.Load < KI_STEAL_LOAD THEN
+        KiLowerIpl ( ipl )
+
+        LEAVE
+    END
+
+    // Lock the loaded Prb.
+
+    KiAcquireReadyQueueElevated ( loadedprb )
+
+    // Select a thread.
+
+    thread := KiSelectThread (
+        loadedprb, // prb
+        NULLPTR, // current
+        FALSE, // exclusive
+        TRUE, // migrate
+    )
+
+    // Set INFLIGHT so nobody tries to touch it while we've got it.
+
+    thread^.Status = KI_THREAD_INFLIGHT
+
+    // Release the ready queue.
+
+    KiReleaseReadyQueueElevated ( loadedprb )
+
+    // Lock the thread.
+
+    KiAcquireThreadElevated ( thread )
+
+    // Lock our Prb.
+
+    KiAcquireReadyQueueElevated ( myprb )
+
+    // Insert the thread.
+
+    KiInsertThread (
+        myprb, // prb
+        thread, // thread
+        FALSE, // other
+    )
+
+    // Release our Prb.
+
+    KiReleaseReadyQueueElevated ( myprb )
+
+    // Release the thread.
+
+    KiReleaseThreadElevated ( thread )
+
+    // Lower IPL - we should switch to the stolen thread.
+
+    KiLowerIpl ( ipl )
+END
+
+#END
 
 #MACRO KiCheckWaitInterruptingEvents ( thread, ipl, alertable, waitmode ) [
     IF ipl == KI_IPL_LOW THEN

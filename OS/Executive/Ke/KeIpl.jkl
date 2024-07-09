@@ -208,7 +208,18 @@ FN KiClockTick (
 
     IF thread == &prb^.IdleThread THEN
         // If we're in the idle thread there's nothing to switch to and we'd
-        // only waste CPU cycles trying.
+        // only waste CPU cycles trying, so don't quantum end.
+
+#IF BLD_MP
+        // Do tick down the counter until we try to steal work again.
+
+        IF prb^.StealCount >= intervalms THEN
+            prb^.StealCount -= intervalms
+
+        ELSE
+            prb^.StealCount = 0
+        END
+#END
 
         LEAVE
     END
