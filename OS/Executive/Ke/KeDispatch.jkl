@@ -441,12 +441,17 @@ FN KiReadyThread (
     END
 
     IF NOT prb THEN
-        // Scan for a preemptible processor.
+        // Scan for the preemptible processor with the lowest load.
+        // At the same time, scan for the processor with the lowest load in
+        // general.
 
         index := KeIncrementUlong (
             &KiProcessorScanIndex, // ptr
             1, // ulong
         )
+
+        preemptprb : ^KiPrb = NULLPTR
+        unloadedprb : ^KiPrb = NULLPTR
 
         i := 0
         max := ExLoaderBlock.ProcessorCount
@@ -459,39 +464,54 @@ FN KiReadyThread (
 
             prb = KiPrbFromNumber ( index )
 
+            preempt : UWORD
+
             KiAcquireReadyQueueElevated ( prb )
 
-            IF KiWouldPreempt (
+            preempt = KiWouldPreempt (
                 thread, // thread1
                 prb^.CurrentThread, // thread2
                 prb, // targetprb
-            ) THEN
-                
-                // Select this one.
-
-                KiReleaseReadyQueueElevated ( prb )
-
-                BREAK
-            END
+            )
 
             KiReleaseReadyQueueElevated ( prb )
+
+            IF preempt THEN
+                IF NOT preemptprb THEN
+                    preemptprb = prb
+
+                ELSEIF prb^.Load < preemptprb^.Load THEN
+                    preemptprb = prb
+                END
+            END
+
+            IF NOT unloadedprb THEN
+                unloadedprb = prb
+
+            ELSEIF prb^.Load < unloadedprb^.Load THEN
+                unloadedprb = prb
+            END
 
             i += 1
             index += 1
             prb += BL_PRB_SIZE
         END
 
-        IF i == max THEN
-            // Didn't find one.
+        IF preemptprb THEN
+            // Select the preemptible processor with the least load.
 
-            prb = NULLPTR
+            prb = preemptprb
+
+        ELSEIF unloadedprb THEN
+            // Select the least loaded processor in general.
+
+            prb = unloadedprb
+
+        ELSE
+            // Pick this processor.
+
+            prb = myprb
         END
-    END
-
-    IF NOT prb THEN
-        // Just enqueue to me.
-
-        prb = myprb
     END
 
     KiAcquireReadyQueueElevated ( prb )
