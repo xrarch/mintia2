@@ -126,9 +126,9 @@ FN KiSwitchThread (
 
     prb := KI_CURRENT_PRB
 
+#IF BLD_MP
     thread^.AffinityPrb = prb
 
-#IF BLD_MP
     IF thread^.Priority == OS_PRIORITY_IDLE AND
         current^.Priority != OS_PRIORITY_IDLE THEN
 
@@ -201,7 +201,10 @@ FN KiInsertThread (
     // is held.
 
     thread^.Status = KI_THREAD_READY
+
+#IF BLD_MP
     thread^.CurrentPrb = prb
+#END
 
     current := prb^.CurrentThread
     next := prb^.NextThread
@@ -750,7 +753,7 @@ FN KiSetPriorityThread (
     other := (prb != KI_CURRENT_PRB)
 
 #ELSE
-    prb := thread^.CurrentPrb
+    prb := KI_CURRENT_PRB
     other := FALSE
 #END
 

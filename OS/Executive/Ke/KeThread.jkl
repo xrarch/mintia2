@@ -53,10 +53,6 @@ FN KeInitializeThread (
     thread^.InSwapList = FALSE
     thread^.Interactive = FALSE
 
-    thread^.AffinityPrb = NULLPTR
-    thread^.CurrentPrb = NULLPTR
-    thread^.Pinned = FALSE
-
     // Initialize the APC list heads.
 
     RtlInitializeList ( &thread^.KapcListHead )
@@ -87,6 +83,10 @@ FN KeInitializeThread (
     KiInitializeSpinlock ( &thread^.Spinlock )
 
     thread^.WaitAttempt = KI_THREAD_WAIT_NONE
+
+    thread^.AffinityPrb = NULLPTR
+    thread^.CurrentPrb = NULLPTR
+    thread^.Pinned = FALSE
 #END
 
     thread^.IgnoreEventCount = 0
