@@ -81,7 +81,7 @@ END
 
 #IF BLD_MP
 
-KiNextWorkBalanceMs := KI_WORK_BALANCE_INTERVAL
+KiNextWorkBalanceMs : WORD = KI_WORK_BALANCE_INTERVAL
 
 #END
 
@@ -158,14 +158,9 @@ FN KiClockTick (
 
 #IF BLD_MP
     IF prb^.Id == 0 THEN
-        IF KiNextWorkBalanceMs <= intervalms THEN
-            KiNextWorkBalanceMs = 0
+        KiNextWorkBalanceMs -= intervalms
 
-        ELSE
-            KiNextWorkBalanceMs -= intervalms
-        END
-
-        IF NOT KiNextWorkBalanceMs THEN
+        IF KiNextWorkBalanceMs <= 0 THEN
             // Enqueue the work balance DPC.
 
             KiNextWorkBalanceMs = KI_WORK_BALANCE_INTERVAL
@@ -202,22 +197,19 @@ FN KiClockTick (
         LEAVE
     END
 
-    IF q < KI_QUANTUM_PER_TICK THEN
-        q = 0
-
-    ELSE
-        q -= KI_QUANTUM_PER_TICK
-    END
-
-    thread^.RemainingQuantum = q
+    q -= KI_QUANTUM_PER_TICK
 
     // If quantum has run down, request a quantum end interrupt at IPLDPC.
 
-    IF NOT q THEN
+    IF q <= 0 THEN
         prb^.QuantumEnd = TRUE
 
         // Have to use an atomic OR here in case an IPI comes in.
 
         KiSoftInterruptSelf ( prb, KI_IPL_DPC )
+
+        q = 0
     END
+
+    thread^.RemainingQuantum = q
 END
