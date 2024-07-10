@@ -2,6 +2,8 @@
 // Public header file for the Kernel (Ke) component of the MINTIA Executive.
 //
 
+#INCLUDE "<ll>/System/OsStatus.hjk"
+
 #IF BLD_MP
 
 TYPE KiSpinlock : ULONG
@@ -221,7 +223,6 @@ EXTERN FN KeDisconnectInterrupt (
 ENUM KiDispatchType : UBYTE
     KI_DISPATCH_NULL,
 
-    KI_DISPATCH_TIMER,
     KI_DISPATCH_EVENT_NOTIF,
     KI_DISPATCH_EVENT_SYNCH,
     KI_DISPATCH_SEMAPHORE,
@@ -238,12 +239,15 @@ STRUCT KiDispatchHeader
     Type : KiDispatchType,
 END
 
+#DEFINE KI_WB_UNWAITED 1
+#DEFINE KI_WB_DEQUEUED 2
+
 STRUCT KiWaitBlock
     Entry : RtlListEntry,
     Thread : ^KeThread,
     Object : ^KiDispatchHeader,
     WakeStatus : ULONG,
-    Awoken : ULONG,
+    Flags : ULONG,
 END
 
 STRUCT KeTimer
@@ -453,3 +457,12 @@ EXTERN FN KeReleasePushlock (
 EXTERN FN KeConvertPushlockToShared (
     IN pushlock : ^KePushlock,
 )
+
+EXTERN FN KeWaitForObjects (
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+    IN timeout : ^RtlUquad,
+    IN objectcount : UWORD,
+    IN objecttable : ^^KiDispatchHeader,
+    IN waitblocktable : ^KiWaitBlock,
+) : OsStatus

@@ -110,7 +110,7 @@ EXPORT FN KeInitializeTimer (
     KiInitializeDispatchObject (
         &timer^.Header, // header
         name, // name
-        KI_DISPATCH_TIMER, // type
+        KI_DISPATCH_EVENT_NOTIF, // type
     )
 
     timer^.EnqueuedTo = NULLPTR
@@ -289,8 +289,6 @@ FN (KeDpcF) KiTimerExpiration (
 
     // Capture the current time.
 
-    RtlPrint ( "%u", KiCurrentProcessor () )
-
     KiCaptureCurrentTicks (
         prb, // prb
         &currentticks, // uquad
@@ -358,15 +356,16 @@ FN (KeDpcF) KiTimerExpiration (
 
         KiReleaseTimerTreeElevated ( prb )
 
-        // Signal the timer if there are wait blocks.
-        // XXX This is wrong but I'm keeping it like this for a bit til the
-        //     dispatcher is implemented - if there are no waiters we still
-        //     need to set the SignalCount. This could either be done inline
-        //     here or we can do it in whatever subroutine we call to deal with
-        //     signaling the object; we'll see.
+        // Signal the timer if there are waiters.
 
-        IF NOT RtlEmptyList ( &timer^.Header.WaitListHead ) THEN
-            KeCrash ( "TODO Signal.\n" )
+        IF timer^.Header.WaiterCount THEN
+            KiSatisfyObject (
+                &timer^.Header, // object
+                0, // priorityboost
+                TRUE, // all
+            )
+
+            timer^.Header.SignalCount = 1
         END
 
         // Capture DPC information.

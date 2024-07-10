@@ -1,0 +1,95 @@
+//
+// Implements support for KeEvent dispatcher objects.
+//
+
+#INCLUDE "Ki.hjk"
+
+EXPORT FN KeInitializeEvent (
+    IN event : ^KeEvent,
+    IN name : ^UBYTE,
+    IN notification : UWORD,
+    IN signalstate : UWORD,
+)
+
+    type := KI_DISPATCH_EVENT_SYNCH
+
+    IF notification THEN
+        type = KI_DISPATCH_EVENT_NOTIF
+    END
+
+    KiInitializeDispatchObject (
+        &event^.Header, // hdr
+        name, // name
+        type, // type
+    )
+
+    IF signalstate THEN
+        signalstate = 1
+    END
+
+    event^.Header.SignalCount = signalstate
+END
+
+EXPORT FN KeResetEvent (
+    IN event : ^KeEvent,
+) : UWORD
+
+    ipl := KiAcquireObject ( &event^.Header )
+
+    old := event^.Header.SignalCount
+    event^.Header.SignalCount = 0
+
+    KiReleaseObject ( &event^.Header, ipl )
+
+    RETURN old
+END
+
+EXPORT FN KeSignalEvent (
+    IN event : ^KeEvent,
+    IN priorityboost : UWORD,
+) : UWORD
+
+    // Signal the event object and return its previous state.
+
+    ipl := KiAcquireObject ( &event^.Header )
+
+    IF event^.Header.SignalCount THEN
+        KiReleaseObject ( &event^.Header, ipl )
+
+        RETURN 1
+    END
+
+    IF event^.Header.WaiterCount THEN
+        // Satisfy waits on the object.
+
+        IF event^.Header.Type == KI_DISPATCH_EVENT_NOTIF THEN
+            // Satisfy ALL waits.
+
+            KiSatisfyObject (
+                &event^.Header, // object
+                priorityboost, // priorityboost
+                TRUE, // all
+            )
+
+            // Set signaled.
+
+            event^.Header.SignalCount = 1
+
+        ELSE
+            // Satisfy one wait.
+
+            KiSatisfyObject (
+                &event^.Header, // object
+                priorityboost, // priorityboost
+                FALSE, // all
+            )
+        END
+
+    ELSE
+        event^.Header.SignalCount = 1
+    END
+
+    KiReleaseObject ( &event^.Header, ipl )
+
+    RETURN 0
+END
