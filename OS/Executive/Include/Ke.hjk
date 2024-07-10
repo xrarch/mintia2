@@ -231,6 +231,7 @@ STRUCT KiDispatchHeader
     WaitListHead : RtlListEntry,
     Name : ^UBYTE,
     SignalCount : ULONG,
+    WaiterCount : ULONG,
 #IF BLD_MP
     Spinlock : KiSpinlock,
 #END
@@ -241,7 +242,8 @@ STRUCT KiWaitBlock
     Entry : RtlListEntry,
     Thread : ^KeThread,
     Object : ^KiDispatchHeader,
-    WakeStatus : UWORD,
+    WakeStatus : ULONG,
+    Awoken : ULONG,
 END
 
 STRUCT KeTimer
@@ -407,6 +409,26 @@ STRUCT KeThread
 #END
 
 END
+
+STRUCT KeEvent
+    Header : KiDispatchHeader,
+END
+
+EXTERN FN KeInitializeEvent (
+    IN event : ^KeEvent,
+    IN name : ^UBYTE,
+    IN notification : UWORD,
+    IN signalstate : UWORD,
+)
+
+EXTERN FN KeResetEvent (
+    IN event : ^KeEvent,
+) : UWORD
+
+EXTERN FN KeSignalEvent (
+    IN event : ^KeEvent,
+    IN priorityboost : UWORD,
+) : UWORD
 
 EXTERN FN KeSignalThread (
     IN thread : ^KeThread,

@@ -9,12 +9,32 @@
 
 #IF BLD_MP
 
-PUBLIC KiIdleProcessorListHead : RtlListEntry
+KiActiveProcessorBitmap : ULONG[(KI_MAXIMUM_PROCESSORS + 31) / 32]
+KiIdleProcessorCount : ULONG
 
-KiIdleProcessorSpinlock : KiSpinlock = KI_INITIAL_SPINLOCK
+#MACRO KiSetProcessorIdle ( prb ) [
+    KeMaskUlong (
+        &KiActiveProcessorBitmap[(prb)^.Id / 32], // ptr
+        ~(1 << ((prb^).Id % 32)), // mask
+    )
 
-KiProcessorScanIndex : ULONG
-KiIdleProcessorScanIndex : ULONG
+    KeIncrementUlong (
+        &KiIdleProcessorCount, // ptr
+        1, // ulong
+    )
+]
+
+#MACRO KiClearProcessorIdle ( prb ) [
+    KeIncrementUlong (
+        &KiIdleProcessorCount, // ptr
+        0xFFFFFFFF, // ulong
+    )
+
+    KeOrUlong (
+        &KiActiveProcessorBitmap[(prb)^.Id / 32], // ptr
+        1 << ((prb^).Id % 32), // bitset
+    )
+]
 
 #MACRO KiAcquireReadyQueueElevated ( prb ) [
     KiAcquireSpinlock ( &(prb)^.ReadyQueueLock )
@@ -49,6 +69,10 @@ KiIdleProcessorScanIndex : ULONG
 
 #ELSE
 
+#MACRO KiSetProcessorIdle ( prb ) []
+
+#MACRO KiClearProcessorIdle ( prb ) []
+
 #MACRO KiAcquireReadyQueueElevated ( prb ) []
 
 #MACRO KiReleaseReadyQueueElevated ( prb ) []
@@ -76,18 +100,7 @@ FN KiJumpIntoIdleThread (
     // Called by a processor when it first enters the system to initially jump
     // into its idle thread.
 
-#IF BLD_MP
-    // Add self to idle list.
-
-    ipl := KiAcquireSpinlockRaise ( &KiIdleProcessorSpinlock )
-
-    RtlInsertAtTailList (
-        &KiIdleProcessorListHead, // head
-        &prb^.IdlePrbListEntry, // entry
-    )
-
-    KiReleaseSpinlockLower ( &KiIdleProcessorSpinlock, ipl )
-#END
+    KiSetProcessorIdle ( prb )
 
     // Switch into our idle thread.
 
@@ -135,25 +148,14 @@ FN KiSwitchThread (
 
         // Add self to idle list.
 
-        KiAcquireSpinlock ( &KiIdleProcessorSpinlock )
-
-        RtlInsertAtTailList (
-            &KiIdleProcessorListHead, // head
-            &prb^.IdlePrbListEntry, // entry
-        )
-
-        KiReleaseSpinlock ( &KiIdleProcessorSpinlock )
+        KiSetProcessorIdle ( prb )
 
     ELSEIF current^.Priority == OS_PRIORITY_IDLE AND
         thread^.Priority != OS_PRIORITY_IDLE THEN
 
         // Remove self from idle list.
 
-        KiAcquireSpinlock ( &KiIdleProcessorSpinlock )
-
-        RtlRemoveEntryList ( &prb^.IdlePrbListEntry )
-
-        KiReleaseSpinlock ( &KiIdleProcessorSpinlock )
+        KiClearProcessorIdle ( prb )
     END
 #END
 
@@ -358,6 +360,9 @@ FN KiWouldPreempt (
 
     // Returns TRUE if thread1 would preempt thread2.
 
+    pri1 := thread1^.Priority
+    pri2 := thread2^.Priority
+
     IF thread1^.Interactive THEN
         IF NOT thread2^.Interactive THEN
             // Interactive threads always preempt non-interactive threads.
@@ -367,19 +372,19 @@ FN KiWouldPreempt (
 
         // Both are interactive. Compare priorities.
 
-        RETURN thread1^.Priority > thread2^.Priority
+        RETURN pri1 > pri2
     END
 
-    IF thread1^.Priority >= OS_PRIORITY_LOW_REALTIME AND
-        thread1^.Priority > thread2^.Priority THEN
+    IF pri1 >= OS_PRIORITY_LOW_REALTIME AND
+        pri1 > pri2 THEN
 
         // Higher priority real time threads preempt all other threads.
 
         RETURN TRUE
     END
 
-    IF thread1^.Priority > OS_PRIORITY_IDLE AND
-        thread2^.Priority == OS_PRIORITY_IDLE THEN
+    IF pri1 > OS_PRIORITY_IDLE AND
+        pri2 == OS_PRIORITY_IDLE THEN
 
         // Non-idle threads always preempt idle threads.
 
@@ -394,6 +399,133 @@ FN KiWouldPreempt (
 
     RETURN FALSE
 END
+
+#IF BLD_MP
+
+FN KiFindIdleProcessor () : ^KiPrb
+
+    // Find an idle processor and return the pointer.
+
+    bytes := CAST &KiActiveProcessorBitmap[0] TO ^UBYTE
+
+    i := 0
+    procs := ExLoaderBlock.ProcessorCount
+    fbc := &KiIndexFirstBitClear[0]
+
+    WHILE i < procs DO
+        index := fbc[bytes[i / 8]]
+
+        IF index != 8 THEN
+            // Found one.
+
+            index += i
+
+            IF index < procs THEN
+                RETURN KiPrbFromNumber ( index )
+            END
+
+            // THe index was beyond the actual processor count.
+
+            RETURN NULLPTR
+        END
+
+        i += 8
+    END
+
+    RETURN NULLPTR
+END
+
+FN KiFindProcessor (
+    IN thread : ^KeThread,
+) : ^KiPrb
+
+    // Scan for the preemptible processor with the lowest load.
+    // At the same time, scan for the processor with the lowest load in
+    // general.
+
+    procs := ExLoaderBlock.ProcessorCount
+
+    preemptprb : ^KiPrb = NULLPTR
+    unloadedprb : ^KiPrb = NULLPTR
+    prb : ^KiPrb
+
+    i := 0
+
+    WHILE i < procs DO
+        prb = KiPrbFromNumber ( i )
+
+        preempt : UWORD
+
+        KiAcquireReadyQueueElevated ( prb )
+
+        preempt = KiWouldPreempt (
+            thread, // thread1
+            prb^.CurrentThread, // thread2
+            prb, // targetprb
+        )
+
+        KiReleaseReadyQueueElevated ( prb )
+
+        IF preempt THEN
+            IF NOT preemptprb THEN
+                preemptprb = prb
+
+            ELSEIF prb^.Load < preemptprb^.Load THEN
+                preemptprb = prb
+            END
+        END
+
+        IF NOT unloadedprb THEN
+            unloadedprb = prb
+
+        ELSEIF prb^.Load < unloadedprb^.Load THEN
+            unloadedprb = prb
+        END
+
+        i += 1
+    END
+
+    IF preemptprb THEN
+        // Select the preemptible processor with the least load.
+
+        RETURN preemptprb
+    END
+
+    // Select the least loaded processor in general.
+
+    RETURN unloadedprb
+END
+
+FN KiFindMostAndLeastLoadedProcessor (
+    OUT mostloaded : ^KiPrb,
+    OUT leastloaded : ^KiPrb,
+)
+
+    // Find and return the most and least loaded processors.
+
+    procs := ExLoaderBlock.ProcessorCount
+
+    mostloaded = KiPrbFromNumber ( 0 )
+    leastloaded = mostloaded
+
+    i := 1
+    prb := mostloaded + BL_PRB_SIZE
+
+    WHILE i < procs DO
+        IF prb^.Load < leastloaded^.Load THEN
+            leastloaded = prb
+        END
+
+        IF prb^.Load > mostloaded^.Load THEN
+            mostloaded = prb
+        END
+
+        i += 1
+        prb += BL_PRB_SIZE
+    END
+END
+
+#END
 
 FN KiReadyThread (
     IN thread : ^KeThread,
@@ -417,104 +549,43 @@ FN KiReadyThread (
     IF prb THEN
         KiAcquireReadyQueueElevated ( prb )
 
-        IF NOT thread^.Pinned AND NOT KiWouldPreempt (
+        IF thread^.Pinned OR KiWouldPreempt (
             thread, // thread1
             prb^.CurrentThread, // thread2
             prb, // targetprb
         ) THEN
-            // Not pinned to, and wouldn't preempt. Don't pick this one.
 
-            prb = NULLPTR
+            GOTO Found
         END
 
         KiReleaseReadyQueueElevated ( prb )
     END
 
-    IF NOT prb THEN
-        listentry := &KiIdleProcessorListHead.Next
+    IF KiIdleProcessorCount THEN
+        // Search the idle processor bitmap.
 
-        IF listentry != &KiIdleProcessorListHead THEN
-            // Enqueue to this one. Note that no locks are required for this.
+        prb = KiFindIdleProcessor ()
 
-            prb = CONTAINEROF listentry TO KiPrb.IdlePrbListEntry
-        END
-    END
-
-    IF NOT prb THEN
-        // Scan for the preemptible processor with the lowest load.
-        // At the same time, scan for the processor with the lowest load in
-        // general.
-
-        index := KeIncrementUlong (
-            &KiProcessorScanIndex, // ptr
-            1, // ulong
-        )
-
-        preemptprb : ^KiPrb = NULLPTR
-        unloadedprb : ^KiPrb = NULLPTR
-
-        i := 0
-        max := ExLoaderBlock.ProcessorCount
-        index %= max
-
-        WHILE i < max DO
-            IF index >= max THEN
-                index = 0
-            END
-
-            prb = KiPrbFromNumber ( index )
-
-            preempt : UWORD
-
+        IF prb THEN
             KiAcquireReadyQueueElevated ( prb )
 
-            preempt = KiWouldPreempt (
-                thread, // thread1
-                prb^.CurrentThread, // thread2
-                prb, // targetprb
-            )
-
-            KiReleaseReadyQueueElevated ( prb )
-
-            IF preempt THEN
-                IF NOT preemptprb THEN
-                    preemptprb = prb
-
-                ELSEIF prb^.Load < preemptprb^.Load THEN
-                    preemptprb = prb
-                END
-            END
-
-            IF NOT unloadedprb THEN
-                unloadedprb = prb
-
-            ELSEIF prb^.Load < unloadedprb^.Load THEN
-                unloadedprb = prb
-            END
-
-            i += 1
-            index += 1
-            prb += BL_PRB_SIZE
-        END
-
-        IF preemptprb THEN
-            // Select the preemptible processor with the least load.
-
-            prb = preemptprb
-
-        ELSEIF unloadedprb THEN
-            // Select the least loaded processor in general.
-
-            prb = unloadedprb
-
-        ELSE
-            // Pick this processor.
-
-            prb = myprb
+            GOTO Found
         END
     END
 
+    // Scan for the preemptible processor with the lowest load.
+
+    prb = KiFindProcessor ( thread )
+
+#IF BLD_CHK
+    IF NOT prb THEN
+        KeCrash ( "KiFindProcessor returned NULLPTR\n" )
+    END
+#END
+
     KiAcquireReadyQueueElevated ( prb )
+
+@Found
 
     KiInsertThread (
         prb, // prb
@@ -671,7 +742,15 @@ FN KiSelectThread (
         interactive = current^.Interactive
 
         IF exclusive THEN
+            // Only pick threads that can preempt the given one.
+
             minimumpriority += 1
+
+            IF minimumpriority == 32 THEN
+                // None can.
+
+                RETURN NULLPTR
+            END
         END
     END
 
@@ -1080,7 +1159,7 @@ FN KiWaitThread (
 #IF BLD_MP
         // Before committing to an idle, try to steal work.
 
-        prb^.StealCount = 0
+        prb^.StealWork = TRUE
 #END
 
         // Switch to the idle thread.
@@ -1100,70 +1179,33 @@ END
 
 #IF BLD_MP
 
-FN KiStealWork ()
+FN KiMoveThread (
+    IN destprb : ^KiPrb,
+    IN srcprb : ^KiPrb,
+)
 
-    // This is called periodically (once every 200ms) by the idle thread of each
-    // processor. We want to find the most heavily loaded processor and steal
-    // a thread off his queues.
+    // Move a thread from the source to the destination.
 
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    // Lock the source Prb.
 
-    index := KeIncrementUlong (
-        &KiIdleProcessorScanIndex, // ptr
-        1, // ulong
-    )
-
-    i := 0
-    max := ExLoaderBlock.ProcessorCount
-    index %= max
-
-    myprb := KI_CURRENT_PRB
-
-    loadedprb : ^KiPrb = NULLPTR
-
-    WHILE i < max DO
-        IF index >= max THEN
-            index = 0
-        END
-
-        prb := KiPrbFromNumber ( i )
-
-        IF NOT loadedprb THEN
-            loadedprb = prb
-
-        ELSEIF prb^.Load > loadedprb^.Load THEN
-            loadedprb = prb
-        END
-
-        index += 1
-        i += 1
-        prb += BL_PRB_SIZE
-    END
-
-    IF loadedprb == myprb THEN
-        KiLowerIpl ( ipl )
-
-        LEAVE
-    END
-
-    IF loadedprb^.Load < KI_STEAL_LOAD THEN
-        KiLowerIpl ( ipl )
-
-        LEAVE
-    END
-
-    // Lock the loaded Prb.
-
-    KiAcquireReadyQueueElevated ( loadedprb )
+    KiAcquireReadyQueueElevated ( srcprb )
 
     // Select a thread.
 
     thread := KiSelectThread (
-        loadedprb, // prb
+        srcprb, // prb
         NULLPTR, // current
         FALSE, // exclusive
         TRUE, // migrate
     )
+
+    IF NOT thread THEN
+        // Unlikely situation, but we got no thread to move. Give up.
+
+        KiReleaseReadyQueueElevated ( srcprb )
+
+        LEAVE
+    END
 
     // Set INFLIGHT so nobody tries to touch it while we've got it.
 
@@ -1171,38 +1213,205 @@ FN KiStealWork ()
 
     // Release the ready queue.
 
-    KiReleaseReadyQueueElevated ( loadedprb )
+    KiReleaseReadyQueueElevated ( srcprb )
 
     // Lock the thread.
 
     KiAcquireThreadElevated ( thread )
 
-    // Lock our Prb.
+    // Lock the destination Prb.
 
-    KiAcquireReadyQueueElevated ( myprb )
+    KiAcquireReadyQueueElevated ( destprb )
 
     // Insert the thread.
 
     KiInsertThread (
-        myprb, // prb
+        destprb, // prb
         thread, // thread
         FALSE, // other
     )
 
-    // Release our Prb.
+    // Release the destination Prb.
 
-    KiReleaseReadyQueueElevated ( myprb )
+    KiReleaseReadyQueueElevated ( destprb )
 
     // Release the thread.
 
     KiReleaseThreadElevated ( thread )
+END
+
+FN KiStealWork ()
+
+    // This is called by the idle thread of each processor. We want to find the
+    // most heavily loaded processor and steal a thread off his queues.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+    myprb := KI_CURRENT_PRB
+
+    loadedprb : ^KiPrb
+    garbagecan : ^VOID
+
+    KiFindMostAndLeastLoadedProcessor (
+        OUT loadedprb, // mostloaded
+        OUT garbagecan, // leastloaded
+    )
+
+    IF loadedprb == myprb THEN
+        // Most loaded processor was me. Clearly, something changed while I was
+        // trying to do this.
+
+        KiLowerIpl ( ipl )
+
+        LEAVE
+    END
+
+    IF loadedprb^.Load < KI_STEAL_LOAD THEN
+        // Most loaded processor was still below the minimum stealing load.
+        // Just leave.
+
+        KiLowerIpl ( ipl )
+
+        LEAVE
+    END
+
+    KiMoveThread (
+        myprb, // destprb
+        loadedprb, // srcprb
+    )
 
     // Lower IPL - we should switch to the stolen thread.
 
     KiLowerIpl ( ipl )
 END
 
+FN (KeDpcF) KiBalanceWork (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Called once per second on processor 0. Moves work from the most loaded
+    // processor to the least loaded processor until balance is achieved.
+
+    WHILE TRUE DO
+        mostloaded : ^KiPrb
+        leastloaded : ^KiPrb
+
+        KiFindMostAndLeastLoadedProcessor (
+            OUT mostloaded, // mostloaded
+            OUT leastloaded, // leastloaded
+        )
+
+        diff := CAST mostloaded^.Load - leastloaded^.Load TO WORD
+
+        IF diff < 0 THEN
+            // Something changed. Retry.
+
+            CONTINUE
+        END
+
+        IF diff == 0 THEN
+            // Balance is achieved.
+
+            LEAVE
+        END
+
+        IF diff > 2 THEN
+            // Only move 2 threads this round.
+
+            diff = 2
+        END
+
+        i := 0
+
+        WHILE i < diff DO
+            KiMoveThread (
+                leastloaded, // destprb
+                mostloaded, // srcprb
+            )
+
+            i += 1
+        END
+
+        IF diff == 1 THEN
+            // If we try any more we're going to just keep moving the same
+            // thread around. That's fine to do once per second but not in an
+            // infinite loop like this.
+
+            LEAVE
+        END
+    END
+END
+
 #END
+
+FN KiUnwaitThread (
+    IN thread : ^KeThread,
+    IN status : OsStatus,
+)
+
+    // Unwait the thread with the given status.
+    // An object lock may be held.
+
+    KiAcquireThreadElevated ( thread )
+
+    thread^.WaitStatus = status
+
+#IF BLD_MP
+    IF thread^.Status == KI_THREAD_RUNNING AND
+        thread^.WaitAttempt == KI_THREAD_WAIT_TRY THEN
+        
+        // Abort the wait.
+
+        thread^.WaitAttempt = KI_THREAD_WAIT_ABORTED
+    END
+#END
+
+    // Set all the thread's wait blocks to inactive.
+
+
+
+    KiReleaseThreadElevated ( thread )
+END
+
+FN KiSatisfyObject (
+    IN object : ^KiDispatchHeader,
+    IN priorityboost : UWORD,
+    IN all : UWORD,
+)
+
+    // Satisfy a wait on the object. The object lock is held, but is released
+    // on exit.
+
+    listhead := &object^.WaitListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        waitblock := CONTAINEROF listentry TO KiWaitBlock.Entry
+
+        IF NOT waitblock^.Awoken THEN
+            // Still active. Unwait the thread. This will set all of the wait
+            // blocks to inactive, including ours. They'll be dequeued in the
+            // context of the thread when it wakes.
+
+            object^.WaiterCount -= 1
+
+            KiUnwaitThread (
+                waitblock^.Thread, // thread
+                waitblock^.WakeStatus, // status
+            )
+
+            IF NOT all THEN
+                // We got one, so exit.
+
+                LEAVE
+            END
+        END
+
+        listentry = listentry^.Next
+    END
+END
 
 #MACRO KiCheckWaitInterruptingEvents ( thread, ipl, alertable, waitmode ) [
     IF ipl == KI_IPL_LOW THEN
@@ -1321,6 +1530,7 @@ FN KeWaitForObjects (
         KeCrash ( "KeWaitForObjects: objectcount > ULONG size\n" )
     END
 #END
+
 #END
 
     thread := KeCurrentThread ()
@@ -1437,6 +1647,13 @@ FN KeWaitForObjects (
 
                 RtlRemoveEntryList ( &waitblock^.Entry )
 
+                IF NOT waitblock^.Awoken THEN
+                    // Decrement waiter count, since this wait block wasn't
+                    // satisfied yet.
+
+                    object^.WaiterCount -= 1
+                END
+
                 // Release the object lock.
 
                 KiReleaseObjectElevated ( object )
@@ -1457,6 +1674,10 @@ FN KeWaitForObjects (
             &object^.WaitListHead, // head
             &waitblock^.Entry, // entry
         )
+
+        // Increment waiter count.
+
+        object^.WaiterCount += 1
 
         // Release the object lock.
 
@@ -1485,6 +1706,8 @@ FN KeWaitForObjects (
             &timer^.Header.WaitListHead, // head
             &waitblock^.Entry, // entry
         )
+
+        timer^.Header.WaiterCount = 1
 
         // Enqueue the timer.
 

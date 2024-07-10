@@ -54,6 +54,12 @@ STRUCT KiAsidInfoEntry
     Asid : UWORD,
 END
 
+// The only thing this restricts is the size of some bitmaps, so it can be
+// freely set to the maximum number of processors supported by any platform with
+// this processor.
+
+#DEFINE KI_MAXIMUM_PROCESSORS 8
+
 #ELSEIF ( STRCMP ARCHITECTURE "fox32" )
 
 // Fox32 is always uniprocessor, so the Prb is mapped in a convenient and
@@ -98,13 +104,14 @@ END
 
 #DEFINE KI_TIMESHARED_DISTANCE [(OS_PRIORITY_HIGH_USER + 1)]
 
-// Millisecond interval between attempts to steal work by the idle thread.
+// Interval in milliseconds at which to perform global load balancing.
 
-#DEFINE KI_WORK_STEAL_INTERVAL 200
+#DEFINE KI_WORK_BALANCE_INTERVAL 1000
 
 // Minimum load to steal threads from a processor.
+// This is a count of threads on its ready queue.
 
-#DEFINE KI_STEAL_LOAD 2
+#DEFINE KI_STEAL_LOAD 1
 
 #IF BLD_MP
 
@@ -246,11 +253,6 @@ STRUCT KiPrb
     // 32-bit count of threads enqueued ready on this processor.
 
     Load : ULONG,
-
-    // 32-bit countdown of milliseconds until we should scan to steal work
-    // while idle.
-
-    StealCount : ULONG,
 #END
 
     Id : UINT,
@@ -260,6 +262,11 @@ STRUCT KiPrb
     DpcActive : UBYTE,
     CalendarRunIndex : UBYTE,
     CalendarEnqueueIndex : UBYTE,
+
+#IF BLD_MP
+    StealWork : UBYTE,
+#END
+
 END
 
 // KiRaiseIpl and KiLowerIpl may only be used to move between the software IPLs:
@@ -379,6 +386,12 @@ EXTERN FN KiClockTick (
     IN previpl : UWORD,
 )
 
+EXTERN FN KiSatisfyObject (
+    IN object : ^KiDispatchHeader,
+    IN priorityboost : UWORD,
+    IN all : UWORD,
+)
+
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
 
 #MACRO KiSoftInterruptSelf ( prb, ipl ) [
@@ -389,6 +402,12 @@ EXTERN KiUnexpectedInterruptObject : KeInterrupt
 ]
 
 #IF BLD_MP
+
+EXTERN FN (KeDpcF) KiBalanceWork (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
 
 EXTERN FN KiFreezeOtherProcessors ()
 
@@ -464,9 +483,9 @@ EXTERN FN KiReleaseSpinlockLower (
     KiReleaseSpinlock ( &(object)^.Spinlock )
 ]
 
-EXTERN KiIdleProcessorListHead : RtlListEntry
-
 EXTERN FN KiStealWork ()
+
+EXTERN KiWorkBalanceDpc : KeDpc
 
 #ELSE
 
@@ -492,6 +511,7 @@ EXTERN FN KiStealWork ()
     RtlInitializeList ( &(hdr)^.WaitListHead )
     NOTHING (hdr)^.Name = (name)
     NOTHING (hdr)^.SignalCount = 0
+    NOTHING (hdr)^.WaiterCount = 0
 #IF BLD_MP
     KiInitializeSpinlock ( &(hdr)^.Spinlock )
 #END
@@ -505,3 +525,5 @@ EXTERN FN KiInitializeContext (
     IN context1 : UWORD,
     IN context2 : UWORD,
 ) : ^OsContext
+
+EXTERN KiIndexFirstBitClear : UBYTE[256]

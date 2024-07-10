@@ -16,6 +16,8 @@ KiInitializeCount : ULONG
 
 KiAnnounceSpinlock : KiSpinlock = KI_INITIAL_SPINLOCK
 
+PUBLIC KiWorkBalanceDpc : KeDpc
+
 #MACRO KiAcquireAnnounce () [
     KiAcquireSpinlockRaise ( &KiAnnounceSpinlock )
 ]
@@ -70,10 +72,10 @@ FN (KeStartThreadF) KiIdleLoop (
         KiWaitForInterrupt ()
 
 #IF BLD_MP
-        IF prb^.StealCount == 0 THEN
+        IF prb^.StealWork THEN
             // Time to try stealing work.
 
-            prb^.StealCount = KI_WORK_STEAL_INTERVAL
+            prb^.StealWork = FALSE
 
             KiStealWork ()
         END
@@ -362,9 +364,12 @@ EXPORT FN KeMain (
     END
 
 #IF BLD_MP
-    // Initialize the idle processor list.
+    // Initialize the work balancing DPC.
 
-    RtlInitializeList ( &KiIdleProcessorListHead )
+    KeInitializeDpc (
+        &KiWorkBalanceDpc, // dpc
+        &KiBalanceWork, // func
+    )
 
     // We're ready to pull the other processors into the system.
 
