@@ -669,8 +669,25 @@ FN KiSelectTimesharedThread (
 
     readybits := prb^.CalendarReady
 
-    count := KI_TIMESHARED_QUEUES
     k := prb^.CalendarRunIndex
+
+#IF BLD_MP
+    IF migrate THEN
+        // If we're migrating, seek to a set bit to make sure the caller can get
+        // a thread.
+
+        count := KI_TIMESHARED_QUEUES
+
+        WHILE (readybits >> k) & 1 == 0 AND count DO
+            k += 1
+            count -= 1
+
+            IF k == KI_TIMESHARED_QUEUES THEN
+                k = 0
+            END
+        END
+    END
+#END
 
     IF (readybits >> k) & 1 THEN
         // There's a thread in this queue. Unlink and return it.
@@ -689,10 +706,12 @@ FN KiSelectTimesharedThread (
 
                 prb^.CalendarReady = readybits & ~(1 << k)
 
-                // Advance the run index.
+                IF NOT migrate THEN
+                    // Advance the run index.
 
-                IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex THEN
-                    prb^.CalendarRunIndex = (k + 1) % KI_TIMESHARED_QUEUES
+                    IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex THEN
+                        prb^.CalendarRunIndex = (k + 1) % KI_TIMESHARED_QUEUES
+                    END
                 END
             END
 
@@ -805,7 +824,7 @@ FN KiSelectThread (
 
     IF minimumpriority > OS_PRIORITY_IDLE THEN
         // Can't be preempted by an idle thread.
-    
+
         RETURN NULLPTR
     END
 
@@ -1264,19 +1283,10 @@ FN (KeDpcF) KiBalanceWork (
             LEAVE
         END
 
-        i := 0
-
-        WHILE i < diff DO
-            IF NOT KiMoveThread (
-                leastloaded, // destprb
-                mostloaded, // srcprb
-            ) THEN
-
-                BREAK
-            END
-
-            i += 1
-        END
+        moved := KiMoveThread (
+            leastloaded, // destprb
+            mostloaded, // srcprb
+        )
 
         j += 1
     END
