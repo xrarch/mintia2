@@ -97,10 +97,9 @@ KiIdleProcessorCount : ULONG
 
 #END
 
-#DEFINE KI_TICK_SHIFT 10
 #DEFINE KI_INTERACT_MAX 100
 #DEFINE KI_INTERACT_HALF ( / KI_INTERACT_MAX 2 )
-#DEFINE KI_INTERACT_THRESH 30
+#DEFINE KI_INTERACT_THRESH 15
 #DEFINE KI_SLP_RUN_MAX ( << 5000 KI_TICK_SHIFT )
 
 FN KiJumpIntoIdleThread (
@@ -119,7 +118,7 @@ END
 
 FN KiUpdateInteractivity (
     IN thread : ^KeThread,
-)
+) : UWORD
 
     // Update the sliding history of thread interactivity.
     // Adapted from sched_interact_update in sched_ule.c, the FreeBSD ULE
@@ -129,7 +128,7 @@ FN KiUpdateInteractivity (
     // non-interactive, false otherwise.
 
     IF thread^.Priority == OS_PRIORITY_IDLE THEN
-        LEAVE
+        RETURN FALSE
     END
 
     sum := thread^.RunMs + thread^.SleepMs
@@ -205,6 +204,8 @@ FN KiUpdateInteractivity (
 
     oldint := thread^.Interactive
 
+    lostinteractivity := FALSE
+
     IF score < KI_INTERACT_THRESH THEN
         // Interactive.
 
@@ -213,12 +214,17 @@ FN KiUpdateInteractivity (
     ELSE
         // Not interactive.
 
-        thread^.Interactive = FALSE
+        IF thread^.Interactive THEN
+            lostinteractivity = TRUE
+            thread^.Interactive = FALSE
+        END
     END
 
     IF thread^.Interactive != oldint THEN
         RtlPrint ( "i%u,%d,%d,%d ", thread^.Interactive, score, thread^.RunMs, thread^.SleepMs )
     END
+
+    RETURN lostinteractivity
 END
 
 FN KiSwitchThread (
@@ -270,21 +276,6 @@ FN KiSwitchThread (
         KiClearProcessorIdle ( prb )
     END
 #END
-
-    // Increment the milliseconds the current thread ran for.
-
-    ranms := current^.StateMs
-    currentms := KiLowTick ( prb )
-
-    IF ranms < currentms THEN
-        current^.RunMs += (currentms - ranms) << KI_TICK_SHIFT
-
-        // Update interactivity score.
-
-        KiUpdateInteractivity ( current )
-    END
-
-    current^.StateMs = currentms
 
     // Store tick the new thread started running on.
 
@@ -1204,6 +1195,40 @@ FN KiSetPriorityThread (
 
 END
 
+FN KiCheckInteractivity (
+    IN prb : ^KiPrb,
+)
+
+    // The current thread has changed from interactive to non-interactive as a
+    // result of a timer interrupt. We have to check for preemption.
+
+    current := prb^.CurrentThread
+
+    // Lock the ready queue.
+
+    KiAcquireReadyQueueElevated ( prb )
+
+    IF NOT prb^.NextThread THEN
+        // Try to find a thread to preempt this one with.
+
+        next := KiSelectThread (
+            prb, // prb
+            current, // current
+            FALSE, // exclusive
+            FALSE, // migrate
+        )
+
+        IF next THEN
+            // Found one. Set it as the next thread.
+
+            next^.Status = KI_THREAD_STANDBY
+            prb^.NextThread = next
+        END
+    END
+
+    KiReleaseReadyQueueElevated ( prb )
+END
+
 FN KiQuantumEnd (
     IN prb : ^KiPrb,
 )
@@ -1786,10 +1811,6 @@ FN KeWaitForObjects (
 
     // The following parameters should never be given by executive callers and
     // should have been rejected by the object manager.
-
-    IF NOT objectcount THEN
-        KeCrash ( "KeWaitForObjects: objectcount == 0\n" )
-    END
 
 #IF ( == BLD_BITS 64 )
     IF objectcount > 0xFFFFFFFF THEN

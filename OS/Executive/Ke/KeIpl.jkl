@@ -72,6 +72,12 @@ FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
         KiDispatchDpcQueue ( prb )
     END
 
+    IF prb^.CheckInteractivity THEN
+        prb^.CheckInteractivity = FALSE
+
+        KiCheckInteractivity ( prb )
+    END
+
     IF prb^.QuantumEnd THEN
         prb^.QuantumEnd = FALSE
 

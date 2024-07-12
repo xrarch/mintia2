@@ -110,6 +110,8 @@ END
 
 #DEFINE KI_STEAL_LOAD 1
 
+#DEFINE KI_TICK_SHIFT 10
+
 #IF BLD_MP
 
 FNPTR KiIpiF (
@@ -259,6 +261,7 @@ STRUCT KiPrb
     DpcActive : UBYTE,
     CalendarRunIndex : UBYTE,
     CalendarEnqueueIndex : UBYTE,
+    CheckInteractivity : UBYTE,
 
 #IF BLD_MP
     StealWork : UBYTE,
@@ -354,6 +357,10 @@ EXTERN FN KiQuantumEnd (
     IN prb : ^KiPrb,
 )
 
+EXTERN FN KiCheckInteractivity (
+    IN prb : ^KiPrb,
+)
+
 EXTERN FN KiSwitchAddressSpace (
     IN process : ^KeProcess,
 )
@@ -370,6 +377,10 @@ EXTERN FN KiJumpIntoThread (
 EXTERN FN KiJumpIntoIdleThread (
     IN prb : ^KiPrb,
 )
+
+EXTERN FN KiUpdateInteractivity (
+    IN thread : ^KeThread,
+) : UWORD
 
 EXTERN FN (KeDpcF) KiTimerExpiration (
     IN dpc : ^KeDpc,

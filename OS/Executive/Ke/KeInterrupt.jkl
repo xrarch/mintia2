@@ -187,6 +187,21 @@ FN KiClockTick (
         LEAVE
     END
 
+    // Increment the time that the current thread ran for.
+
+    thread^.RunMs += intervalms << KI_TICK_SHIFT
+
+    // Update the interactivity score.
+
+    IF KiUpdateInteractivity ( thread ) THEN
+        // The thread was changed to non-interactive from interactive.
+        // We need to check for preemption at KI_IPL_DPC.
+
+        prb^.CheckInteractivity = TRUE
+
+        KiSoftInterruptSelf ( prb, KI_IPL_DPC )
+    END
+
     // Decrement thread quantum.
 
     q := thread^.RemainingQuantum
