@@ -202,8 +202,6 @@ FN KiUpdateInteractivity (
         score = 0
     END
 
-    oldint := thread^.Interactive
-
     lostinteractivity := FALSE
 
     IF score < KI_INTERACT_THRESH THEN
@@ -218,10 +216,6 @@ FN KiUpdateInteractivity (
             lostinteractivity = TRUE
             thread^.Interactive = FALSE
         END
-    END
-
-    IF thread^.Interactive != oldint THEN
-        RtlPrint ( "i%u,%d,%d,%d ", thread^.Interactive, score, thread^.RunMs, thread^.SleepMs )
     END
 
     RETURN lostinteractivity
