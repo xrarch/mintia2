@@ -33,9 +33,9 @@ FN DbgTrace (
 )
 
 #IF ( == BLD_BITS 64 )
-    infostr := "InstrPtr         Name"
+    infostr := "InstrPtr         StackPtr         Name"
 #ELSE
-    infostr := "InstrPtr Name"
+    infostr := "InstrPtr StackPtr Name"
 #END
 
     RtlPrint ( "%s\n", infostr )
@@ -81,7 +81,7 @@ FN DbgTrace (
             pc - symvalue,
         )
 
-        RtlPrint ( "%p %s\n", pc, &DbgTraceNameBuffer[0] )
+        RtlPrint ( "%p %p %s\n", pc, sp, &DbgTraceNameBuffer[0] )
 
         IF NOT sp THEN
             RtlPrint ( "!! SP=0 !!\n" )
