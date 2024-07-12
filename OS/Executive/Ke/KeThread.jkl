@@ -33,6 +33,10 @@ FN KeInitializeThread (
     thread^.BasePriority = OS_PRIORITY_DEFAULT
     thread^.Priority = OS_PRIORITY_DEFAULT
 
+    thread^.SleepMs = 0
+    thread^.RunMs = 0
+    thread^.StateMs = 0
+
     // Initialize the context on the kernel stack.
 
     thread^.Context = KiInitializeContext (
@@ -47,10 +51,6 @@ FN KeInitializeThread (
 
     thread^.RemainingQuantum = KI_DEFAULT_QUANTUM
 
-    thread^.SwapListNext = NULLPTR
-    thread^.KernelStackCanBeSwapped = TRUE
-    thread^.KernelStackResident = TRUE
-    thread^.InSwapList = FALSE
     thread^.Interactive = FALSE
 
     // Initialize the APC list heads.

@@ -66,25 +66,6 @@
 
 #END
 
-#IF ( == BLD_BITS 32 )
-
-#MACRO KiCaptureCurrentTicks ( prb, uquad ) [
-    oldstate := KiDisableInterrupts ()
-
-    NOTHING (uquad)^.High = (prb)^.ClockTicks.High
-    NOTHING (uquad)^.Low = (prb)^.ClockTicks.Low
-
-    KiRestoreInterrupts ( oldstate )
-]
-
-#ELSE
-
-#MACRO KiCaptureCurrentTicks ( prb, uquad ) [
-    NOTHING (uquad)^.Quad = (prb)^.ClockTicks.Quad
-]
-
-#END
-
 FN (RtlLessThanF) KiCompareTimers (
     IN a : ^RtlHeapEntry,
     IN b : ^RtlHeapEntry,

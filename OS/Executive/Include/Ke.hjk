@@ -368,7 +368,6 @@ STRUCT KeThread
     Process : ^KeProcess,
     ActualProcess : ^KeProcess,
     KernelStackTop : ^VOID,
-    SwapListNext : ^KeThread,
 
 #IF BLD_MP
     AffinityPrb : ^KiPrb,
@@ -388,11 +387,11 @@ STRUCT KeThread
     SignalDeliverOnWaitMask : ULONG,
     IgnoreEventCount : ULONG,
     WaitStatus : ULONG,
+    SleepMs : ULONG,
+    RunMs : ULONG,
+    StateMs : ULONG,
 
     RemainingQuantum : BYTE,
-#IF BLD_MP
-    WaitAttempt : UBYTE,
-#END
     UserApcTriggered : UBYTE,
     UserInterrupt : UBYTE,
     WaitCount : UBYTE,
@@ -403,15 +402,13 @@ STRUCT KeThread
     WaitMode : UBYTE,
     WaitIpl : UBYTE,
     LazyApcTriggered : UBYTE,
-    KernelStackCanBeSwapped : UBYTE,
-    KernelStackResident : UBYTE,
     InSwapList : UBYTE,
     Interactive : UBYTE,
     CurrentQueue : UBYTE,
 #IF BLD_MP
+    WaitAttempt : UBYTE,
     Pinned : UBYTE,
 #END
-
 END
 
 STRUCT KeEvent

@@ -88,13 +88,9 @@ END
 
 #END
 
-// Try to make ticks represent 5ms intervals.
-
-#DEFINE KI_QUANTUM_PER_TICK ( / HAL_TIMER_INTERVAL 5 )
-
 // Default quantum is 30ms.
 
-#DEFINE KI_DEFAULT_QUANTUM 6
+#DEFINE KI_DEFAULT_QUANTUM 30
 
 // Number of timeshared ready queues.
 
@@ -501,6 +497,33 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #MACRO KiAcquireObjectElevated ( object ) []
 
 #MACRO KiReleaseObjectElevated ( object ) []
+
+#END
+
+#IF ( == BLD_BITS 32 )
+
+#MACRO KiCaptureCurrentTicks ( prb, uquad ) [
+    oldstate := KiDisableInterrupts ()
+
+    NOTHING (uquad)^.High = (prb)^.ClockTicks.High
+    NOTHING (uquad)^.Low = (prb)^.ClockTicks.Low
+
+    KiRestoreInterrupts ( oldstate )
+]
+
+#MACRO KiLowTick ( prb ) [
+    ((prb)^.ClockTicks.Low)
+]
+
+#ELSE
+
+#MACRO KiCaptureCurrentTicks ( prb, uquad ) [
+    NOTHING (uquad)^.Quad = (prb)^.ClockTicks.Quad
+]
+
+#MACRO KiLowTick ( prb ) [
+    ((prb)^.ClockTicks.Quad)
+]
 
 #END
 

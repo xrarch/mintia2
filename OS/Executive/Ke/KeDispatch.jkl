@@ -2,6 +2,10 @@
 // Implements the processor dispatcher for the MINTIA Kernel.
 //
 
+// Lock ordering:
+//
+//  Object -> Thread -> ReadyQueue
+
 #INCLUDE "Ki.hjk"
 
 #INCLUDE "<ll>/System/OsStatus.hjk"
@@ -93,6 +97,12 @@ KiIdleProcessorCount : ULONG
 
 #END
 
+#DEFINE KI_TICK_SHIFT 10
+#DEFINE KI_INTERACT_MAX 100
+#DEFINE KI_INTERACT_HALF ( / KI_INTERACT_MAX 2 )
+#DEFINE KI_INTERACT_THRESH 30
+#DEFINE KI_SLP_RUN_MAX ( << 5000 KI_TICK_SHIFT )
+
 FN KiJumpIntoIdleThread (
     IN prb : ^KiPrb,
 )
@@ -105,6 +115,110 @@ FN KiJumpIntoIdleThread (
     // Switch into our idle thread.
 
     KiJumpIntoThread ( &prb^.IdleThread )
+END
+
+FN KiUpdateInteractivity (
+    IN thread : ^KeThread,
+)
+
+    // Update the sliding history of thread interactivity.
+    // Adapted from sched_interact_update in sched_ule.c, the FreeBSD ULE
+    // scheduler.
+    //
+    // Returns TRUE if the thread was changed from interactive to
+    // non-interactive, false otherwise.
+
+    IF thread^.Priority == OS_PRIORITY_IDLE THEN
+        LEAVE
+    END
+
+    sum := thread^.RunMs + thread^.SleepMs
+
+    IF sum < KI_SLP_RUN_MAX THEN
+        // Not enough history.
+
+        GOTO SetInteractive
+    END
+
+    IF sum > KI_SLP_RUN_MAX * 2 THEN
+        // There's an excessive amount of history.
+        // Reset the values to evade overflow.
+
+        IF thread^.RunMs > thread^.SleepMs THEN
+            thread^.RunMs = KI_SLP_RUN_MAX
+            thread^.SleepMs = 1
+
+        ELSE
+            thread^.RunMs = 1
+            thread^.SleepMs = KI_SLP_RUN_MAX
+        END
+
+        GOTO SetInteractive
+    END
+
+    // If we have exceeded by more than 1/5 then the algorithm below will not
+    // bring us back into range. Dividing by two here forces us into the range
+    // of [4/5 * KI_SLP_RUN_MAX, KI_SLP_RUN_MAX].
+
+    IF sum > (KI_SLP_RUN_MAX / 5) * 6 THEN
+        thread^.RunMs /= 2
+        thread^.SleepMs /= 2
+
+        GOTO SetInteractive
+    END
+
+    thread^.RunMs = (thread^.RunMs / 5) * 4
+    thread^.SleepMs = (thread^.SleepMs / 5) * 4
+
+@SetInteractive
+
+    // Calculate the interactivity score.
+
+    score : WORD
+    div : UWORD
+
+    IF thread^.RunMs > thread^.SleepMs THEN
+        div = thread^.RunMs / KI_INTERACT_HALF
+
+        IF NOT div THEN
+            div = 1
+        END
+
+        score = CAST KI_INTERACT_HALF +
+            (KI_INTERACT_HALF - (thread^.SleepMs / div)) TO WORD
+
+    ELSEIF thread^.RunMs < thread^.SleepMs THEN
+        div = thread^.SleepMs / KI_INTERACT_HALF
+
+        IF NOT div THEN
+            div = 1
+        END
+
+        score = CAST thread^.RunMs / div TO WORD
+
+    ELSEIF thread^.RunMs THEN
+        score = KI_INTERACT_HALF
+
+    ELSE
+        score = 0
+    END
+
+    oldint := thread^.Interactive
+
+    IF score < KI_INTERACT_THRESH THEN
+        // Interactive.
+
+        thread^.Interactive = TRUE
+
+    ELSE
+        // Not interactive.
+
+        thread^.Interactive = FALSE
+    END
+
+    IF thread^.Interactive != oldint THEN
+        RtlPrint ( "i%u,%d,%d,%d ", thread^.Interactive, score, thread^.RunMs, thread^.SleepMs )
+    END
 END
 
 FN KiSwitchThread (
@@ -143,21 +257,38 @@ FN KiSwitchThread (
 #IF BLD_MP
     thread^.AffinityPrb = prb
 
-    IF thread^.Priority == OS_PRIORITY_IDLE AND
-        current^.Priority != OS_PRIORITY_IDLE THEN
+    IF thread^.Priority == OS_PRIORITY_IDLE THEN
+        IF current^.Priority != OS_PRIORITY_IDLE THEN
+            // We were non-idle and are switching into an idle thread.
 
-        // Add self to idle list.
+            KiSetProcessorIdle ( prb )
+        END
 
-        KiSetProcessorIdle ( prb )
-
-    ELSEIF current^.Priority == OS_PRIORITY_IDLE AND
-        thread^.Priority != OS_PRIORITY_IDLE THEN
-
-        // Remove self from idle list.
+    ELSEIF current^.Priority == OS_PRIORITY_IDLE THEN
+        // We were idle and are switching into a non-idle thread.
 
         KiClearProcessorIdle ( prb )
     END
 #END
+
+    // Increment the milliseconds the current thread ran for.
+
+    ranms := current^.StateMs
+    currentms := KiLowTick ( prb )
+
+    IF ranms < currentms THEN
+        current^.RunMs += (currentms - ranms) << KI_TICK_SHIFT
+
+        // Update interactivity score.
+
+        KiUpdateInteractivity ( current )
+    END
+
+    current^.StateMs = currentms
+
+    // Store tick the new thread started running on.
+
+    thread^.StateMs = KiLowTick ( prb )
 
     // See if we have to switch address spaces.
 
@@ -424,7 +555,7 @@ FN KiFindIdleProcessor () : ^KiPrb
                 RETURN KiPrbFromNumber ( index )
             END
 
-            // THe index was beyond the actual processor count.
+            // The index was beyond the actual processor count.
 
             RETURN NULLPTR
         END
@@ -1092,13 +1223,6 @@ FN KiQuantumEnd (
 
     current^.RemainingQuantum = KI_DEFAULT_QUANTUM
 
-    // Decay interactivity score by one since this thread went a full quantum
-    // without blocking.
-
-    IF current^.Interactive THEN
-        current^.Interactive -= 1
-    END
-
     // Decay priority by one.
 
     IF current^.Priority > current^.BasePriority THEN
@@ -1336,6 +1460,10 @@ FN KiWaitThread (
 
     thread^.Status = KI_THREAD_WAITING
 
+    // Store tick we slept on.
+
+    thread^.StateMs = KiLowTick ( prb )
+
     // Try to find a thread to switch into.
 
     KiAcquireReadyQueueElevated ( prb )
@@ -1479,6 +1607,19 @@ FN KiUnwaitThread (
             IF newpri > thread^.Priority THEN
                 thread^.Priority = newpri
             END
+        END
+
+        // Update the ticks the thread has spent sleeping.
+
+        waitedms := thread^.StateMs
+        currentms := KiLowTick ( KI_CURRENT_PRB_LOCAL )
+
+        IF waitedms < currentms THEN
+            thread^.SleepMs += (currentms - waitedms) << KI_TICK_SHIFT
+
+            // Update interactivity score.
+
+            KiUpdateInteractivity ( thread )
         END
 
         // Ready the thread.

@@ -98,6 +98,14 @@ FN KiClockTick (
 
     prb := KI_CURRENT_PRB
 
+    thread := prb^.CurrentThread
+
+    IF NOT thread THEN
+        // No thread yet. This can happen during early init.
+
+        LEAVE
+    END
+
     // Increment count of clock ticks on this processor.
 
     RtlAddUlongToUquad ( &prb^.ClockTicks, intervalms )
@@ -117,8 +125,6 @@ FN KiClockTick (
             0, // context2
         )
     END
-
-    thread := prb^.CurrentThread
 
     IF prb^.DpcActive THEN
         // Update time spent executing DPCs on this processor.
@@ -174,12 +180,6 @@ FN KiClockTick (
     END
 #END
 
-    IF NOT thread THEN
-        // No thread yet. This can happen during early init.
-
-        LEAVE
-    END
-
     IF thread == &prb^.IdleThread THEN
         // If we're in the idle thread there's nothing to switch to and we'd
         // only waste CPU cycles trying, so don't quantum end.
@@ -197,7 +197,7 @@ FN KiClockTick (
         LEAVE
     END
 
-    q -= KI_QUANTUM_PER_TICK
+    q -= intervalms
 
     // If quantum has run down, request a quantum end interrupt at IPLDPC.
 
