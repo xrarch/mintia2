@@ -4,11 +4,15 @@
 
 #INCLUDE "../Ki.hjk"
 
+// The exact interface to the HAL for interrupts is private to the architecture.
+
 EXTERN FN HalEnableInterrupt (
+    IN prb : ^KiPrb,
     IN vector : UWORD,
 )
 
 EXTERN FN HalDisableInterrupt (
+    IN prb : ^KiPrb,
     IN vector : UWORD,
 )
 
@@ -17,25 +21,85 @@ EXPORT FN KeConnectInterrupt (
 ) : UWORD
 
     // Connect the interrupt object so that the routine is called whenever the
-    // specified interrupt is raised.
+    // specified interrupt is raised. Returns TRUE if connected, FALSE
+    // otherwise.
     //
     // NOTE: No attempt is made to synchronize against an interrupt object being
-    //       connected multiple times concurrently.
+    //       connected multiple times concurrently, or being disconnected and
+    //       connected simultaneously.
 
-    IF interrupt^.Connected THEN
-        // Already connected.
+    IF interrupt^.Connected OR
+        interrupt^.Vector >= HAL_VECTOR_MAX OR
+        interrupt^.ShareVector THEN
+
+        // Already connected, or beyond maximum, or shared (which we never do on
+        // XR/17032 platforms).
 
         RETURN FALSE
     END
 
-    // Properly implementing this requires CPU pinning support which requires
-    // the scheduler to be implemented.
+    status := FALSE
 
-    KeCrash ( "NYI KeConnectInterrupt\n" )
+    // Get the Prb for the target processor.
+
+    prb := KiPrbFromNumber ( interrupt^.ProcessorId )
+
+    // Raise IPL.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+#IF BLD_MP
+    // Pin the current thread to the target processor.
+
+    KiPinThread ( prb )
+#END
+
+    IF prb^.IrqDispatchTable[interrupt^.Vector] THEN
+        // Vector already in use. XR/17032 platforms never share IRQs, so
+        // just leave with a failure status rather than chaining the
+        // interrupt object on.
+
+        GOTO Out
+    END
+
+    // Disable interrupts so it won't come in while we're enabling it.
+
+    oldstate := KiDisableInterrupts ()
+
+    // Set the interrupt object in the table.
+
+    prb^.IrqDispatchTable[interrupt^.Vector] = interrupt
+
+    // Enable the interrupt.
+
+    HalEnableInterrupt (
+        prb, // prb
+        interrupt^.Vector, // vector
+    )
+
+    // Restore interrupts.
+
+    KiRestoreInterrupts ( oldstate )
+
+    // Set the interrupt object connected.
 
     interrupt^.Connected = TRUE
 
-    RETURN TRUE
+    status = TRUE
+
+@Out
+
+#IF BLD_MP
+    // Unpin the thread.
+
+    KiUnpinThread ()
+#END
+
+    // Lower IPL.
+
+    KiLowerIpl ( ipl )
+
+    RETURN status
 END
 
 EXPORT FN KeDisconnectInterrupt (
@@ -43,15 +107,60 @@ EXPORT FN KeDisconnectInterrupt (
 ) : UWORD
 
     // Disconnect the interrupt so that the routine is no longer called.
+    //
+    // NOTE: No attempt is made to synchronize against an interrupt object being
+    //       disconnected multiple times concurrently, or being disconnected and
+    //       connected simultaneously.
 
     IF NOT interrupt^.Connected THEN
         RETURN FALSE
     END
 
-    // Properly implementing this requires CPU pinning support which requires
-    // the scheduler to be implemented.
+    // Get the Prb for the target processor.
 
-    KeCrash ( "NYI KeDisconnectInterrupt\n" )
+    prb := KiPrbFromNumber ( interrupt^.ProcessorId )
+
+    // Raise IPL.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+#IF BLD_MP
+    // Pin the current thread to the target processor.
+
+    KiPinThread ( prb )
+#END
+
+    // Disable interrupts so that the interrupt can't come in while we're
+    // disabling it.
+
+    oldstate := KiDisableInterrupts ()
+
+    // Disable the interrupt.
+
+    HalDisableInterrupt (
+        prb, // prb
+        interrupt^.Vector, // vector
+    )
+
+    // Clear the interrupt object in the table.
+
+    prb^.IrqDispatchTable[interrupt^.Vector] = NULLPTR
+
+    // Restore interrupts.
+
+    KiRestoreInterrupts ( oldstate )
+
+#IF BLD_MP
+    // Unpin the thread.
+
+    KiUnpinThread ()
+#END
+
+    // Lower IPL.
+
+    KiLowerIpl ( ipl )
+
+    // Set the interrupt object disconnected.
 
     interrupt^.Connected = FALSE
 

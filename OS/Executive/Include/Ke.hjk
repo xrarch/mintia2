@@ -10,7 +10,9 @@ TYPE KiSpinlock : ULONG
 
 #END
 
-TYPE KePushlock : ^VOID
+STRUCT KePushlock
+    Ptr : ^VOID,
+END
 
 #DEFINE KE_KERNEL_MODE 1
 #DEFINE KE_USER_MODE 2
@@ -438,7 +440,7 @@ EXTERN FN KeSignalThread (
 )
 
 #MACRO KeInitializePushlock ( pushlock ) [
-    NOTHING (pushlock)^ = 0
+    NOTHING (pushlock)^.Ptr = 0
 ]
 
 EXTERN FN KeAcquirePushlockShared (

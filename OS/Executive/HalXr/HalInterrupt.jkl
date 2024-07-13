@@ -191,6 +191,66 @@ FN (KeInterruptF) HalpTimerInterrupt (
     )
 END
 
+FN HalEnableInterrupt (
+    IN prb : ^KiPrb,
+    IN vector : UWORD,
+)
+
+    // Enable the interrupt with the given vector.
+    // Interrupts are disabled and we are running on the target processor.
+
+    lsic := CAST prb^.LsicBase TO ^HalpLsic
+
+    maskptr := &lsic^.Mask0
+
+    IF vector >= 32 THEN
+        vector -= 32
+        maskptr = &lsic^.Mask1
+    END
+
+    // Read the current LSIC mask.
+
+    mask := maskptr^
+
+    // Clear the bit for this interrupt (enabling it).
+
+    mask &= ~(1 << vector)
+
+    // Set the new mask.
+
+    maskptr^ = mask
+END
+
+FN HalDisableInterrupt (
+    IN prb : ^KiPrb,
+    IN vector : UWORD,
+)
+
+    // Disable the interrupt with the given vector.
+    // Interrupts are disabled and we are running on the target processor.
+
+    lsic := CAST prb^.LsicBase TO ^HalpLsic
+
+    maskptr := &lsic^.Mask0
+
+    IF vector >= 32 THEN
+        vector -= 32
+        maskptr = &lsic^.Mask1
+    END
+
+    // Read the current LSIC mask.
+
+    mask := maskptr^
+
+    // Set the bit for this interrupt (disabling it).
+
+    mask |= 1 << vector
+
+    // Set the new mask.
+
+    maskptr^ = mask
+END
+
 #IF BLD_MP
 
 FN HalTriggerIpi (
