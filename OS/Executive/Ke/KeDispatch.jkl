@@ -1014,11 +1014,13 @@ FN KiPreemptThread (
 
     KiAcquireThreadElevated ( current )
 
+#IF BLD_MP
     // Indicate context switching so that anyone who grabs us from the ready
     // queue and tries to switch into us, will wait until we are off our
     // stack. This flag is cleared by KiSwitchContext.
 
     current^.Switching = TRUE
+#END
 
     IF current != &prb^.IdleThread THEN
         // Ready the current thread.
@@ -1301,6 +1303,53 @@ FN KiQuantumEnd (
     END
 END
 
+FN KiYield (
+    IN current : ^KeThread,
+    IN prb : ^KiPrb,
+)
+
+    // Yield the processor. Thread lock is held on entry, released on exit.
+
+    // Try to find a thread to switch into.
+
+    KiAcquireReadyQueueElevated ( prb )
+
+    next := KiSelectThread (
+        prb, // prb
+        NULLPTR, // current
+        FALSE, // exclusive
+        FALSE, // migrate
+    )
+
+    KiReleaseReadyQueueElevated ( prb )
+
+    IF next THEN
+        // Wait for the next thread to no longer be switching off his stack.
+
+        KiWaitForSwitch ( next )
+
+        // Switch into it. KiSwitchThread returns with the thread lock released.
+
+        KiSwitchThread (
+            current, // current
+            next, // thread
+        )
+
+    ELSE
+#IF BLD_MP
+        prb^.StealWork = TRUE
+#END
+
+        // Switch to the idle thread. KiSwitchThread returns with the thread
+        // lock released.
+
+        KiSwitchThread (
+            current, // current
+            &prb^.IdleThread, // thread
+        )
+    END
+END
+
 #IF BLD_MP
 
 FN KiMoveThread (
@@ -1457,6 +1506,100 @@ FN (KeDpcF) KiBalanceWork (
     END
 END
 
+FN KiPinThread (
+    IN prb : ^KiPrb,
+)
+
+    // Pin the current thread to the given processor. No locks are held on
+    // entry to this function. 
+
+    myprb := KI_CURRENT_PRB
+
+    current := myprb^.CurrentThread
+
+#IF BLD_CHK
+    IF KiCurrentIpl () != KI_IPL_DPC THEN
+        KeCrash ( "KiPinThread: IPL != KI_IPL_DPC\n" )
+    END
+
+    IF current == &myprb^.IdleThread THEN
+        KeCrash ( "KiPinThread: can't pin idle thread\n" )
+    END
+#END
+
+    KiAcquireThreadElevated ( current )
+
+    current^.AffinityPrb = prb
+    current^.Pinned = TRUE
+
+    IF myprb == prb THEN
+        // Already on the right processor. Nothing to do.
+
+        KiReleaseThreadElevated ( current )
+
+        LEAVE
+    END
+
+    // We need to insert ourselves on the target processor's ready queue and
+    // then yield execution.
+
+    // Indicate context switching so that anyone who grabs us from the ready
+    // queue and tries to switch into us, will wait until we are off our
+    // stack. This flag is cleared by KiSwitchContext.
+
+    current^.Switching = TRUE
+
+    // Ready the current thread to the target Prb.
+
+    KiAcquireReadyQueueElevated ( prb )
+
+    KiInsertThread (
+        prb, // prb
+        current, // thread
+        FALSE, // other
+    )
+
+    KiReleaseReadyQueueElevated ( prb )
+
+    // Yield the current processor.
+
+    KiYield (
+        current, // current
+        myprb, // prb
+    )
+
+    // We are now pinned to the requested processor. The thread lock has been
+    // released.
+END
+
+FN KiUnpinThread ()
+
+    // Unpin the current thread. No locks are held on entry to this function.
+
+    myprb := KI_CURRENT_PRB
+
+    current := myprb^.CurrentThread
+
+#IF BLD_CHK
+    IF KiCurrentIpl () != KI_IPL_DPC THEN
+        KeCrash ( "KiUnpinThread: IPL != KI_IPL_DPC\n" )
+    END
+
+    IF current == &myprb^.IdleThread THEN
+        KeCrash ( "KiUnpinThread: can't unpin idle thread\n" )
+    END
+#END
+
+    // Acquire the thread lock so that nobody sees the value of Pinned change
+    // partway through an operation.
+
+    KiAcquireThreadElevated ( current )
+
+    current^.Pinned = FALSE
+
+    KiReleaseThreadElevated ( current )
+END
+
 #END
 
 #MACRO KiDequeueWaitBlock ( waitblock ) [
@@ -1505,44 +1648,12 @@ FN KiWaitThread (
 
     thread^.StateMs = KiLowTick ( prb )
 
-    // Try to find a thread to switch into.
+    // Yield.
 
-    KiAcquireReadyQueueElevated ( prb )
-
-    next := KiSelectThread (
+    KiYield (
+        thread, // current
         prb, // prb
-        NULLPTR, // current
-        FALSE, // exclusive
-        FALSE, // migrate
     )
-
-    KiReleaseReadyQueueElevated ( prb )
-
-    // Wait for the next thread to no longer be switching off his stack.
-
-    KiWaitForSwitch ( next )
-
-    IF next THEN
-        // Switch into it. KiSwitchThread returns with the thread lock released.
-
-        KiSwitchThread (
-            thread, // current
-            next, // thread
-        )
-
-    ELSE
-#IF BLD_MP
-        prb^.StealWork = TRUE
-#END
-
-        // Switch to the idle thread. KiSwitchThread returns with the thread
-        // lock released.
-
-        KiSwitchThread (
-            thread, // current
-            &prb^.IdleThread, // thread
-        )
-    END
 
     // We're back! Thread lock is dropped, but we're still at KI_IPL_DPC.
 
@@ -1889,7 +2000,7 @@ END
     RtlSubUquadFromUquad ( timeout, &currenttime )
 ]
 
-FN KeWaitForObjects (
+EXPORT FN KeWaitForObjects (
     IN waitmode : UWORD,
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
