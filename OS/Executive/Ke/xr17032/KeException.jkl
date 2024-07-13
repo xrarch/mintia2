@@ -360,6 +360,16 @@ KiBadLowerMessage:
 
 #END
 
+// a0 - thread
+KiJumpIntoThread:
+.global KiJumpIntoThread
+
+    // Restore context of new thread.
+
+    mov  sp, long [a0 + KeThread_Context]
+
+    j    LoadContext
+
 // a0 - newthread
 // a1 - oldthread
 KiSwitchContext:
@@ -395,10 +405,17 @@ KiSwitchContext:
 
     mov  long [a1 + KeThread_Context], sp
 
+    // Restore context of new thread.
+
+    mov  sp, long [a0 + KeThread_Context]
+
     // Release thread lock. Inline KiReleaseSpinlock here for speed.
 
 #IF BLD_MP
-    
+    // Indicate no longer switching off of our stack.
+
+    mov  byte [a1 + KeThread_Switching], 0
+
     // Memory barrier to ensure old writes are committed.
 
     wmb
@@ -406,14 +423,9 @@ KiSwitchContext:
     // Set spinlock un-owned.
 
     mov  long [a1 + KeThread_Spinlock], zero
-
 #END
 
-    // Fall through.
-
-// a0 - thread
-KiJumpIntoThread:
-.global KiJumpIntoThread
+LoadContext:
 
     // Set new thread parameters in Prb.
 
@@ -425,10 +437,6 @@ KiJumpIntoThread:
     // Set thread to RUNNING.
 
     mov  byte [a0 + KeThread_Status], KI_THREAD_RUNNING
-
-    // Restore context of new thread.
-
-    mov  sp, long [a0 + KeThread_Context]
 
     mov  lr, long [sp + OsContext_Lr]
     mov  s0, long [sp + OsContext_S0]

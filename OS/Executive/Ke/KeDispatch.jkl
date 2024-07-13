@@ -71,6 +71,16 @@ KiIdleProcessorCount : ULONG
     NOTHING (thread)^.WaitAttempt = (state)
 ]
 
+#MACRO KiWaitForSwitch ( thread ) [
+    // Wait for the next thread to no longer be switching off his stack.
+
+    WHILE (thread)^.Switching DO
+        // Language BARRIER to ensure this loop isn't optimized out.
+
+        BARRIER
+    END
+]
+
 #ELSE
 
 #MACRO KiSetProcessorIdle ( prb ) []
@@ -94,6 +104,8 @@ KiIdleProcessorCount : ULONG
 #MACRO KiReleaseThreadElevated ( thread ) []
 
 #MACRO KiSetWaitAttempt ( thread, state ) []
+
+#MACRO KiWaitForSwitch ( thread ) []
 
 #END
 
@@ -990,12 +1002,27 @@ FN KiPreemptThread (
         LEAVE
     END
 
+    // Wait for the next thread to no longer be switching off his stack.
+
+    KiWaitForSwitch ( next )
+
+    // Acquire a pointer to the current thread.
+
     current := prb^.CurrentThread
+
+    // Acquire the current thread's lock.
+
+    KiAcquireThreadElevated ( current )
+
+    // Indicate context switching so that anyone who grabs us from the ready
+    // queue and tries to switch into us, will wait until we are off our
+    // stack. This flag is cleared by KiSwitchContext.
+
+    current^.Switching = TRUE
 
     IF current != &prb^.IdleThread THEN
         // Ready the current thread.
 
-        KiAcquireThreadElevated ( current )
         KiAcquireReadyQueueElevated ( prb )
 
         KiInsertThread (
@@ -1005,12 +1032,7 @@ FN KiPreemptThread (
         )
 
         KiReleaseReadyQueueElevated ( prb )
-        KiReleaseThreadElevated ( current )
     END
-
-    // Acquire the thread lock.
-
-    KiAcquireThreadElevated ( current )
 
     // Switch into the thread.
 
@@ -1495,6 +1517,10 @@ FN KiWaitThread (
     )
 
     KiReleaseReadyQueueElevated ( prb )
+
+    // Wait for the next thread to no longer be switching off his stack.
+
+    KiWaitForSwitch ( next )
 
     IF next THEN
         // Switch into it. KiSwitchThread returns with the thread lock released.
