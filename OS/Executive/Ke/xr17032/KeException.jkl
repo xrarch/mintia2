@@ -556,7 +556,7 @@ FN KiInitializeArchitecture (
         // the exception block, except for the TB miss handlers, which have
         // already been set up by Loader.
 
-        eb := CAST ExLoaderBlock.U.Xr.ExceptionBlock TO ^ULONG
+        eb := CAST KeLoaderBlock.U.Xr.ExceptionBlock TO ^ULONG
 
         jmpinstruction := CAST &KiExceptionHandler TO ULONG
 
@@ -579,7 +579,7 @@ FN KiInitializeArchitecture (
         // execution.
 
         RtlCopyBytes (
-            ExLoaderBlock.U.Xr.ExceptionBlock, // dest
+            KeLoaderBlock.U.Xr.ExceptionBlock, // dest
             &KiSwitchMapCode, // src
             &KiSwitchMapCodeEnd - &KiSwitchMapCode, // sz
         )
@@ -616,7 +616,7 @@ FN KiSwitchAddressSpace (
     // On entry to this function we are holding the current thread's spinlock
     // and interrupts are totally disabled (to block out ASID rollover IPIs).
 
-    IF process^.PageDirectoryPfn == ExLoaderBlock.SystemPageDirectoryPfn THEN
+    IF process^.PageDirectoryPfn == KeLoaderBlock.SystemPageDirectoryPfn THEN
         // Just switch, don't bother dealing with ASIDs since ASID 0 is reserved
         // for the system address space.
 

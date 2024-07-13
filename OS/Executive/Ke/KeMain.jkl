@@ -6,7 +6,7 @@
 
 PUBLIC KiIdleProcess : KeProcess
 
-EXPORT ExLoaderBlock : BlInfoRecord
+EXPORT KeLoaderBlock : BlInfoRecord
 
 FNPTR DbgMainF ()
 
@@ -261,17 +261,17 @@ FN KiFixupLoaderBlockLists ()
     // Fix up the circular lists in the loader block so that they still point to
     // the newly relocated list heads.
 
-    listhead := &ExLoaderBlock.ResourceListHead
+    listhead := &KeLoaderBlock.ResourceListHead
 
     listhead^.Next^.Prev = listhead
     listhead^.Prev^.Next = listhead
 
-    listhead = &ExLoaderBlock.DllListHead
+    listhead = &KeLoaderBlock.DllListHead
 
     listhead^.Next^.Prev = listhead
     listhead^.Prev^.Next = listhead
 
-    listhead = &ExLoaderBlock.DescriptorListHead
+    listhead = &KeLoaderBlock.DescriptorListHead
 
     listhead^.Next^.Prev = listhead
     listhead^.Prev^.Next = listhead
@@ -311,7 +311,7 @@ EXPORT FN KeMain (
     // Start by copying the loader block into the Executive.
 
     RtlCopyBytes (
-        &ExLoaderBlock, // dest
+        &KeLoaderBlock, // dest
         loaderblock, // src
         SIZEOF BlInfoRecord, // sz
     )
@@ -357,8 +357,8 @@ EXPORT FN KeMain (
 
     // Perform early initialization of the debugger.
 
-    IF ExLoaderBlock.DbgMain THEN
-        dbgmain := CAST ExLoaderBlock.DbgMain TO DbgMainF
+    IF KeLoaderBlock.DbgMain THEN
+        dbgmain := CAST KeLoaderBlock.DbgMain TO DbgMainF
 
         dbgmain ()
     END
@@ -373,14 +373,14 @@ EXPORT FN KeMain (
 
     // We're ready to pull the other processors into the system.
 
-    KiInitializeCount = ExLoaderBlock.ProcessorCount - 1
+    KiInitializeCount = KeLoaderBlock.ProcessorCount - 1
 
     // Call the Loader to do platform-specific stuff to start the processors.
     // Some platforms require calling the firmware with paging disabled. We
     // can't do that from here, but on those platforms Loader lives in an
     // identity mapping of low memory, so he can do that just fine.
 
-    ExLoaderBlock.StartProcessors (
+    KeLoaderBlock.StartProcessors (
         &KiStartOtherProcessor, // startfunc
     )
 

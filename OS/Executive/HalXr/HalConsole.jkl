@@ -37,9 +37,9 @@ FN HalpDrawCharacter (
     left : UWORD
 
     dest : ^UBYTE =
-        ExLoaderBlock.BootFbBase + x + (y * ExLoaderBlock.BootFbWidth)
+        KeLoaderBlock.BootFbBase + x + (y * KeLoaderBlock.BootFbWidth)
 
-    mod := ExLoaderBlock.BootFbWidth - w
+    mod := KeLoaderBlock.BootFbWidth - w
 
     bmp := CAST font + SIZEOF HalConsoleFont TO ^UBYTE
     bmp += ((w + 7) >> 3) * h * c
@@ -230,7 +230,7 @@ FN HalpClearScreen ()
         HAL_CONSOLE_BG
 
     RtlFillMemoryWithUlong (
-        ExLoaderBlock.BootFbBase, // ptr
+        KeLoaderBlock.BootFbBase, // ptr
         HalpFramebufferBytes, // sz
         ulong, // ulong
     )
@@ -250,11 +250,11 @@ FN HalpScrollScreen ()
     font := HalpFont
 
     RtlCopyBytes (
-        ExLoaderBlock.BootFbBase, // dest
-        ExLoaderBlock.BootFbBase +
-        ExLoaderBlock.BootFbWidth * font^.Height, // src
-        ExLoaderBlock.BootFbWidth *
-        (ExLoaderBlock.BootFbHeight - font^.Height), // sz
+        KeLoaderBlock.BootFbBase, // dest
+        KeLoaderBlock.BootFbBase +
+        KeLoaderBlock.BootFbWidth * font^.Height, // src
+        KeLoaderBlock.BootFbWidth *
+        (KeLoaderBlock.BootFbHeight - font^.Height), // sz
     )
 
     // Clear the last line.
@@ -265,10 +265,10 @@ FN HalpScrollScreen ()
         HAL_CONSOLE_BG
 
     RtlFillMemoryWithUlong (
-        ExLoaderBlock.BootFbBase +
-        ExLoaderBlock.BootFbWidth *
+        KeLoaderBlock.BootFbBase +
+        KeLoaderBlock.BootFbWidth *
         (HalpHeight - 1) * font^.Height, // ptr
-        ExLoaderBlock.BootFbWidth * font^.Height, // sz
+        KeLoaderBlock.BootFbWidth * font^.Height, // sz
         ulong, // ulong
     )
 END
@@ -335,12 +335,12 @@ FN HalCrashConsole ()
         // Draw a cool shutter effect.
 
         size := HalpFramebufferBytes
-        addr := CAST ExLoaderBlock.BootFbBase TO ^UBYTE
+        addr := CAST KeLoaderBlock.BootFbBase TO ^UBYTE
 
-        height := ExLoaderBlock.BootFbHeight
+        height := KeLoaderBlock.BootFbHeight
 
         WHILE height DO
-            width := ExLoaderBlock.BootFbWidth
+            width := KeLoaderBlock.BootFbWidth
 
             off := height & 1
 
@@ -410,7 +410,7 @@ FN HalpInitializeConsole ()
 
     // First see if we got a boot framebuffer.
 
-    IF ExLoaderBlock.BootFbBase THEN
+    IF KeLoaderBlock.BootFbBase THEN
         // We did! Try to find the HAL console font resource.
 
         rsrc := KeFindResource (
@@ -424,10 +424,10 @@ FN HalpInitializeConsole ()
             HalpUseFramebuffer = TRUE
 
             HalpFramebufferBytes =
-                ExLoaderBlock.BootFbWidth * ExLoaderBlock.BootFbHeight
+                KeLoaderBlock.BootFbWidth * KeLoaderBlock.BootFbHeight
 
-            HalpWidth = ExLoaderBlock.BootFbWidth / HalpFont^.Width
-            HalpHeight = ExLoaderBlock.BootFbHeight / HalpFont^.Height
+            HalpWidth = KeLoaderBlock.BootFbWidth / HalpFont^.Width
+            HalpHeight = KeLoaderBlock.BootFbHeight / HalpFont^.Height
 
             // Draw the background.
 

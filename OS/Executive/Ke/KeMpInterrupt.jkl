@@ -67,9 +67,9 @@ EXPORT FN KiFreezeOtherProcessors ()
     j := 0
 
     WHILE j < KI_FREEZE_RETRY DO
-        prb := CAST ExLoaderBlock.VirtualPrbBase TO ^KiPrb
+        prb := CAST KeLoaderBlock.VirtualPrbBase TO ^KiPrb
 
-        count := ExLoaderBlock.ProcessorCount
+        count := KeLoaderBlock.ProcessorCount
         i := 0
 
         WHILE i < count DO
@@ -255,7 +255,7 @@ FN KiExecuteOnEveryoneElse (
     END
 #END
 
-    count := ExLoaderBlock.ProcessorCount
+    count := KeLoaderBlock.ProcessorCount
 
     prb := KI_CURRENT_PRB
 
@@ -319,7 +319,7 @@ FN KiExecuteOnEveryoneElse (
 
     selfid := prb^.Id
 
-    targetprb := CAST ExLoaderBlock.VirtualPrbBase TO ^KiPrb
+    targetprb := CAST KeLoaderBlock.VirtualPrbBase TO ^KiPrb
 
     // Now send IPIs to all of the processors in the system (other than me).
 

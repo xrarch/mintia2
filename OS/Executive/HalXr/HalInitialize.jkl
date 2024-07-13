@@ -9,7 +9,7 @@ FN HalpConfigureTimer ()
 
     // Configure the timer interrupt to interrupt at 5ms intervals.
 
-    timer := CAST ExLoaderBlock.U.Xr.CitronBase + 0x80 TO ^HalpTimer
+    timer := CAST KeLoaderBlock.U.Xr.CitronBase + 0x80 TO ^HalpTimer
 
     timer^.DataPort = HAL_TIMER_INTERVAL
     BARRIER
@@ -27,7 +27,7 @@ FN HalpInitializeLsic (
     // for the timer interrupt and IPI interrupt. Then enable interrupts.
 
     lsic :=
-        CAST ExLoaderBlock.U.Xr.LsicBase + procid * HALP_LSIC_GAP TO ^HalpLsic
+        CAST KeLoaderBlock.U.Xr.LsicBase + procid * HALP_LSIC_GAP TO ^HalpLsic
 
     prb := KI_CURRENT_PRB
 
