@@ -1328,6 +1328,8 @@ FN KiYield (
 
         KiWaitForSwitch ( next )
 
+        RtlPrint ( "%x ", next )
+
         // Switch into it. KiSwitchThread returns with the thread lock released.
 
         KiSwitchThread (
@@ -1359,6 +1361,8 @@ FN KiMoveThread (
 
     // Move a thread from the source to the destination.
     // Return TRUE if a thread was moved, FALSE otherwise.
+
+    myprb := KI_CURRENT_PRB
 
     // Lock the source Prb.
 
@@ -1402,7 +1406,7 @@ FN KiMoveThread (
     KiInsertThread (
         destprb, // prb
         thread, // thread
-        FALSE, // other
+        myprb != destprb, // other
     )
 
     // Release the destination Prb.
@@ -1556,7 +1560,7 @@ FN KiPinThread (
     KiInsertThread (
         prb, // prb
         current, // thread
-        FALSE, // other
+        TRUE, // other
     )
 
     KiReleaseReadyQueueElevated ( prb )
