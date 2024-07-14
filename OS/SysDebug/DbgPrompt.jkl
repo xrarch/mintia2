@@ -14,6 +14,7 @@ DbgTokenBuffer : UBYTE[DBG_TOKEN_BUFFER_SIZE]
 DbgNextTokenPointer : ^UBYTE
 
 PUBLIC DbgCurrentContext : ^OsContext
+PUBLIC DbgCurrentPrb : ^KiPrb
 
 FNPTR DbgCommandF ()
 
@@ -364,9 +365,7 @@ FN (DbgCommandF) DbgCommandCpu ()
         32, // bufsize
     ) THEN
 
-        RtlPrint ( "Usage: cpu [num]\n" )
-
-        LEAVE
+        GOTO PrintCpuInfo
     END
 
     numval : UWORD
@@ -413,6 +412,107 @@ FN (DbgCommandF) DbgCommandCpu ()
     END
 
     DbgCurrentContext = context
+    DbgCurrentPrb = prb
+
+@PrintCpuInfo
+
+    RtlPrint ( "CPU is %d    PRB @ %p\n", DbgCurrentPrb^.Id, DbgCurrentPrb )
+END
+
+FN (DbgCommandF) DbgCommandReady ()
+
+    prb := DbgCurrentPrb
+
+    idleempty := 1
+
+    IF RtlEmptyList ( &prb^.IdleListHead ) THEN
+        idleempty = 0
+    END
+
+    RtlPrint (
+        "RT=%08x TS=%08x Idle=%d TSR=%d TSE=%d\n", // fmt
+        prb^.RealTimeReady,
+        prb^.CalendarReady,
+        idleempty,
+        prb^.CalendarRunIndex,
+        prb^.CalendarEnqueueIndex,
+    )
+
+    RtlPrint ( "\nRT Queues\n" )
+
+    i := 0
+    head : ^RtlListEntry
+    listentry : ^RtlListEntry
+    thread : ^KeThread
+
+    WHILE i < OS_PRIORITY_MAX DO
+        head = &prb^.RealTimeListHeads[i]
+
+        IF NOT RtlEmptyList ( head ) THEN
+            RtlPrint ( "%d: ", i )
+        END
+
+        listentry = head^.Next
+
+        WHILE listentry != head DO
+            thread = CONTAINEROF listentry TO KeThread.ReadyEntry
+
+            RtlPrint ( "%p ", thread )
+
+            listentry = listentry^.Next
+        END
+
+        IF NOT RtlEmptyList ( head ) THEN
+            RtlPrint ( "\n" )
+        END
+
+        i += 1
+    END
+
+    RtlPrint ( "\nTS Queues\n" )
+
+    i = 0
+
+    WHILE i < KI_TIMESHARED_QUEUES DO
+        head = &prb^.CalendarListHeads[i]
+
+        IF NOT RtlEmptyList ( head ) THEN
+            RtlPrint ( "%d: ", i )
+        END
+
+        listentry = head^.Next
+
+        WHILE listentry != head DO
+            thread = CONTAINEROF listentry TO KeThread.ReadyEntry
+
+            RtlPrint ( "%p ", thread )
+
+            listentry = listentry^.Next
+        END
+
+        IF NOT RtlEmptyList ( head ) THEN
+            RtlPrint ( "\n" )
+        END
+
+        i += 1
+    END
+
+    RtlPrint ( "\nIdle Queue (thread is %08x)\n", &prb^.IdleThread )
+
+    head = &prb^.IdleListHead
+    listentry = head^.Next
+
+    WHILE listentry != head DO
+        thread = CONTAINEROF listentry TO KeThread.ReadyEntry
+
+        RtlPrint ( "%p ", thread )
+
+        listentry = listentry^.Next
+    END
+
+    IF NOT RtlEmptyList ( head ) THEN
+        RtlPrint ( "\n" )
+    END
 END
 
 #SECTION "text"
@@ -471,6 +571,11 @@ DbgCommandTable : DbgCommand[] = {
         [Name] = "cpu",
         [Function] = &DbgCommandCpu,
         [Help] = "Switch to examining the specified CPU's context.",
+    },
+    {
+        [Name] = "ready",
+        [Function] = &DbgCommandReady,
+        [Help] = "Dump the ready queues of the current CPU.",
     },
 
     // Sentinel.

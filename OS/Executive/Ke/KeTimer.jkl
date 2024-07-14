@@ -6,7 +6,6 @@
 
 KiCurrentTime : RtlUquad
 KiTimeZoneOffset : ULONG
-KiCurrentTimeLock : KiSpinlock = KI_INITIAL_SPINLOCK
 
 // Initialize this to TRUE so that the first call to KeQueryTime fills the
 // current time from the HAL.
@@ -14,6 +13,8 @@ KiCurrentTimeLock : KiSpinlock = KI_INITIAL_SPINLOCK
 PUBLIC KiTimerTickOccurred : UBYTE = TRUE
 
 #IF BLD_MP
+
+KiCurrentTimeLock : KiSpinlock = KI_INITIAL_SPINLOCK
 
 #MACRO KiAcquireTimerTree ( prb ) [
     KiAcquireSpinlockInPrb (

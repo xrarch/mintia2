@@ -799,10 +799,14 @@ FN KiSelectTimesharedThread (
 
     k := prb^.CalendarRunIndex
 
+    IF NOT current
 #IF BLD_MP
-    IF migrate THEN
-        // If we're migrating, seek to a set bit to make sure the caller can get
-        // a thread.
+        OR migrate
+#END
+        THEN
+
+        // If we're migrating, or we'd become idle if we fail to get a thread
+        // here, seek to a set bit to make sure we get a thread.
 
         count := KI_TIMESHARED_QUEUES
 
@@ -815,45 +819,50 @@ FN KiSelectTimesharedThread (
             END
         END
     END
-#END
 
-    IF (readybits >> k) & 1 THEN
-        // There's a thread in this queue. Unlink and return it.
-
-        queue := &prb^.CalendarListHeads[k]
-
-        thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
-
-#IF BLD_MP
-        IF NOT thread^.Pinned OR NOT migrate THEN
-#END
-            RtlRemoveEntryList ( &thread^.ReadyEntry )
-
-            IF RtlEmptyList ( queue ) THEN
-                // The queue is empty now. Clear the bit.
-
-                prb^.CalendarReady = readybits & ~(1 << k)
-
-                IF NOT migrate THEN
-                    // Advance the run index.
-
-                    IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex THEN
-                        prb^.CalendarRunIndex = (k + 1) % KI_TIMESHARED_QUEUES
-                    END
-                END
-            END
-
-#IF BLD_MP
-            // Decrement count of ready threads.
-
-            prb^.Load -= 1
-#END
-
-            RETURN thread
-#IF BLD_MP
-        END
-#END
+    IF (readybits >> k) & 1 == 0 THEN
+        RETURN NULLPTR
     END
+
+    // There's a thread in this queue. Unlink and return it.
+
+    queue := &prb^.CalendarListHeads[k]
+
+    thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
+
+#IF BLD_MP
+    IF NOT thread^.Pinned OR NOT migrate THEN
+#END
+        RtlRemoveEntryList ( &thread^.ReadyEntry )
+
+        IF RtlEmptyList ( queue ) THEN
+            // The queue is empty now. Clear the bit.
+
+            prb^.CalendarReady = readybits & ~(1 << k)
+
+#IF BLD_MP
+            IF NOT migrate THEN
+#END
+                // Advance the run index.
+
+                IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex THEN
+                    prb^.CalendarRunIndex = (k + 1) % KI_TIMESHARED_QUEUES
+                END
+#IF BLD_MP
+            END
+#END
+        END
+
+#IF BLD_MP
+        // Decrement count of ready threads.
+
+        prb^.Load -= 1
+#END
+
+        RETURN thread
+#IF BLD_MP
+    END
+#END
 
     RETURN NULLPTR
 END
@@ -1327,8 +1336,6 @@ FN KiYield (
         // Wait for the next thread to no longer be switching off his stack.
 
         KiWaitForSwitch ( next )
-
-        RtlPrint ( "%x ", next )
 
         // Switch into it. KiSwitchThread returns with the thread lock released.
 
