@@ -1799,9 +1799,12 @@ FN KiSatisfyObject (
     IN object : ^KiDispatchHeader,
     IN priorityboost : UWORD,
     IN all : UWORD,
-)
+) : UWORD
 
     // Satisfy a wait on the object. The object lock is held.
+    // Return TRUE if any waits were satisfied, FALSE otherwise.
+
+    satisfied := FALSE
 
     listhead := &object^.WaitListHead
     listentry := listhead^.Next
@@ -1849,13 +1852,17 @@ FN KiSatisfyObject (
 
             KiReleaseThreadElevated ( thread )
 
-            LEAVE
+            RETURN TRUE
         END
+
+        satisfied = TRUE
 
         KiReleaseThreadElevated ( thread )
 
         listentry = listentry^.Next
     END
+
+    RETURN satisfied
 END
 
 #MACRO KiCheckWaitInterruptingEvents ( thread, ipl, alertable, waitmode ) [

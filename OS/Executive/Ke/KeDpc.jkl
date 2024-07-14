@@ -109,7 +109,7 @@ EXPORT FN KeEnqueueDpc (
     // On UP this can be a direct read-modify-write since we already have
     // interrupts disabled and no other processors can touch it.
 
-    prb^.PendingSoftwareInterrupts |= 1 << (KI_IPL_DPC - 1)
+    prb^.PendingSoftwareInterrupts |= KiPendingIpl ( KI_IPL_DPC )
 #END
 
     // Release the DPC queue lock.

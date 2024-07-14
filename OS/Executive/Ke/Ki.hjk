@@ -112,6 +112,10 @@ END
 
 #DEFINE KI_TICK_SHIFT 10
 
+#MACRO KiPendingIpl ( ipl ) [
+     (1 << ((ipl) - 1))
+]
+
 #IF BLD_MP
 
 FNPTR KiIpiF (
@@ -398,14 +402,14 @@ EXTERN FN KiSatisfyObject (
     IN object : ^KiDispatchHeader,
     IN priorityboost : UWORD,
     IN all : UWORD,
-)
+) : UWORD
 
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
 
 #MACRO KiSoftInterruptSelf ( prb, ipl ) [
     KeOrUlong (
         &(prb)^.PendingSoftwareInterrupts, // ptr
-        1 << (ipl - 1), // bitset
+        KiPendingIpl ( ipl ), // bitset
     )
 ]
 
@@ -449,10 +453,10 @@ EXTERN FN KiExecuteOnEveryoneElse (
 
     oldvalue := KeOrUlong (
         &(targetprb)^.PendingSoftwareInterrupts, // ptr
-        1 << ((ipl) - 1), // bitset
+        KiPendingIpl ( ipl ), // bitset
     )
 
-    IF oldvalue & ((ipl) - 1) == 0 THEN
+    IF oldvalue & KiPendingIpl ( ipl ) == 0 THEN
         // We just set it, so we should send an IPI to get him to check it.
 
         HalTriggerIpi ( targetprb )
@@ -551,7 +555,6 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #MACRO KiInitializeDispatchObject ( hdr, name, type ) [
     RtlInitializeList ( &(hdr)^.WaitListHead )
     NOTHING (hdr)^.Name = (name)
-    NOTHING (hdr)^.SignalCount = 0
     NOTHING (hdr)^.WaiterCount = 0
 #IF BLD_MP
     KiInitializeSpinlock ( &(hdr)^.Spinlock )

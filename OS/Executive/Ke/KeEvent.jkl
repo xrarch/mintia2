@@ -78,11 +78,15 @@ EXPORT FN KeSignalEvent (
         ELSE
             // Satisfy one wait.
 
-            KiSatisfyObject (
+            IF NOT KiSatisfyObject (
                 &event^.Header, // object
                 priorityboost, // priorityboost
                 FALSE, // all
-            )
+            ) THEN
+                // Didn't satisfy any waits. Set signaled.
+
+                event^.Header.SignalCount = 1
+            END
         END
 
     ELSE

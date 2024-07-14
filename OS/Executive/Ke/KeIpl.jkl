@@ -18,10 +18,10 @@
 #IF BLD_MP
     KeMaskUlong (
         &prb^.PendingSoftwareInterrupts, // ptr
-        ~(1 << (ipl - 1)), // mask
+        ~(KiPendingIpl ( ipl )), // mask
     )
 #ELSE
-    NOTHING (prb)^.PendingSoftwareInterrupts &= ~(1 << (ipl - 1))
+    NOTHING (prb)^.PendingSoftwareInterrupts &= ~(KiPendingIpl ( ipl ))
 #END
 ]
 
@@ -100,10 +100,6 @@ KiSoftwareInterruptPriorityTable : KiSoftwareInterruptHandlerF[8] = {
     [1] = &KiApcInterrupt,
     [2] = &KiDpcInterrupt,
     [3] = &KiDpcInterrupt,
-    [4] = &KiDpcInterrupt,
-    [5] = &KiDpcInterrupt,
-    [6] = &KiDpcInterrupt,
-    [7] = &KiDpcInterrupt,
 }
 
 FN KiDispatchSoftwareInterrupts (
@@ -113,7 +109,7 @@ FN KiDispatchSoftwareInterrupts (
     oldstate := KiDisableInterrupts ()
 
     prb := KI_CURRENT_PRB_LOCAL
-    pending := prb^.PendingSoftwareInterrupts & (0xF << newipl)
+    pending := prb^.PendingSoftwareInterrupts & (3 << newipl)
 
     WHILE pending DO
         KiSoftwareInterruptPriorityTable[pending] (
@@ -127,7 +123,7 @@ FN KiDispatchSoftwareInterrupts (
         prb = KI_CURRENT_PRB_LOCAL
 #END
 
-        pending = prb^.PendingSoftwareInterrupts & (0xF << newipl)
+        pending = prb^.PendingSoftwareInterrupts & (3 << newipl)
     END
 
     prb^.Ipl = newipl

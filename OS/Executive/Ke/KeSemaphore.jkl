@@ -1,0 +1,83 @@
+//
+// Implements support for KeSemaphore dispatcher objects.
+//
+
+#INCLUDE "Ki.hjk"
+
+EXPORT FN KeInitializeSemaphore (
+    IN semaphore : ^KeSemaphore,
+    IN name : ^UBYTE,
+    IN initialcount : UWORD,
+)
+
+    KiInitializeDispatchObject (
+        &semaphore^.Header, // hdr
+        name, // name
+        KI_DISPATCH_EVENT_SYNCH, // type
+    )
+
+    semaphore^.Header.SignalCount = initialcount
+END
+
+EXPORT FN KeReleaseSemaphore (
+    IN semaphore : ^KeSemaphore,
+    IN priorityboost : UWORD,
+    IN count : UWORD,
+) : UWORD
+
+    // Signal the semaphore object and return its previous state.
+
+    ipl := KiAcquireObject ( &semaphore^.Header )
+
+    oldcount := semaphore^.Header.SignalCount
+
+    IF oldcount + count < count THEN
+        // oldcount+count overflows
+
+        KiReleaseObject ( &semaphore^.Header, ipl )
+
+        RETURN oldcount
+    END
+
+    IF semaphore^.Header.SignalCount OR NOT semaphore^.Header.WaiterCount THEN
+        // Signal count is nonzero or there are no waiters.
+        // Just add the count and return.
+
+        semaphore^.Header.SignalCount = oldcount + count
+
+        KiReleaseObject ( &semaphore^.Header, ipl )
+
+        RETURN oldcount
+    END
+
+    // Satisfy waits.
+
+    WHILE count DO
+        IF NOT KiSatisfyObject (
+            &semaphore^.Header, // object
+            priorityboost, // priorityboost
+            FALSE, // all
+        ) THEN
+            // Didn't satisfy any waits.
+
+            BREAK
+        END
+
+        count -= 1
+
+        IF NOT semaphore^.Header.WaiterCount THEN
+            // We satisfied the last waiter. Break out rather than uselessly
+            // call KiSatisfyObject again.
+
+            BREAK
+        END
+    END
+
+    // Add what remains of the count.
+
+    semaphore^.Header.SignalCount = oldcount + count
+
+    KiReleaseObject ( &semaphore^.Header, ipl )
+
+    RETURN 0
+END
