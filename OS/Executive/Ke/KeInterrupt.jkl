@@ -4,6 +4,8 @@
 
 #INCLUDE "Ki.hjk"
 
+KiInterruptAssignmentCounter : ULONG = 0
+
 FN (KeInterruptF) KiUnexpectedInterrupt (
     IN interrupt : ^KeInterrupt,
     IN context : ^OsContext,
@@ -33,6 +35,18 @@ EXPORT FN KeInitializeInterrupt (
 )
 
     // Initialize an interrupt object.
+
+    IF procid == KE_AUTOMATIC_INTERRUPT_PROCESSOR THEN
+        // Automatically choose the processor ID that should service this
+        // interrupt. Use an incrementing counter to spread the load.
+
+        procid = KeIncrementUlong (
+            &KiInterruptAssignmentCounter, // ptr
+            1, // ulong
+        )
+
+        procid %= KeLoaderBlock.ProcessorCount
+    END
 
     interrupt^.Routine = routine
     interrupt^.Context = context
@@ -162,8 +176,10 @@ FN KiClockTick (
         END
     END
 
-#IF BLD_MP
     IF prb^.Id == 0 THEN
+        KiTimerTickOccurred = TRUE
+
+#IF BLD_MP
         KiNextWorkBalanceMs -= intervalms
 
         IF KiNextWorkBalanceMs <= 0 THEN
@@ -177,8 +193,8 @@ FN KiClockTick (
                 0, // context2
             )
         END
-    END
 #END
+    END
 
     IF thread == &prb^.IdleThread THEN
         // If we're in the idle thread there's nothing to switch to and we'd

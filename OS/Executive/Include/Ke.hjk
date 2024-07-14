@@ -200,6 +200,8 @@ STRUCT KeInterrupt
     Connected : UBYTE,
 END
 
+#DEFINE KE_AUTOMATIC_INTERRUPT_PROCESSOR -1
+
 EXTERN FN KeInitializeInterrupt (
     IN interrupt : ^KeInterrupt,
     IN routine : KeInterruptF,
@@ -277,6 +279,31 @@ EXTERN FN KeEnqueueTimer (
 EXTERN FN KeDequeueTimer (
     IN timer : ^KeTimer,
 ) : UWORD
+
+EXTERN FN KeResetTimer (
+    IN timer : ^KeTimer,
+) :  UWORD
+
+EXTERN FN KeRealTimeToLocalTime (
+    IN desttime : ^RtlUquad,
+    IN srctime : ^RtlUquad,
+)
+
+EXTERN FN KeLocalTimeToRealTime (
+    IN desttime : ^RtlUquad,
+    IN srctime : ^RtlUquad,
+)
+
+EXTERN FN KeSetTimeZoneOffset (
+    IN offset : ULONG,
+)
+
+EXTERN FN KeGetTimeZoneOffset () : ULONG
+
+EXTERN FN KeQueryTime (
+    IN time : ^RtlUquad,
+    IN local : UWORD,
+)
 
 EXTERN FN KeInitializeProcess (
     IN process : ^KeProcess,

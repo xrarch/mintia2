@@ -16,6 +16,10 @@ EXTERN FN HalSetDebugConsole (
 
 EXTERN FN HalCrashConsole ()
 
+EXTERN FN HalQueryTime (
+    IN time : ^RtlUquad,
+)
+
 EXTERN FN HalQueryConsoleSize (
     OUT width : UWORD,
     OUT height : UWORD,
@@ -60,11 +64,15 @@ EXTERN FN HalProcessorInitialize (
     #DEFINE HAL_IPL_SERIAL 6
     #DEFINE HAL_IPL_DISK 7
 
+    #DEFINE HAL_RTC_IS_LOCAL 0
+
 #ELSEIF ( STRCMP PLATFORM "fox32" )
     // Rounded up from 16.67ms vblank interval.
 
     #DEFINE HAL_TIMER_INTERVAL 17
     #DEFINE HAL_VECTOR_MAX 256
+
+    #DEFINE HAL_RTC_IS_LOCAL 1
 
 #ELSE
     #ERROR "Unknown platform"
