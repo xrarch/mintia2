@@ -78,8 +78,9 @@ FN HalQueryTime (
 
     // Store result.
 
-    RtlMoveUquad (
-        time, // destquad
-        &tmptime, // srcquad
-    )
+    time^.High = tmptime.High
+
+    KeMemoryBarrier ()
+
+    time^.Low = tmptime.Low
 END

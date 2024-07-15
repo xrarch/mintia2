@@ -10,13 +10,13 @@
 // There are three kinds of APCs.
 //
 // Kernel APCs: These are dispatched whenever IPL is below KI_IPL_APC on a
-//              processor. They can take page faults and can acquire locks that
-//              have been marked as KAPC-acquirable.
+//              processor. They can take page faults and can acquire pushlocks
+//              that have been marked as KAPC-acquirable.
 //
 // Lazy APCs:   These are dispatched whenever a processor is executing in
 //              usermode, upon return to usermode from the kernel, and whenever
 //              the kernel takes a KE_USER_MODE wait. They can take page faults
-//              and can acquire any lock.
+//              and can acquire (almost) any pushlock.
 //
 // User APCs:   UAPCs are special as they cause code to be executed in usermode
 //              instead of kernel mode. They are dispatched only when the kernel
@@ -25,14 +25,23 @@
 //              return value. The thread then executes a callback in usermode
 //              before returning to the caller of the system service.
 
-FN KiDispatchApcQueue (
+FN KiDispatchKernelApcQueue (
     IN current : ^KeThread,
 )
 
-    // Here we have to dispatch kernel APCs, and if LazyApcTriggered is set in
-    // the thread, we also have to dispatch those.
+    // Here we have to dispatch kernel APCs.
 
-    KeCrash ( "NYI KiDispatchApcQueue\n" )
+    KeCrash ( "NYI KiDispatchKernelApcQueue\n" )
+END
+
+FN KiDispatchLazyApcQueue (
+    IN current : ^KeThread,
+)
+
+    // Dispatch the lazy APC queue. This is called upon an attempt to perform a
+    // KE_USER_MODE wait, and upon return to userspace, with pending lazy APCs.
+
+    KeCrash ( "NYI KiDispatchLazyApcQueue\n" )
 END
 
 FN KiDispatchUserApcQueue (

@@ -341,7 +341,11 @@ EXTERN FN KiDispatchSoftwareInterrupts (
     IN newipl : UWORD,
 )
 
-EXTERN FN KiDispatchApcQueue (
+EXTERN FN KiDispatchKernelApcQueue (
+    IN current : ^KeThread,
+)
+
+EXTERN FN KiDispatchLazyApcQueue (
     IN current : ^KeThread,
 )
 
@@ -402,7 +406,7 @@ EXTERN FN KiSatisfyObject (
     IN object : ^KiDispatchHeader,
     IN priorityboost : UWORD,
     IN all : UWORD,
-) : UWORD
+) : ^KeThread
 
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
 

@@ -1,0 +1,38 @@
+//
+// Implements support for Balanced Queue kernel objects.
+//
+// These are queues into which items can be inserted and removed.
+// There is integration with the dispatcher so that when a thread which is
+// dealing with a balanced queue item blocks, another thread is awoken to take
+// its place, so that the system processors aren't oversubscribed with threads.
+//
+
+#INCLUDE "Ki.hjk"
+
+EXPORT FN KeInitializeBalancedQueue (
+    IN queue : ^KeBalancedQueue,
+    IN name : ^UBYTE,
+    IN maxthreads : UWORD,
+)
+
+    KiInitializeDispatchObject (
+        &queue^.Header, // header
+        name, // name
+        KI_DISPATCH_EVENT_SYNCH, // type
+    )
+
+    queue^.Header.SignalCount = 0
+
+    RtlInitializeList ( &queue^.ItemListHead )
+    RtlInitializeList ( &queue^.ThreadListHead )
+
+    queue^.ActiveThreadCount = 0
+
+    IF maxthreads THEN
+        queue^.MaximumThreadCount = maxthreads
+
+    ELSE
+        queue^.MaximumThreadCount = KeLoaderBlock.ProcessorCount
+    END
+END
+

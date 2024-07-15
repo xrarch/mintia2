@@ -1799,12 +1799,10 @@ FN KiSatisfyObject (
     IN object : ^KiDispatchHeader,
     IN priorityboost : UWORD,
     IN all : UWORD,
-) : UWORD
+) : ^KeThread
 
     // Satisfy a wait on the object. The object lock is held.
-    // Return TRUE if any waits were satisfied, FALSE otherwise.
-
-    satisfied := FALSE
+    // Return a pointer to a satisfied thread object, NULLPTR if none satisfied.
 
     listhead := &object^.WaitListHead
     listentry := listhead^.Next
@@ -1852,22 +1850,24 @@ FN KiSatisfyObject (
 
             KiReleaseThreadElevated ( thread )
 
-            RETURN TRUE
+            RETURN thread
         END
-
-        satisfied = TRUE
 
         KiReleaseThreadElevated ( thread )
 
         listentry = listentry^.Next
     END
 
-    RETURN satisfied
+    RETURN NULLPTR
 END
 
 #MACRO KiCheckWaitInterruptingEvents ( thread, ipl, alertable, waitmode ) [
-    IF ipl == KI_IPL_LOW THEN
-        // IPL >= KI_IPL_APC masks out all events.
+    // IPL >= KI_IPL_APC masks out all events. We also don't check unless
+    // KernelInterrupt has been set, as this is pretty time consuming to do on
+    // every wait operation.
+
+    IF thread^.KernelInterrupt AND ipl == KI_IPL_LOW THEN
+        thread^.KernelInterrupt = FALSE
 
         IF NOT alertable THEN
             IF waitmode == KE_USER_MODE AND
@@ -1898,20 +1898,21 @@ END
             END
 
         ELSEIF NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
-            // There are pending lazy APCs and this is a KE_USER_MODE wait.
+            // There are pending lazy APCs and this is a usermode wait,
+            // so dispatch them and retry.
 
             KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
 
-            thread^.LazyApcTriggered = TRUE
-
-            KiSoftInterruptSelf ( KI_CURRENT_PRB_LOCAL, KI_IPL_APC )
-
             KiReleaseThread ( thread, ipl )
+
+            KiDispatchLazyApcQueue ( thread )
 
             GOTO Retry
 
         ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
-            // There are pending usermode APCs and this is a KE_USER_MODE wait.
+            // There are pending usermode APCs and this is a usermode
+            // wait, so interrupt the wait and cause them to be
+            // dispatched upon return to userspace.
 
             KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
 
@@ -1926,7 +1927,9 @@ END
             thread^.SignalAcceptMask &
             thread^.SignalDeliverOnWaitMask THEN
 
-            // There are pending signals and this is a KE_USER_MODE wait.
+            // There are pending signals and this is a usermode wait, so
+            // interrupt the wait and cause them to be dispatched upon return
+            // to usermode.
 
             KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
 
@@ -2015,7 +2018,14 @@ END
 
     RtlSubUquadFromUquad ( &currenttime, starttime )
 
-    RtlSubUquadFromUquad ( timeout, &currenttime )
+    IF RtlUquadLtUquad ( &currenttime, timeout ) THEN
+        RtlSubUquadFromUquad ( timeout, &currenttime )
+
+    ELSE
+        // Timeout already expired.
+
+        RETURN OS_STATUS_WAIT_TIMEOUT
+    END
 ]
 
 EXPORT FN KeWaitForObjects (

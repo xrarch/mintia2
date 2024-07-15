@@ -491,9 +491,10 @@ EXPORT FN KeQueryTime (
 #ELSE
     capturedhigh := KiCurrentTime.High
     time^.High = capturedhigh
-    time^.Low = KiCurrentTime.Low
 
-    BARRIER
+    KeMemoryBarrier ()
+    
+    time^.Low = KiCurrentTime.Low
 
     IF KiCurrentTime.High != capturedhigh THEN
         GOTO Retry

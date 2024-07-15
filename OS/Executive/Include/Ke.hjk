@@ -8,6 +8,12 @@
 
 TYPE KiSpinlock : ULONG
 
+EXTERN FN KeMemoryBarrier ()
+
+#ELSE
+
+#MACRO KeMemoryBarrier () []
+
 #END
 
 STRUCT KePushlock
@@ -423,6 +429,7 @@ STRUCT KeThread
     RemainingQuantum : BYTE,
     UserApcTriggered : UBYTE,
     UserInterrupt : UBYTE,
+    KernelInterrupt : UBYTE,
     WaitCount : UBYTE,
     Priority : UBYTE,
     BasePriority : UBYTE,
@@ -430,7 +437,6 @@ STRUCT KeThread
     Alertable : UBYTE,
     WaitMode : UBYTE,
     WaitIpl : UBYTE,
-    LazyApcTriggered : UBYTE,
     InSwapList : UBYTE,
     Interactive : UBYTE,
     CurrentQueue : UBYTE,
@@ -469,6 +475,18 @@ EXTERN FN KeSignalThread (
     IN thread : ^KeThread,
     IN signal : UWORD,
 )
+
+EXTERN FN KeInitializeSemaphore (
+    IN semaphore : ^KeSemaphore,
+    IN name : ^UBYTE,
+    IN initialcount : UWORD,
+)
+
+EXTERN FN KeReleaseSemaphore (
+    IN semaphore : ^KeSemaphore,
+    IN priorityboost : UWORD,
+    IN count : UWORD,
+) : UWORD
 
 #MACRO KeInitializePushlock ( pushlock ) [
     NOTHING (pushlock)^.Ptr = 0
@@ -510,3 +528,11 @@ EXTERN FN KeWaitForSingleObject (
     IN timeout : ^RtlUquad,
     IN object : ^KiDispatchHeader,
 ) : OsStatus
+
+STRUCT KeBalancedQueue
+    Header : KiDispatchHeader,
+    ThreadListHead : RtlListEntry,
+    ItemListHead : RtlListEntry,
+    ActiveThreadCount : ULONG,
+    MaximumThreadCount : ULONG,
+END
