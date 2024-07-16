@@ -406,7 +406,12 @@ EXTERN FN KiSatisfyObject (
     IN object : ^KiDispatchHeader,
     IN priorityboost : UWORD,
     IN all : UWORD,
+    IN status : OsStatus,
 ) : ^KeThread
+
+EXTERN FN KiWakeBalancedQueue (
+    IN queue : ^KeBalancedQueue,
+)
 
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
 
@@ -505,6 +510,40 @@ EXTERN FN KiReleaseSpinlockLower (
     KiReleaseSpinlock ( &(object)^.Spinlock )
 ]
 
+#IF ( == BLD_BITS 64 )
+
+#DEFINE KI_QUEUE_REMOVAL_LOCKS 32
+#DEFINE KI_QUEUE_SHIFT 6
+
+#ELSE
+
+#DEFINE KI_QUEUE_REMOVAL_LOCKS 16
+#DEFINE KI_QUEUE_SHIFT 5
+
+#END
+
+EXTERN KiQueueRemovalLocks : KiSpinlock[KI_QUEUE_REMOVAL_LOCKS]
+
+#MACRO KiQueueLockIndex ( queue ) [
+    (((queue) >> KI_QUEUE_SHIFT) & (KI_QUEUE_REMOVAL_LOCKS - 1))
+]
+
+#MACRO KiAcquireQueueRemoval ( queue ) [
+    KiAcquireSpinlockRaise ( &KiQueueRemovalLocks[KiQueueLockIndex(queue)] )
+]
+
+#MACRO KiReleaseQueueRemoval ( queue, ipl ) [
+    KiReleaseSpinlockLower ( &KiQueueRemovalLocks[KiQueueLockIndex(queue)], ipl )
+]
+
+#MACRO KiAcquireQueueRemovalElevated ( queue ) [
+    KiAcquireSpinlock ( &KiQueueRemovalLocks[KiQueueLockIndex(queue)] )
+]
+
+#MACRO KiReleaseQueueRemovalElevated ( queue ) [
+    KiReleaseSpinlock ( &KiQueueRemovalLocks[KiQueueLockIndex(queue)] )
+]
+
 EXTERN FN KiStealWork ()
 
 EXTERN KiWorkBalanceDpc : KeDpc
@@ -522,6 +561,18 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #MACRO KiAcquireObjectElevated ( object ) []
 
 #MACRO KiReleaseObjectElevated ( object ) []
+
+#MACRO KiAcquireQueueRemoval ( queue ) [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseQueueRemoval ( queue, ipl ) [
+    KiLowerIpl ( ipl )
+]
+
+#MACRO KiAcquireQueueRemovalElevated ( queue ) []
+
+#MACRO KiReleaseQueueRemovalElevated ( queue ) []
 
 #END
 

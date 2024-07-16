@@ -368,6 +368,7 @@ FN (KeDpcF) KiTimerExpiration (
                 &timer^.Header, // object
                 0, // priorityboost
                 TRUE, // all
+                0, // status
             )
 
             timer^.Header.SignalCount = 1
@@ -493,7 +494,7 @@ EXPORT FN KeQueryTime (
     time^.High = capturedhigh
 
     KeMemoryBarrier ()
-    
+
     time^.Low = KiCurrentTime.Low
 
     IF KiCurrentTime.High != capturedhigh THEN

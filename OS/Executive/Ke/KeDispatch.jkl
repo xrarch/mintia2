@@ -1636,6 +1636,56 @@ END
     KiReleaseObjectElevated ( object )
 ]
 
+#MACRO KiIndicateActive ( thread, queue ) [
+    // If we're associated with a balanced queue, we have to indicate that we've
+    // awoken.
+
+    IF queue THEN
+        // Indicate that we're active again.
+
+        KiAcquireQueueRemovalElevated ( queue )
+
+#IF BLD_MP
+        IF (thread)^.BalancedQueue THEN
+#END
+            KiAcquireObjectElevated ( &queue^.Header )
+
+            queue^.ActiveThreadCount += 1
+
+            KiReleaseObjectElevated ( &queue^.Header )
+#IF BLD_MP
+        END
+#END
+
+        KiReleaseQueueRemovalElevated ( queue )
+    END
+]
+
+#MACRO KiIndicateDeactivated ( thread, queue ) [
+    // If we're associated with a balanced queue, we have to indicate that we're
+    // blocking.
+
+    IF queue THEN
+        // Indicate that we're active again.
+
+        KiAcquireQueueRemovalElevated ( queue )
+
+#IF BLD_MP
+        IF (thread)^.BalancedQueue THEN
+#END
+            KiAcquireObjectElevated ( &queue^.Header )
+
+            KiWakeBalancedQueue ( queue )
+
+            KiReleaseObjectElevated ( &queue^.Header )
+#IF BLD_MP
+        END
+#END
+
+        KiReleaseQueueRemovalElevated ( queue )
+    END
+]
+
 FN KiWaitThread (
     IN thread : ^KeThread,
     IN hastimeout : UWORD,
@@ -1692,6 +1742,13 @@ FN KiWaitThread (
 
         KeDequeueTimer ( &thread^.Timeout )
     END
+
+    queue := thread^.BalancedQueue
+
+    // If we're associated with a balanced queue, we have to indicate that we're
+    // awake now.
+
+    KiIndicateActive ( thread, queue )
 
     // Return the status.
 
@@ -1799,6 +1856,7 @@ FN KiSatisfyObject (
     IN object : ^KiDispatchHeader,
     IN priorityboost : UWORD,
     IN all : UWORD,
+    IN status : OsStatus,
 ) : ^KeThread
 
     // Satisfy a wait on the object. The object lock is held.
@@ -1839,11 +1897,24 @@ FN KiSatisfyObject (
 
         // Still active. Unwait the thread.
 
-        KiUnwaitThread (
-            waitblock^.Thread, // thread
-            waitblock^.WakeStatus, // status
-            priorityboost, // priorityboost
-        )
+        IF NOT status THEN
+            // Unwait with the status stored in the wait block.
+
+            KiUnwaitThread (
+                waitblock^.Thread, // thread
+                waitblock^.WakeStatus, // status
+                priorityboost, // priorityboost
+            )
+
+        ELSE
+            // Unwait with the specified status.
+
+            KiUnwaitThread (
+                waitblock^.Thread, // thread
+                status, // status
+                priorityboost, // priorityboost
+            )
+        END
 
         IF NOT all THEN
             // We got one, so exit.
@@ -2230,6 +2301,13 @@ EXPORT FN KeWaitForObjects (
         )
     END
 
+    queue := thread^.BalancedQueue
+
+    // If we're associated with a balanced queue, we have to indicate that we
+    // are blocking so that someone else can be awoken.
+
+    KiIndicateDeactivated ( thread, queue )
+
     // Lock our thread.
 
     KiAcquireThreadElevated ( thread )
@@ -2265,6 +2343,11 @@ EXPORT FN KeWaitForObjects (
 
             RtlRemoveEntryList ( &waitblock^.Entry )
         END
+
+        // If we're associated with a balanced queue, we indicated that we were
+        // deactivated. We have to undo that now.
+
+        KiIndicateActive ( thread, queue )
 
         // The guy who aborted the wait left our status in our thread struct.
 
@@ -2365,6 +2448,13 @@ EXPORT FN KeSleep (
         0, // context2
     )
 
+    queue := thread^.BalancedQueue
+
+    // If we're associated with a balanced queue, we have to indicate that we
+    // are blocking so that someone else can be awoken.
+
+    KiIndicateDeactivated ( thread, queue )
+
     // Lock our thread.
 
     KiAcquireThreadElevated ( thread )
@@ -2403,6 +2493,11 @@ EXPORT FN KeSleep (
         // Set to not waiting.
 
         KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+        // If we're associated with a balanced queue, we indicated that we were
+        // deactivated. We have to undo that now.
+
+        KiIndicateActive ( thread, queue )
 
         KiLowerIpl ( ipl )
 
@@ -2498,25 +2593,54 @@ EXPORT FN KeWaitForSingleObject (
 
     KiAcquireObjectElevated ( object )
 
-    // Capture the current signal count.
+    IF object^.Type != KI_DISPATCH_BALANCED_QUEUE THEN
+        IF object^.SignalCount THEN
+            // Already signaled. Our wait has been satisfied before it began.
+            // If this isn't a notification event, consume the count.
 
-    signal := object^.SignalCount
+            IF object^.Type != KI_DISPATCH_EVENT_NOTIF THEN
+                object^.SignalCount -= 1
+            END
 
-    IF signal THEN
-        // Already signaled. Our wait has been satisfied before it began.
-        // If this isn't a notification event, consume the count.
+            KiReleaseObjectElevated ( object )
 
-        IF object^.Type != KI_DISPATCH_EVENT_NOTIF THEN
-            object^.SignalCount = signal - 1
+            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+            KiLowerIpl ( ipl )
+
+            RETURN 0
         END
 
-        KiReleaseObjectElevated ( object )
+    ELSE
+        // This is a balanced queue. If there's a pending item, grab it.
 
-        KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+        queue := CONTAINEROF object TO KeBalancedQueue.Header
 
-        KiLowerIpl ( ipl )
+        IF NOT RtlEmptyList ( &queue^.ItemListHead ) AND
+            queue^.ActiveThreadCount <= queue^.MaximumThreadCount THEN
 
-        RETURN 0
+            // Grab the item.
+
+            item := queue^.ItemListHead.Next
+
+            // Stash it in the thread object.
+
+            thread^.QueueItem = item
+
+            // Remove it from the list.
+
+            RtlRemoveEntryList ( item )
+
+            // Back out and return.
+
+            KiReleaseObjectElevated ( object )
+
+            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+            KiLowerIpl ( ipl )
+
+            RETURN 0
+        END
     END
 
     // Enqueue our wait block to the object.
@@ -2565,6 +2689,13 @@ EXPORT FN KeWaitForSingleObject (
         )
     END
 
+    queue := thread^.BalancedQueue
+
+    // If we're associated with a balanced queue, we have to indicate that we
+    // are blocking so that someone else can be awoken.
+
+    KiIndicateDeactivated ( thread, queue )
+
     // Lock our thread.
 
     KiAcquireThreadElevated ( thread )
@@ -2612,6 +2743,11 @@ EXPORT FN KeWaitForSingleObject (
         // Set to not waiting.
 
         KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+        // If we're associated with a balanced queue, we indicated that we were
+        // deactivated. We have to undo that now.
+
+        KiIndicateActive ( thread, queue )
 
         KiLowerIpl ( ipl )
 

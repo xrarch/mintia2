@@ -235,7 +235,7 @@ ENUM KiDispatchType : UBYTE
 
     KI_DISPATCH_EVENT_NOTIF,
     KI_DISPATCH_EVENT_SYNCH,
-    KI_DISPATCH_SEMAPHORE,
+    KI_DISPATCH_BALANCED_QUEUE,
 END
 
 STRUCT KiDispatchHeader
@@ -389,6 +389,7 @@ STRUCT KeThread
 
     ProcessListEntry : RtlListEntry,
     ReadyEntry : RtlListEntry,
+    BalancedQueueEntry : RtlListEntry,
 
     KapcListHead : RtlListEntry,
     LapcListHead : RtlListEntry,
@@ -404,6 +405,9 @@ STRUCT KeThread
     ActualProcess : ^KeProcess,
     KernelStackTop : ^VOID,
 
+    BalancedQueue : ^KeBalancedQueue,
+    QueueItem : ^RtlListEntry,
+
 #IF BLD_MP
     AffinityPrb : ^KiPrb,
     CurrentPrb : ^KiPrb,
@@ -415,6 +419,7 @@ STRUCT KeThread
 
 #IF BLD_MP
     Spinlock : KiSpinlock,
+    QueueSpinlock : KiSpinlock,
 #END
 
     SignalMask : ULONG,
