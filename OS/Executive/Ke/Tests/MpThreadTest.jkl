@@ -1,0 +1,203 @@
+#INCLUDE "../Ki.hjk"
+
+FN KiInitializeTest ()
+
+    prb := KI_CURRENT_PRB
+
+    IF prb^.Id == 0 THEN
+        KeInitializeSemaphore (
+            &KiTestSemaphore, // semaphore
+            "TestSemaphore", // name
+            0, // initialcount
+        )
+
+        ipl = KiRaiseIpl ( KI_IPL_DPC )
+
+        KeInitializeThread (
+            &KiIdleProcess, // process
+            &KiTestThreads[0], // thread
+            "TestThread", // name
+            &KiTestThreadsStacks[0], // kstack
+            2048, // kstacksize
+            &KiTestThreadPinning, // startfunc
+            0, // context1
+            0, // context2
+        )
+
+        KiReadyThread ( &KiTestThreads[0] )
+
+        i := 0
+
+        WHILE i < KI_TEST_EVENTS DO
+            KeInitializeEvent (
+                &KiTestEvents[i], // event
+                "TestEvent", // name
+                FALSE, // notification
+                0, // signalstate
+            )
+
+            i += 1
+        END
+
+        i = 1
+
+        WHILE i < KI_TEST_THREADS DO
+            KeInitializeThread (
+                &KiIdleProcess, // process
+                &KiTestThreads[i], // thread
+                "TestThread", // name
+                &KiTestThreadsStacks[512 * i], // kstack
+                2048, // kstacksize
+                &KiTestThread, // startfunc
+                i, // context1
+                0, // context2
+            )
+
+            i += 1
+        END
+
+        i = 1
+
+        WHILE i < KI_TEST_THREADS DO
+            KiReadyThread ( &KiTestThreads[i] )
+
+            i += 1
+        END
+
+        KiLowerIpl ( ipl )
+    END
+END
+
+EXTERN FN KiReadyThread (
+    IN thread : ^KeThread,
+)
+
+#DEFINE KI_TEST_THREADS 24
+#DEFINE KI_TEST_EVENTS 8
+
+KiTestThreads : KeThread[KI_TEST_THREADS]
+KiTestThreadsStacks : ULONG[512 * KI_TEST_THREADS]
+KiTestEvents : KeEvent[KI_TEST_EVENTS]
+KiTestSemaphore : KeSemaphore
+
+PUBLIC Counter := 0
+
+FN (KeStartThreadF) KiTestThread (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    objecttable : ^KiDispatchHeader[2]
+
+    timeout : RtlUquad
+
+    timeout.High = 0
+    timeout.Low = 50 + context1 * 50
+
+    i := context1 % KI_TEST_EVENTS
+    j := i + 1
+    n := 0
+
+    WHILE TRUE DO
+        IF j == KI_TEST_EVENTS THEN
+            n += 1
+            j = 0
+        END
+
+        IF i >= KI_TEST_EVENTS THEN
+            i %= KI_TEST_EVENTS
+        END
+
+        objecttable[0] = &KiTestEvents[i].Header
+        objecttable[1] = &KiTestEvents[j].Header
+
+        status : OsStatus
+
+        IF n == 100 THEN
+            spin := 0
+
+            ipl := KiAcquireAnnounce ()
+
+            KiReleaseAnnounce ( ipl )
+
+            WHILE spin < 5000000 DO
+                spin += 1
+            END
+
+            RtlPrint ( "D" )
+
+            status = KeWaitForSingleObject (
+                KE_KERNEL_MODE, // waitmode
+                FALSE, // alertable
+                NULLPTR, // timeout
+                &KiTestSemaphore.Header, // object
+            )
+
+            RtlPrint ( "%u:%x ", context1, status )
+
+            n = 0
+        END
+
+        IF j & 1 THEN
+            status = KeWaitForObjects (
+                KE_KERNEL_MODE, // waitmode
+                FALSE, // alertable
+                &timeout, // timeout
+                2, // objectcount
+                &objecttable[0], // objecttable
+                NULLPTR, // waitblocktable
+            )
+
+        ELSE
+            status = KeWaitForSingleObject (
+                KE_KERNEL_MODE, // waitmode
+                FALSE, // alertable
+                &timeout, // timeout
+                &KiTestEvents[i].Header, // object
+            )
+
+        END
+
+        Counter = context1
+
+        KeSignalEvent (
+            &KiTestEvents[j], // event
+            2, // priorityboost
+        )
+
+
+        nexti := i + 1
+
+        IF nexti >= KI_TEST_EVENTS THEN
+            nexti %= KI_TEST_EVENTS
+        END
+
+        KeSignalEvent (
+            &KiTestEvents[nexti], // event
+            3, // priorityboost
+        )
+
+        i += 2
+        j += 1
+    END
+END
+
+FN (KeStartThreadF) KiTestThreadPinning (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+
+    interval : RtlUquad
+    interval.High = 0
+    interval.Low = 10000
+
+    WHILE TRUE DO
+
+        KeSleep (
+            &interval, // interval
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+        )
+    END
+END

@@ -256,7 +256,7 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
             KiReleaseObject ( &queue^.Header, ipl )
 
-            RETURN item
+            RETURN OS_STATUS_SUCCESS
         END
 
         KiReleaseObjectElevated ( &queue^.Header )
@@ -273,6 +273,12 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
     IF status == 0 THEN
         // Got an item.
+
+#IF BLD_CHK
+        IF NOT thread^.QueueItem THEN
+            KeCrash ( "KeRemoveFromBalancedQueue: status of 0 but no item\n" )
+        END
+#END
 
         item = thread^.QueueItem
 

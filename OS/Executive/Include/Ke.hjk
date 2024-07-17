@@ -541,3 +541,24 @@ STRUCT KeBalancedQueue
     ActiveThreadCount : ULONG,
     MaximumThreadCount : ULONG,
 END
+
+EXTERN FN KeInitializeBalancedQueue (
+    IN queue : ^KeBalancedQueue,
+    IN name : ^UBYTE,
+    IN maxthreads : UWORD,
+)
+
+EXTERN FN KeInsertIntoBalancedQueue (
+    IN queue : ^KeBalancedQueue,
+    IN item : ^RtlListEntry,
+    IN head : UWORD,
+    IN priorityboost : UWORD,
+)
+
+EXTERN FN KeRemoveFromBalancedQueue (
+    IN queue : ^KeBalancedQueue,
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+    IN timeout : ^RtlUquad,
+    OUT item : ^RtlListEntry,
+) : OsStatus
