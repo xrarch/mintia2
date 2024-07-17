@@ -15,24 +15,6 @@ EXTERN FN BlInitializeIo ()
 EXTERN FN BlLoadResources ()
 EXTERN FN BlLoadDrivers ()
 
-#IF BLD_MP
-
-EXTERN FN BxStartProcessors (
-    IN startfunc : BlStartProcessorF,
-)
-
-FN (BlStartProcessorsF) BlStartProcessors (
-    IN startfunc : BlStartProcessorF,
-)
-
-    // Callback from the Executive when it's ready to receive the non-boot
-    // processors. Defer to platform code for this.
-
-    BxStartProcessors ( startfunc )
-END
-
-#END
-
 FN BlMain () : UWORD
 
     RtlPrint (
@@ -42,10 +24,6 @@ FN BlMain () : UWORD
     )
 
     BlDoRelinkAll = BlGetExistenceArg ( "-relink" )
-
-#IF BLD_MP
-    BlInfoBlock.StartProcessors = &BlStartProcessors
-#END
 
     // Initialize memory management.
 

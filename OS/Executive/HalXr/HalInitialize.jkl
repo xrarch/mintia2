@@ -118,3 +118,15 @@ FN HalEarlyInitialize ()
 
     HalpConfigureTimer ()
 END
+
+FN HalStartProcessors (
+    IN startfunc : HalStartProcessorF,
+)
+
+    // Call the Loader to do platform-specific stuff to start the processors.
+    // We have to call the firmware with paging disabled. We can't do that from
+    // here, but on XR/station the Loader lives in an identity mapping of low
+    // memory, so he can do that just fine.
+
+    KeLoaderBlock.U.Xr.StartProcessors ( CAST startfunc TO BlStartProcessorF )
+END

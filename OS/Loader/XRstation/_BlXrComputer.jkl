@@ -356,6 +356,11 @@ EXTERN FN BxFlushPage (
 
 EXTERN FN BlMain () : UWORD
 
+// FORWARD
+EXTERN FN (BlStartProcessorsF) BxStartProcessors (
+    IN startfunc : BlStartProcessorF,
+)
+
 #DEFINE BX_ARG_TABLE_SIZE 256
 #DEFINE BX_ARG_MAX 32
 
@@ -448,6 +453,7 @@ FN (FwBootstrapEntrypoint) BxEntry (
 
 #IF BLD_MP
     BlInfoBlock.ProcessorCount = FwDeviceDatabase^.ProcessorCount
+    BlInfoBlock.U.Xr.StartProcessors = &BxStartProcessors
 #ELSE
     BlInfoBlock.ProcessorCount = 1
 #END
@@ -1122,7 +1128,7 @@ FN (FwKickProcessorCallbackF) BxStartProcessor (
     WHILE TRUE DO END
 END
 
-FN BxStartProcessors (
+FN (BlStartProcessorsF) BxStartProcessors (
     IN startfunc : BlStartProcessorF,
 )
 

@@ -207,7 +207,7 @@ END
 #IF BLD_MP
 
 #SECTION "INIT$text"
-FN (BlStartProcessorF) KiStartOtherProcessor ()
+FN (HalStartProcessorF) KiStartOtherProcessor ()
 
     // This is the first code that runs in the context of a non-boot processor.
     // We assume any context required to access the Prb has been set up by the
@@ -375,14 +375,9 @@ EXPORT FN KeMain (
 
     KiInitializeCount = KeLoaderBlock.ProcessorCount - 1
 
-    // Call the Loader to do platform-specific stuff to start the processors.
-    // Some platforms require calling the firmware with paging disabled. We
-    // can't do that from here, but on those platforms Loader lives in an
-    // identity mapping of low memory, so he can do that just fine.
+    // Bring em in.
 
-    KeLoaderBlock.StartProcessors (
-        &KiStartOtherProcessor, // startfunc
-    )
+    HalStartProcessors ( &KiStartOtherProcessor )
 
     // Wait for them to signal that they've been initialized.
 

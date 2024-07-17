@@ -25,23 +25,26 @@
 
 #DEFINE BL_PRB_SIZE ( << 1 BL_PRB_SHIFT )
 
+FNPTR BlStartProcessorF ()
+
+FNPTR BlStartProcessorsF (
+    IN startfunc : BlStartProcessorF,
+)
+
 STRUCT BlInfoRecordXrStation
     ExceptionBlock : ^VOID,
     ExceptionBlockPhys : ^VOID,
     CitronBase : ^VOID,
     LsicBase : ^VOID,
     NvramBase : ^VOID,
+#IF BLD_MP
+    StartProcessors : BlStartProcessorsF,
+#END
 END
 
 UNION BlInfoUnion
     Xr : BlInfoRecordXrStation,
 END
-
-FNPTR BlStartProcessorF ()
-
-FNPTR BlStartProcessorsF (
-    IN startfunc : BlStartProcessorF,
-)
 
 #DEFINE BL_BOOT_NAME_MAX 64
 
@@ -55,10 +58,6 @@ STRUCT BlInfoRecord
     VirtualPrbBase : ^VOID,
     PhysicalPrbBase : ^VOID,
     DbgMain : ^VOID,
-
-#IF BLD_MP
-    StartProcessors : BlStartProcessorsF,
-#END
 
     SystemPageDirectoryPfn : UWORD,
 
