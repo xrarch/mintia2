@@ -119,6 +119,9 @@ FN HalEarlyInitialize ()
     HalpConfigureTimer ()
 END
 
+#IF BLD_MP
+
+#SECTION "INIT$text"
 FN HalStartProcessors (
     IN startfunc : HalStartProcessorF,
 )
@@ -130,3 +133,5 @@ FN HalStartProcessors (
 
     KeLoaderBlock.U.Xr.StartProcessors ( CAST startfunc TO BlStartProcessorF )
 END
+
+#END
