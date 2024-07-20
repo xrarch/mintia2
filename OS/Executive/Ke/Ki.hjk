@@ -637,20 +637,17 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #MACRO KiUpdateTime ( prb ) [
     sup := KeLoaderBlock.VirtualSharedUserPage
 
-#IF HAL_RTC_IS_LOCAL
     realtime : RtlUquad
 
     HalQueryTime ( &realtime )
 
+#IF HAL_RTC_IS_LOCAL
     // Convert to real time by subtracting the time zone offset.
 
     realtime.Quad -= OS_SHARED_USER_PAGE^.TimeZoneOffset
+#END
 
     sup^.RealTime.Quad = realtime.Quad
-
-#ELSE
-    HalQueryTime ( &sup^.RealTime )
-#END
 
     sup^.Uptime.Quad = (prb)^.ClockTicks.Quad
 ]
