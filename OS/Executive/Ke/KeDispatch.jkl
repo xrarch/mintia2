@@ -1628,6 +1628,12 @@ END
         // Decrement waiter count, since this wait block wasn't
         // satisfied yet.
 
+#IF BLD_CHK
+        IF object^.WaiterCount == 0 THEN
+            KeCrash ( "Waiter count underflow\n" )
+        END
+#END
+
         object^.WaiterCount -= 1
     END
 
@@ -2255,6 +2261,15 @@ EXPORT FN KeWaitForObjects (
 
         // Increment waiter count.
 
+#IF BLD_CHK
+        IF object^.WaiterCount == 0xFFFFFFFF THEN
+            // This shouldn't be possible as it would require 4 billion
+            // concurrently active threads.
+
+            KeCrash ( "Waiter count overflow\n" )
+        END
+#END
+
         object^.WaiterCount += 1
 
         // Release the object lock.
@@ -2640,6 +2655,15 @@ EXPORT FN KeWaitForSingleObject (
     )
 
     // Increment waiter count.
+
+#IF BLD_CHK
+    IF object^.WaiterCount == 0xFFFFFFFF THEN
+        // This shouldn't be possible as it would require 4 billion concurrently
+        // active threads.
+
+        KeCrash ( "Waiter count overflow\n" )
+    END
+#END
 
     object^.WaiterCount += 1
 
