@@ -578,27 +578,81 @@ EXTERN KiWorkBalanceDpc : KeDpc
 
 #IF ( == BLD_BITS 32 )
 
-#MACRO KiCaptureCurrentTicks ( prb, uquad ) [
-    oldstate := KiDisableInterrupts ()
+#MACRO KiCaptureCurrentTicks ( uquad ) [
+    WHILE TRUE DO
+        sup := OS_SHARED_USER_PAGE
 
-    NOTHING (uquad)^.High = (prb)^.ClockTicks.High
-    NOTHING (uquad)^.Low = (prb)^.ClockTicks.Low
+        NOTHING (uquad)^.High = (sup)^.Uptime.High
+        NOTHING (uquad)^.Low = (sup)^.Uptime.Low
 
-    KiRestoreInterrupts ( oldstate )
+        IF (uquad)^.High == (sup)^.UptimeCheckHigh THEN
+            // Didn't change while collecting.
+
+            BREAK
+        END
+    END
 ]
 
-#MACRO KiLowTick ( prb ) [
-    ((prb)^.ClockTicks.Low)
+#MACRO KiLowTick () [
+    (OS_SHARED_USER_PAGE^.Uptime.Low)
+]
+
+#MACRO KiUpdateTime ( prb ) [
+    sup := KeLoaderBlock.VirtualSharedUserPage
+
+    realtime : RtlUquad
+
+    HalQueryTime ( &realtime )
+
+#IF HAL_RTC_IS_LOCAL
+    // Convert to real time by subtracting the time zone offset.
+
+    offset := OS_SHARED_USER_PAGE^.TimeZoneOffset
+
+    RtlSubUlongFromUquad (
+        &realtime, // destquad
+        offset, // ulong
+    )
+#END
+
+    sup^.RealTimeCheckHigh = realtime.High
+    sup^.RealTime.Low = realtime.Low
+    sup^.RealTime.High = realtime.High
+
+    sup^.UptimeCheckHigh = (prb)^.ClockTicks.High
+    sup^.Uptime.Low = (prb)^.ClockTicks.Low
+    sup^.Uptime.High = (prb)^.ClockTicks.High
 ]
 
 #ELSE
 
-#MACRO KiCaptureCurrentTicks ( prb, uquad ) [
-    NOTHING (uquad)^.Quad = (prb)^.ClockTicks.Quad
+#MACRO KiCaptureCurrentTicks ( uquad ) [
+    NOTHING (uquad)^.Quad = OS_SHARED_USER_PAGE^.Uptime.Quad
 ]
 
 #MACRO KiLowTick ( prb ) [
-    ((prb)^.ClockTicks.Quad)
+    (OS_SHARED_USER_PAGE^.Uptime.Quad)
+]
+
+#MACRO KiUpdateTime ( prb ) [
+    sup := KeLoaderBlock.VirtualSharedUserPage
+
+#IF HAL_RTC_IS_LOCAL
+    realtime : RtlUquad
+
+    HalQueryTime ( &realtime )
+
+    // Convert to real time by subtracting the time zone offset.
+
+    realtime.Quad -= OS_SHARED_USER_PAGE^.TimeZoneOffset
+
+    sup^.RealTime.Quad = realtime.Quad
+
+#ELSE
+    HalQueryTime ( &sup^.RealTime )
+#END
+
+    sup^.Uptime.Quad = (prb)^.ClockTicks.Quad
 ]
 
 #END
@@ -626,5 +680,3 @@ EXTERN FN KiInitializeContext (
 ) : ^OsContext
 
 EXTERN KiIndexFirstBitClear : UBYTE[256]
-
-EXTERN KiTimerTickOccurred : UBYTE

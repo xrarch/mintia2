@@ -177,7 +177,9 @@ FN KiClockTick (
     END
 
     IF prb^.Id == 0 THEN
-        KiTimerTickOccurred = TRUE
+        // If we're processor zero, then update the time.
+
+        KiUpdateTime ( prb )
 
 #IF BLD_MP
         KiNextWorkBalanceMs -= intervalms

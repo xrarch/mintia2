@@ -1,5 +1,19 @@
 #INCLUDE "../Ki.hjk"
 
+EXTERN FN KiReadyThread (
+    IN thread : ^KeThread,
+)
+
+#DEFINE KI_TEST_THREADS 24
+#DEFINE KI_TEST_EVENTS 8
+
+KiTestThreads : KeThread[KI_TEST_THREADS]
+KiTestThreadsStacks : ULONG[512 * KI_TEST_THREADS]
+KiTestEvents : KeEvent[KI_TEST_EVENTS]
+KiTestSemaphore : KeSemaphore
+
+PUBLIC Counter := 0
+
 FN KiInitializeTest ()
 
     prb := KI_CURRENT_PRB
@@ -67,20 +81,6 @@ FN KiInitializeTest ()
         KiLowerIpl ( ipl )
     END
 END
-
-EXTERN FN KiReadyThread (
-    IN thread : ^KeThread,
-)
-
-#DEFINE KI_TEST_THREADS 24
-#DEFINE KI_TEST_EVENTS 8
-
-KiTestThreads : KeThread[KI_TEST_THREADS]
-KiTestThreadsStacks : ULONG[512 * KI_TEST_THREADS]
-KiTestEvents : KeEvent[KI_TEST_EVENTS]
-KiTestSemaphore : KeSemaphore
-
-PUBLIC Counter := 0
 
 FN (KeStartThreadF) KiTestThread (
     IN context1 : UWORD,

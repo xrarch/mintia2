@@ -247,13 +247,9 @@ BxEnableVirtualAddressing:
 
     ret
 
-// We would align BxStartSystem to a 64 byte (16 instruction) boundary to
-// ensure that we don't take a TB miss while inserting the zeroth Prb into the
-// reserved entry, but the only miss possible is an ITB miss which won't impact
-// anything we do with the DTB.
-
 // a0 - entrypoint
 // a1 - prb
+// a2 - userpage
 BxStartSystem:
 .global BxStartSystem
     // Flush the icache.
@@ -262,7 +258,8 @@ BxStartSystem:
     mtcr icachectrl, t0
 
     // Ensure any ITB misses that are going to happen on this routine have
-    // already happened by jumping to the end and back here.
+    // already happened by jumping to the end and back here. Note that this
+    // assumes that the routine is less than a page size.
 
     b    .itbmiss
 .back:
@@ -280,6 +277,19 @@ BxStartSystem:
     rshi t1, a1, 12
     lshi t1, t1, 5
     ori  t1, t1, 0x17 // PTE_V | PTE_W | PTE_G | PTE_K
+    mtcr dtbpte, t1
+
+    // Insert the shared user page into DTB reserved entry #2.
+
+    li   t1, 2
+    mtcr dtbindex, t1
+
+    la   t1, (0x7FFFF000 >> 12)
+    mtcr dtbtag, t1
+
+    rshi t1, a2, 12
+    lshi t1, t1, 5
+    ori  t1, t1, 0x11 // PTE_V | PTE_G
     mtcr dtbpte, t1
 
     mtcr dtbindex, t0
@@ -1123,6 +1133,7 @@ FN (FwKickProcessorCallbackF) BxStartProcessor (
     BxStartSystem (
         context, // entrypoint
         prbphys, // prb
+        BlInfoBlock.PhysicalSharedUserPage, // userpage
     )
 
     WHILE TRUE DO END

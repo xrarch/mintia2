@@ -4,17 +4,7 @@
 
 #INCLUDE "Ki.hjk"
 
-KiCurrentTime : RtlUquad
-KiTimeZoneOffset : ULONG
-
-// Initialize this to TRUE so that the first call to KeQueryTime fills the
-// current time from the HAL.
-
-PUBLIC KiTimerTickOccurred : UBYTE = TRUE
-
 #IF BLD_MP
-
-KiCurrentTimeLock : KiSpinlock = KI_INITIAL_SPINLOCK
 
 #MACRO KiAcquireTimerTree ( prb ) [
     KiAcquireSpinlockInPrb (
@@ -138,10 +128,7 @@ EXPORT FN KeEnqueueTimer (
 
     // Capture the current time.
 
-    KiCaptureCurrentTicks (
-        prb, // prb
-        &timer^.ExpiryTime, // uquad
-    )
+    KiCaptureCurrentTicks ( &timer^.ExpiryTime )
 
     // We need to check the next UQUAD add for overflow, so save the current
     // value.
@@ -294,10 +281,7 @@ FN (KeDpcF) KiTimerExpiration (
 
     // Capture the current time.
 
-    KiCaptureCurrentTicks (
-        prb, // prb
-        &currentticks, // uquad
-    )
+    KiCaptureCurrentTicks ( &currentticks )
 
     // Pop items from the timer tree until we hit one that hasn't expired yet.
 
@@ -413,7 +397,7 @@ EXPORT FN KeRealTimeToLocalTime (
         )
     END
 
-    offset := KiTimeZoneOffset
+    offset := OS_SHARED_USER_PAGE^.TimeZoneOffset
 
     RtlAddUlongToUquad (
         desttime, // destquad
@@ -434,7 +418,7 @@ EXPORT FN KeLocalTimeToRealTime (
         )
     END
 
-    offset := KiTimeZoneOffset
+    offset := OS_SHARED_USER_PAGE^.TimeZoneOffset
 
     RtlSubUlongFromUquad (
         desttime, // destquad
@@ -447,72 +431,43 @@ EXPORT FN KeSetTimeZoneOffset (
     IN offset : ULONG,
 )
 
-    KiTimeZoneOffset = offset
+    KeLoaderBlock.VirtualSharedUserPage^.TimeZoneOffset = offset
 END
 
 #SECTION "PAGE$text"
 EXPORT FN KeGetTimeZoneOffset () : ULONG
 
-    RETURN KiTimeZoneOffset
+    RETURN KeLoaderBlock.VirtualSharedUserPage^.TimeZoneOffset
 END
 
+#SECTION "PAGE$text"
 EXPORT FN KeQueryTime (
     IN time : ^RtlUquad,
     IN local : UWORD,
 )
 
+    // Query the time from the shared user page.
+
+    sup := OS_SHARED_USER_PAGE
+
 @Retry
 
-    IF KiTimerTickOccurred THEN
-        // A few timer ticks occurred on processor zero since the last time we
-        // updated the current time, so do that now.
-
-#IF BLD_MP
-        ipl := KiAcquireSpinlockRaise ( &KiCurrentTimeLock )
-#ELSE
-        ipl := KiRaiseIpl ( KI_IPL_DPC )
-#END
-
-        IF KiTimerTickOccurred THEN
-            KiTimerTickOccurred = FALSE
-
-            HalQueryTime ( &KiCurrentTime )
-        END
-
-#IF BLD_MP
-        KiReleaseSpinlockLower ( &KiCurrentTimeLock, ipl )
-#ELSE
-        KiLowerIpl ( ipl )
-#END
-    END
-
 #IF ( == BLD_BITS 64 )
-    time^.Quad = KiCurrentTime.Quad
+    time^.Quad = sup^.RealTime.Quad
 
 #ELSE
-    capturedhigh := KiCurrentTime.High
-    time^.High = capturedhigh
+    hightime := sup^.RealTime.High
 
-    KeMemoryBarrier ()
+    time^.High = hightime
+    time^.Low = sup^.RealTime.Low
 
-    time^.Low = KiCurrentTime.Low
+    IF hightime != sup^.RealTimeCheckHigh THEN
+        // The time changed while we were collecting it, so try again.
 
-    IF KiCurrentTime.High != capturedhigh THEN
         GOTO Retry
     END
 #END
 
-#IF HAL_RTC_IS_LOCAL
-    IF NOT local THEN
-        // The current time is local time, so convert to real time.
-
-        KeLocalTimeToRealTime (
-            time, // desttime
-            time, // srctime
-        )
-    END
-
-#ELSE
     IF local THEN
         // The current time is real time, so convert to local time.
 
@@ -521,6 +476,4 @@ EXPORT FN KeQueryTime (
             time, // srctime
         )
     END
-#END
-
 END

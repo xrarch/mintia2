@@ -8,8 +8,8 @@ FN HalQueryTime (
     IN time : ^RtlUquad,
 )
 
-    // Query the time in milliseconds. This is called with any appropriate locks
-    // held.
+    // Query the time in milliseconds. This is called from the timer interrupt
+    // on processor 0.
 
     timer := CAST KeLoaderBlock.U.Xr.CitronBase + 0x80 TO ^HalpTimer
 
@@ -57,30 +57,20 @@ FN HalQueryTime (
     part1 := (sec & 0xFFFF) * 1000
     part2 := (sec >> 16) * 1000
 
-    tmptime : RtlUquad
-
     // Upper 16 bits of part2 become low 16 bits of high part of 64 bit result.
 
-    tmptime.High = part2 >> 16
+    time^.High = part2 >> 16
 
     // Low 16 bits of part2 become high 16 bits of low part.
 
-    tmptime.Low = part2 << 16
+    time^.Low = part2 << 16
 
     // Add part1 and milliseconds.
 
     part1 += ms
 
     RtlAddUlongToUquad (
-        &tmptime, // quad
+        time, // quad
         part1, // val
     )
-
-    // Store result.
-
-    time^.High = tmptime.High
-
-    KeMemoryBarrier ()
-
-    time^.Low = tmptime.Low
 END

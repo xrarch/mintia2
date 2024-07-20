@@ -11,3 +11,29 @@
 #DEFINE OS_PRIORITY_MED_REALTIME 28
 #DEFINE OS_PRIORITY_HIGH_REALTIME 31
 #DEFINE OS_PRIORITY_MAX 32
+
+#IF ( == BLD_BITS 32 )
+
+#DEFINE OS_SHARED_USER_PAGE [(CAST 0x7FFFF000 TO ^OsSharedUserPage)]
+
+#ELSE
+
+#ERROR "Define base addresses for shared user page on 64-bit\n"
+
+#END
+
+STRUCT OsSharedUserPage
+    Uptime : RtlUquad,
+
+#IF ( == BLD_BITS 32 )
+    UptimeCheckHigh : ULONG,
+#END
+
+    RealTime : RtlUquad,
+
+#IF ( == BLD_BITS 32 )
+    RealTimeCheckHigh : ULONG,
+#END
+
+    TimeZoneOffset : ULONG,
+END
