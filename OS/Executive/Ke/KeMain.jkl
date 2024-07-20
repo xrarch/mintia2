@@ -10,6 +10,8 @@ EXPORT KeLoaderBlock : BlInfoRecord
 
 FNPTR DbgMainF ()
 
+PUBLIC KeSharedUserPage : ^OsSharedUserPage
+
 #IF BLD_MP
 
 KiInitializeCount : ULONG
@@ -353,7 +355,15 @@ EXPORT FN KeMain (
     END
 #END
 
+    // Perform platform-specific initialization for the boot processor.
+
     HalProcessorInitialize ( prb )
+
+    // Initialize the shared user page.
+
+    KeSharedUserPage = KeLoaderBlock.VirtualSharedUserPage
+
+    KiUpdateTime ( prb )
 
     // Perform early initialization of the debugger.
 

@@ -580,7 +580,7 @@ EXTERN KiWorkBalanceDpc : KeDpc
 
 #MACRO KiCaptureCurrentTicks ( uquad ) [
     WHILE TRUE DO
-        sup := OS_SHARED_USER_PAGE
+        sup := KeSharedUserPage
 
         NOTHING (uquad)^.High = (sup)^.Uptime.High
         NOTHING (uquad)^.Low = (sup)^.Uptime.Low
@@ -594,11 +594,11 @@ EXTERN KiWorkBalanceDpc : KeDpc
 ]
 
 #MACRO KiLowTick () [
-    (OS_SHARED_USER_PAGE^.Uptime.Low)
+    (KeSharedUserPage^.Uptime.Low)
 ]
 
 #MACRO KiUpdateTime ( prb ) [
-    sup := KeLoaderBlock.VirtualSharedUserPage
+    sup := KeSharedUserPage
 
     realtime : RtlUquad
 
@@ -607,7 +607,7 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #IF HAL_RTC_IS_LOCAL
     // Convert to real time by subtracting the time zone offset.
 
-    offset := OS_SHARED_USER_PAGE^.TimeZoneOffset
+    offset := KeSharedUserPage^.TimeZoneOffset
 
     RtlSubUlongFromUquad (
         &realtime, // destquad
@@ -627,15 +627,15 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #ELSE
 
 #MACRO KiCaptureCurrentTicks ( uquad ) [
-    NOTHING (uquad)^.Quad = OS_SHARED_USER_PAGE^.Uptime.Quad
+    NOTHING (uquad)^.Quad = KeSharedUserPage^.Uptime.Quad
 ]
 
 #MACRO KiLowTick ( prb ) [
-    (OS_SHARED_USER_PAGE^.Uptime.Quad)
+    (KeSharedUserPage^.Uptime.Quad)
 ]
 
 #MACRO KiUpdateTime ( prb ) [
-    sup := KeLoaderBlock.VirtualSharedUserPage
+    sup := KeSharedUserPage
 
     realtime : RtlUquad
 
@@ -644,7 +644,7 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #IF HAL_RTC_IS_LOCAL
     // Convert to real time by subtracting the time zone offset.
 
-    realtime.Quad -= OS_SHARED_USER_PAGE^.TimeZoneOffset
+    realtime.Quad -= KeSharedUserPage^.TimeZoneOffset
 #END
 
     sup^.RealTime.Quad = realtime.Quad

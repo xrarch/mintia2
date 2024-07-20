@@ -397,7 +397,7 @@ EXPORT FN KeRealTimeToLocalTime (
         )
     END
 
-    offset := OS_SHARED_USER_PAGE^.TimeZoneOffset
+    offset := KeSharedUserPage^.TimeZoneOffset
 
     RtlAddUlongToUquad (
         desttime, // destquad
@@ -418,7 +418,7 @@ EXPORT FN KeLocalTimeToRealTime (
         )
     END
 
-    offset := OS_SHARED_USER_PAGE^.TimeZoneOffset
+    offset := KeSharedUserPage^.TimeZoneOffset
 
     RtlSubUlongFromUquad (
         desttime, // destquad
@@ -431,13 +431,13 @@ EXPORT FN KeSetTimeZoneOffset (
     IN offset : ULONG,
 )
 
-    KeLoaderBlock.VirtualSharedUserPage^.TimeZoneOffset = offset
+    KeSharedUserPage^.TimeZoneOffset = offset
 END
 
 #SECTION "PAGE$text"
 EXPORT FN KeGetTimeZoneOffset () : ULONG
 
-    RETURN KeLoaderBlock.VirtualSharedUserPage^.TimeZoneOffset
+    RETURN KeSharedUserPage^.TimeZoneOffset
 END
 
 #SECTION "PAGE$text"
@@ -448,7 +448,7 @@ EXPORT FN KeQueryTime (
 
     // Query the time from the shared user page.
 
-    sup := OS_SHARED_USER_PAGE
+    sup := KeSharedUserPage
 
 @Retry
 
