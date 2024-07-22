@@ -60,32 +60,24 @@ EXPORT FN KeInitializeApc (
     apc^.Type = type
 END
 
-FN KiDispatchKernelApcQueue (
-    IN current : ^KeThread,
+FN KiDispatchKernelModeApcs (
+    IN thread : ^KeThread,
+    IN head : ^RtlListEntry,
 )
 
-    // Here we have to dispatch kernel APCs. We are in the context of the
-    // current thread at KI_IPL_APC.
-
-#IF BLD_CHK
-    IF KiCurrentIpl () != KI_IPL_APC THEN
-        KeCrash ( "KiDispatchKernelApcQueue: not KI_IPL_APC\n" )
-    END
-#END
+    // Dispatch the kernel mode APCs on the given list.
 
     // Pop items from the list until it's emptied.
 
-    head := &current^.KapcListHead
-
     WHILE TRUE DO
-        ipl := KiAcquireApcQueue ( current )
+        ipl := KiAcquireApcQueue ( thread )
 
         listentry := head^.Next
 
         IF listentry == head THEN
             // Queue's empty.
 
-            KiReleaseApcQueue ( current, ipl )
+            KiReleaseApcQueue ( thread, ipl )
 
             BREAK
         END
@@ -105,7 +97,7 @@ FN KiDispatchKernelApcQueue (
 
         // Unlock the queue.
 
-        KiReleaseApcQueue ( current, ipl )
+        KiReleaseApcQueue ( thread, ipl )
 
         // Call the APC function.
 
@@ -115,6 +107,25 @@ FN KiDispatchKernelApcQueue (
             context2, // context2
         )
     END
+END
+
+FN KiDispatchKernelApcQueue (
+    IN current : ^KeThread,
+)
+
+    // Here we have to dispatch kernel APCs. We are in the context of the
+    // current thread at KI_IPL_APC.
+
+#IF BLD_CHK
+    IF KiCurrentIpl () != KI_IPL_APC THEN
+        KeCrash ( "KiDispatchKernelApcQueue: not KI_IPL_APC\n" )
+    END
+#END
+
+    KiDispatchKernelModeApcs (
+        current, // thread
+        &current^.KapcListHead, // head
+    )
 END
 
 FN KiDispatchLazyApcQueue (
@@ -131,48 +142,10 @@ FN KiDispatchLazyApcQueue (
     END
 #END
 
-    // Pop items from the list until it's emptied.
-
-    head := &current^.LapcListHead
-
-    WHILE TRUE DO
-        ipl := KiAcquireApcQueue ( current )
-
-        listentry := head^.Next
-
-        IF listentry == head THEN
-            // Queue's empty.
-
-            KiReleaseApcQueue ( current, ipl )
-
-            BREAK
-        END
-
-        apc := CONTAINEROF head^.Next TO KeApc.Entry
-
-        // Remove from the list.
-
-        RtlRemoveEntryList ( &apc^.Entry )
-
-        // Capture the context before unlocking the queue, or the APC could get
-        // re-enqueued again from an interrupt or another processor, destroying
-        // the context.
-
-        context1 := apc^.Context1
-        context2 := apc^.Context2
-
-        // Unlock the queue.
-
-        KiReleaseApcQueue ( current, ipl )
-
-        // Call the APC function.
-
-        apc^.Function (
-            apc, // apc
-            context1, // context1
-            context2, // context2
-        )
-    END
+    KiDispatchKernelModeApcs (
+        current, // thread
+        &current^.LapcListHead, // head
+    )
 END
 
 FN KiDispatchUserApcQueue (
