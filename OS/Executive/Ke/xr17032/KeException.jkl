@@ -699,3 +699,34 @@ FN KiInitializeContext (
 
     RETURN context
 END
+
+FN KiInterruptUsermode (
+    IN dispatchfunc : ^VOID,
+    IN trapframe : ^OsContext,
+    IN userfunc : UWORD,
+    IN context : UWORD,
+)
+
+    // Cause a usermode interrupt of the current thread by saving the context
+    // on the user stack and redirecting the trapframe to the usermode
+    // interrupt handler. This is used to implement signal and APC dispatch.
+
+    usp := trapframe^.Sp
+
+    usp -= SIZEOF OsContext
+
+    // Save the trapframe to the user stack.
+    // If that fails, and the thread has a panic stack, switch to it and copy
+    // out to that instead.
+
+    // Can't implement this until we get copy-out figured out.
+    KeCrash ( "NYI KiInterruptUsermode\n" )
+
+    // Redirect the trapframe to the usermode interrupt handler.
+
+    trapframe^.Sp = usp
+    trapframe^.Epc = dispatchfunc
+    trapframe^.A0 = context
+    trapframe^.A1 = usp
+    trapframe^.A2 = userfunc
+END

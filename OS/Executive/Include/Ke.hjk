@@ -421,7 +421,7 @@ STRUCT KeThread
 
 #IF BLD_MP
     Spinlock : KiSpinlock,
-    QueueSpinlock : KiSpinlock,
+    ApcSpinlock : KiSpinlock,
 #END
 
     SignalMask : ULONG,
@@ -640,4 +640,37 @@ STRUCT KeRequestQueue
     Sorted : UBYTE,
     CurrentQueueIndex : UBYTE,
     Busy : UBYTE,
+END
+
+EXTERN FN KeInitializeRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN sorted : UWORD,
+)
+
+EXTERN FN KeInsertRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN request : ^KeRequestEntry,
+    IN sortkey : UWORD,
+) : UWORD
+
+EXTERN FN KeRemoveRequestQueue (
+    IN queue : ^KeRequestQueue,
+) : ^KeRequestEntry
+
+#DEFINE KE_APC_USER 1
+#DEFINE KE_APC_LAZY 2
+#DEFINE KE_APC_KERNEL 3
+
+FNPTR KeApcF (
+    IN apc : ^KeApc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+STRUCT KeApc
+    Entry : RtlListEntry,
+    Function : KeApcF,
+    Context1 : UWORD,
+    Context2 : UWORD,
+    Type : UBYTE,
 END

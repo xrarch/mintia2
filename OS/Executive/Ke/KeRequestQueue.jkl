@@ -26,6 +26,7 @@
 #MACRO KiReleaseRequestQueue ( queue, oldipl ) [
     KiLowerIpl ( oldipl )
 ]
+
 #END
 
 EXPORT FN KeInitializeRequestQueue (
@@ -165,11 +166,14 @@ EXPORT FN KeRemoveRequestQueue (
                 queue^.Busy = FALSE
 
             ELSE
-                // We've switched queues, so set the new queue index and pivot.
+                // We've switched queues, so set the new queue index.
 
                 queue^.CurrentQueueIndex = current
                 queue^.Pivot = entry^.SortKey
             END
+
+        ELSE
+            queue^.Pivot = entry^.SortKey
         END
 
     ELSE

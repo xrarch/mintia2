@@ -25,13 +25,96 @@
 //              return value. The thread then executes a callback in usermode
 //              before returning to the caller of the system service.
 
+#IF BLD_MP
+
+#MACRO KiAcquireApcQueue ( thread ) [
+    KiAcquireSpinlockRaise ( &(thread)^.ApcSpinlock )
+]
+
+#MACRO KiReleaseApcQueue ( thread, oldipl ) [
+    KiReleaseSpinlockLower (
+        &(thread)^.ApcSpinlock, // spinlock
+        oldipl, // oldipl
+    )
+]
+
+#ELSE
+
+#MACRO KiAcquireApcQueue ( thread ) [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseApcQueue ( thread, oldipl ) [
+    KiLowerIpl ( oldipl )
+]
+
+#END
+
+EXPORT FN KeInitializeApc (
+    IN apc : ^KeApc,
+    IN func : KeApcF,
+    IN type : UWORD,
+)
+
+    apc^.Function = func
+    apc^.Type = type
+END
+
 FN KiDispatchKernelApcQueue (
     IN current : ^KeThread,
 )
 
-    // Here we have to dispatch kernel APCs.
+    // Here we have to dispatch kernel APCs. We are in the context of the
+    // current thread at KI_IPL_APC.
 
-    KeCrash ( "NYI KiDispatchKernelApcQueue\n" )
+#IF BLD_CHK
+    IF KiCurrentIpl () != KI_IPL_APC THEN
+        KeCrash ( "KiDispatchKernelApcQueue: not KI_IPL_APC\n" )
+    END
+#END
+
+    // Pop items from the list until it's emptied.
+
+    head := &current^.KapcListHead
+
+    WHILE TRUE DO
+        ipl := KiAcquireApcQueue ( current )
+
+        listentry := head^.Next
+
+        IF listentry == head THEN
+            // Queue's empty.
+
+            KiReleaseApcQueue ( current, ipl )
+
+            BREAK
+        END
+
+        apc := CONTAINEROF head^.Next TO KeApc.Entry
+
+        // Remove from the list.
+
+        RtlRemoveEntryList ( &apc^.Entry )
+
+        // Capture the context before unlocking the queue, or the APC could get
+        // re-enqueued again from an interrupt or another processor, destroying
+        // the context.
+
+        context1 := apc^.Context1
+        context2 := apc^.Context2
+
+        // Unlock the queue.
+
+        KiReleaseApcQueue ( current, ipl )
+
+        // Call the APC function.
+
+        apc^.Function (
+            apc, // apc
+            context1, // context1
+            context2, // context2
+        )
+    END
 END
 
 FN KiDispatchLazyApcQueue (
@@ -39,14 +122,113 @@ FN KiDispatchLazyApcQueue (
 )
 
     // Dispatch the lazy APC queue. This is called upon an attempt to perform a
-    // KE_USER_MODE wait, and upon return to userspace, with pending lazy APCs.
+    // KE_USER_MODE wait, and upon a return to userspace with pending lazy APCs.
+    // We are in the context of the current thread at KI_IPL_LOW.
 
-    KeCrash ( "NYI KiDispatchLazyApcQueue\n" )
+#IF BLD_CHK
+    IF KiCurrentIpl () != KI_IPL_LOW THEN
+        KeCrash ( "KiDispatchLazyApcQueue: not KI_IPL_LOW\n" )
+    END
+#END
+
+    // Pop items from the list until it's emptied.
+
+    head := &current^.LapcListHead
+
+    WHILE TRUE DO
+        ipl := KiAcquireApcQueue ( current )
+
+        listentry := head^.Next
+
+        IF listentry == head THEN
+            // Queue's empty.
+
+            KiReleaseApcQueue ( current, ipl )
+
+            BREAK
+        END
+
+        apc := CONTAINEROF head^.Next TO KeApc.Entry
+
+        // Remove from the list.
+
+        RtlRemoveEntryList ( &apc^.Entry )
+
+        // Capture the context before unlocking the queue, or the APC could get
+        // re-enqueued again from an interrupt or another processor, destroying
+        // the context.
+
+        context1 := apc^.Context1
+        context2 := apc^.Context2
+
+        // Unlock the queue.
+
+        KiReleaseApcQueue ( current, ipl )
+
+        // Call the APC function.
+
+        apc^.Function (
+            apc, // apc
+            context1, // context1
+            context2, // context2
+        )
+    END
 END
 
 FN KiDispatchUserApcQueue (
     IN current : ^KeThread,
+    IN dispatchfunc : ^VOID,
+    IN trapframe : ^VOID,
 )
 
-    KeCrash ( "NYI KiDispatchUserApcQueue\n" )
+    // Dispatch the user APC queue. This is called upon return to usermode after
+    // an attempt to perform an alertable KE_USER_MODE wait. We are in the
+    // context of the current thread at KI_IPL_LOW.
+
+    ipl := KiAcquireApcQueue ( current )
+
+    IF RtlEmptyList ( &current^.UapcListHead ) THEN
+        // None to dispatch.
+
+        KiReleaseApcQueue ( current, ipl )
+
+        LEAVE
+    END
+
+    listentry := current^.UapcListHead.Next
+
+    // Remove the user APC from the queue.
+
+    RtlRemoveEntryList ( listentry )
+
+    apc := CONTAINEROF listentry TO KeApc.Entry
+
+    // Capture the context before unlocking the queue, or the APC could get
+    // re-enqueued again from an interrupt or another processor, destroying
+    // the context.
+
+    context1 := apc^.Context1
+    context2 := apc^.Context2
+
+    // Unlock the queue.
+
+    KiReleaseApcQueue ( current, ipl )
+
+    // Call the kernel function. It will probably free the APC structure, so we
+    // can't touch it after this.
+
+    apc^.Function (
+        apc, // apc
+        context1, // context1
+        context2, // context2
+    )
+
+    // Dispatch the APC in usermode.
+
+    KiInterruptUsermode (
+        dispatchfunc, // dispatchfunc
+        trapframe, // trapframe
+        context1, // userfunc
+        context2, // context
+    )
 END

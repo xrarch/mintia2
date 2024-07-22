@@ -341,6 +341,13 @@ EXTERN FN KiDispatchSoftwareInterrupts (
     IN newipl : UWORD,
 )
 
+EXTERN FN KiInterruptUsermode (
+    IN dispatchfunc : ^VOID,
+    IN trapframe : ^OsContext,
+    IN userfunc : UWORD,
+    IN context : UWORD,
+)
+
 EXTERN FN KiDispatchKernelApcQueue (
     IN current : ^KeThread,
 )
@@ -351,6 +358,8 @@ EXTERN FN KiDispatchLazyApcQueue (
 
 EXTERN FN KiDispatchUserApcQueue (
     IN current : ^KeThread,
+    IN dispatchfunc : ^VOID,
+    IN trapframe : ^VOID,
 )
 
 EXTERN FN KiDispatchDpcQueue (
