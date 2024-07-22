@@ -1,0 +1,197 @@
+//
+// Implements a spinlock-guarded request queue. Intended for devices.
+//
+
+#INCLUDE "Ki.hjk"
+
+#IF BLD_MP
+
+#MACRO KiAcquireRequestQueue ( queue ) [
+    KiAcquireSpinlockRaise ( &(queue)^.Spinlock )
+]
+
+#MACRO KiReleaseRequestQueue ( queue, oldipl ) [
+    KiReleaseSpinlockLower (
+        &(queue)^.Spinlock, // spinlock
+        oldipl, // oldipl
+    )
+]
+
+#ELSE
+
+#MACRO KiAcquireRequestQueue ( queue ) [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseRequestQueue ( queue, oldipl ) [
+    KiLowerIpl ( oldipl )
+]
+#END
+
+EXPORT FN KeInitializeRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN sorted : UWORD,
+)
+
+    // Initialize a request queue.
+
+    IF sorted THEN
+        // Initialize the roots of the pairing heaps.
+
+        queue^.Head.Sorted.Roots[0] = NULLPTR
+        queue^.Head.Sorted.Roots[1] = NULLPTR
+        queue^.CurrentQueueIndex = 0
+
+    ELSE
+        // Initialize the linked list.
+
+        RtlInitializeList ( &queue^.Head.List )
+    END
+
+    queue^.Sorted = sorted
+    queue^.Busy = FALSE
+
+#IF BLD_MP
+    KiInitializeSpinlock ( &queue^.Spinlock )
+#END
+
+END
+
+FN (RtlLessThanF) KiCompareRequests (
+    IN a : ^RtlHeapEntry,
+    IN b : ^RtlHeapEntry,
+) : UWORD
+
+    request1 := CONTAINEROF a TO KeRequestEntry.Entry.Sorted
+    request2 := CONTAINEROF b TO KeRequestEntry.Entry.Sorted
+
+    RETURN request1^.SortKey < request2^.SortKey
+END
+
+EXPORT FN KeInsertRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN request : ^KeRequestEntry,
+    IN sortkey : UWORD,
+) : UWORD
+
+    // Insert a request into the queue. Return TRUE if the queue was busy,
+    // FALSE otherwise.
+
+    ipl := KiAcquireRequestQueue ( queue )
+
+    busy := queue^.Busy
+
+    IF NOT busy THEN
+        // Not busy, set it busy.
+
+        queue^.Busy = TRUE
+        queue^.Pivot = sortkey
+
+    ELSEIF queue^.Sorted THEN
+        // This is a sorted request queue.
+
+        // The queue is busy, so insert the request into the appropriate
+        // priority queue.
+
+        request^.SortKey = sortkey
+
+        current := queue^.CurrentQueueIndex
+
+        IF sortkey <= queue^.Pivot THEN
+            // We are currently processing entries with a key larger than the
+            // current pivot. Since we're less or equal, toggle the index to
+            // insert us into the "next" queue.
+
+            current $= 1
+        END
+
+        RtlInsertIntoHeap (
+            &KiCompareRequests, // comparisonfunc
+            &queue^.Head.Sorted.Roots[current], // rootptr
+            &request^.Entry.Sorted, // entry
+        )
+
+    ELSE
+        // This is a non-sorted request queue.
+
+        // The queue is busy, so insert the request at the tail of the list.
+
+        RtlInsertAtTailList (
+            &queue^.Head.List, // head
+            &request^.Entry.List, // entry
+        )
+    END
+
+    KiReleaseRequestQueue ( queue, ipl )
+
+    RETURN busy
+END
+
+EXPORT FN KeRemoveRequestQueue (
+    IN queue : ^KeRequestQueue,
+) : ^KeRequestEntry
+
+    // Remove a request from the queue. Returns a request entry if one is
+    // available, otherwise returns NULLPTR.
+
+    entry : ^KeRequestEntry = NULLPTR
+
+    ipl := KiAcquireRequestQueue ( queue )
+
+    IF queue^.Sorted THEN
+        // This is a sorted request queue.
+        // Try to grab an item from the current queue.
+
+        current := queue^.CurrentQueueIndex
+
+        entry = CAST RtlExtractHeap (
+            &KiCompareRequests, // comparisonfunc
+            &queue^.Head.Sorted.Roots[current], // rootptr
+        ) TO ^KeRequestEntry
+
+        IF NOT entry THEN
+            // The current queue ran out. Toggle the current queue.
+
+            current $= 1
+
+            entry = CAST RtlExtractHeap (
+                &KiCompareRequests, // comparisonfunc
+                &queue^.Head.Sorted.Roots[current], // rootptr
+            ) TO ^KeRequestEntry
+
+            IF NOT entry THEN
+                // The other queue is out too. No longer busy.
+
+                queue^.Busy = FALSE
+
+            ELSE
+                // We've switched queues, so set the new queue index and pivot.
+
+                queue^.CurrentQueueIndex = current
+                queue^.Pivot = entry^.SortKey
+            END
+        END
+
+    ELSE
+        // This is a non-sorted request queue.
+
+        IF RtlEmptyList ( &queue^.Head.List ) THEN
+            // Empty! No longer busy.
+
+            queue^.Busy = FALSE
+
+        ELSE
+            // Grab the head item of the list.
+
+            listentry := queue^.Head.List.Next
+
+            RtlRemoveEntryList ( listentry )
+
+            entry = CONTAINEROF listentry TO KeRequestEntry.Entry.List
+        END
+    END
+
+    KiReleaseRequestQueue ( queue, ipl )
+
+    RETURN entry
+END

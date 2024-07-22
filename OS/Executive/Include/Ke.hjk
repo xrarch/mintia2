@@ -609,3 +609,35 @@ EXTERN FN KeExtractEntryRingBuffer (
     IN ring : ^KeRingBuffer,
     IN entry : ^VOID,
 ) : UWORD
+
+UNION KiRequestLinks
+    Sorted : RtlHeapEntry,
+    List : RtlListEntry,
+END
+
+STRUCT KeRequestEntry
+    Entry : KiRequestLinks,
+    SortKey : UWORD,
+END
+
+STRUCT KiRequestSortedHead
+    Roots : ^RtlHeapEntry[2],
+END
+
+UNION KiRequestHeads
+    Sorted : KiRequestSortedHead,
+    List : RtlListEntry,
+END
+
+STRUCT KeRequestQueue
+    Pivot : UWORD,
+    Head : KiRequestHeads,
+
+#IF BLD_MP
+    Spinlock : KiSpinlock,
+#END
+
+    Sorted : UBYTE,
+    CurrentQueueIndex : UBYTE,
+    Busy : UBYTE,
+END
