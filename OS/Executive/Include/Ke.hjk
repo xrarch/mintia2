@@ -564,3 +564,48 @@ EXTERN FN KeRemoveFromBalancedQueue (
     IN timeout : ^RtlUquad,
     OUT item : ^RtlListEntry,
 ) : OsStatus
+
+STRUCT KeRingBuffer
+    Data : ^VOID,
+
+    WriteIndex : ULONG,
+    ReadIndex : ULONG,
+    EntriesLeft : ULONG,
+    BufferMask : ULONG,
+#IF BLD_MP
+    Spinlock : KiSpinlock,
+#END
+
+    EntrySizeLog : UINT,
+    EntryCountLog : UINT,
+    Overwrite : UBYTE,
+END
+
+EXTERN FN KeInitializeRingBuffer (
+    IN ring : ^KeRingBuffer,
+    IN name : ^UBYTE,
+    IN data : ^VOID,
+    IN entrysizelog : UWORD,
+    IN entrycountlog : UWORD,
+    IN overwrite : UWORD,
+)
+
+EXTERN FN KeInsertByteRingBuffer (
+    IN ring : ^KeRingBuffer,
+    IN byte : UBYTE,
+) : UWORD
+
+EXTERN FN KeExtractByteRingBuffer (
+    IN ring : ^KeRingBuffer,
+    OUT byte : UBYTE,
+) : UWORD
+
+EXTERN FN KeInsertEntryRingBuffer (
+    IN ring : ^KeRingBuffer,
+    IN entry : ^VOID,
+) : UWORD
+
+EXTERN FN KeExtractEntryRingBuffer (
+    IN ring : ^KeRingBuffer,
+    IN entry : ^VOID,
+) : UWORD
