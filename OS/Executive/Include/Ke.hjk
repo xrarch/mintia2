@@ -716,7 +716,25 @@ FNPTR KeApcF (
 STRUCT KeApc
     Entry : RtlListEntry,
     Function : KeApcF,
+    Thread : ^KeThread,
     Context1 : UWORD,
     Context2 : UWORD,
     Type : UBYTE,
+    Enqueued : UBYTE,
 END
+
+EXTERN FN KeInitializeApc (
+    IN apc : ^KeApc,
+    IN func : KeApcF,
+    IN type : UWORD,
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeEnqueueKapc (
+    IN apc : ^KeApc,
+    IN priorityboost : UWORD,
+) : UWORD
+
+EXTERN FN KeDequeueApc (
+    IN apc : ^KeApc,
+) : UWORD

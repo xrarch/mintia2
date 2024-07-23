@@ -166,15 +166,23 @@ FN KiStartRequests (
 
         current := queue^.CurrentQueueIndex
 
-        IF queue^.Head.Sorted.Roots[current] THEN
-            request = CONTAINEROF queue^.Head.Sorted.Roots[current]
-                TO KeRequestEntry.Entry.Sorted
+        root := queue^.Head.Sorted.Roots[current]
 
-        ELSEIF queue^.Head.Sorted.Roots[current $ 1] THEN
-            request = CONTAINEROF queue^.Head.Sorted.Roots[current $ 1]
-                TO KeRequestEntry.Entry.Sorted
+        IF root THEN
+            request = CONTAINEROF root TO KeRequestEntry.Entry.Sorted
 
-            queue^.CurrentQueueIndex = current $ 1
+        ELSE
+            // None in current queue. Switch queues and check the other one.
+
+            current $= 1
+
+            queue^.CurrentQueueIndex = current
+
+            root = queue^.Head.Sorted.Roots[current]
+
+            IF root THEN
+                request = CONTAINEROF root TO KeRequestEntry.Entry.Sorted
+            END
         END
     END
 
@@ -216,8 +224,9 @@ EXPORT FN KeCompleteRequestQueue (
     IN request : ^KeRequestEntry,
 ) : UWORD
 
-    // Complete the given request (if it hasn't already been) and start any that
-    // can now be started. Returns TRUE if completed, FALSE otherwise.
+    // Complete the given request (if it hasn't already been cancelled) and
+    // start any that can now be started. Returns TRUE if completed, FALSE
+    // otherwise.
 
     completed := FALSE
 

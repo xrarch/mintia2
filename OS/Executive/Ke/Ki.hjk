@@ -418,6 +418,12 @@ EXTERN FN KiSatisfyObject (
     IN status : OsStatus,
 ) : ^KeThread
 
+EXTERN FN KiUnwaitThread (
+    IN thread : ^KeThread,
+    IN status : OsStatus,
+    IN priorityboost : UWORD,
+)
+
 EXTERN FN KiWakeBalancedQueue (
     IN queue : ^KeBalancedQueue,
 )
@@ -553,6 +559,25 @@ EXTERN KiQueueRemovalLocks : KiSpinlock[KI_QUEUE_REMOVAL_LOCKS]
     KiReleaseSpinlock ( &KiQueueRemovalLocks[KiQueueLockIndex(queue)] )
 ]
 
+#MACRO KiAcquireThread ( thread ) [
+    KiAcquireSpinlockRaise ( &(thread)^.Spinlock )
+]
+
+#MACRO KiReleaseThread ( thread, oldipl ) [
+    KiReleaseSpinlockLower (
+        &(thread)^.Spinlock, // spinlock
+        oldipl, // oldipl
+    )
+]
+
+#MACRO KiAcquireThreadElevated ( thread ) [
+    KiAcquireSpinlock ( &(thread)^.Spinlock )
+]
+
+#MACRO KiReleaseThreadElevated ( thread ) [
+    KiReleaseSpinlock ( &(thread)^.Spinlock )
+]
+
 EXTERN FN KiStealWork ()
 
 EXTERN KiWorkBalanceDpc : KeDpc
@@ -582,6 +607,18 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #MACRO KiAcquireQueueRemovalElevated ( queue ) []
 
 #MACRO KiReleaseQueueRemovalElevated ( queue ) []
+
+#MACRO KiAcquireThread ( thread ) [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseThread ( thread, oldipl ) [
+    KiLowerIpl ( oldipl )
+]
+
+#MACRO KiAcquireThreadElevated ( thread ) []
+
+#MACRO KiReleaseThreadElevated ( thread ) []
 
 #END
 

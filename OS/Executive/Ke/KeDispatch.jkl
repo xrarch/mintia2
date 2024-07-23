@@ -48,25 +48,6 @@ KiIdleProcessorCount : ULONG
     KiReleaseSpinlock ( &(prb)^.ReadyQueueLock )
 ]
 
-#MACRO KiAcquireThread ( thread ) [
-    KiAcquireSpinlockRaise ( &(thread)^.Spinlock )
-]
-
-#MACRO KiReleaseThread ( thread, oldipl ) [
-    KiReleaseSpinlockLower (
-        &(thread)^.Spinlock, // spinlock
-        oldipl, // oldipl
-    )
-]
-
-#MACRO KiAcquireThreadElevated ( thread ) [
-    KiAcquireSpinlock ( &(thread)^.Spinlock )
-]
-
-#MACRO KiReleaseThreadElevated ( thread ) [
-    KiReleaseSpinlock ( &(thread)^.Spinlock )
-]
-
 #MACRO KiSetWaitAttempt ( thread, state ) [
     NOTHING (thread)^.WaitAttempt = (state)
 ]
@@ -90,18 +71,6 @@ KiIdleProcessorCount : ULONG
 #MACRO KiAcquireReadyQueueElevated ( prb ) []
 
 #MACRO KiReleaseReadyQueueElevated ( prb ) []
-
-#MACRO KiAcquireThread ( thread ) [
-    KiRaiseIpl ( KI_IPL_DPC )
-]
-
-#MACRO KiReleaseThread ( thread, oldipl ) [
-    KiLowerIpl ( oldipl )
-]
-
-#MACRO KiAcquireThreadElevated ( thread ) []
-
-#MACRO KiReleaseThreadElevated ( thread ) []
 
 #MACRO KiSetWaitAttempt ( thread, state ) []
 

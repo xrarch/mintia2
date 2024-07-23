@@ -38,6 +38,14 @@
     )
 ]
 
+#MACRO KiAcquireApcQueueElevated ( thread ) [
+    KiAcquireSpinlock ( &(thread)^.ApcSpinlock )
+]
+
+#MACRO KiReleaseApcQueueElevated ( thread ) [
+    KiReleaseSpinlock ( &(thread)^.ApcSpinlock )
+]
+
 #ELSE
 
 #MACRO KiAcquireApcQueue ( thread ) [
@@ -48,16 +56,156 @@
     KiLowerIpl ( oldipl )
 ]
 
+#MACRO KiAcquireApcQueueElevated ( thread ) []
+
+#MACRO KiReleaseApcQueueElevated ( thread ) []
+
 #END
 
 EXPORT FN KeInitializeApc (
     IN apc : ^KeApc,
     IN func : KeApcF,
     IN type : UWORD,
+    IN thread : ^KeThread,
 )
 
     apc^.Function = func
     apc^.Type = type
+    apc^.Thread = thread
+    apc^.Enqueued = FALSE
+END
+
+EXPORT FN KeEnqueueKapc (
+    IN apc : ^KeApc,
+    IN priorityboost : UWORD,
+) : UWORD
+
+    // Enqueue the kernel APC to its thread.
+    // Return TRUE if enqueued, FALSE otherwise.
+
+#IF BLD_CHK
+    IF apc^.Type != KE_APC_KERNEL THEN
+        KeCrash ( "KeEnqueueKapc: wrong type %u\n", apc^.Type )
+    END
+#END
+
+    thread := apc^.Thread
+
+    // Acquire the APC queue.
+
+    ipl := KiAcquireApcQueue ( thread )
+
+    IF apc^.Enqueued THEN
+        // Already enqueued.
+
+        KiReleaseApcQueue ( thread, ipl )
+
+        RETURN FALSE
+    END
+
+    // Add the APC to the list.
+
+    RtlInsertAtTailList (
+        &thread^.KapcListHead, // head
+        &apc^.Entry, // entry
+    )
+
+    apc^.Enqueued = TRUE
+
+    // Release APC queue but keep IPL elevated.
+
+    KiReleaseApcQueueElevated ( thread )
+
+    // Acquire the thread lock.
+
+    KiAcquireThreadElevated ( thread )
+
+    // Acquire a pointer to the current Prb.
+
+    prb := KI_CURRENT_PRB
+
+    IF thread^.Status == KI_THREAD_RUNNING THEN
+        // Need to trigger an APC interrupt.
+
+#IF BLD_MP
+        IF thread^.WaitAttempt == KI_THREAD_WAIT_TRY AND
+            thread^.WaitIpl == KI_IPL_LOW THEN
+
+            // Abort the wait attempt.
+
+            KiUnwaitThread (
+                thread, // thread,
+                OS_STATUS_KERNEL_APC, // status
+                priorityboost, // priorityboost
+            )
+        END
+
+        IF thread^.CurrentPrb != prb THEN
+            // Trigger on the target processor.
+
+            KiSoftInterruptOther (
+                thread^.CurrentPrb, // targetprb
+                KI_IPL_APC, // ipl
+            )
+
+        ELSE
+#END
+            // Trigger on the current processor.
+
+            KiSoftInterruptSelf (
+                prb, // targetprb
+                KI_IPL_APC, // ipl
+            )
+#IF BLD_MP
+        END
+#END
+
+    ELSEIF thread^.Status == KI_THREAD_WAITING AND
+        thread^.WaitIpl == KI_IPL_LOW THEN
+
+        // Wake the thread.
+
+        RtlPrint ( "W " )
+
+        KiUnwaitThread (
+            thread, // thread,
+            OS_STATUS_KERNEL_APC, // status
+            priorityboost, // priorityboost
+        )
+    END
+
+    KiReleaseThread ( thread, ipl )
+
+    RETURN TRUE
+END
+
+EXPORT FN KeDequeueApc (
+    IN apc : ^KeApc,
+) : UWORD
+
+    // Dequeue an APC of any type and return whether it was dequeued or not.
+
+    thread := apc^.Thread
+
+    // Acquire the APC queue.
+
+    ipl := KiAcquireApcQueue ( thread )
+
+    enqueued := apc^.Enqueued
+
+    IF enqueued THEN
+        // Remove from the appropriate list.
+
+        RtlRemoveEntryList ( &apc^.Entry )
+
+        apc^.Enqueued = FALSE
+    END
+
+    // Release APC queue.
+
+    KiReleaseApcQueue ( thread, ipl )
+
+    RETURN enqueued
 END
 
 FN KiDispatchKernelModeApcs (
@@ -94,6 +242,10 @@ FN KiDispatchKernelModeApcs (
 
         context1 := apc^.Context1
         context2 := apc^.Context2
+
+        // Set dequeued.
+
+        apc^.Enqueued = FALSE
 
         // Unlock the queue.
 
@@ -182,6 +334,10 @@ FN KiDispatchUserApcQueue (
 
     context1 := apc^.Context1
     context2 := apc^.Context2
+
+    // Set dequeued.
+
+    apc^.Enqueued = FALSE
 
     // Unlock the queue.
 
