@@ -615,10 +615,49 @@ UNION KiRequestLinks
     List : RtlListEntry,
 END
 
+#DEFINE KE_REQUEST_QUEUE_FIFO 1
+#DEFINE KE_REQUEST_QUEUE_KEY 2
+#DEFINE KE_REQUEST_QUEUE_COST 3
+
+#DEFINE KI_REQUEST_NONE 0
+#DEFINE KI_REQUEST_ENQUEUED 1
+#DEFINE KI_REQUEST_CURRENT 2
+#DEFINE KI_REQUEST_CANCELLED 3
+#DEFINE KI_REQUEST_COMPLETED 4
+
 STRUCT KeRequestEntry
     Entry : KiRequestLinks,
     SortKey : UWORD,
+    Cost : UINT,
+    HeapIndex : UBYTE,
+    Status : UBYTE,
 END
+
+#MACRO KeInitializeCostRequest ( request, cost ) [
+    NOTHING (request)^.Cost = (cost)
+    NOTHING (request)^.SortKey = (cost)
+    NOTHING (request)^.Status = KI_REQUEST_NONE
+]
+
+#MACRO KeInitializeSortedRequest ( request, sortkey, cost ) [
+    NOTHING (request)^.Cost = (cost)
+    NOTHING (request)^.SortKey = (sortkey)
+    NOTHING (request)^.Status = KI_REQUEST_NONE
+]
+
+#MACRO KeInitializeFifoRequest ( request, cost ) [
+    NOTHING (request)^.Cost = (cost)
+    NOTHING (request)^.Status = KI_REQUEST_NONE
+]
+
+FNPTR KeRequestStartF (
+    IN request : ^KeRequestEntry,
+)
+
+FNPTR KeRequestCompleteF (
+    IN request : ^KeRequestEntry,
+    IN cancelled : UWORD,
+)
 
 STRUCT KiRequestSortedHead
     Roots : ^RtlHeapEntry[2],
@@ -630,32 +669,39 @@ UNION KiRequestHeads
 END
 
 STRUCT KeRequestQueue
-    Pivot : UWORD,
     Head : KiRequestHeads,
+    Pivot : UWORD,
+    StartFunction : KeRequestStartF,
+    CompleteFunction : KeRequestCompleteF,
 
 #IF BLD_MP
     Spinlock : KiSpinlock,
 #END
 
-    Sorted : UBYTE,
+    Current : UINT,
+    Maximum : UINT,
+
+    SortPolicy : UBYTE,
     CurrentQueueIndex : UBYTE,
-    Busy : UBYTE,
 END
 
 EXTERN FN KeInitializeRequestQueue (
     IN queue : ^KeRequestQueue,
-    IN sorted : UWORD,
+    IN sortpolicy : UWORD,
+    IN startfunc : KeRequestStartF,
+    IN completefunc : KeRequestCompleteF,
+    IN maximum : UWORD,
 )
 
-EXTERN FN KeInsertRequestQueue (
+EXTERN FN KeCompleteRequestQueue (
     IN queue : ^KeRequestQueue,
     IN request : ^KeRequestEntry,
-    IN sortkey : UWORD,
 ) : UWORD
 
-EXTERN FN KeRemoveRequestQueue (
+EXTERN FN KeCancelRequestQueue (
     IN queue : ^KeRequestQueue,
-) : ^KeRequestEntry
+    IN request : ^KeRequestEntry,
+) : UWORD
 
 #DEFINE KE_APC_USER 1
 #DEFINE KE_APC_LAZY 2

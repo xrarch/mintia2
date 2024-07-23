@@ -31,12 +31,15 @@
 
 EXPORT FN KeInitializeRequestQueue (
     IN queue : ^KeRequestQueue,
-    IN sorted : UWORD,
+    IN sortpolicy : UWORD,
+    IN startfunc : KeRequestStartF,
+    IN completefunc : KeRequestCompleteF,
+    IN maximum : UWORD,
 )
 
     // Initialize a request queue.
 
-    IF sorted THEN
+    IF sortpolicy != KE_REQUEST_QUEUE_FIFO THEN
         // Initialize the roots of the pairing heaps.
 
         queue^.Head.Sorted.Roots[0] = NULLPTR
@@ -49,8 +52,11 @@ EXPORT FN KeInitializeRequestQueue (
         RtlInitializeList ( &queue^.Head.List )
     END
 
-    queue^.Sorted = sorted
-    queue^.Busy = FALSE
+    queue^.SortPolicy = sortpolicy
+    queue^.Current = 0
+    queue^.Maximum = maximum
+    queue^.StartFunction = startfunc
+    queue^.CompleteFunction = completefunc
 
 #IF BLD_MP
     KiInitializeSpinlock ( &queue^.Spinlock )
@@ -72,33 +78,33 @@ END
 EXPORT FN KeInsertRequestQueue (
     IN queue : ^KeRequestQueue,
     IN request : ^KeRequestEntry,
-    IN sortkey : UWORD,
-) : UWORD
+)
 
-    // Insert a request into the queue. Return TRUE if the queue was busy,
-    // FALSE otherwise.
+    // Insert a request into the queue, and start it if possible.
 
     ipl := KiAcquireRequestQueue ( queue )
 
-    busy := queue^.Busy
-
-    IF NOT busy THEN
+    IF queue^.Current + request^.Cost <= queue^.Maximum THEN
         // Not busy, set it busy.
 
-        queue^.Busy = TRUE
-        queue^.Pivot = sortkey
+        queue^.Current += request^.Cost
+        queue^.Pivot = request^.SortKey
 
-    ELSEIF queue^.Sorted THEN
+        request^.Status = KI_REQUEST_CURRENT
+
+        // Start the request.
+
+        queue^.StartFunction ( request )
+
+    ELSEIF queue^.SortPolicy THEN
         // This is a sorted request queue.
 
         // The queue is busy, so insert the request into the appropriate
         // priority queue.
 
-        request^.SortKey = sortkey
-
         current := queue^.CurrentQueueIndex
 
-        IF sortkey <= queue^.Pivot THEN
+        IF request^.SortKey <= queue^.Pivot THEN
             // We are currently processing entries with a key larger than the
             // current pivot. Since we're less or equal, toggle the index to
             // insert us into the "next" queue.
@@ -112,6 +118,14 @@ EXPORT FN KeInsertRequestQueue (
             &request^.Entry.Sorted, // entry
         )
 
+        // Save which heap we stored it in.
+
+        request^.HeapIndex = current
+
+        // Set inserted.
+
+        request^.Status = KI_REQUEST_ENQUEUED
+
     ELSE
         // This is a non-sorted request queue.
 
@@ -121,81 +135,199 @@ EXPORT FN KeInsertRequestQueue (
             &queue^.Head.List, // head
             &request^.Entry.List, // entry
         )
+
+        // Set inserted.
+
+        request^.Status = KI_REQUEST_ENQUEUED
     END
 
     KiReleaseRequestQueue ( queue, ipl )
-
-    RETURN busy
 END
 
-EXPORT FN KeRemoveRequestQueue (
+FN KiStartRequests (
     IN queue : ^KeRequestQueue,
-) : ^KeRequestEntry
+)
 
-    // Remove a request from the queue. Returns a request entry if one is
-    // available, otherwise returns NULLPTR.
+    // Start requests from the queue until the maximum cost is reached. Queue
+    // lock is held.
 
-    entry : ^KeRequestEntry = NULLPTR
+@Again
+    request : ^KeRequestEntry = NULLPTR
 
-    ipl := KiAcquireRequestQueue ( queue )
+    IF queue^.SortPolicy == KE_REQUEST_QUEUE_FIFO AND
+        NOT RtlEmptyList ( &queue^.Head.List ) THEN
 
-    IF queue^.Sorted THEN
-        // This is a sorted request queue.
-        // Try to grab an item from the current queue.
+        // Check the FIFO queue.
+
+        request = CONTAINEROF queue^.Head.List.Next TO KeRequestEntry.Entry.List
+
+    ELSE
+        // Check the current queue.
 
         current := queue^.CurrentQueueIndex
 
-        entry = CAST RtlExtractHeap (
-            &KiCompareRequests, // comparisonfunc
-            &queue^.Head.Sorted.Roots[current], // rootptr
-        ) TO ^KeRequestEntry
+        IF queue^.Head.Sorted.Roots[current] THEN
+            request = CONTAINEROF queue^.Head.Sorted.Roots[current]
+                TO KeRequestEntry.Entry.Sorted
 
-        IF NOT entry THEN
-            // The current queue ran out. Toggle the current queue.
+        ELSEIF queue^.Head.Sorted.Roots[current $ 1] THEN
+            request = CONTAINEROF queue^.Head.Sorted.Roots[current $ 1]
+                TO KeRequestEntry.Entry.Sorted
 
-            current $= 1
+            queue^.CurrentQueueIndex = current $ 1
+        END
+    END
 
-            entry = CAST RtlExtractHeap (
+    IF request AND queue^.Current + request^.Cost <= queue^.Maximum THEN
+        IF queue^.SortPolicy == KE_REQUEST_QUEUE_FIFO THEN
+            // Remove from FIFO list.
+
+            RtlRemoveEntryList ( &request^.Entry.List )
+
+        ELSE
+            // Remove from heap.
+
+            RtlRemoveFromHeap (
                 &KiCompareRequests, // comparisonfunc
-                &queue^.Head.Sorted.Roots[current], // rootptr
-            ) TO ^KeRequestEntry
+                &queue^.Head.Sorted.Roots[request^.HeapIndex], // rootptr
+                &request^.Entry.Sorted, // entry
+            )
+        END
 
-            IF NOT entry THEN
-                // The other queue is out too. No longer busy.
+        // Start the next request.
 
-                queue^.Busy = FALSE
+        queue^.Current += request^.Cost
+        queue^.Pivot = request^.SortKey
+
+        request^.Status = KI_REQUEST_CURRENT
+
+        // Start the request.
+
+        queue^.StartFunction ( request )
+
+        // Find another one.
+
+        GOTO Again
+    END
+END
+
+EXPORT FN KeCompleteRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN request : ^KeRequestEntry,
+) : UWORD
+
+    // Complete the given request (if it hasn't already been) and start any that
+    // can now be started. Returns TRUE if completed, FALSE otherwise.
+
+    completed := FALSE
+
+    ipl := KiAcquireRequestQueue ( queue )
+
+#IF BLD_CHK
+    IF request^.Status != KI_REQUEST_CURRENT AND
+        request^.Status != KI_REQUEST_CANCELLED THEN
+
+        KeCrash ( "KeCompleteRequestQueue: weird status %u\n", request^.Status )
+    END
+#END
+
+    IF request^.Status == KI_REQUEST_CURRENT THEN
+        completed = TRUE
+
+        // Set as completed.
+
+        request^.Status = KI_REQUEST_COMPLETED
+
+        // The request is still current, so decrement the current cost.
+
+        queue^.Current -= request^.Cost
+
+        // Invoke callback to free up any structures associated with this
+        // entry's cost.
+
+        queue^.CompleteFunction (
+            request, // request
+            FALSE, // cancelled
+        )
+
+        // Try to start any requests that can be started.
+
+        KiStartRequests ( queue )
+    END
+
+    KiReleaseRequestQueue ( queue, ipl )
+
+    RETURN completed
+END
+
+EXPORT FN KeCancelRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN request : ^KeRequestEntry,
+) : UWORD
+
+    // Cancel the given request. Returns TRUE if cancelled, FALSE otherwise.
+
+    cancelled := FALSE
+
+    ipl := KiAcquireRequestQueue ( queue )
+
+#IF BLD_CHK
+    IF request^.Status != KI_REQUEST_ENQUEUED AND
+        request^.Status != KI_REQUEST_CURRENT AND
+        request^.Status != KI_REQUEST_COMPLETED THEN
+
+        KeCrash ( "KeCancelRequestQueue: weird status %u\n", request^.Status )
+    END
+#END
+
+    status := request^.Status
+
+    IF status != KI_REQUEST_COMPLETED THEN
+        // Hasn't been completed yet, which means its still cancellable.
+
+        cancelled = TRUE
+
+        request^.Status = KI_REQUEST_CANCELLED
+
+        IF status == KI_REQUEST_ENQUEUED THEN
+            // It was enqueued, so we have to remove it from the queue
+            // structure.
+
+            IF queue^.SortPolicy == KE_REQUEST_QUEUE_FIFO THEN
+                // Remove from the FIFO list.
+
+                RtlRemoveEntryList ( &request^.Entry.List )
 
             ELSE
-                // We've switched queues, so set the new queue index.
+                // Remove from the appropriate min heap.
 
-                queue^.CurrentQueueIndex = current
-                queue^.Pivot = entry^.SortKey
+                RtlRemoveFromHeap (
+                    &KiCompareRequests, // comparisonfunc
+                    &queue^.Head.Sorted.Roots[request^.HeapIndex], // rootptr
+                    &request^.Entry.Sorted, // entry
+                )
             END
 
         ELSE
-            queue^.Pivot = entry^.SortKey
-        END
+            // It was current, so we have to clean up the cost.
 
-    ELSE
-        // This is a non-sorted request queue.
+            queue^.Current -= request^.Cost
 
-        IF RtlEmptyList ( &queue^.Head.List ) THEN
-            // Empty! No longer busy.
+            // Invoke callback to free up any structures associated with this
+            // entry's cost.
 
-            queue^.Busy = FALSE
+            queue^.CompleteFunction (
+                request, // request
+                TRUE, // cancelled
+            )
 
-        ELSE
-            // Grab the head item of the list.
+            // Try to start any requests that can be started.
 
-            listentry := queue^.Head.List.Next
-
-            RtlRemoveEntryList ( listentry )
-
-            entry = CONTAINEROF listentry TO KeRequestEntry.Entry.List
+            KiStartRequests ( queue )
         END
     END
 
     KiReleaseRequestQueue ( queue, ipl )
 
-    RETURN entry
+    RETURN cancelled
 END
