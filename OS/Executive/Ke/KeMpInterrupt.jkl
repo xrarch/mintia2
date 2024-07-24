@@ -62,32 +62,18 @@ EXPORT FN KiFreezeOtherProcessors ()
 
     // Now send IPIs to all of the processors in the system (other than me).
 
-    selfid := KiCurrentProcessor ()
+    myprb := KI_CURRENT_PRB
 
     j := 0
 
     WHILE j < KI_FREEZE_RETRY DO
         prb := CAST KeLoaderBlock.VirtualPrbBase TO ^KiPrb
 
-        count := KeLoaderBlock.ProcessorCount
-        i := 0
-
-        WHILE i < count DO
-            // Don't IPI the processor if it's me.
-
-            IF prb^.Id != selfid THEN
-                // Trigger an IPI.
-
-                HalTriggerIpi ( prb )
-            END
-
-            i += 1
-            prb += BL_PRB_SIZE
-        END
+        HalBroadcastIpi ( myprb )
 
         // Now wait for everyone except for me to freeze.
 
-        expected := count - 1
+        expected := KeLoaderBlock.ProcessorCount - 1
         spincount := KI_FREEZE_SPIN
 
         WHILE KiFrozenProcessorCount != expected AND spincount DO
@@ -321,28 +307,27 @@ FN KiExecuteOnEveryoneElse (
 
     targetprb := CAST KeLoaderBlock.VirtualPrbBase TO ^KiPrb
 
-    // Now send IPIs to all of the processors in the system (other than me).
+    // Now set pending to all of the processors in the system (other than me).
 
     WHILE i < count DO
         // Don't IPI the processor if it's me.
 
-        IF targetprb^.Id != selfid THEN
-            // The order of the following operations is important.
-            // 1. Mark pending.
+        IF targetprb != prb THEN
+            // Mark pending.
 
             KeOrUlong (
                 &targetprb^.IpiPendingSet, // ptr
                 1 << index, // bitset
             )
-
-            // 2. Trigger the IPI.
-
-            HalTriggerIpi ( targetprb )
         END
 
         i += 1
         targetprb += BL_PRB_SIZE
     END
+
+    // Broadcast IPI to all except me.
+
+    HalBroadcastIpi ( prb )
 
     // Spin-wait for execution of our callback.
 

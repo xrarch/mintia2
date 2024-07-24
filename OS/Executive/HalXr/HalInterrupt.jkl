@@ -269,6 +269,32 @@ FN HalTriggerIpi (
     lsic^.Pending0 = (1 << 1)
 END
 
+FN HalBroadcastIpi (
+    IN except : ^KiPrb,
+)
+
+    // Broadcast IPIs to all processors except the one provided, which is
+    // also guaranteed to be the one we're executing on. We have to do this
+    // one at a time on XR/station.
+
+    targetprb := CAST KeLoaderBlock.VirtualPrbBase TO ^KiPrb
+    count := KeLoaderBlock.ProcessorCount
+    i := 0
+
+    // Now send IPIs to all of the processors in the system (other than me).
+
+    WHILE i < count DO
+        // Don't IPI the processor if it's me.
+
+        IF targetprb != except THEN
+            HalTriggerIpi ( targetprb )
+        END
+
+        i += 1
+        targetprb += BL_PRB_SIZE
+    END
+END
+
 FN (KeInterruptF) HalpIpiInterrupt (
     IN interrupt : ^KeInterrupt,
     IN context : ^OsContext,
