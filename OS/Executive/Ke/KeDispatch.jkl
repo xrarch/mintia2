@@ -274,6 +274,12 @@ FN KiSwitchThread (
         current, // oldthread
     )
 
+#IF BLD_CHK
+    IF current != KeCurrentThread () THEN
+        KeCrash ( "KiSwitchThread: current isn't current\n" )
+    END
+#END
+
     // We're back in the context of the "current" thread. This is always where
     // the hole that the gopher pops back out of is, except in the case of a
     // newly created thread being dispatched for the first time.
@@ -283,6 +289,8 @@ FN KiSwitchThread (
     // (RtlEmptyList) does not touch any pointers.
 
     IF NOT RtlEmptyList ( &current^.KapcListHead ) THEN
+        prb = KI_CURRENT_PRB
+
         KiSoftInterruptSelf ( prb, KI_IPL_APC )
     END
 END

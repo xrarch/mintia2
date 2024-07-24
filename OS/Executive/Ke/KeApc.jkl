@@ -78,6 +78,8 @@ END
 EXPORT FN KeEnqueueKapc (
     IN apc : ^KeApc,
     IN priorityboost : UWORD,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
 ) : UWORD
 
     // Enqueue the kernel APC to its thread.
@@ -111,6 +113,9 @@ EXPORT FN KeEnqueueKapc (
     )
 
     apc^.Enqueued = TRUE
+
+    apc^.Context1 = context1
+    apc^.Context2 = context2
 
     // Release APC queue but keep IPL elevated.
 
@@ -180,18 +185,20 @@ END
 EXPORT FN KeEnqueueUapc (
     IN apc : ^KeApc,
     IN priorityboost : UWORD,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
 ) : UWORD
 
     // Enqueue the user APC to its thread.
     // Return TRUE if enqueued, FALSE otherwise.
+
+    thread := apc^.Thread
 
 #IF BLD_CHK
     IF apc^.Type != KE_APC_USER THEN
         KeCrash ( "KeEnqueueUapc: wrong type %u\n", apc^.Type )
     END
 #END
-
-    thread := apc^.Thread
 
     // Acquire the APC queue.
 
@@ -213,6 +220,9 @@ EXPORT FN KeEnqueueUapc (
     )
 
     apc^.Enqueued = TRUE
+
+    apc^.Context1 = context1
+    apc^.Context2 = context2
 
     // Release APC queue but keep IPL elevated.
 
@@ -255,6 +265,8 @@ END
 EXPORT FN KeEnqueueLapc (
     IN apc : ^KeApc,
     IN priorityboost : UWORD,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
 ) : UWORD
 
     // Enqueue the lazy APC to its thread.
@@ -289,6 +301,9 @@ EXPORT FN KeEnqueueLapc (
 
     apc^.Enqueued = TRUE
 
+    apc^.Context1 = context1
+    apc^.Context2 = context2
+
     // Release APC queue but keep IPL elevated.
 
     KiReleaseApcQueueElevated ( thread )
@@ -297,16 +312,22 @@ EXPORT FN KeEnqueueLapc (
 
     KiAcquireThreadElevated ( thread )
 
+    // Set user interrupt pending to make sure the thread checks his lazy APC
+    // queue on the way back out to usermode.
+
+    thread^.UserInterrupt = TRUE
+
     IF (thread^.Status == KI_THREAD_WAITING
 #IF BLD_MP
         OR (thread^.Status == KI_THREAD_RUNNING AND
         thread^.WaitAttempt == KI_THREAD_WAIT_TRY)
 #END
-        ) AND
-        thread^.WaitIpl == KI_IPL_LOW AND
+        ) AND thread^.WaitIpl == KI_IPL_LOW AND
         thread^.WaitMode == KE_USER_MODE THEN
 
-        // The thread was in a usermode wait, so trigger lazy APC delivery.
+        // The thread was in a usermode wait, so wake him up with a kernel APC
+        // status so that he tries to wait again and dispatches his lazy APC
+        // queue at that time.
 
         KiUnwaitThread (
             thread, // thread,
@@ -320,8 +341,6 @@ EXPORT FN KeEnqueueLapc (
 
         // The thread is running in usermode on another processor. Cause an IPI
         // to get him to check his lazy APC queue.
-
-        thread^.UserInterrupt = TRUE
 
         HalTriggerIpi ( thread^.CurrentPrb )
 #END
@@ -383,11 +402,11 @@ FN KiDispatchKernelModeApcs (
             BREAK
         END
 
-        apc := CONTAINEROF head^.Next TO KeApc.Entry
+        apc := CONTAINEROF listentry TO KeApc.Entry
 
         // Remove from the list.
 
-        RtlRemoveEntryList ( &apc^.Entry )
+        RtlRemoveEntryList ( listentry )
 
         // Capture the context before unlocking the queue, or the APC could get
         // re-enqueued again from an interrupt or another processor, destroying
@@ -410,6 +429,7 @@ FN KiDispatchKernelModeApcs (
             apc, // apc
             context1, // context1
             context2, // context2
+            FALSE, // rundown
         )
     END
 END
@@ -453,10 +473,10 @@ FN KiDispatchLazyApcQueue (
     )
 END
 
+EXTERN PsUexecApcDispatcher : ^VOID
+
 FN KiDispatchUserApcQueue (
     IN current : ^KeThread,
-    IN dispatchfunc : ^VOID,
-    IN trapframe : ^VOID,
 )
 
     // Dispatch the user APC queue. This is called upon return to usermode after
@@ -503,13 +523,14 @@ FN KiDispatchUserApcQueue (
         apc, // apc
         context1, // context1
         context2, // context2
+        FALSE, // rundown
     )
 
     // Dispatch the APC in usermode.
 
     KiInterruptUsermode (
-        dispatchfunc, // dispatchfunc
-        trapframe, // trapframe
+        PsUexecApcDispatcher, // dispatchfunc
+        current^.UserFrame, // trapframe
         context1, // userfunc
         context2, // context
     )

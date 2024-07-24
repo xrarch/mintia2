@@ -4,6 +4,29 @@
 
 #INCLUDE "Ki.hjk"
 #INCLUDE "<ll>/System/OsStatus.hjk"
+#INCLUDE "<ll>/System/OsSignal.hjk"
+#INCLUDE "<inc>/Ps.hjk"
+
+#SECTION "PAGE$text"
+FN (KeApcF) KiSuspendThreadApc (
+    IN apc : ^KeApc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+    IN rundown : UWORD,
+)
+
+    // Called at KI_IPL_LOW as a lazy APC whenever thread suspension has been
+    // requested.
+
+    thread := KeCurrentThread ()
+
+    KeWaitForSingleObject (
+        KE_KERNEL_MODE, // waitmode
+        FALSE, // alertable
+        NULLPTR, // timeout
+        &thread^.SuspendHeader, // object
+    )
+END
 
 #SECTION "PAGE$text"
 FN KeInitializeThread (
@@ -39,6 +62,8 @@ FN KeInitializeThread (
     thread^.RunMs = 0
     thread^.StateMs = 0
 
+    thread^.Terminated = FALSE
+
     // Initialize the context on the kernel stack.
 
     thread^.Context = KiInitializeContext (
@@ -54,6 +79,23 @@ FN KeInitializeThread (
     thread^.RemainingQuantum = KI_DEFAULT_QUANTUM
 
     thread^.Interactive = FALSE
+
+    // Initialize the suspension LAPC.
+
+    KeInitializeApc (
+        &thread^.SuspendLapc, // apc
+        &KiSuspendThreadApc, // func
+        KE_APC_LAZY, // type
+        thread, // thread
+    )
+
+    KiInitializeDispatchObject (
+        &thread^.SuspendHeader, // hdr
+        "Suspended", // name
+        KI_DISPATCH_EVENT_NOTIF, // type
+    )
+
+    thread^.SuspendCount = 0
 
     // Initialize the APC list heads.
 
@@ -127,10 +169,350 @@ FN KeInitializeThread (
     // KeReleasePushlock ( &process^.Pushlock )
 END
 
+EXPORT FN KeSuspendThread (
+    IN thread : ^KeThread,
+) : UWORD
+
+    // Suspend a thread. Return the old suspension count.
+    // We are basically implementing a dispatch object with special semantics
+    // here rather than use the event APIs directly, such that whenever the
+    // SuspendCount > 0, the object is unsignaled, and when SuspendCount == 0
+    // it is signaled.
+
+    IF thread^.Terminated THEN
+        // Can't suspend a terminated thread.
+
+        RETURN 0
+    END
+
+    ipl := KiAcquireObject ( &thread^.SuspendHeader )
+
+    count := thread^.SuspendCount
+
+    IF count == KE_SUSPEND_MAX THEN
+        // Can't increment or we'll overflow.
+
+        GOTO Out
+    END
+
+    thread^.SuspendCount = count + 1
+
+    IF NOT count THEN
+        // Set the object unsignaled.
+
+        thread^.SuspendHeader.SignalCount = 0
+
+        // If the suspension APC isn't enqueued, do that now to get the thread
+        // to wait on this suspension object.
+
+        IF NOT thread^.SuspendLapc.Enqueued THEN
+            KeEnqueueLapc (
+                &thread^.SuspendLapc, // apc
+                0, // priorityboost
+                0, // context1
+                0, // context2
+            )
+        END
+    END
+
+@Out
+
+    KiReleaseObject ( &thread^.SuspendHeader, ipl )
+
+    RETURN count
+END
+
+EXPORT FN KeUnsuspendThread (
+    IN thread : ^KeThread,
+    IN force : UWORD,
+) : UWORD
+
+    // Unsuspend a thread. Return the old suspension count.
+
+    ipl := KiAcquireObject ( &thread^.SuspendHeader )
+
+    count := thread^.SuspendCount
+
+    IF count == 0 THEN
+        // Can't decrement or we'll underflow.
+
+        GOTO Out
+    END
+
+    IF force THEN
+        // Forcibly unsuspend by simulating a decrement from 1.
+
+        count = 1
+    END
+
+    thread^.SuspendCount = count - 1
+
+    IF count == 1 THEN
+        // No longer suspended, set the object signaled.
+
+        thread^.SuspendHeader.SignalCount = 1
+
+        // Satisfy any waits.
+
+        IF thread^.SuspendHeader.WaiterCount THEN
+            KiSatisfyObject (
+                &thread^.SuspendHeader, // object
+                0, // priorityboost
+                TRUE, // all
+                0, // status
+            )
+        END
+    END
+
+@Out
+
+    KiReleaseObject ( &thread^.SuspendHeader, ipl )
+
+    RETURN count
+END
+
+FN KiWakeThreadForSignal (
+    IN thread : ^KeThread,
+)
+
+    // Check if the thread needs to be awoken to receive a signal.
+    // Thread lock is held.
+
+    IF (thread^.Status == KI_THREAD_WAITING
+#IF BLD_MP
+        OR (thread^.Status == KI_THREAD_RUNNING AND
+        thread^.WaitAttempt == KI_THREAD_WAIT_TRY)
+#END
+        ) AND thread^.WaitIpl == KI_IPL_LOW THEN
+
+        // The thread is waiting and may need to be awoken.
+
+        status := 0
+
+        IF thread^.WaitMode == KE_USER_MODE THEN
+            IF thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+                // This is a usermode wait and KILL is pending, so cause a wake.
+
+                status = OS_STATUS_KILLED
+
+            ELSEIF thread^.Alertable AND
+                thread^.SignalMask & thread^.SignalAcceptMask THEN
+
+                // This is a usermode alertable wait and there are pending
+                // signals, so cause a wake.
+
+                status = OS_STATUS_SIGNALED
+
+                // Clear the signals from the deliver-on-wait mask.
+
+                thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
+            END
+        
+        ELSEIF thread^.Alertable AND
+            thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+
+            // Alertable kernel mode waits are (only) interrupted by
+            // termination.
+            
+            status = OS_STATUS_KILLED
+        END
+
+        IF status THEN
+            // We've identified an event that we should alert the thread to.
+            // Set user interrupt pending.
+
+            thread^.UserInterrupt = TRUE
+
+            IF NOT thread^.IgnoreEventCount THEN
+                // Wake the thread.
+
+                KiUnwaitThread (
+                    thread, // thread,
+                    status, // status
+                    0, // priorityboost
+                )
+            END
+        END
+
+    ELSEIF thread^.SignalMask &
+        thread^.SignalAcceptMask &
+        ~thread^.SignalDeliverOnWaitMask THEN
+
+        // There are pending signals. Set user interrupt pending so he checks
+        // it eventually.
+
+        thread^.UserInterrupt = TRUE
+
+#IF BLD_MP
+        IF thread^.Status == KI_THREAD_RUNNING AND
+            thread^.CurrentMode == KE_USER_MODE THEN
+
+            // The thread is running in usermode on another processor, so cause
+            // an IPI to slurp him up into the kernel to check his signals.
+
+            HalTriggerIpi ( thread^.CurrentPrb )
+        END
+#END
+    END
+END
+
 FN KeSignalThread (
     IN thread : ^KeThread,
     IN signal : UWORD,
 )
 
-    KeCrash ( "NYI KeSignalThread\n" )
+    // Send a signal to the thread.
+
+#IF BLD_CHK
+    IF signal == 0 THEN
+        KeCrash ( "KeSignalThread: signal == 0\n" )
+    END
+
+    IF signal >= 32 THEN
+        KeCrash ( "KeSignalThread: signal >= 32\n" )
+    END
+#END
+    // If this is a KILL signal, unsuspend the thread.
+
+    IF signal == OS_SIGNAL_KILL THEN
+        thread^.Terminated = TRUE
+
+        KeUnsuspendThread (
+            thread, // thread
+            TRUE, // force
+        )
+    END
+
+    // Acquire the thread lock.
+
+    ipl := KiAcquireThread ( thread )
+
+    // OR the new signal bit in.
+
+    thread^.SignalMask |= (1 << signal)
+
+    // Check if the thread needs to be kicked in the pants.
+
+    KiWakeThreadForSignal ( thread )
+
+    // Release the thread lock.
+
+    KiReleaseThread ( thread, ipl )
+END
+
+FN KiDispatchSignal (
+    IN thread : ^KeThread,
+)
+
+    // There's a pending signal and we are ready to receive it. Find out what
+    // it is and redirect the usermode trapframe to the signal dispatcher.
+
+    ipl := KiAcquireThread ( thread )
+
+    excsignals := thread^.SignalAcceptMask &
+        ~thread^.SignalDeliverOnWaitMask &
+        thread^.SignalMask
+
+    IF NOT excsignals THEN
+        // No signals pending, somehow.
+
+        KiReleaseThread ( thread, ipl )
+
+        LEAVE
+    END
+
+    // There must be a set bit, and therefore a pending signal; we WILL find it
+    // here.
+
+    signal := 0
+
+    WHILE signal < 32 DO
+        IF excsignals & (1 << signal) THEN
+            BREAK
+        END
+
+        signal += 1
+    END
+
+    // Clear the pending signal bit.
+
+    thread^.SignalMask &= ~(1 << signal)
+
+    // Mask off the signal.
+
+    thread^.SignalAcceptMask &= ~(1 << signal)
+
+    KiReleaseThread ( thread, ipl )
+
+    // Dispatch the signal in usermode.
+
+    KiInterruptUsermode (
+        PsUexecSignalDispatcher, // dispatchfunc
+        thread^.UserFrame, // trapframe
+        0, // userfunc
+        signal, // context
+    )
+END
+
+FN KiDispatchUserInterrupts ()
+
+    // Called before the exception handler returns to usermode.
+    // Handles usermode interrupt dispatch, such as thread termination,
+    // suspension, and signal dispatch.
+    //
+    // NOTE: This routine is architected to be called with all interrupts
+    //       disabled. Just being at IPLDPC is not sufficient, because it
+    //       creates a race condition on exit to usermode. This problem is
+    //       worsened on MP systems, where we have to be sure that all IPIs are
+    //       blocked while we check these things.
+
+    thread := KeCurrentThread ()
+
+    WHILE thread^.UserInterrupt DO
+        thread^.UserInterrupt = FALSE
+
+        KiEnableInterrupts ()
+
+        IF thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+            // The current thread has been terminated.
+            // Upcall into Ps to go die. It'll call KeExitThread when its ready
+            // and then we will add this thread to the reaper list and yield the
+            // processor for the last time.
+
+            PsExitThread ()
+
+#IF BLD_CHK
+            KeCrash ( "PsExitThread returned\n" )
+#END
+        END
+
+        IF thread^.SignalAcceptMask &
+            ~thread^.SignalDeliverOnWaitMask &
+            thread^.SignalMask THEN
+
+            // Dispatch a pending signal.
+
+            KiDispatchSignal ( thread )
+        END
+
+        IF NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
+            // Dispatch the lazy APC queue.
+
+            KiDispatchLazyApcQueue ( thread )
+        END
+
+        IF thread^.UserApcTriggered THEN
+            // A user APC was previously triggered; deliver it now.
+            // It's safe to clear thread^.UserApcTriggered here because we
+            // only set it from the context of our own thread, anyway; except
+            // when a user APC is enqueued to us, but then only if we're
+            // waiting, which we clearly aren't doing right now.
+
+            thread^.UserApcTriggered = FALSE
+
+            KiDispatchUserApcQueue ( thread )
+        END
+
+        KiDisableInterrupts ()
+    END
 END

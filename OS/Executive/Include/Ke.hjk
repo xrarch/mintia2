@@ -313,6 +313,67 @@ EXTERN FN KeQueryTime (
     IN local : UWORD,
 )
 
+#DEFINE KE_APC_USER 1
+#DEFINE KE_APC_LAZY 2
+#DEFINE KE_APC_KERNEL 3
+
+FNPTR KeApcF (
+    IN apc : ^KeApc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+    IN rundown : UWORD,
+)
+
+STRUCT KeApc
+    Entry : RtlListEntry,
+    Function : KeApcF,
+    Thread : ^KeThread,
+    Context1 : UWORD,
+    Context2 : UWORD,
+    Type : UBYTE,
+    Enqueued : UBYTE,
+END
+
+EXTERN FN KeInitializeApc (
+    IN apc : ^KeApc,
+    IN func : KeApcF,
+    IN type : UWORD,
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KeEnqueueKapc (
+    IN apc : ^KeApc,
+    IN priorityboost : UWORD,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+EXTERN FN KeEnqueueLapc (
+    IN apc : ^KeApc,
+    IN priorityboost : UWORD,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+EXTERN FN KeEnqueueUapc (
+    IN apc : ^KeApc,
+    IN priorityboost : UWORD,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+EXTERN FN KeDequeueApc (
+    IN apc : ^KeApc,
+) : UWORD
+
+STRUCT KeEvent
+    Header : KiDispatchHeader,
+END
+
+STRUCT KeSemaphore
+    Header : KiDispatchHeader,
+END
+
 EXTERN FN KeInitializeProcess (
     IN process : ^KeProcess,
     IN name : ^UBYTE,
@@ -386,6 +447,8 @@ END
 #DEFINE KI_TIMESHARED_QUEUE 2
 #DEFINE KI_REAL_TIME_QUEUE 3
 
+#DEFINE KE_SUSPEND_MAX 255
+
 STRUCT KeThread
     Name : UBYTE[KE_DEBUG_NAME_LENGTH],
 
@@ -406,6 +469,7 @@ STRUCT KeThread
     Process : ^KeProcess,
     ActualProcess : ^KeProcess,
     KernelStackTop : ^VOID,
+    UserFrame : ^OsContext,
 
     BalancedQueue : ^KeBalancedQueue,
     QueueItem : ^RtlListEntry,
@@ -414,6 +478,9 @@ STRUCT KeThread
     AffinityPrb : ^KiPrb,
     CurrentPrb : ^KiPrb,
 #END
+
+    SuspendLapc : KeApc,
+    SuspendHeader : KiDispatchHeader,
 
     WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
     TimeoutWaitBlock : KiWaitBlock,
@@ -446,20 +513,16 @@ STRUCT KeThread
     InSwapList : UBYTE,
     Interactive : UBYTE,
     CurrentQueue : UBYTE,
+    SuspendCount : UBYTE,
+    Terminated : UBYTE,
+
 #IF BLD_MP
     WaitAttempt : UBYTE,
     Pinned : UBYTE,
     Switching : UBYTE,
     CurrentMode : UBYTE,
 #END
-END
 
-STRUCT KeEvent
-    Header : KiDispatchHeader,
-END
-
-STRUCT KeSemaphore
-    Header : KiDispatchHeader,
 END
 
 EXTERN FN KeInitializeEvent (
@@ -615,9 +678,9 @@ UNION KiRequestLinks
     List : RtlListEntry,
 END
 
-#DEFINE KE_REQUEST_QUEUE_FIFO 1
-#DEFINE KE_REQUEST_QUEUE_KEY 2
-#DEFINE KE_REQUEST_QUEUE_COST 3
+#DEFINE KE_REQUEST_QUEUE_FIFO 0
+#DEFINE KE_REQUEST_QUEUE_KEY 1
+#DEFINE KE_REQUEST_QUEUE_COST 2
 
 #DEFINE KI_REQUEST_NONE 0
 #DEFINE KI_REQUEST_ENQUEUED 1
@@ -701,40 +764,4 @@ EXTERN FN KeCompleteRequestQueue (
 EXTERN FN KeCancelRequestQueue (
     IN queue : ^KeRequestQueue,
     IN request : ^KeRequestEntry,
-) : UWORD
-
-#DEFINE KE_APC_USER 1
-#DEFINE KE_APC_LAZY 2
-#DEFINE KE_APC_KERNEL 3
-
-FNPTR KeApcF (
-    IN apc : ^KeApc,
-    IN context1 : UWORD,
-    IN context2 : UWORD,
-)
-
-STRUCT KeApc
-    Entry : RtlListEntry,
-    Function : KeApcF,
-    Thread : ^KeThread,
-    Context1 : UWORD,
-    Context2 : UWORD,
-    Type : UBYTE,
-    Enqueued : UBYTE,
-END
-
-EXTERN FN KeInitializeApc (
-    IN apc : ^KeApc,
-    IN func : KeApcF,
-    IN type : UWORD,
-    IN thread : ^KeThread,
-)
-
-EXTERN FN KeEnqueueKapc (
-    IN apc : ^KeApc,
-    IN priorityboost : UWORD,
-) : UWORD
-
-EXTERN FN KeDequeueApc (
-    IN apc : ^KeApc,
 ) : UWORD

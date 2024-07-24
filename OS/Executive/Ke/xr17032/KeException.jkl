@@ -177,14 +177,21 @@ KiExceptionHandler:
     mtcr scratch1, sp               // Save the current stack pointer.
 
     mfcr t0, rs                     // Read the status register.
-    andi t0, t0, 1                  // Isolate the USER bit.
-    beq  t0, .waskernel             // If not set, we were already in kernel mode.
+    andi t0, t0, (1 << 8)           // Isolate the old USER bit.
+    beq  t0, .waskernel             // If not set, we were already in kernel
+                                    // mode. If clear, we entered from usermode.
 
     subi t0, zero, 4096             // Load the address of the PRB.
+
+    // Switch to the current thread's kernel stack.
+
     mov  sp, long [t0 + KiPrb_KernelStackTop]
 
 .waskernel:
+
     subi sp, sp, OsContext__SIZEOF   // Create a context block on the stack.
+
+    // Save the context of the processor in order to create a trapframe.
 
     mfcr t0, scratch0
     mov  long [sp + OsContext_T1], t1
@@ -224,14 +231,61 @@ KiExceptionHandler:
     mov  long [sp + OsContext_Epc], t1
     mov  long [sp + OsContext_Rs], t2
 
-    rshi t0, t2, 28
-    la   t1, KiHandlerTable
-    mov  t0, long [t1 + t0 LSH 2]
+    andi s0, t2, (1 << 8)           // Isolate the old USER bit.
+    beq  s0, .waskernel2            // If not set, we were already in kernel
+                                    // mode. If clear, we entered from usermode.
 
-    mfcr a1, ebadaddr
-    mov  a0, sp
-    jalr lr, t0, 0
-    
+    subi t0, zero, 4096             // Load the address of the PRB.
+
+    // Load the current thread.
+
+    mov  s1, long [t0 + KiPrb_CurrentThread]
+
+    // Store the user trapframe address.
+
+    mov  long [s1 + KeThread_UserFrame], sp
+
+#IF BLD_MP
+    // Set current thread as currently in kernel mode.
+
+    mov  byte [s1 + KeThread_CurrentMode], KE_KERNEL_MODE
+#END
+
+.waskernel2:
+
+    rshi t0, t2, 28                 // Isolate the exception code.
+    la   t1, KiHandlerTable         // Load the address of the handler table.
+    mov  t0, long [t1 + t0 LSH 2]   // Load the handler.
+
+    mfcr a1, ebadaddr               // Set bad address as second argument.
+    mov  a0, sp                     // Set trapframe as first argument.
+    jalr lr, t0, 0                  // Execute handler.
+
+    beq  s0, .waskernel3            // If not set, we were already in kernel
+                                    // mode. If clear, we are returning to user
+                                    // mode.
+
+#IF BLD_MP
+    // Set current thread as currently in usermode.
+    // Do this *before* dispatching usermode interrupts, or there's a risk of
+    // missed IPIs. This field is purely advisory for IPI delivery so there's
+    // no harm to this.
+
+    mov  byte [s1 + KeThread_CurrentMode], KE_USER_MODE
+#END
+
+    // Check for pending usermode interrupt.
+
+    mov  t0, byte [s1 + KeThread_UserInterrupt]
+
+    beq  t0, .waskernel3            // If clear, no pending usermode interrupt.
+
+    jal  KiDispatchUserInterrupts   // Dispatch pending usermode interrupts.
+
+.waskernel3:
+
+    // Restore the context of the processor from the trapframe.
+
     mov  t0, long [sp + OsContext_Rs]
     mtcr rs, t0
     mov  t1, long [sp + OsContext_Epc]
@@ -267,6 +321,8 @@ KiExceptionHandler:
     mov  tp, long [sp + OsContext_Tp]
     mov  lr, long [sp + OsContext_Lr]
     mov  sp, long [sp + OsContext_Sp]
+
+    // Return from the exception.
 
     rfe
 
