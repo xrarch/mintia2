@@ -120,12 +120,12 @@ EXPORT FN KeEnqueueKapc (
 
     KiAcquireThreadElevated ( thread )
 
-    // Acquire a pointer to the current Prb.
-
-    prb := KI_CURRENT_PRB
-
     IF thread^.Status == KI_THREAD_RUNNING THEN
         // Need to trigger an APC interrupt.
+
+        // Acquire a pointer to the current Prb.
+
+        prb := KI_CURRENT_PRB
 
 #IF BLD_MP
         IF thread^.WaitAttempt == KI_THREAD_WAIT_TRY AND
@@ -165,13 +165,166 @@ EXPORT FN KeEnqueueKapc (
 
         // Wake the thread.
 
-        RtlPrint ( "W " )
+        KiUnwaitThread (
+            thread, // thread,
+            OS_STATUS_KERNEL_APC, // status
+            priorityboost, // priorityboost
+        )
+    END
+
+    KiReleaseThread ( thread, ipl )
+
+    RETURN TRUE
+END
+
+EXPORT FN KeEnqueueUapc (
+    IN apc : ^KeApc,
+    IN priorityboost : UWORD,
+) : UWORD
+
+    // Enqueue the user APC to its thread.
+    // Return TRUE if enqueued, FALSE otherwise.
+
+#IF BLD_CHK
+    IF apc^.Type != KE_APC_USER THEN
+        KeCrash ( "KeEnqueueUapc: wrong type %u\n", apc^.Type )
+    END
+#END
+
+    thread := apc^.Thread
+
+    // Acquire the APC queue.
+
+    ipl := KiAcquireApcQueue ( thread )
+
+    IF apc^.Enqueued THEN
+        // Already enqueued.
+
+        KiReleaseApcQueue ( thread, ipl )
+
+        RETURN FALSE
+    END
+
+    // Add the APC to the list.
+
+    RtlInsertAtTailList (
+        &thread^.UapcListHead, // head
+        &apc^.Entry, // entry
+    )
+
+    apc^.Enqueued = TRUE
+
+    // Release APC queue but keep IPL elevated.
+
+    KiReleaseApcQueueElevated ( thread )
+
+    // Acquire the thread lock.
+
+    KiAcquireThreadElevated ( thread )
+
+    IF (thread^.Status == KI_THREAD_WAITING
+#IF BLD_MP
+        OR (thread^.Status == KI_THREAD_RUNNING AND
+        thread^.WaitAttempt == KI_THREAD_WAIT_TRY)
+#END
+        ) AND
+        thread^.WaitIpl == KI_IPL_LOW AND
+        thread^.WaitMode == KE_USER_MODE AND
+        thread^.Alertable THEN
+
+        // The thread was in a usermode alertable wait, so trigger user APC
+        // delivery.
+
+        thread^.UserApcTriggered = TRUE
+        thread^.UserInterrupt = TRUE
+
+        // Wake the thread.
+
+        KiUnwaitThread (
+            thread, // thread,
+            OS_STATUS_USER_APC, // status
+            priorityboost, // priorityboost
+        )
+    END
+
+    KiReleaseThread ( thread, ipl )
+
+    RETURN TRUE
+END
+
+EXPORT FN KeEnqueueLapc (
+    IN apc : ^KeApc,
+    IN priorityboost : UWORD,
+) : UWORD
+
+    // Enqueue the lazy APC to its thread.
+    // Return TRUE if enqueued, FALSE otherwise.
+
+#IF BLD_CHK
+    IF apc^.Type != KE_APC_LAZY THEN
+        KeCrash ( "KeEnqueueLapc: wrong type %u\n", apc^.Type )
+    END
+#END
+
+    thread := apc^.Thread
+
+    // Acquire the APC queue.
+
+    ipl := KiAcquireApcQueue ( thread )
+
+    IF apc^.Enqueued THEN
+        // Already enqueued.
+
+        KiReleaseApcQueue ( thread, ipl )
+
+        RETURN FALSE
+    END
+
+    // Add the APC to the list.
+
+    RtlInsertAtTailList (
+        &thread^.LapcListHead, // head
+        &apc^.Entry, // entry
+    )
+
+    apc^.Enqueued = TRUE
+
+    // Release APC queue but keep IPL elevated.
+
+    KiReleaseApcQueueElevated ( thread )
+
+    // Acquire the thread lock.
+
+    KiAcquireThreadElevated ( thread )
+
+    IF (thread^.Status == KI_THREAD_WAITING
+#IF BLD_MP
+        OR (thread^.Status == KI_THREAD_RUNNING AND
+        thread^.WaitAttempt == KI_THREAD_WAIT_TRY)
+#END
+        ) AND
+        thread^.WaitIpl == KI_IPL_LOW AND
+        thread^.WaitMode == KE_USER_MODE THEN
+
+        // The thread was in a usermode wait, so trigger lazy APC delivery.
 
         KiUnwaitThread (
             thread, // thread,
             OS_STATUS_KERNEL_APC, // status
             priorityboost, // priorityboost
         )
+
+#IF BLD_MP
+    ELSEIF thread^.Status == KI_THREAD_RUNNING AND
+        thread^.CurrentMode == KE_USER_MODE THEN
+
+        // The thread is running in usermode on another processor. Cause an IPI
+        // to get him to check his lazy APC queue.
+
+        thread^.UserInterrupt = TRUE
+
+        HalTriggerIpi ( thread^.CurrentPrb )
+#END
     END
 
     KiReleaseThread ( thread, ipl )

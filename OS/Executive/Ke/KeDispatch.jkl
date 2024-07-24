@@ -1908,13 +1908,9 @@ FN KiSatisfyObject (
 END
 
 #MACRO KiCheckWaitInterruptingEvents ( thread, ipl, alertable, waitmode ) [
-    // IPL >= KI_IPL_APC masks out all events. We also don't check unless
-    // KernelInterrupt has been set, as this is pretty time consuming to do on
-    // every wait operation.
+    // IPL >= KI_IPL_APC masks out all events.
 
-    IF thread^.KernelInterrupt AND ipl == KI_IPL_LOW THEN
-        thread^.KernelInterrupt = FALSE
-
+    IF ipl == KI_IPL_LOW THEN
         IF NOT alertable THEN
             IF waitmode == KE_USER_MODE AND
                 thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
