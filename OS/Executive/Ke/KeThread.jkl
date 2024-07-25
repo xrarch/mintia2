@@ -356,6 +356,115 @@ FN KiWakeThreadForSignal (
     END
 END
 
+FN KeDeliverOnWaitSignalThread (
+    IN thread : ^KeThread,
+    IN signal : UWORD,
+    IN enable : UWORD,
+) : UWORD
+
+    // Set the given signal as deliver-on-wait. This means it will remain
+    // pending until the next usermode alertable wait.
+    // Returns TRUE if it was previously enabled, FALSE otherwise.
+
+#IF BLD_CHK
+    IF signal == 0 THEN
+        KeCrash ( "KeDeliverOnWaitSignalThread: signal == 0\n" )
+    END
+
+    IF signal >= 32 THEN
+        KeCrash ( "KeDeliverOnWaitSignalThread: signal >= 32\n" )
+    END
+#END
+
+    IF signal == OS_SIGNAL_KILL THEN
+        // Can't mask off KILL.
+
+        RETURN TRUE
+    END
+
+    ipl := KiAcquireThread ( thread )
+
+    enabled := FALSE
+
+    IF thread^.SignalDeliverOnWaitMask & (1 << signal) THEN
+        enabled = TRUE
+    END
+
+    IF enable THEN
+        // Deliver-on-wait the signal.
+
+        thread^.SignalDeliverOnWaitMask |= (1 << signal)
+
+    ELSE
+        // Un-deliver-on-wait the signal.
+
+        thread^.SignalDeliverOnWaitMask &= ~(1 << signal)
+
+        // See if we need to wake the thread now that this signal has been
+        // enabled.
+
+        KiWakeThreadForSignal ( thread )
+    END
+
+    KiReleaseThread ( thread, ipl )
+
+    RETURN enabled
+END
+
+FN KeMaskSignalThread (
+    IN thread : ^KeThread,
+    IN signal : UWORD,
+    IN enable : UWORD,
+) : UWORD
+
+    // Mask the given signal from being delivered to the thread.
+    // Returns TRUE if it was previously enabled, FALSE otherwise.
+
+#IF BLD_CHK
+    IF signal == 0 THEN
+        KeCrash ( "KeMaskSignalThread: signal == 0\n" )
+    END
+
+    IF signal >= 32 THEN
+        KeCrash ( "KeMaskSignalThread: signal >= 32\n" )
+    END
+#END
+
+    IF signal == OS_SIGNAL_KILL THEN
+        // Can't mask off KILL.
+
+        RETURN TRUE
+    END
+
+    ipl := KiAcquireThread ( thread )
+
+    enabled := FALSE
+
+    IF thread^.SignalAcceptMask & (1 << signal) THEN
+        enabled = TRUE
+    END
+
+    IF enable THEN
+        // Enable the signal.
+
+        thread^.SignalAcceptMask |= (1 << signal)
+
+        // See if we need to wake the thread now that this signal has been
+        // enabled.
+
+        KiWakeThreadForSignal ( thread )
+
+    ELSE
+        // Disable the signal.
+
+        thread^.SignalAcceptMask &= ~(1 << signal)
+    END
+
+    KiReleaseThread ( thread, ipl )
+
+    RETURN enabled
+END
+
 FN KeSignalThread (
     IN thread : ^KeThread,
     IN signal : UWORD,
@@ -372,6 +481,7 @@ FN KeSignalThread (
         KeCrash ( "KeSignalThread: signal >= 32\n" )
     END
 #END
+
     // If this is a KILL signal, unsuspend the thread.
 
     IF signal == OS_SIGNAL_KILL THEN
