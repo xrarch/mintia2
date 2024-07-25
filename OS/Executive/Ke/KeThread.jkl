@@ -189,33 +189,27 @@ EXPORT FN KeSuspendThread (
 
     count := thread^.SuspendCount
 
-    IF count == KE_SUSPEND_MAX THEN
-        // Can't increment or we'll overflow.
+    IF count != KE_SUSPEND_MAX THEN
+        thread^.SuspendCount = count + 1
 
-        GOTO Out
-    END
+        IF NOT count THEN
+            // Set the object unsignaled.
 
-    thread^.SuspendCount = count + 1
+            thread^.SuspendHeader.SignalCount = 0
 
-    IF NOT count THEN
-        // Set the object unsignaled.
+            // If the suspension APC isn't enqueued, do that now to get the
+            // thread to wait on this suspension object.
 
-        thread^.SuspendHeader.SignalCount = 0
-
-        // If the suspension APC isn't enqueued, do that now to get the thread
-        // to wait on this suspension object.
-
-        IF NOT thread^.SuspendLapc.Enqueued THEN
-            KeEnqueueLapc (
-                &thread^.SuspendLapc, // apc
-                0, // priorityboost
-                0, // context1
-                0, // context2
-            )
+            IF NOT thread^.SuspendLapc.Enqueued THEN
+                KeEnqueueLapc (
+                    &thread^.SuspendLapc, // apc
+                    0, // priorityboost
+                    0, // context1
+                    0, // context2
+                )
+            END
         END
     END
-
-@Out
 
     KiReleaseObject ( &thread^.SuspendHeader, ipl )
 
@@ -233,38 +227,32 @@ EXPORT FN KeUnsuspendThread (
 
     count := thread^.SuspendCount
 
-    IF count == 0 THEN
-        // Can't decrement or we'll underflow.
+    IF count THEN
+        IF force THEN
+            // Forcibly unsuspend by simulating a decrement from 1.
 
-        GOTO Out
-    END
+            count = 1
+        END
 
-    IF force THEN
-        // Forcibly unsuspend by simulating a decrement from 1.
+        thread^.SuspendCount = count - 1
 
-        count = 1
-    END
+        IF count == 1 THEN
+            // No longer suspended, set the object signaled.
 
-    thread^.SuspendCount = count - 1
+            thread^.SuspendHeader.SignalCount = 1
 
-    IF count == 1 THEN
-        // No longer suspended, set the object signaled.
+            // Satisfy any waits.
 
-        thread^.SuspendHeader.SignalCount = 1
-
-        // Satisfy any waits.
-
-        IF thread^.SuspendHeader.WaiterCount THEN
-            KiSatisfyObject (
-                &thread^.SuspendHeader, // object
-                0, // priorityboost
-                TRUE, // all
-                0, // status
-            )
+            IF thread^.SuspendHeader.WaiterCount THEN
+                KiSatisfyObject (
+                    &thread^.SuspendHeader, // object
+                    0, // priorityboost
+                    TRUE, // all
+                    0, // status
+                )
+            END
         END
     END
-
-@Out
 
     KiReleaseObject ( &thread^.SuspendHeader, ipl )
 
