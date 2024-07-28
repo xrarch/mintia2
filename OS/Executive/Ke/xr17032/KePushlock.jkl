@@ -1,33 +1,229 @@
 //
 // Architecture-specific code for pushlocks.
+// Contains pushlock fast paths handwritten in assembly for the target
+// architecture, to ensure that they are efficient.
 //
 
 #INCLUDE "../Ki.hjk"
 
 #ASM [
 
+#MACRO ApcSafe ( x ) [
+    // The pushlock is APC-safe, so raise to KI_IPL_APC and increment the
+    // pushlock depth.
+
+    subi t1, zero, 4096             // Acquire a pointer to the Prb.
+    mov  byte [t1 + KiPrb_Ipl], 1   // Store the new IPL.
+
+    // Acquire a pointer to the current thread.
+
+    mov  t2, long [t1 + KiPrb_CurrentThread]
+
+    // Increment the pushlock depth. This is synchronized as only the current
+    // thread can modify its pushlock depth.
+
+    mov  t3, long [t2 + KeThread_ApcPushlockDepth]
+    addi t3, t3, 1
+    mov  long [t2 + KeThread_ApcPushlockDepth], t3
+]
+
+// a0 - pushlock
+KeAcquireApcSafePushlockShared:
+.export KeAcquireApcSafePushlockShared
+
+    ApcSafe ( x )
+
+    // Fall through.
+
 // a0 - pushlock
 KeAcquirePushlockShared:
 .export KeAcquirePushlockShared
 
+    // Load the value we'll store into the pushlock on success.
+
+    li   t2, (KI_PUSHLOCK_LOCKED | KI_PUSHLOCK_SHARE_INC)
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+.retry:
+
+    ll   t0, a0                     // Load-locked the pushlock word.
+    bne  t0, .slow                  // If not equal to zero, take slow path.
+    sc   t5, a0, t2                 // Conditionally store the new word.
+    beq  t5, .retry                 // If failed, retry.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+    ret
+
+.slow:
     j    KiAcquirePushlockShared
+
+// a0 - pushlock
+KeAcquireApcSafePushlockExclusive:
+.export KeAcquireApcSafePushlockExclusive
+
+    ApcSafe ( x )
+
+    // Fall through.
 
 // a0 - pushlock
 KeAcquirePushlockExclusive:
 .export KeAcquirePushlockExclusive
 
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+.retry:
+
+    ll   t0, a0                     // Load-locked the pushlock word.
+    andi t1, t0, KI_PUSHLOCK_LOCKED // Isolate the LOCKED bit.
+    bne  t1, .slow                  // If not zero, take slow path.
+    ori  t1, t0, KI_PUSHLOCK_LOCKED // Set LOCKED bit.
+    sc   t2, a0, t1                 // Conditionally store the new word.
+    beq  t2, .retry                 // If failed, retry.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+    ret
+
+.slow:
     j    KiAcquirePushlockExclusive
+
+#MACRO ReleasePushlock ( x ) [
+
+#IF BLD_CHK
+    mov  t0, long [a0]
+    andi t0, t0, KI_PUSHLOCK_LOCKED
+    beq  t0, KiNotLocked
+#END
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+.retry:
+
+    ll   t0, a0                     // Load-locked the pushlock word.
+
+    // Isolate the WAITING bit.
+
+    andi t1, t0, KI_PUSHLOCK_WAITING
+    bne  t1, .slow                  // If not zero, take slow path.
+
+    // Isolate the share count.
+
+    rshi t1, t0, KI_PUSHLOCK_SHARE_SHIFT
+
+    li   t2, 0                      // Load the value to store.
+    slti t3, t1, 2                  // Compare share count <= 1.
+    bne  t3, .notshared             // If <= 1, not shared.
+
+    // Share count is > 1, so we must be a shared holder; decrement the share
+    // count.
+
+    subi t2, t0, KI_PUSHLOCK_SHARE_INC
+
+.notshared:
+
+    sc   t4, a0, t2                 // Conditionally store the new word.
+    beq  t4, .retry                 // If failed, retry.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+]
 
 // a0 - pushlock
 KeReleasePushlock:
 .export KeReleasePushlock
 
+    ReleasePushlock ( x )
+
+    ret
+
+.slow:
     j    KiReleasePushlock
 
 // a0 - pushlock
-KeConvertPushlockToShared:
-.export KeConvertPushlockToShared
+KeReleaseApcSafePushlock:
+.export KeReleaseApcSafePushlock
 
-    j    KiConvertPushlockToShared
+    ReleasePushlock ( x )
+
+    // Branch around the slow path.
+
+    b    .apcsafe
+
+.slow:
+    subi sp, sp, 4
+    mov  long [sp], lr
+
+    jal  KiReleasePushlock
+
+    mov  lr, long [sp]
+    addi sp, sp, 4
+
+    // Fall through.
+
+.apcsafe:
+
+    // The pushlock is APC-safe, so decrement the pushlock count of the current
+    // thread.
+
+    subi t1, zero, 4096             // Acquire a pointer to the Prb.
+
+    // Acquire a pointer to the current thread.
+
+    mov  t2, long [t1 + KiPrb_CurrentThread]
+
+    // Decrement the count.
+
+    mov  t3, long [t2 + KeThread_ApcPushlockDepth]
+    subi t3, t3, 1
+    mov  long [t2 + KeThread_ApcPushlockDepth], t3
+
+    // If the count became 0, drop to KI_IPL_LOW.
+
+    bne  t3, .dontdrop
+
+    mov  byte [t1 + KiPrb_Ipl], 0   // Store the new IPL.
+    mov  t2, long [t1 + KiPrb_PendingSoftwareInterrupts]
+    bne  t2, .dispatch              // If zero, none pending at new IPL.
+
+.dontdrop:
+    ret
+
+.dispatch:
+    j    KiDispatchSoftwareInterrupts
+
+#IF BLD_CHK
+
+KiNotLocked:
+    // Create stack frame for debugger traces.
+
+    subi sp, sp, 4
+    mov  long [sp], lr
+
+    la   a0, KiNotLockedMessage
+    li   a1, 0
+    li   a2, 0
+    jal  KeCrash
+
+KiNotLockedMessage:
+    .ds "KeReleasePushlock: pushlock not locked\n"
+    .db 0
+
+.align 4
+
+#END
 
 ]

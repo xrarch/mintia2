@@ -366,6 +366,10 @@ EXTERN FN KeDequeueApc (
     IN apc : ^KeApc,
 ) : UWORD
 
+EXTERN FN KeMaskApcs ()
+
+EXTERN FN KeUnmaskApcs ()
+
 STRUCT KeEvent
     Header : KiDispatchHeader,
 END
@@ -491,6 +495,7 @@ STRUCT KeThread
     ApcSpinlock : KiSpinlock,
 #END
 
+    ApcPushlockDepth : ULONG,
     SignalMask : ULONG,
     SignalAcceptMask : ULONG,
     SignalDeliverOnWaitMask : ULONG,
@@ -562,10 +567,6 @@ EXTERN FN KeReleaseSemaphore (
     NOTHING (pushlock)^.Ptr = 0
 ]
 
-#MACRO KeInitializeKapcSafePushlock ( pushlock ) [
-    NOTHING (pushlock)^.Ptr = 1
-]
-
 EXTERN FN KeAcquirePushlockShared (
     IN pushlock : ^KePushlock,
 )
@@ -574,6 +575,17 @@ EXTERN FN KeAcquirePushlockExclusive (
 )
 
 EXTERN FN KeReleasePushlock (
+    IN pushlock : ^KePushlock,
+)
+
+EXTERN FN KeAcquireApcSafePushlockShared (
+    IN pushlock : ^KePushlock,
+)
+EXTERN FN KeAcquireApcSafePushlockExclusive (
+    IN pushlock : ^KePushlock,
+)
+
+EXTERN FN KeReleaseApcSafePushlock (
     IN pushlock : ^KePushlock,
 )
 

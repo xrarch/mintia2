@@ -237,8 +237,7 @@ EXPORT FN KeEnqueueUapc (
         OR (thread^.Status == KI_THREAD_RUNNING AND
         thread^.WaitAttempt == KI_THREAD_WAIT_TRY)
 #END
-        ) AND
-        thread^.WaitIpl == KI_IPL_LOW AND
+        ) AND thread^.WaitIpl == KI_IPL_LOW AND
         thread^.WaitMode == KE_USER_MODE AND
         thread^.Alertable THEN
 
@@ -447,10 +446,28 @@ FN KiDispatchKernelApcQueue (
     END
 #END
 
+    // Increment the pushlock depth so that releasing APC-safe pushlocks doesn't
+    // cause IPL to drop to LOW.
+
+    oldcount := current^.ApcPushlockDepth
+    current^.ApcPushlockDepth = oldcount + 1
+
+    // Dispatch the APCs.
+
     KiDispatchKernelModeApcs (
         current, // thread
         &current^.KapcListHead, // head
     )
+
+    // Restore the pushlock depth.
+
+#IF BLD_CHK
+    IF current^.ApcPushlockDepth != oldcount + 1 THEN
+        KeCrash ( "KiDispatchKernelApcQueue: pushlock depth\n" )
+    END
+#END
+
+    current^.ApcPushlockDepth = oldcount
 END
 
 FN KiDispatchLazyApcQueue (
@@ -534,4 +551,48 @@ FN KiDispatchUserApcQueue (
         context1, // userfunc
         context2, // context
     )
+END
+
+FN KeMaskApcs ()
+
+    // Get the current thread.
+
+    current := KeCurrentThread ()
+
+    // Raise to KI_IPL_APC.
+
+    KiRaiseIpl ( KI_IPL_APC )
+
+    // Increment the pushlock depth so that releasing APC-safe pushlocks doesn't
+    // cause IPL to drop to LOW.
+
+    current^.ApcPushlockDepth += 1
+END
+
+FN KeUnmaskApcs ()
+
+    // Get the current thread.
+
+    current := KeCurrentThread ()
+
+#IF BLD_CHK
+    IF current^.ApcPushlockDepth == 0 THEN
+        KeCrash ( "KeUnmaskApcs: underflow\n" )
+    END
+
+    IF KiCurrentIpl () != KI_IPL_APC THEN
+        KeCrash ( "KeUnmaskApcs: not KI_IPL_APC\n" )
+    END
+#END
+
+    // Decrement the pushlock depth.
+
+    oldcount := current^.ApcPushlockDepth
+    current^.ApcPushlockDepth = oldcount - 1
+
+    IF current == 1 THEN
+        // Lower to KI_IPL_LOW.
+
+        KiLowerIpl ( KI_IPL_LOW )
+    END
 END

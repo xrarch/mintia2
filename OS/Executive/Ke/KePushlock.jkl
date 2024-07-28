@@ -13,15 +13,6 @@
 
 #DEFINE KI_PUSHLOCK_SPIN_COUNT 300
 
-#DEFINE KI_PUSHLOCK_APC_SAFE 0x1
-#DEFINE KI_PUSHLOCK_LOCKED 0x2
-#DEFINE KI_PUSHLOCK_WAITING 0x4
-#DEFINE KI_PUSHLOCK_WAKING 0x8
-#DEFINE KI_PUSHLOCK_MULTIPLE_SHARED 0x10
-#DEFINE KI_PUSHLOCK_SHARE_INC 0x20
-#DEFINE KI_PUSHLOCK_PTR_BITS 0x1F
-#DEFINE KI_PUSHLOCK_SHARE_SHIFT 5
-
 #DEFINE KI_PUSHBLOCK_FLAG_EXCLUSIVE 1
 #DEFINE KI_PUSHBLOCK_FLAG_WAIT 2
 
@@ -118,7 +109,7 @@ FN KiWakePushlock (
 
             new = KeCompareSwapPtr (
                 &pushlock^.Ptr, // ptr
-                current & KI_PUSHLOCK_APC_SAFE, // newvalue
+                0, // newvalue
                 current, // expectedvalue
             )
 
@@ -245,22 +236,14 @@ FN KiAcquirePushlockExclusive (
     // If this is an APC safe pushlock, the fast path raised to KI_IPL_APC prior
     // to calling us.
 
-    // Acquire a 32 byte aligned block on the stack.
+    // Acquire a 16 byte aligned block on the stack so that we can use the low
+    // four bits to store control flags.
 
-    stack : UBYTE[SIZEOF KiPushBlock + 32]
-    block := CAST (((&stack[0]) + 31) & ~31) TO ^KiPushBlock
+    stack : UBYTE[SIZEOF KiPushBlock + 16]
+    block := CAST (((&stack[0]) + 15) & ~15) TO ^KiPushBlock
 
 #IF BLD_CHK
-    IF pushlock^.Ptr & KI_PUSHLOCK_APC_SAFE == 0 THEN
-        IF KiCurrentIpl () >= KI_IPL_APC THEN
-            KeCrash ( "KiAcquirePushlockExclusive: Not APC safe\n" )
-        END
-
-    ELSEIF KiCurrentIpl () != KI_IPL_APC THEN
-        KeCrash ( "KiAcquirePushlockExclusive: APC safe, IPL not APC\n" )
-    END
-
-    IF block & 31 THEN
+    IF block & 15 THEN
         KeCrash ( "KiAcquirePushlockExclusive: unaligned block\n" )
     END
 #END
@@ -317,8 +300,7 @@ FN KiAcquirePushlockExclusive (
             block^.Last = block
             block^.Share = current >> KI_PUSHLOCK_SHARE_SHIFT
 
-            new = block | (current & KI_PUSHLOCK_APC_SAFE) |
-                KI_PUSHLOCK_LOCKED | KI_PUSHLOCK_WAITING
+            new = block | KI_PUSHLOCK_LOCKED | KI_PUSHLOCK_WAITING
 
             IF block^.Share > 1 THEN
                 new |= KI_PUSHLOCK_MULTIPLE_SHARED
@@ -410,22 +392,14 @@ FN KiAcquirePushlockShared (
     // If this is an APC safe pushlock, the fast path raised to KI_IPL_APC prior
     // to calling us.
 
-    // Acquire a 32 byte aligned block on the stack.
+    // Acquire a 16 byte aligned block on the stack so that we can use the low
+    // four bits to store control flags.
 
-    stack : UBYTE[SIZEOF KiPushBlock + 32]
-    block := CAST (((&stack[0]) + 31) & ~31) TO ^KiPushBlock
+    stack : UBYTE[SIZEOF KiPushBlock + 16]
+    block := CAST (((&stack[0]) + 15) & ~15) TO ^KiPushBlock
 
 #IF BLD_CHK
-    IF pushlock^.Ptr & KI_PUSHLOCK_APC_SAFE == 0 THEN
-        IF KiCurrentIpl () >= KI_IPL_APC THEN
-            KeCrash ( "KiAcquirePushlockShared: Not APC safe\n" )
-        END
-
-    ELSEIF KiCurrentIpl () != KI_IPL_APC THEN
-        KeCrash ( "KiAcquirePushlockShared: APC safe, IPL not APC\n" )
-    END
-
-    IF block & 31 THEN
+    IF block & 15 THEN
         KeCrash ( "KiAcquirePushlockShared: unaligned block\n" )
     END
 #END
@@ -484,8 +458,7 @@ FN KiAcquirePushlockShared (
             new = block
             
             new |= current & (KI_PUSHLOCK_LOCKED |
-                KI_PUSHLOCK_MULTIPLE_SHARED |
-                KI_PUSHLOCK_APC_SAFE)
+                KI_PUSHLOCK_MULTIPLE_SHARED)
 
             new |= KI_PUSHLOCK_WAITING | KI_PUSHLOCK_WAKING
 
@@ -579,21 +552,16 @@ FN KiReleasePushlock (
     // Release a pushlock which was held either exclusive or shared.
     // The fundamental structure of this routine is an atomic CAS loop.
 
-#IF BLD_CHK
-    IF pushlock^.Ptr & KI_PUSHLOCK_APC_SAFE == 0 THEN
-        IF KiCurrentIpl () >= KI_IPL_APC THEN
-            KeCrash ( "KiReleasePushlock: Not APC safe\n" )
-        END
-
-    ELSEIF KiCurrentIpl () != KI_IPL_APC THEN
-        KeCrash ( "KiReleasePushlock: APC safe, IPL not APC\n" )
-    END
-#END
-
     current := pushlock^.Ptr
     new : UWORD
 
     WHILE TRUE DO
+#IF BLD_CHK
+        IF current & KI_PUSHLOCK_LOCKED == 0 THEN
+            KeCrash ( "KiReleasePushlock: Not owned\n" )
+        END
+#END
+
         IF current & KI_PUSHLOCK_WAITING == 0 THEN
             new = 0
 
@@ -604,10 +572,6 @@ FN KiReleasePushlock (
 
                 new = current - KI_PUSHLOCK_SHARE_INC
             END
-
-            // Preserve the APC-safe bit.
-
-            new |= current & KI_PUSHLOCK_APC_SAFE
 
             new = KeCompareSwapPtr (
                 &pushlock^.Ptr, // ptr
@@ -712,9 +676,47 @@ FN KiReleasePushlock (
     END
 END
 
-FN KiConvertPushlockToShared (
+EXPORT FN KeConvertPushlockToShared (
     IN pushlock : ^KePushlock,
 )
 
-    KeCrash ( "NYI KeConvertPushlockToShared\n" )
+    // Change the current ownership of a pushlock from exclusive to shared.
+    // The basic structure of this routine is a CAS loop.
+
+    current := pushlock^.Ptr
+    new : UWORD
+
+    WHILE TRUE DO
+#IF BLD_CHK
+        IF current & KI_PUSHLOCK_LOCKED == 0 THEN
+            KeCrash ( "KiConvertPushlockToShared: Not owned\n" )
+        END
+#END
+
+        IF current & KI_PUSHLOCK_WAITING THEN
+            // Just leave it exclusive if there are waiters.
+
+            LEAVE
+        END
+
+        // Set the pushlock to be LOCKED with a single shared holder.
+
+        new = KI_PUSHLOCK_LOCKED + KI_PUSHLOCK_SHARE_INC
+
+        new = KeCompareSwapPtr (
+            &pushlock^.Ptr, // ptr
+            new, // newvalue
+            current, // currentvalue
+        )
+
+        IF new == current THEN
+            // Did it.
+
+            LEAVE
+        END
+
+        // Failed to CAS, try again.
+
+        current = new
+    END
 END
