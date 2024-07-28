@@ -11,12 +11,6 @@
 #INCLUDE "<ll>/System/OsStatus.hjk"
 #INCLUDE "<ll>/System/OsSignal.hjk"
 
-PUBLIC KiStackSwapCandidatesListHead : RtlListEntry
-
-KiStackSwapListHead : ^KeThread = NULLPTR
-
-PUBLIC KeStackSwapperEvent : KeEvent
-
 #IF BLD_MP
 
 KiActiveProcessorBitmap : ULONG[(KI_MAXIMUM_PROCESSORS + 31) / 32]
@@ -54,22 +48,6 @@ KiIdleProcessorCount : ULONG
     KiReleaseSpinlock ( &(prb)^.ReadyQueueLock )
 ]
 
-#MACRO KiAcquireCandidateListElevated ( prb ) [
-    KiAcquireSpinlock ( &(prb)^.StackSwapListLock )
-]
-
-#MACRO KiReleaseCandidateListElevated ( prb ) [
-    KiReleaseSpinlock ( &(prb)^.StackSwapListLock )
-]
-
-#MACRO KiAcquireCandidateList ( prb ) [
-    KiAcquireSpinlockRaise ( &(prb)^.StackSwapListLock )
-]
-
-#MACRO KiReleaseCandidateList ( prb, ipl ) [
-    KiReleaseSpinlockLower ( &(prb)^.StackSwapListLock, ipl )
-]
-
 #MACRO KiSetWaitAttempt ( thread, state ) [
     NOTHING (thread)^.WaitAttempt = (state)
 ]
@@ -93,18 +71,6 @@ KiIdleProcessorCount : ULONG
 #MACRO KiAcquireReadyQueueElevated ( prb ) []
 
 #MACRO KiReleaseReadyQueueElevated ( prb ) []
-
-#MACRO KiAcquireCandidateListElevated ( prb ) []
-
-#MACRO KiReleaseCandidateListElevated ( prb ) []
-
-#MACRO KiAcquireCandidateList ( prb ) [
-    KiRaiseIpl ( KI_IPL_DPC )
-]
-
-#MACRO KiReleaseCandidateList ( prb, ipl ) [
-    KiLowerIpl ( ipl )
-]
 
 #MACRO KiSetWaitAttempt ( thread, state ) []
 
@@ -665,183 +631,6 @@ FN KiFindMostAndLeastLoadedProcessor (
 END
 
 #END
-
-FN KeFlushSwapperQueue () : ^KeThread
-
-    // Atomically detaches the current contents of the thread stack swap list
-    // and returns the head item of a singly linked list. If it was empty,
-    // NULLPTR is returned.
-
-#IF BLD_MP
-    // On MP, atomically fetch-and-set the head to NULLPTR.
-
-    head := CAST KeFetchAndSetPtr (
-        &KiStackSwapListHead, // ptr
-        NULLPTR, // newvalue
-    ) TO ^KeThread
-
-#ELSE
-    // On UP, use raised IPL to synchronize the list.
-
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
-
-    head := KiStackSwapListHead
-    KiStackSwapListHead = NULLPTR
-
-    KiLowerIpl ( ipl )
-#END
-
-    RETURN head
-END
-
-FN KeHarvestSwapCandidates (
-    IN procid : UWORD,
-) : ^KeThread
-
-    // Scans the kernel stack swap candidate list for the given processor, marks
-    // any eligible threads outswapped, and returns the head item of a singly
-    // linked list of outswapped threads to process. If none, NULLPTR is
-    // returned.
-
-    head : ^KeThread = NULLPTR
-
-    prb := KiPrbFromNumber ( procid )
-
-    listhead := &prb^.StackSwapCandidateListHead
-
-    ipl := KiAcquireCandidateList ( prb )
-
-    tick := KiLowTick ()
-
-    listentry := listhead^.Next
-
-    WHILE listentry != listhead DO
-        thread := CONTAINEROF listentry TO KeThread.WaitEntry
-
-        // Capture the next link now since we may be about to corrupt it.
-
-        listentry = listentry^.Next
-
-        // Lock the thread.
-
-        KiAcquireThreadElevated ( thread )
-
-        IF thread^.Status == KI_THREAD_WAITING THEN
-            // The thread is WAITING which means we may be able to outswap its
-            // stack.
-
-#IF BLD_CHK
-            IF thread^.WaitMode != KE_USER_MODE THEN
-                KeCrash ( "KeHarvestSwapCandidates: found kernelmode waiter\n" )
-            END
-#END
-
-            IF tick - thread^.StateMs < KI_STACK_SWAP_INTERVAL_MS THEN
-                // This thread has been waiting for less time than the required
-                // interval. No more threads after it will be eligible either,
-                // so break out of the loop.
-
-                KiReleaseThreadElevated ( thread )
-
-                BREAK
-            END
-
-            // Remove the thread from the candidate list.
-
-            RtlRemoveEntryList ( &thread^.WaitEntry )
-
-            thread^.SwapCandidatePrb = NULLPTR
-
-            IF thread^.KernelStackSwappable THEN
-                // This thread is eligible.
-                // Mark the thread's kernel stack outswapped; attempts to ready
-                // this thread after we unlock it will cause it to be enqueued
-                // to the stack swapper thread (which should also be this
-                // thread!).
-
-                thread^.KernelStackResident = FALSE
-
-                // Add to the singly linked list, which we thread through the
-                // WaitEntry. It should not be possible for the thread to be
-                // re-enqueued to a candidate list while it is on this singly
-                // linked list (the custody of the swapper thread). We can't
-                // reuse the SwapNext list link because it may come into use
-                // concurrently if this thread is readied while it is being
-                // outswapped.
-
-                thread^.WaitEntry.Next = CAST head TO ^VOID
-                head = thread
-            END
-        END
-
-        KiReleaseThreadElevated ( thread )
-    END
-
-    KiReleaseCandidateList ( prb, ipl )
-
-    RETURN head
-END
-
-FN KiReadyOutswappedThread (
-    IN thread : ^KeThread,
-)
-
-    // The thread was readied while its kernel stack was outswapped, so we have
-    // to enqueue it to // the swap list and request the swap thread to wake up.
-
-#IF BLD_CHK
-    IF thread^.InSwapList THEN
-        KeCrash ( "KiReadyOutswappedThread: already in swap list\n" )
-    END
-#END
-
-    thread^.InSwapList = TRUE
-
-#IF BLD_MP
-    // Use a CAS loop to insert the thread in the list.
-
-    WHILE TRUE DO
-        head := KiStackSwapListHead
-        thread^.SwapNext = head
-
-        IF KeCompareSwapPtr (
-            &KiStackSwapListHead, // ptr
-            thread, // newvalue
-            head, // expectedvalue
-        ) == head THEN
-
-            // Inserted.
-
-            BREAK
-        END
-    END
-
-    // Request the swap thread to be awoken. We can't do it here because we're
-    // underneath some spinlocks whose order we would violate, so we defer it
-    // until the next time IPL drops below DPC level.
-
-    myprb := KI_CURRENT_PRB
-
-    myprb^.WakeStackSwapper = TRUE
-
-    KiSoftInterruptSelf (
-        myprb, // prb
-        KI_IPL_DPC, // ipl
-    )
-
-#ELSE
-    thread^.SwapNext = KiStackSwapListHead
-    KiStackSwapListHead = thread
-
-    // Wake the swap thread.
-
-    KeSignalEvent (
-        &KeStackSwapperEvent, // event
-        0, // priorityboost
-    )
-#END
-
-END
 
 FN KiReadyThread (
     IN thread : ^KeThread,
@@ -1894,73 +1683,6 @@ END
     END
 ]
 
-FN KiInsertSwapCandidateListFunc (
-    IN thread : ^KeThread,
-)
-
-    // Insert the thread in the swap candidate list for the current processor.
-
-    prb := KI_CURRENT_PRB
-
-    // Stash the Prb whose candidate list we're going into.
-
-    thread^.SwapCandidatePrb = prb
-
-    head := &prb^.StackSwapCandidateListHead
-
-    // Acquire the Prb's candidate list lock.
-
-    KiAcquireCandidateListElevated ( prb )
-
-    // Insert at the tail of the list, which keeps it sorted by earliest to
-    // latest sleep time.
-
-    RtlInsertAtTailList (
-        head, // head
-        &thread^.WaitEntry, // entry
-    )
-
-    // Release the candidate list lock.
-
-    KiReleaseCandidateListElevated ( prb )
-END
-
-FN KiRemoveSwapCandidateListFunc (
-    IN thread : ^KeThread,
-)
-
-    // Remove the thread from the swap candidate list.
-    // We don't have to re-check that the thread wasn't removed from the
-    // candidate list, because only WAITING threads are, and we ain't
-    // waiting.
-
-    prb := thread^.SwapCandidatePrb
-
-    KiAcquireCandidateListElevated ( prb )
-
-    RtlRemoveEntryList ( &thread^.WaitEntry )
-
-    KiReleaseCandidateListElevated ( prb )
-
-    // Clear the Prb pointer to indicate no longer in a list.
-
-    thread^.SwapCandidatePrb = NULLPTR
-END
-
-#MACRO KiInsertSwapCandidateList ( thread, waitmode ) [
-    IF (waitmode) == KE_USER_MODE AND
-        (thread)^.KernelStackSwappable THEN
-
-        KiInsertSwapCandidateListFunc ( thread )
-    END
-]
-
-#MACRO KiRemoveSwapCandidateList ( thread ) [
-    IF (thread)^.SwapCandidatePrb THEN
-        KiRemoveSwapCandidateListFunc ( thread )
-    END
-]
-
 FN KiWaitThread (
     IN thread : ^KeThread,
     IN hastimeout : UWORD,
@@ -2024,6 +1746,9 @@ FN KiWaitThread (
     // awake now.
 
     KiIndicateActive ( thread, queue )
+
+    // If we were placed on a list of kernel stack outswap candidates, remove
+    // ourselves.
 
     KiRemoveSwapCandidateList ( thread )
 
@@ -2584,6 +2309,9 @@ EXPORT FN KeWaitForObjects (
 
     KiIndicateDeactivated ( thread, queue )
 
+    // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
+    // insert ourselves on the current processor's outswap candidate list.
+
     KiInsertSwapCandidateList ( thread, waitmode )
 
     // Lock our thread.
@@ -2626,6 +2354,9 @@ EXPORT FN KeWaitForObjects (
         // deactivated. We have to undo that now.
 
         KiIndicateActive ( thread, queue )
+
+        // If we were placed on a list of kernel stack outswap candidates, we
+        // have to remove ourselves.
 
         KiRemoveSwapCandidateList ( thread )
 
@@ -2734,6 +2465,9 @@ EXPORT FN KeSleep (
 
     KiIndicateDeactivated ( thread, queue )
 
+    // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
+    // insert ourselves on the current processor's outswap candidate list.
+
     KiInsertSwapCandidateList ( thread, waitmode )
 
     // Lock our thread.
@@ -2779,6 +2513,9 @@ EXPORT FN KeSleep (
         // deactivated. We have to undo that now.
 
         KiIndicateActive ( thread, queue )
+
+        // If we were placed on a list of kernel stack outswap candidates, we
+        // have to remove ourselves.
 
         KiRemoveSwapCandidateList ( thread )
 
@@ -2987,6 +2724,9 @@ EXPORT FN KeWaitForSingleObject (
 
     KiIndicateDeactivated ( thread, queue )
 
+    // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
+    // insert ourselves on the current processor's outswap candidate list.
+
     KiInsertSwapCandidateList ( thread, waitmode )
 
     // Lock our thread.
@@ -3041,6 +2781,9 @@ EXPORT FN KeWaitForSingleObject (
         // deactivated. We have to undo that now.
 
         KiIndicateActive ( thread, queue )
+
+        // If we were placed on a list of kernel stack outswap candidates, we
+        // have to remove ourselves.
 
         KiRemoveSwapCandidateList ( thread )
 

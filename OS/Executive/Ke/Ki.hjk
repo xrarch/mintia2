@@ -453,6 +453,10 @@ EXTERN FN KiUnwaitThread (
     IN priorityboost : UWORD,
 )
 
+EXTERN FN KiReadyThread (
+    IN thread : ^KeThread,
+)
+
 EXTERN FN KiDispatchUserInterrupts ()
 
 EXTERN FN KiWakeBalancedQueue (
@@ -754,3 +758,29 @@ EXTERN FN KiInitializeContext (
 ) : ^OsContext
 
 EXTERN KiIndexFirstBitClear : UBYTE[256]
+
+EXTERN FN KiInsertSwapCandidateListFunc (
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KiRemoveSwapCandidateListFunc (
+    IN thread : ^KeThread,
+)
+
+#MACRO KiInsertSwapCandidateList ( thread, waitmode ) [
+    IF (waitmode) == KE_USER_MODE AND
+        (thread)^.KernelStackSwappable THEN
+
+        KiInsertSwapCandidateListFunc ( thread )
+    END
+]
+
+#MACRO KiRemoveSwapCandidateList ( thread ) [
+    IF (thread)^.SwapCandidatePrb THEN
+        KiRemoveSwapCandidateListFunc ( thread )
+    END
+]
+
+EXTERN FN KiReadyOutswappedThread (
+    IN thread : ^KeThread,
+)
