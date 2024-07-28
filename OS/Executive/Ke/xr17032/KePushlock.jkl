@@ -151,6 +151,7 @@ KeReleasePushlock:
     ret
 
 .slow:
+
     j    KiReleasePushlock
 
 // a0 - pushlock
@@ -164,6 +165,7 @@ KeReleaseApcSafePushlock:
     b    .apcsafe
 
 .slow:
+
     subi sp, sp, 4
     mov  long [sp], lr
 
@@ -200,9 +202,11 @@ KeReleaseApcSafePushlock:
     bne  t2, .dispatch              // If zero, none pending at new IPL.
 
 .dontdrop:
+
     ret
 
 .dispatch:
+
     j    KiDispatchSoftwareInterrupts
 
 #IF BLD_CHK

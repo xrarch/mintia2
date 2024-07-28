@@ -7,7 +7,11 @@
 #INCLUDE "<ll>/System/OsSignal.hjk"
 #INCLUDE "<inc>/Ps.hjk"
 
+#IF BLD_MP
+
 KiBootLock : KiSpinlock = KI_INITIAL_SPINLOCK
+
+#END
 
 #SECTION "PAGE$text"
 FN (KeApcF) KiSuspendThreadApc (
@@ -84,6 +88,10 @@ FN KeInitializeThread (
 
     thread^.Interactive = FALSE
 
+    thread^.InSwapList = FALSE
+    thread^.KernelStackResident = TRUE
+    thread^.KernelStackSwappable = TRUE
+
     // Initialize the suspension LAPC.
 
     KeInitializeApc (
@@ -140,6 +148,8 @@ FN KeInitializeThread (
     thread^.CurrentMode = KE_KERNEL_MODE
 #END
 
+    thread^.SwapCandidatePrb = NULLPTR
+
     thread^.IgnoreEventCount = 0
 
     // Initialize signal state.
@@ -159,11 +169,16 @@ FN KeInitializeThread (
         process^.SignalThread = thread
     END
 
+#IF BLD_MP
     IF process == &KiIdleProcess THEN
-        KiAcquireSpinlockRaise ( &KiBootLock )
+        KiAcquireSpinlock ( &KiBootLock )
     ELSE
         KeAcquirePushlockExclusive ( &process^.Pushlock )
     END
+
+#ELSE
+    KeAcquirePushlockExclusive ( &process^.Pushlock )
+#END
 
     RtlInsertAtTailList (
         &process^.ThreadListHead, // head
@@ -171,13 +186,18 @@ FN KeInitializeThread (
     )
 
     process^.ThreadCount += 1
-    process^.ResidentStackCount += 1
 
+#IF BLD_MP
     IF process == &KiIdleProcess THEN
-        KiReleaseSpinlockLower ( &KiBootLock, KI_IPL_LOW )
+        KiReleaseSpinlock ( &KiBootLock )
     ELSE
         KeReleasePushlock ( &process^.Pushlock )
     END
+
+#ELSE
+    KeReleasePushlock ( &process^.Pushlock )
+#END
+
 END
 
 EXPORT FN KeSuspendThread (
@@ -507,6 +527,36 @@ FN KeSignalThread (
     // Release the thread lock.
 
     KiReleaseThread ( thread, ipl )
+END
+
+EXPORT FN KeIgnoreEvents ()
+
+    // Increment the IgnoreEvent count of the current thread.
+
+    thread := KeCurrentThread ()
+
+#IF BLD_CHK
+    IF thread^.IgnoreEventCount == 255 THEN
+        KeCrash ( "KeIgnoreEvents: overflow\n" )
+    END
+#END
+
+    thread^.IgnoreEventCount += 1
+END
+
+EXPORT FN KeAcceptEvents ()
+
+    // Decrement the IgnoreEvent count of the current thread.
+
+    thread := KeCurrentThread ()
+
+#IF BLD_CHK
+    IF thread^.IgnoreEventCount == 0 THEN
+        KeCrash ( "KeAcceptEvents: underflow\n" )
+    END
+#END
+
+    thread^.IgnoreEventCount -= 1
 END
 
 FN KiDispatchSignal (

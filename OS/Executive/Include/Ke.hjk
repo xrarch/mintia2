@@ -403,18 +403,12 @@ EXTERN FN KeInitializeThread (
 
 #DEFINE KE_PROCESS_THREAD_MAX 65536
 
-#DEFINE KE_PROCESS_RESIDENT 1
-#DEFINE KE_PROCESS_TRANSITION 2
-#DEFINE KE_PROCESS_OUTSWAPPED 3
-
 STRUCT KeProcess
     Name : UBYTE[KE_DEBUG_NAME_LENGTH],
 
     ThreadListHead : RtlListEntry,
 
-    DeferredThreadListHead : ^KeThread,
     SignalThread : ^KeThread,
-    SwapListNext : ^KeProcess,
 
     Pushlock : KePushlock,
 
@@ -426,10 +420,7 @@ STRUCT KeProcess
 
     TerminationStatus : ULONG,
 
-    ThreadCount : UINT,
-    ResidentStackCount : UINT,
-
-    MemoryState : UBYTE,
+    ThreadCount : ULONG,
     Terminated : UBYTE,
 END
 
@@ -459,6 +450,7 @@ STRUCT KeThread
     ProcessListEntry : RtlListEntry,
     ReadyEntry : RtlListEntry,
     BalancedQueueEntry : RtlListEntry,
+    WaitEntry : RtlListEntry,
 
     KapcListHead : RtlListEntry,
     LapcListHead : RtlListEntry,
@@ -474,6 +466,7 @@ STRUCT KeThread
     ActualProcess : ^KeProcess,
     KernelStackTop : ^VOID,
     UserFrame : ^OsContext,
+    SwapNext : ^KeThread,
 
     BalancedQueue : ^KeBalancedQueue,
     QueueItem : ^RtlListEntry,
@@ -482,6 +475,7 @@ STRUCT KeThread
     AffinityPrb : ^KiPrb,
     CurrentPrb : ^KiPrb,
 #END
+    SwapCandidatePrb : ^KiPrb,
 
     SuspendLapc : KeApc,
     SuspendHeader : KiDispatchHeader,
@@ -499,7 +493,6 @@ STRUCT KeThread
     SignalMask : ULONG,
     SignalAcceptMask : ULONG,
     SignalDeliverOnWaitMask : ULONG,
-    IgnoreEventCount : ULONG,
     WaitStatus : ULONG,
     SleepMs : ULONG,
     RunMs : ULONG,
@@ -520,6 +513,9 @@ STRUCT KeThread
     CurrentQueue : UBYTE,
     SuspendCount : UBYTE,
     Terminated : UBYTE,
+    KernelStackResident : UBYTE,
+    IgnoreEventCount : UBYTE,
+    KernelStackSwappable : UBYTE,
 
 #IF BLD_MP
     WaitAttempt : UBYTE,
@@ -781,3 +777,11 @@ EXTERN FN KeCancelRequestQueue (
     IN queue : ^KeRequestQueue,
     IN request : ^KeRequestEntry,
 ) : UWORD
+
+EXTERN KeStackSwapperEvent : KeEvent
+
+EXTERN FN KeFlushSwapperQueue () : ^KeThread
+
+EXTERN FN KeHarvestSwapCandidates (
+    IN procid : UWORD,
+) : ^KeThread

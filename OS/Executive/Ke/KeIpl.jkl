@@ -84,6 +84,22 @@ FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
         KiQuantumEnd ( prb )
     END
 
+#IF BLD_MP
+    IF prb^.WakeStackSwapper THEN
+        // A request was made to wake the stack swapper.
+        // On MP we do this here because when we notice we have to, we are deep
+        // in some spinlocks. UP does not have this issue - DPC level is DPC
+        // level.
+
+        prb^.WakeStackSwapper = FALSE
+
+        KeSignalEvent (
+            &KeStackSwapperEvent, // event
+            0, // priorityboost
+        )
+    END
+#END
+
     IF prb^.NextThread THEN
         // A next thread was selected to preempt the current one.
         // Switch to it immediately.

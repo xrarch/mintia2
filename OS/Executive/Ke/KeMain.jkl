@@ -114,10 +114,13 @@ FN KiInitializePrb (
 
     RtlInitializeList ( &prb^.DpcListHead )
 
+    RtlInitializeList ( &prb^.StackSwapCandidateListHead )
+
 #IF BLD_MP
     KiInitializeSpinlock ( &prb^.DpcQueueLock )
     KiInitializeSpinlock ( &prb^.ReadyQueueLock )
     KiInitializeSpinlock ( &prb^.TimerTreeLock )
+    KiInitializeSpinlock ( &prb^.StackSwapListLock )
 #END
 
     KeInitializeDpc (
@@ -372,6 +375,16 @@ EXPORT FN KeMain (
 
         dbgmain ()
     END
+
+    // Initialize the stack swapper event. This is waited upon by a component
+    // of Mm which outswaps kernel stacks and processes.
+
+    KeInitializeEvent (
+        &KeStackSwapperEvent, // event
+        "StackSwap", // name
+        FALSE, // notification
+        FALSE, // signalstate
+    )
 
 #IF BLD_MP
     // Initialize the work balancing DPC.
