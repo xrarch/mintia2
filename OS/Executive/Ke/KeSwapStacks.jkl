@@ -187,6 +187,9 @@ FN KiReadyOutswappedThread (
 
     // The thread was readied while its kernel stack was outswapped, so we have
     // to enqueue it to the swap list and request the swap thread to wake up.
+    // Thread lock is held.
+
+    thread^.Status = KI_THREAD_READY
 
 #IF BLD_CHK
     IF thread^.InSwapList THEN
@@ -250,6 +253,10 @@ FN KiInsertSwapCandidateListFunc (
     IF KeCurrentThread () != thread THEN
         KeCrash ( "KiInsertSwapCandidateListFunc: not current\n" )
     END
+
+    IF thread^.SwapCandidatePrb THEN
+        KeCrash ( "KiInsertSwapCandidateListFunc: already in list\n" )
+    END
 #END
 
     // Insert the thread in the swap candidate list for the current processor.
@@ -286,6 +293,10 @@ FN KiRemoveSwapCandidateListFunc (
 #IF BLD_CHK
     IF KeCurrentThread () != thread THEN
         KeCrash ( "KiRemoveSwapCandidateListFunc: not current\n" )
+    END
+
+    IF NOT thread^.SwapCandidatePrb THEN
+        KeCrash ( "KiRemoveSwapCandidateListFunc: not in list\n" )
     END
 #END
 

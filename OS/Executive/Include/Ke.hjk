@@ -437,6 +437,7 @@ END
 #DEFINE KI_THREAD_INITIALIZED 4
 #DEFINE KI_THREAD_STANDBY 5
 #DEFINE KI_THREAD_INFLIGHT 6
+#DEFINE KI_THREAD_TERMINATED 7
 
 #DEFINE KI_IDLE_QUEUE 1
 #DEFINE KI_TIMESHARED_QUEUE 2
@@ -789,3 +790,11 @@ EXTERN FN KeHarvestSwapCandidates (
 EXTERN FN KeReadyInswappedThread (
     IN thread : ^KeThread,
 )
+
+EXTERN KeReaperEvent : KeEvent
+
+EXTERN FN KeExitThread (
+    IN thread : ^KeThread,
+)
+
+EXTERN FN KePopReaperList () : ^KeThread

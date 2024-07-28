@@ -7,9 +7,39 @@
 #INCLUDE "<ll>/System/OsSignal.hjk"
 #INCLUDE "<inc>/Ps.hjk"
 
+PUBLIC KeReaperEvent : KeEvent
+
+KiReaperListHead : ^KeThread = NULLPTR
+
 #IF BLD_MP
 
 KiBootLock : KiSpinlock = KI_INITIAL_SPINLOCK
+
+KiReaperListLock : KiSpinlock = KI_INITIAL_SPINLOCK
+
+#MACRO KiAcquireReaperList () [
+    KiAcquireSpinlockRaise ( &KiReaperListLock )
+]
+
+#MACRO KiReleaseReaperList ( ipl ) [
+    KiReleaseSpinlockLower ( &KiReaperListLock, ipl )
+]
+
+#MACRO KiReleaseReaperListElevated () [
+    KiReleaseSpinlock ( &KiReaperListLock )
+]
+
+#ELSE
+
+#MACRO KiAcquireReaperList () [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseReaperList ( ipl ) [
+    KiLowerIpl ( ipl )
+]
+
+#MACRO KiReleaseReaperListElevated () []
 
 #END
 
@@ -557,6 +587,135 @@ EXPORT FN KeAcceptEvents ()
 #END
 
     thread^.IgnoreEventCount -= 1
+END
+
+FN KiRundownApcQueue (
+    IN thread : ^KeThread,
+    IN head : ^RtlListEntry,
+)
+
+    // Rundown the specified APC queue. By this point it shouldn't be possible
+    // for any more APCs to be added to the specified queue, so we use no locks.
+
+    listentry := head^.Next
+
+    WHILE listentry != head DO
+        apc := CONTAINEROF listentry TO KeApc.Entry
+
+        // Capture the Next link now as the APC structure will probably be freed
+        // during rundown.
+
+        listentry = listentry^.Next
+
+        // Call the APC function with rundown set to TRUE.
+
+        apc^.Function (
+            apc, // apc
+            apc^.Context1, // context1
+            apc^.Context2, // context2
+            TRUE, // rundown
+        )
+    END
+END
+
+FN KePopReaperList () : ^KeThread
+
+    // Pop a thread off the reaper list. The thread is guaranteed to have
+    // switched off its stack for the final time, and can be deleted.
+
+    ipl := KiAcquireReaperList ()
+
+    // Pop the item off the singly linked list.
+
+    thread := KiReaperListHead
+
+    IF thread THEN
+        KiReaperListHead = thread^.SwapNext
+    END
+
+    KiReleaseReaperList ( ipl )
+
+#IF BLD_MP
+    IF thread THEN
+        // Acquire and release the thread's spinlock as a barrier to ensure it
+        // isn't currently context switching and has fully died.
+
+        ipl = KiAcquireThread ( thread )
+        KiReleaseThread ( thread, ipl )
+    END
+#END
+
+    RETURN thread
+END
+
+FN KeExitThread (
+    IN thread : ^KeThread,
+)
+
+    // Called by PsExitThread as the final stage of thread termination.
+    // We have to rundown the thread, add it to the reaper list, and signal the
+    // reaper event. This function does not return.
+
+#IF BLD_CHK
+    IF NOT RtlEmptyList ( &thread^.KapcListHead ) THEN
+        KeCrash ( "KeExitThread: pending KAPCs\n" )
+    END
+#END
+
+    // Rundown the lazy APC queue.
+
+    KiRundownApcQueue (
+        thread, // thread
+        &thread^.LapcListHead, // head
+    )
+
+    // Rundown the user APC queue.
+
+    KiRundownApcQueue (
+        thread, // thread
+        &thread^.UapcListHead, // head
+    )
+
+    // Remove the thread from any balanced queue it is currently attached to.
+
+    KiDisassociateFromBalancedQueue ( thread )
+
+    // Add to reaper list.
+
+    KiAcquireReaperList ()
+
+    // Reuse SwapNext link as it can never be used again.
+
+    thread^.SwapNext = KiReaperListHead
+    KiReaperListHead = thread
+
+    // Signal the reaper event before acquiring my thread spinlock or we will
+    // violate the lock ordering.
+
+    KeSignalEvent (
+        &KeReaperEvent, // event
+        0, // priorityboost
+    )
+
+    // Acquire my thread spinlock before releasing the reaper list.
+
+    KiAcquireThreadElevated ( thread )
+
+    // Release the reaper list.
+
+    KiReleaseReaperListElevated ()
+
+    // Set to terminated status.
+
+    thread^.Status = KI_THREAD_TERMINATED
+
+    // Yield. Control will never return to this thread.
+    // The thread lock is released automatically.
+
+    KiYield (
+        thread, // thread
+        KI_CURRENT_PRB, // prb
+    )
 END
 
 FN KiDispatchSignal (
