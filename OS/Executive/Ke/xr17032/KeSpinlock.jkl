@@ -99,20 +99,13 @@ KiReleaseSpinlockLower:
     mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.
     mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a1                 // Right shift pending by new IPL.
-    beq  t2, .skip                  // If zero, none pending at new IPL.
-
-    subi sp, sp, 4
-    mov  long [sp], lr
-
-    mov  a0, a1
-    jal  KiDispatchSoftwareInterrupts
-
-    mov  lr, long [sp]
-    addi sp, sp, 4
-
-.skip:
+    bne  t2, .dispatch              // If zero, none pending at new IPL.
 
     ret
+
+.dispatch:
+    mov   a0, a1
+    j     KiDispatchSoftwareInterrupts
 
 ]
 

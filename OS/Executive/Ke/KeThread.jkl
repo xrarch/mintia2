@@ -7,6 +7,8 @@
 #INCLUDE "<ll>/System/OsSignal.hjk"
 #INCLUDE "<inc>/Ps.hjk"
 
+KiBootLock : KiSpinlock = KI_INITIAL_SPINLOCK
+
 #SECTION "PAGE$text"
 FN (KeApcF) KiSuspendThreadApc (
     IN apc : ^KeApc,
@@ -157,8 +159,11 @@ FN KeInitializeThread (
         process^.SignalThread = thread
     END
 
-    // NYI pushlocks!
-    // KeAcquirePushlockExclusive ( &process^.Pushlock )
+    IF process == &KiIdleProcess THEN
+        KiAcquireSpinlockRaise ( &KiBootLock )
+    ELSE
+        KeAcquirePushlockExclusive ( &process^.Pushlock )
+    END
 
     RtlInsertAtTailList (
         &process^.ThreadListHead, // head
@@ -168,7 +173,11 @@ FN KeInitializeThread (
     process^.ThreadCount += 1
     process^.ResidentStackCount += 1
 
-    // KeReleasePushlock ( &process^.Pushlock )
+    IF process == &KiIdleProcess THEN
+        KiReleaseSpinlockLower ( &KiBootLock, KI_IPL_LOW )
+    ELSE
+        KeReleasePushlock ( &process^.Pushlock )
+    END
 END
 
 EXPORT FN KeSuspendThread (
