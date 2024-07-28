@@ -116,12 +116,11 @@ KeIncrementUlong:
 KeCompareSwapUlong:
 .export KeCompareSwapUlong
 
-.retry:
-
 #IF BLD_MP
     mb                              // Ensure coherence with other processors.
 #END
 
+.retry:
     ll   a3, a0                     // Load-locked the location.
     sub  t0, a3, a2                 // Compare equality with expected value.
     bne  t0, .exit                  // Not equal, leave.

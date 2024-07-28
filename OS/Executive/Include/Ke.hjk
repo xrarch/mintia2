@@ -17,7 +17,7 @@ EXTERN FN KeMemoryBarrier ()
 #END
 
 STRUCT KePushlock
-    Ptr : ^VOID,
+    Ptr : UWORD,
 END
 
 #DEFINE KE_KERNEL_MODE 1
@@ -560,6 +560,10 @@ EXTERN FN KeReleaseSemaphore (
 
 #MACRO KeInitializePushlock ( pushlock ) [
     NOTHING (pushlock)^.Ptr = 0
+]
+
+#MACRO KeInitializeKapcSafePushlock ( pushlock ) [
+    NOTHING (pushlock)^.Ptr = 1
 ]
 
 EXTERN FN KeAcquirePushlockShared (

@@ -1,35 +1,718 @@
 //
 // Implements support for Kernel pushlocks.
+// These are the blocking lock primitive used throughout the system.
 //
 
 #INCLUDE "Ki.hjk"
 
-// These are here temporarily. The Ke- entrypoints for pushlocks will be
-// optimized routines in assembly language which attempt to grab a non-contended
-// pushlock and dispatch here upon failure.
+// These Ki entrypoints for pushlocks are the slow path after the fast path
+// (the Ke entrypoints) written in assembly failed.
+//
+// The reference for these algorithms was ReactOS's ex/pushlock.c source module,
+// written by Alex Ionescu.
 
-EXPORT FN KeAcquirePushlockShared (
+#DEFINE KI_PUSHLOCK_SPIN_COUNT 300
+
+#DEFINE KI_PUSHLOCK_APC_SAFE 0x1
+#DEFINE KI_PUSHLOCK_LOCKED 0x2
+#DEFINE KI_PUSHLOCK_WAITING 0x4
+#DEFINE KI_PUSHLOCK_WAKING 0x8
+#DEFINE KI_PUSHLOCK_MULTIPLE_SHARED 0x10
+#DEFINE KI_PUSHLOCK_SHARE_INC 0x20
+#DEFINE KI_PUSHLOCK_PTR_BITS 0x1F
+#DEFINE KI_PUSHLOCK_SHARE_SHIFT 5
+
+#DEFINE KI_PUSHBLOCK_FLAG_EXCLUSIVE 1
+#DEFINE KI_PUSHBLOCK_FLAG_WAIT 2
+
+STRUCT KiPushBlock
+    Event : KeEvent,
+    Next : ^KiPushBlock,
+    Last : ^KiPushBlock,
+    Prev : ^KiPushBlock,
+    Share : ULONG,
+    Flags : ULONG,
+END
+
+FN KiWakePushlock (
+    IN pushlock : ^KePushlock,
+    IN current : UWORD,
+)
+
+    // Wake a pushlock thats in the waiting state.
+
+    new : UWORD
+    block : ^KiPushBlock
+    prevblock : ^KiPushBlock
+
+    WHILE TRUE DO
+        // Check if locked.
+
+        WHILE current & KI_PUSHLOCK_LOCKED DO
+            // Don't wake if the pushlock is locked.
+
+            new = KeCompareSwapPtr (
+                &pushlock^.Ptr, // ptr
+                current & ~KI_PUSHLOCK_WAKING, // newvalue
+                current, // expectedvalue
+            )
+
+            IF new == current THEN
+                LEAVE
+            END
+
+            // Failed to CAS.
+
+            current = new
+        END
+
+        firstblock := CAST current & ~KI_PUSHLOCK_PTR_BITS TO ^KiPushBlock
+
+        block = firstblock
+
+        WHILE TRUE DO
+            lastblock := block^.Last
+
+            IF lastblock THEN
+                // Found a pointer to the last block stashed in this one.
+
+                block = lastblock
+
+                BREAK
+            END
+
+            // This block didn't stash a last block pointer, so advance.
+
+            prevblock = block
+            block = block^.Next
+            block^.Prev = prevblock
+        END
+
+        // Check if the last wait block is not exclusive or if it's the only
+        // waiter.
+
+        prevblock = block^.Prev
+
+        IF block^.Flags & KI_PUSHBLOCK_FLAG_EXCLUSIVE AND prevblock THEN
+            // This block is exclusive, and it's not the only block on the list,
+            // pop it off the end of the list and wake it alone.
+
+            firstblock^.Last = prevblock
+            block^.Prev = NULLPTR
+
+            // Remove the waking bit from the pushlock.
+
+            KeMaskPtr (
+                &pushlock^.Ptr, // ptr
+                ~KI_PUSHLOCK_WAKING, // mask
+            )
+
+            BREAK
+
+        ELSE
+            // The final block on the chain was a shared waiter, or it was an
+            // exclusive waiter and also the only waiter. Re-initialize the
+            // pushlock to a quiescent state; i.e., release it. This also
+            // detaches the block list from its anchor (the pushlock word) so
+            // that we can freely awake all waiters on it.
+
+            new = KeCompareSwapPtr (
+                &pushlock^.Ptr, // ptr
+                current & KI_PUSHLOCK_APC_SAFE, // newvalue
+                current, // expectedvalue
+            )
+
+            IF new == current THEN
+                BREAK
+            END
+
+            // Failed to CAS.
+
+            current = new
+        END
+    END
+
+    // Check if there's a previous block.
+
+    ipl := KI_IPL_DPC
+
+    IF block^.Prev THEN
+        // Raise to DPC level.
+
+        ipl = KiRaiseIpl ( KI_IPL_DPC )
+    END
+
+    // Signaling loop.
+
+    WHILE TRUE DO
+        // Get the previous block.
+
+        prevblock = block^.Prev
+
+        // Clear the wait bit in the block.
+
+        flag := KeMaskUlong (
+            &block^.Flags, // ptr
+            ~KI_PUSHBLOCK_FLAG_WAIT, // bitmask
+        )
+
+        IF flag & KI_PUSHBLOCK_FLAG_WAIT == 0 THEN
+            // It's safe to signal this block (the event is initialized and the
+            // thread is expecting it), so do it.
+
+            KeSignalEvent (
+                &block^.Event, // event
+                0, // priorityboost
+            )
+        END
+
+        block = prevblock
+
+        IF NOT block THEN
+            BREAK
+        END
+    END
+
+    IF ipl != KI_IPL_DPC THEN
+        KiLowerIpl ( ipl )
+    END
+END
+
+FN KiOptimizePushlockList (
+    IN pushlock : ^KePushlock,
+    IN current : UWORD,
+)
+
+    // Optimizes the list of waiters associated with a pushlock.
+    // At the end of the optimization, the pushlock is wakened.
+
+    WHILE TRUE DO
+        IF current & KI_PUSHLOCK_LOCKED == 0 THEN
+            // Wake and leave.
+
+            KiWakePushlock (
+                pushlock, // pushlock
+                current, // current
+            )
+
+            LEAVE
+        END
+
+        firstblock := CAST current & ~KI_PUSHLOCK_PTR_BITS TO ^KiPushBlock
+
+        block := firstblock
+
+        WHILE TRUE DO
+            lastblock := block^.Last
+
+            IF lastblock THEN
+                // Set this as the new last block.
+
+                firstblock^.Last = lastblock
+
+                BREAK
+            END
+
+            prevblock := block
+            block = block^.Next
+            block^.Prev = prevblock
+        END
+
+        // Remove the waking bit.
+
+        new := KeCompareSwapPtr (
+            &pushlock^.Ptr, // ptr
+            current & ~KI_PUSHLOCK_WAKING, // newvalue
+            current, // expectedvalue
+        )
+
+        IF new == current THEN
+            LEAVE
+        END
+
+        // Failed to CAS.
+
+        current = new
+    END
+END
+
+FN KiAcquirePushlockExclusive (
     IN pushlock : ^KePushlock,
 )
 
-    KeCrash ( "NYI KeAcquirePushlockShared\n" )
+    // Acquire a pushlock exclusive.
+    // The fundamental structure of this routine is an atomic CAS loop.
+    // If this is an APC safe pushlock, the fast path raised to KI_IPL_APC prior
+    // to calling us.
+
+    // Acquire a 32 byte aligned block on the stack.
+
+    stack : UBYTE[SIZEOF KiPushBlock + 32]
+    block := CAST (((&stack[0]) + 31) & ~31) TO ^KiPushBlock
+
+#IF BLD_CHK
+    IF pushlock^.Ptr & KI_PUSHLOCK_APC_SAFE == 0 THEN
+        IF KiCurrentIpl () >= KI_IPL_APC THEN
+            KeCrash ( "KiAcquirePushlockExclusive: Not APC safe\n" )
+        END
+
+    ELSEIF KiCurrentIpl () != KI_IPL_APC THEN
+        KeCrash ( "KiAcquirePushlockExclusive: APC safe, IPL not APC\n" )
+    END
+
+    IF block & 31 THEN
+        KeCrash ( "KiAcquirePushlockExclusive: unaligned block\n" )
+    END
+#END
+
+    current := pushlock^.Ptr
+    new : UWORD
+
+    WHILE TRUE DO
+        IF current & KI_PUSHLOCK_LOCKED == 0 THEN
+            // Unlocked already, take it.
+
+            new = KeCompareSwapPtr (
+                &pushlock^.Ptr, // ptr
+                current | KI_PUSHLOCK_LOCKED, // newvalue
+                current, // expectedvalue
+            )
+
+            IF new == current THEN
+                // Got it.
+
+                LEAVE
+            END
+
+            // Failed to CAS, try again.
+
+            current = new
+
+            CONTINUE
+        END
+
+        // Initialize the block.
+
+        block^.Flags = KI_PUSHBLOCK_FLAG_WAIT | KI_PUSHBLOCK_FLAG_EXCLUSIVE
+        block^.Prev = NULLPTR
+        needwake := FALSE
+
+        IF current & KI_PUSHLOCK_WAITING THEN
+            // There's already a waiter.
+
+            block^.Last = NULLPTR
+            block^.Next = CAST current & ~KI_PUSHLOCK_PTR_BITS TO ^KiPushBlock
+            block^.Share = 0
+
+            new = block | (current & KI_PUSHLOCK_PTR_BITS) |
+                KI_PUSHLOCK_LOCKED | KI_PUSHLOCK_WAKING | KI_PUSHLOCK_WAITING
+
+            IF current & KI_PUSHLOCK_WAKING == 0 THEN
+                needwake = TRUE
+            END
+
+        ELSE
+            // No waiters.
+
+            block^.Last = block
+            block^.Share = current >> KI_PUSHLOCK_SHARE_SHIFT
+
+            new = block | (current & KI_PUSHLOCK_APC_SAFE) |
+                KI_PUSHLOCK_LOCKED | KI_PUSHLOCK_WAITING
+
+            IF block^.Share > 1 THEN
+                new |= KI_PUSHLOCK_MULTIPLE_SHARED
+
+            ELSE
+                block^.Share = 0
+            END
+        END
+
+        tempvalue := new
+
+        new = KeCompareSwapPtr (
+            &pushlock^.Ptr, // ptr
+            new, // newvalue
+            current, // expectedvalue
+        )
+
+        IF new != current THEN
+            // Failed to CAS, try again.
+
+            current = new
+
+            CONTINUE
+        END
+
+        IF needwake THEN
+            // Scan waiters and wake.
+
+            KiOptimizePushlockList (
+                pushlock, // pushlock
+                tempvalue, // current
+            )
+        END
+
+        // Initialize the event.
+
+        KeInitializeEvent (
+            &block^.Event, // event
+            "PushlockExclusive", // name
+            FALSE, // notification
+            FALSE, // signalstate
+        )
+
+#IF BLD_MP
+        // Spin for the lock for a bit before waiting.
+
+        i := 0
+
+        WHILE i < KI_PUSHLOCK_SPIN_COUNT DO
+            IF block^.Flags & KI_PUSHBLOCK_FLAG_WAIT == 0 THEN
+                BREAK
+            END
+
+            // Language BARRIER so this loop isn't optimized out.
+
+            BARRIER
+
+            i += 1
+        END
+#END
+
+        flags := KeMaskUlong (
+            &block^.Flags, // ptr
+            ~KI_PUSHBLOCK_FLAG_WAIT, // bitmask
+        )
+
+        IF flags & KI_PUSHBLOCK_FLAG_WAIT THEN
+            // The wait bit was still set when we cleared it, so wait for the
+            // event.
+
+            KeWaitForSingleObject (
+                KE_KERNEL_MODE, // waitmode
+                FALSE, // alertable
+                NULLPTR, // timeout
+                &block^.Event.Header, // object
+            )
+        END
+
+        current = new
+    END
 END
 
-EXPORT FN KeAcquirePushlockExclusive (
+FN KiAcquirePushlockShared (
     IN pushlock : ^KePushlock,
 )
 
-    KeCrash ( "NYI KeAcquirePushlockExclusive\n" )
+    // Acquire a pushlock shared.
+    // The fundamental structure of this routine is an atomic CAS loop.
+    // If this is an APC safe pushlock, the fast path raised to KI_IPL_APC prior
+    // to calling us.
+
+    // Acquire a 32 byte aligned block on the stack.
+
+    stack : UBYTE[SIZEOF KiPushBlock + 32]
+    block := CAST (((&stack[0]) + 31) & ~31) TO ^KiPushBlock
+
+#IF BLD_CHK
+    IF pushlock^.Ptr & KI_PUSHLOCK_APC_SAFE == 0 THEN
+        IF KiCurrentIpl () >= KI_IPL_APC THEN
+            KeCrash ( "KiAcquirePushlockShared: Not APC safe\n" )
+        END
+
+    ELSEIF KiCurrentIpl () != KI_IPL_APC THEN
+        KeCrash ( "KiAcquirePushlockShared: APC safe, IPL not APC\n" )
+    END
+
+    IF block & 31 THEN
+        KeCrash ( "KiAcquirePushlockShared: unaligned block\n" )
+    END
+#END
+
+    current := pushlock^.Ptr
+    new : UWORD
+
+    WHILE TRUE DO
+        IF current & KI_PUSHLOCK_LOCKED == 0 OR
+            (current & KI_PUSHLOCK_WAITING == 0 AND
+            (current >> KI_PUSHLOCK_SHARE_SHIFT) > 0) THEN
+
+            // It's unlocked, or held shared and there are no waiters.
+
+            new = current | KI_PUSHLOCK_LOCKED
+
+            IF current & KI_PUSHLOCK_WAITING == 0 THEN
+                // No waiters, increase share count.
+
+                new += KI_PUSHLOCK_SHARE_INC
+            END
+
+            // CAS the new value in.
+
+            new = KeCompareSwapPtr (
+                &pushlock^.Ptr, // ptr
+                new, // newvalue
+                current, // expectedvalue
+            )
+
+            IF new == current THEN
+                // Got the lock, leave.
+
+                LEAVE
+            END
+
+            // Failed to CAS, retry.
+
+            current = new
+
+            CONTINUE
+        END
+
+        // Initialize the block.
+
+        block^.Flags = KI_PUSHBLOCK_FLAG_WAIT
+        block^.Share = 0
+        block^.Prev = NULLPTR
+
+        needwake := FALSE
+
+        IF current & KI_PUSHLOCK_WAITING THEN
+            block^.Last = NULLPTR
+            block^.Next = CAST current & ~KI_PUSHLOCK_PTR_BITS TO ^KiPushBlock
+
+            new = block
+            
+            new |= current & (KI_PUSHLOCK_LOCKED |
+                KI_PUSHLOCK_MULTIPLE_SHARED |
+                KI_PUSHLOCK_APC_SAFE)
+
+            new |= KI_PUSHLOCK_WAITING | KI_PUSHLOCK_WAKING
+
+            IF current & KI_PUSHLOCK_WAKING == 0 THEN
+                needwake = TRUE
+            END
+
+        ELSE
+            block^.Last = block
+
+            new = block | (current & KI_PUSHLOCK_PTR_BITS) | KI_PUSHLOCK_WAITING
+        END
+
+        tempvalue := new
+
+        new = KeCompareSwapPtr (
+            &pushlock^.Ptr, // ptr
+            new, // newvalue
+            current, // expectedvalue
+        )
+
+        IF new != current THEN
+            // Failed to CAS, try again.
+
+            current = new
+
+            CONTINUE
+        END
+
+        IF needwake THEN
+            // Scan waiters and wake.
+
+            KiOptimizePushlockList (
+                pushlock, // pushlock
+                new, // current
+            )
+        END
+
+        // Initialize the event.
+
+        KeInitializeEvent (
+            &block^.Event, // event
+            "PushlockShared", // name
+            FALSE, // notification
+            FALSE, // signalstate
+        )
+
+#IF BLD_MP
+        // Spin for the lock for a bit before waiting.
+
+        i := 0
+
+        WHILE i < KI_PUSHLOCK_SPIN_COUNT DO
+            IF block^.Flags & KI_PUSHBLOCK_FLAG_WAIT == 0 THEN
+                BREAK
+            END
+
+            // Language BARRIER so this loop isn't optimized out.
+
+            BARRIER
+
+            i += 1
+        END
+#END
+
+        flags := KeMaskUlong (
+            &block^.Flags, // ptr
+            ~KI_PUSHBLOCK_FLAG_WAIT, // bitmask
+        )
+
+        IF flags & KI_PUSHBLOCK_FLAG_WAIT THEN
+            // The wait bit was still set when we cleared it, so wait for the
+            // event.
+
+            KeWaitForSingleObject (
+                KE_KERNEL_MODE, // waitmode
+                FALSE, // alertable
+                NULLPTR, // timeout
+                &block^.Event.Header, // object
+            )
+        END
+
+        current = new
+    END
 END
 
-EXPORT FN KeReleasePushlock (
+FN KiReleasePushlock (
     IN pushlock : ^KePushlock,
 )
 
-    KeCrash ( "NYI KeReleasePushlock\n" )
+    // Release a pushlock which was held either exclusive or shared.
+    // The fundamental structure of this routine is an atomic CAS loop.
+
+#IF BLD_CHK
+    IF pushlock^.Ptr & KI_PUSHLOCK_APC_SAFE == 0 THEN
+        IF KiCurrentIpl () >= KI_IPL_APC THEN
+            KeCrash ( "KiReleasePushlock: Not APC safe\n" )
+        END
+
+    ELSEIF KiCurrentIpl () != KI_IPL_APC THEN
+        KeCrash ( "KiReleasePushlock: APC safe, IPL not APC\n" )
+    END
+#END
+
+    current := pushlock^.Ptr
+    new : UWORD
+
+    WHILE TRUE DO
+        IF current & KI_PUSHLOCK_WAITING == 0 THEN
+            new = 0
+
+            IF current >> KI_PUSHLOCK_SHARE_SHIFT > 1 THEN
+                // More than one sharer, decrement the share count.
+                // If there was only one, we're releasing it, no need to
+                // decrement.
+
+                new = current - KI_PUSHLOCK_SHARE_INC
+            END
+
+            // Preserve the APC-safe bit.
+
+            new |= current & KI_PUSHLOCK_APC_SAFE
+
+            new = KeCompareSwapPtr (
+                &pushlock^.Ptr, // ptr
+                new, // newvalue
+                current, // expectedvalue
+            )
+
+            IF new == current THEN
+                // Released.
+
+                BREAK
+            END
+
+            // Failed to CAS, try again.
+
+            current = new
+
+            CONTINUE
+        END
+
+        IF current & KI_PUSHLOCK_MULTIPLE_SHARED THEN
+            // Decrement the share count in the last list block.
+
+            block := CAST current & ~KI_PUSHLOCK_PTR_BITS TO ^KiPushBlock
+
+            WHILE TRUE DO
+                lastblock := block^.Last
+
+                IF lastblock THEN
+                    block = lastblock
+
+                    BREAK
+                END
+
+                block = block^.Next
+            END
+
+            IF (CAST block^.Share TO LONG) > 0 THEN
+                old := KeIncrementUlong (
+                    &block^.Share, // ptr
+                    0xFFFFFFFF, // inc
+                )
+
+                IF (CAST old TO LONG) > 1 THEN
+                    // The share count has been decremented, nothing left to do.
+
+                    LEAVE
+                END
+            END
+        END
+
+        WHILE TRUE DO
+            new = current & ~(KI_PUSHLOCK_LOCKED | KI_PUSHLOCK_MULTIPLE_SHARED)
+
+            IF current & KI_PUSHLOCK_WAKING THEN
+                new = KeCompareSwapPtr (
+                    &pushlock^.Ptr, // ptr
+                    new, // newvalue
+                    current, // expectedvalue
+                )
+
+                IF new == current THEN
+                    // Got it.
+
+                    LEAVE
+                END
+
+                // Failed to CAS.
+
+                current = new
+
+                CONTINUE
+            END
+
+            // Try to become the waker.
+
+            new |= KI_PUSHLOCK_WAKING
+
+            wakevalue := new
+
+            new = KeCompareSwapPtr (
+                &pushlock^.Ptr, // ptr
+                new, // newvalue
+                current, // expectedvalue
+            )
+
+            IF new == current THEN
+                // Got it.
+
+                KiWakePushlock (
+                    pushlock, // pushlock
+                    wakevalue, // current
+                )
+
+                LEAVE
+            END
+
+            // Failed to CAS.
+
+            current = new
+        END
+    END
 END
 
-EXPORT FN KeConvertPushlockToShared (
+FN KiConvertPushlockToShared (
     IN pushlock : ^KePushlock,
 )
 
