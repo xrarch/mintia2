@@ -89,7 +89,7 @@ END
 FN KiInitializePrb (
     IN prb : ^KiPrb,
     IN bootprocessor : UWORD,
-) : ^KiPrb
+)
 
     // Initialize this PRB. It has already been filled with zeroes by the Loader
     // so avoid doing that again for those fields where zeroes (and NULLPTR) are
@@ -105,12 +105,8 @@ FN KiInitializePrb (
     // globally visible address for this Prb.
 
 #IF KI_VIRTUAL_PRB
-    prb^.RealVirtual = KiPrbFromNumber ( KiCurrentProcessor () )
+    prb^.RealVirtual = prb
 #END
-
-    // Make sure from now on we're dealing with a global Prb pointer.
-
-    KI_TO_GLOBAL_PRB ( prb )
 
     RtlInitializeList ( &prb^.DpcListHead )
 
@@ -205,8 +201,6 @@ FN KiInitializePrb (
     // read it if we failed to freeze.
 
     prb^.FrozenContext = NULLPTR
-
-    RETURN prb
 END
 
 #IF BLD_MP
@@ -219,14 +213,7 @@ FN (HalStartProcessorF) KiStartOtherProcessor ()
     // Loader. We have to initialize ourselves and then jump into our idle
     // thread to wait for work.
 
-    // Initialize the current processor's Prb.
-
-    prb := KI_CURRENT_PRB_LOCAL
-
-    prb = KiInitializePrb (
-        prb, // prb
-        FALSE, // bootprocessor
-    )
+    prb := KI_CURRENT_PRB
 
     // Initialize architectural support.
 
@@ -332,14 +319,24 @@ EXPORT FN KeMain (
         "Idle", // name
     )
 
-    // Initialize the boot processor's PRB.
+    KiIdleProcess.PageDirectoryPfn = KeLoaderBlock.SystemPageDirectoryPfn
 
-    prb := KI_CURRENT_PRB_LOCAL
+    // Initialize the Prbs.
 
-    prb = KiInitializePrb (
-        prb, // prb
-        TRUE, // bootprocessor
-    )
+    prb := KiPrbFromNumber ( 0 )
+
+    initprb := prb
+    i := 0
+
+    WHILE i < KeLoaderBlock.ProcessorCount DO
+        KiInitializePrb (
+            initprb, // prb
+            i == 0, // bootprocessor
+        )
+
+        i += 1
+        initprb += BL_PRB_SIZE
+    END
 
     // Initialize architectural support.
 

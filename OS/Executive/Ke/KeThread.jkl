@@ -13,8 +13,6 @@ KiReaperListHead : ^KeThread = NULLPTR
 
 #IF BLD_MP
 
-KiBootLock : KiSpinlock = KI_INITIAL_SPINLOCK
-
 KiReaperListLock : KiSpinlock = KI_INITIAL_SPINLOCK
 
 #MACRO KiAcquireReaperList () [
@@ -235,16 +233,7 @@ FN KeInitializeThread (
 
     // Add to the process's thread list.
 
-#IF BLD_MP
-    IF process == &KiIdleProcess THEN
-        KiAcquireSpinlock ( &KiBootLock )
-    ELSE
-        KeAcquirePushlockExclusive ( &process^.Pushlock )
-    END
-
-#ELSE
     KeAcquirePushlockExclusive ( &process^.Pushlock )
-#END
 
     IF process^.Terminated THEN
         // The process is terminated, we can't add new threads to it.
@@ -265,16 +254,9 @@ FN KeInitializeThread (
 
     process^.ThreadCount += 1
 
-#IF BLD_MP
-    IF process == &KiIdleProcess THEN
-        KiReleaseSpinlock ( &KiBootLock )
-    ELSE
-        KeReleasePushlock ( &process^.Pushlock )
-    END
-
-#ELSE
     KeReleasePushlock ( &process^.Pushlock )
-#END
+
+    // Call nonpaged helper routine to increment the resident stack count.
 
     KiAddSwappableThreadToProcess (
         process, // process
