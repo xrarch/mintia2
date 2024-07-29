@@ -260,6 +260,53 @@ FN KeInitializeThread (
     )
 END
 
+FN KeUninitializeThread (
+    IN thread : ^KeThread,
+)
+
+    // Called to uninitialize a thread at the time it is destroyed.
+    // It has context switched off its stack for the last time by now.
+
+#IF BLD_CHK
+    IF NOT thread^.KernelStackResident THEN
+        KeCrash ( "KeUninitializeThread: stack not resident\n" )
+    END
+#END
+
+    process := thread^.Process
+
+    // Remove the thread from the process's thread list and decrement its thread
+    // count.
+
+    KeAcquirePushlockExclusive ( &process^.Pushlock )
+
+    RtlRemoveEntryList ( &thread^.ProcessListEntry )
+
+#IF BLD_CHK
+    IF process^.ThreadCount == 0 THEN
+        KeCrash ( "KeUninitializeThread: thread count underflow\n" )
+    END
+#END
+
+    process^.ThreadCount -= 1
+
+    KeReleasePushlock ( &process^.Pushlock )
+
+    // Remove the thread's resident stack from the process's counter.
+
+    ipl := KiAcquireSwapState ( process )
+
+#IF BLD_CHK
+    IF process^.ResidentThreadCount == 0 THEN
+        KeCrash ( "KeUninitializeThread: resident count underflow\n" )
+    END
+#END
+
+    process^.ResidentThreadCount -= 1
+
+    KiReleaseSwapState ( process, ipl )
+END
+
 EXPORT FN KeSuspendThread (
     IN thread : ^KeThread,
 ) : UWORD
