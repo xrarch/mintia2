@@ -386,6 +386,17 @@ EXPORT FN KeMain (
         FALSE, // signalstate
     )
 
+    // Initialize the reaper event. This is waited upon by a component of Ps
+    // which removes the last reference count from thread objects and deletes
+    // their stack (which cannot be done in the context of the thread itself).
+
+    KeInitializeEvent (
+        &KeReaperEvent, // event
+        "Reaper", // name
+        FALSE, // notification
+        FALSE, // signalstate
+    )
+
 #IF BLD_MP
     // Initialize the work balancing DPC.
 

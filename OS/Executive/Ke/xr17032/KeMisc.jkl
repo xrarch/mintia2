@@ -299,3 +299,257 @@ KeMemoryBarrier:
     ret
 
 ]
+
+#IF BLD_MP
+
+FN (KiIpiF) KiSweepTb (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Executes on the target processor of a TB shootdown.
+
+    KiFlushMyTb ()
+END
+
+FN (KiIpiF) KiFlushSingleTb (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Executes on the target processor of a TB shootdown.
+
+    KiFlushMyTbAddress ( CAST context1 TO ^VOID )
+END
+
+FN (KiIpiF) KiFlushMultipleTb (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Executes on the target processor of a TB shootdown.
+
+    vaddrtable := CAST context1 TO ^^VOID
+
+    WHILE context2 DO
+        KiFlushMyTbAddress ( vaddrtable^ )
+
+        vaddrtable += SIZEOF ^VOID
+        context2 -= 1
+    END
+END
+
+FN (KiIpiF) KiSweepDcache (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Executes on the target processor of a Dcache shootdown.
+
+    KiFlushMyDcache ()
+END
+
+FN (KiIpiF) KiFlushMultipleDcache (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Executes on the target processor of a Dcache shootdown.
+
+    pfntable := CAST context1 TO ^^VOID
+
+    WHILE context2 DO
+        KiFlushMyDcacheByPhys ( pfntable^ )
+
+        pfntable += SIZEOF ^VOID
+        context2 -= 1
+    END
+END
+
+FN (KiIpiF) KiSweepIcache (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Executes on the target processor of an Icache shootdown.
+
+    KiFlushMyIcache ()
+END
+
+FN (KiIpiF) KiFlushMultipleIcache (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Executes on the target processor of an Icache shootdown.
+
+    pfntable := CAST context1 TO ^^VOID
+
+    WHILE context2 DO
+        KiFlushMyIcacheByPhys ( pfntable^ )
+
+        pfntable += SIZEOF ^VOID
+        context2 -= 1
+    END
+END
+
+#END
+
+FN KeSweepTb ()
+
+    // Flush the entire TB on all processors.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+#IF BLD_MP
+    KiExecuteOnEveryoneElse (
+        &KiSweepTb, // function
+        0, // context1
+        0, // context2
+    )
+#END
+
+    KiFlushMyTb ()
+
+    KiLowerIpl ( ipl )
+END
+
+FN KeFlushSingleTb (
+    IN vaddr : ^VOID,
+)
+
+    // Flush a single TB entry on all processors.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+#IF BLD_MP
+    KiExecuteOnEveryoneElse (
+        &KiFlushSingleTb, // function
+        vaddr, // context1
+        0, // context2
+    )
+#END
+
+    KiFlushMyTbAddress ( vaddr )
+
+    KiLowerIpl ( ipl )
+END
+
+FN KeFlushMultipleTb (
+    IN vaddrtable : ^^VOID,
+    IN pagecount : UWORD,
+)
+
+    // Flush multiple TB entries on all processors.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+#IF BLD_MP
+    KiExecuteOnEveryoneElse (
+        &KiFlushMultipleTb, // function
+        vaddrtable, // context1
+        pagecount, // context2
+    )
+#END
+
+    WHILE pagecount DO
+        KiFlushMyTbAddress ( vaddrtable^ )
+
+        vaddrtable += SIZEOF ^VOID
+        pagecount -= 1
+    END
+
+    KiLowerIpl ( ipl )
+END
+
+FN KeSweepDcache ()
+
+    // Flush the entire Dcache on all processors.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+#IF BLD_MP
+    KiExecuteOnEveryoneElse (
+        &KiSweepDcache, // function
+        0, // context1
+        0, // context2
+    )
+#END
+
+    KiFlushMyDcache ()
+
+    KiLowerIpl ( ipl )
+END
+
+FN KeFlushDcachePages (
+    IN pfntable : ^^VOID,
+    IN pagecount : UWORD,
+)
+
+    // Flush pages of the Dcache on all processors.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+#IF BLD_MP
+    KiExecuteOnEveryoneElse (
+        &KiFlushMultipleDcache, // function
+        pfntable, // context1
+        pagecount, // context2
+    )
+#END
+
+    WHILE pagecount DO
+        KiFlushMyDcacheByPhys ( pfntable^ )
+
+        pfntable += SIZEOF ^VOID
+        pagecount -= 1
+    END
+
+    KiLowerIpl ( ipl )
+END
+
+FN KeSweepIcache ()
+
+    // Flush the entire Icache on all processors.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+#IF BLD_MP
+    KiExecuteOnEveryoneElse (
+        &KiSweepIcache, // function
+        0, // context1
+        0, // context2
+    )
+#END
+
+    KiFlushMyIcache ()
+
+    KiLowerIpl ( ipl )
+END
+
+FN KeFlushIcachePages (
+    IN pfntable : ^^VOID,
+    IN pagecount : UWORD,
+)
+
+    // Flush pages of the Icache on all processors.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+#IF BLD_MP
+    KiExecuteOnEveryoneElse (
+        &KiFlushMultipleIcache, // function
+        pfntable, // context1
+        pagecount, // context2
+    )
+#END
+
+    WHILE pagecount DO
+        KiFlushMyIcacheByPhys ( pfntable^ )
+
+        pfntable += SIZEOF ^VOID
+        pagecount -= 1
+    END
+
+    KiLowerIpl ( ipl )
+END
