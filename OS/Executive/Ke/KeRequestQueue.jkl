@@ -318,25 +318,62 @@ EXPORT FN KeCancelRequestQueue (
             END
 
         ELSE
-            // It was current, so we have to clean up the cost.
-
-            queue^.Current -= request^.Cost
-
             // Invoke callback to free up any structures associated with this
             // entry's cost.
 
-            queue^.CompleteFunction (
+            // XXX Maybe have this return a value saying whether it's okay to
+            //     decrement the cost and start more requests - certain things
+            //     won't be able to do that until the device naturally completes
+            //     the pending request. In that case we'd want cleaning up the
+            //     cost and starting the next requests to be its own API.
+            //
+            // XXX That's exactly what it does now - comment above left for
+            //     posterity.
+
+            IF queue^.CompleteFunction (
                 request, // request
                 TRUE, // cancelled
-            )
+            ) THEN
 
-            // Try to start any requests that can be started.
+                // Decrement the cost.
 
-            KiStartRequests ( queue )
+                queue^.Current -= request^.Cost
+
+                // Try to start any requests that can be started.
+
+                KiStartRequests ( queue )
+            END
         END
     END
 
     KiReleaseRequestQueue ( queue, ipl )
 
     RETURN cancelled
+END
+
+EXPORT FN KeFinishCancelRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN request : ^KeRequestEntry,
+)
+
+    // Finish cancelling the given request. This just decrements the current
+    // cost and attempts to start more requests.
+
+    ipl := KiAcquireRequestQueue ( queue )
+
+#IF BLD_CHK
+    IF request^.Status != KI_REQUEST_CANCELLED THEN
+        KeCrash ( "KeFinishCancelRequestQueue: status %u\n", request^.Status )
+    END
+#END
+
+    // Decrement the cost.
+
+    queue^.Current -= request^.Cost
+
+    // Try to start any requests that can be started.
+
+    KiStartRequests ( queue )
+
+    KiReleaseRequestQueue ( queue, ipl )
 END
