@@ -572,3 +572,217 @@ FN KiRemoveSwapCandidateListFunc (
 
     thread^.SwapCandidatePrb = NULLPTR
 END
+
+FN KeAttachProcess (
+    IN process : ^KeProcess,
+    IN try : UWORD,
+) : UWORD
+
+    // Switch the current thread to this process's address space. It will be
+    // able to fault upon its userspace and so on. Returns TRUE upon success,
+    // FALSE upon failure. Failure can only occur if try is set.
+
+    thread := KeCurrentThread ()
+
+#IF BLD_CHK
+    IF thread^.Process != thread^.ActualProcess THEN
+        KeCrash ( "KeAttachProcess: nested attachment\n" )
+    END
+#END
+
+    IF thread^.Process == process THEN
+        // Already in the correct address space.
+
+        RETURN TRUE
+    END
+
+    // Mask KAPCs since we won't be in the right address space to receive them.
+
+    KeMaskApcs ()
+
+    // Acquire the current thread's lock.
+
+    ipl := KiAcquireThread ( thread )
+
+    KiAcquireSwapStateElevated ( process )
+
+    IF try AND process^.MemoryState != KI_PROCESS_RESIDENT THEN
+        // An atomic try was specified. Since it's non-resident, our attempt
+        // failed.
+
+        KiReleaseSwapStateElevated ( process )
+
+        KiReleaseThread ( thread, ipl )
+
+        KeUnmaskApcs ()
+
+        RETURN FALSE
+    END
+
+    process^.ResidentThreadCount += 1
+    thread^.Process = process
+
+    IF process^.MemoryState == KI_PROCESS_RESIDENT THEN
+        // Perform an immediate switch to the new process's address space.
+
+        KiReleaseSwapStateElevated ( process )
+
+        KiSwitchAddressSpace ( process )
+
+        KiReleaseThread ( thread, ipl )
+
+        RETURN TRUE
+    END
+
+    // The process isn't resident, so we need to enqueue the thread in its
+    // swap-in list.
+
+    thread^.SwapNext = process^.SwapListHead
+    process^.SwapListHead = thread
+
+    IF process^.MemoryState == KI_PROCESS_OUTSWAPPED THEN
+        // We saw the process OUTSWAPPED, so it's now our responsibility to
+        // enqueue it to the swapper thread.
+
+        process^.MemoryState = KI_PROCESS_TRANSITION
+
+        // Use a CAS loop to insert the process in the list.
+
+        WHILE TRUE DO
+            head := KiProcessSwapListHead
+            process^.SwapNext = head
+
+            IF KeCompareSwapPtr (
+                &KiProcessSwapListHead, // ptr
+                process, // newvalue
+                head, // expectedvalue
+            ) == head THEN
+
+                // Inserted.
+
+                BREAK
+            END
+        END
+    END
+
+    KiReleaseSwapStateElevated ( process )
+
+    // Wake the swapper to bring the process in.
+
+    KiWakeSwapper ()
+
+    // Yield the processor. We will get scheduled back in (in the target address
+    // space) when the process has been inswapped. The thread lock is
+    // automatically released.
+
+    KiYield (
+        thread, // thread
+        KI_CURRENT_PRB, // prb
+    )
+
+    // Lower to APC level.
+
+    KiLowerIpl ( KI_IPL_APC )
+
+    RETURN TRUE
+END
+
+FN KeDetachProcess (
+    IN process : ^KeProcess,
+)
+
+    // Detach from the process that was previously attached to.
+
+    thread := KeCurrentThread ()
+
+#IF BLD_CHK
+    IF thread^.Process != process THEN
+        KeCrash ( "KeDetachProcess: wrong process\n" )
+    END
+#END
+
+    oldprocess := thread^.Process
+
+    IF oldprocess == thread^.ActualProcess THEN
+        // We weren't attached.
+
+        LEAVE
+    END
+
+    // Lock the thread.
+
+    ipl := KiAcquireThread ( thread )
+
+    // Lock the old process's swap state.
+
+    KiAcquireSwapStateElevated ( oldprocess )
+
+#IF BLD_CHK
+    IF oldprocess^.MemoryState != KI_PROCESS_RESIDENT THEN
+        KeCrash ( "KeDetachProcess: old not resident\n" )
+    END
+
+    IF thread^.ActualProcess^.MemoryState != KI_PROCESS_RESIDENT THEN
+        KeCrash ( "KeDetachProcess: new not resident\n" )
+    END
+#END
+
+    // Decrement the resident stack count, since we're leaving.
+
+    oldcount := oldprocess^.ResidentThreadCount
+
+#IF BLD_CHK
+    IF oldcount == 0 THEN
+        KeCrash ( "KeDetachProcess: underflow\n" )
+    END
+#END
+
+    oldprocess^.ResidentThreadCount = oldcount - 1
+
+    IF oldprocess^.ThreadCount != 0 AND
+        oldcount == 1 THEN
+
+        // This process has threads, and we just decremented its resident stack
+        // count to 0. We need to enqueue it to be outswapped.
+
+        oldprocess^.MemoryState = KI_PROCESS_TRANSITION
+
+        // Use a CAS loop to insert the process in the list.
+
+        WHILE TRUE DO
+            head := KiProcessOutSwapListHead
+            oldprocess^.SwapNext = head
+
+            IF KeCompareSwapPtr (
+                &KiProcessOutSwapListHead, // ptr
+                oldprocess, // newvalue
+                head, // expectedvalue
+            ) == head THEN
+
+                // Inserted.
+
+                BREAK
+            END
+        END
+
+        // Wake the swapper to get it to deal with this outswapped process.
+
+        KiWakeSwapper ()
+    END
+
+    // Release the swap state.
+
+    KiReleaseSwapStateElevated ( oldprocess )
+
+    // Switch back to our real address space.
+
+    thread^.Process = thread^.ActualProcess
+
+    KiSwitchAddressSpace ( thread^.ActualProcess )
+
+    // Release thread lock, lower IPL, unmask APCs.
+
+    KiReleaseThread ( thread, ipl )
+
+    KeUnmaskApcs ()
+END
