@@ -639,10 +639,21 @@ FN KiReadyThread (
     // Ready the thread by inserting it into an appropriate ready queue.
     // Thread lock is held.
 
-    IF NOT thread^.KernelStackResident THEN
+@Retry
+
+    IF thread^.Process^.MemoryState != KI_PROCESS_RESIDENT THEN
+        // The thread's process is outswapped.
+
+        KiReadyThreadOutswappedProcess ( thread )
+
+        LEAVE
+
+    ELSEIF NOT thread^.KernelStackResident THEN
         // The thread's kernel stack is outswapped.
 
-        KiReadyOutswappedThread ( thread )
+        IF KiReadyOutswappedThread ( thread ) THEN
+            GOTO Retry
+        END
 
         LEAVE
     END

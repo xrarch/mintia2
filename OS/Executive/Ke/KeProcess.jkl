@@ -33,8 +33,15 @@ FN KeInitializeProcess (
     process^.Terminated = FALSE
     process^.TerminationStatus = 0
     process^.PageDirectoryPfn = 0
+    process^.MemoryState = KI_PROCESS_RESIDENT
+    process^.ResidentThreadCount = 0
+    process^.SwapListHead = NULLPTR
 
     KeInitializePushlock ( &process^.Pushlock )
+
+#IF BLD_MP
+    KiInitializeSpinlock ( &process^.SwapStateSpinlock )
+#END
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     // We assume the AsidTable pointer was already set by the caller.
@@ -61,6 +68,7 @@ FN KeInitializeProcess (
         END
     END
 #END
+
 END
 
 #SECTION "PAGE$text"

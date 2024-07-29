@@ -622,6 +622,22 @@ EXTERN KiQueueRemovalLocks : KiSpinlock[KI_QUEUE_REMOVAL_LOCKS]
     KiReleaseSpinlock ( &(thread)^.Spinlock )
 ]
 
+#MACRO KiAcquireSwapState ( process ) [
+    KiAcquireSpinlockRaise ( &(process)^.SwapStateSpinlock )
+]
+
+#MACRO KiReleaseSwapState ( process, ipl ) [
+    KiReleaseSpinlockLower ( &(process)^.SwapStateSpinlock, ipl )
+]
+
+#MACRO KiAcquireSwapStateElevated ( process ) [
+    KiAcquireSpinlock ( &(process)^.SwapStateSpinlock )
+]
+
+#MACRO KiReleaseSwapStateElevated ( process ) [
+    KiReleaseSpinlock ( &(process)^.SwapStateSpinlock )
+]
+
 EXTERN FN KiStealWork ()
 
 EXTERN KiWorkBalanceDpc : KeDpc
@@ -663,6 +679,18 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #MACRO KiAcquireThreadElevated ( thread ) []
 
 #MACRO KiReleaseThreadElevated ( thread ) []
+
+#MACRO KiAcquireSwapState ( process ) [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseSwapState ( process, ipl ) [
+    KiLowerIpl ( ipl )
+]
+
+#MACRO KiAcquireSwapStateElevated ( process ) []
+
+#MACRO KiReleaseSwapStateElevated ( process ) []
 
 #END
 
@@ -791,5 +819,9 @@ EXTERN FN KiRemoveSwapCandidateListFunc (
 ]
 
 EXTERN FN KiReadyOutswappedThread (
+    IN thread : ^KeThread,
+) : UWORD
+
+EXTERN FN KiReadyThreadOutswappedProcess (
     IN thread : ^KeThread,
 )

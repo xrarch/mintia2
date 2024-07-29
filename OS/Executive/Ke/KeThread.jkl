@@ -64,6 +64,32 @@ FN (KeApcF) KiSuspendThreadApc (
     )
 END
 
+FN KiAddSwappableThreadToProcess (
+    IN process : ^KeProcess,
+    IN thread : ^KeThread,
+)
+
+    // Nonpaged helper routine for adding a thread's resident stack count to the
+    // process.
+
+    ipl := KiAcquireSwapState ( process )
+
+#IF BLD_CHK
+    // We should be attached to the process right now, meaning there is at least
+    // one thread whose stack is not swapped out, and therefore the process
+    // cannot be either as we only outswap processes after their threads are all
+    // gone.
+
+    IF process^.MemoryState != KI_PROCESS_RESIDENT THEN
+        KeCrash ( "KeInitializeThread: outswapped process\n" )
+    END
+#END
+
+    process^.ResidentThreadCount += 1
+
+    KiReleaseSwapState ( process, ipl )
+END
+
 #SECTION "PAGE$text"
 FN KeInitializeThread (
     IN process : ^KeProcess,
@@ -228,6 +254,10 @@ FN KeInitializeThread (
     KeReleasePushlock ( &process^.Pushlock )
 #END
 
+    KiAddSwappableThreadToProcess (
+        process, // process
+        thread, // thread
+    )
 END
 
 EXPORT FN KeSuspendThread (
@@ -659,6 +689,10 @@ FN KeExitThread (
 #IF BLD_CHK
     IF NOT RtlEmptyList ( &thread^.KapcListHead ) THEN
         KeCrash ( "KeExitThread: pending KAPCs\n" )
+    END
+
+    IF thread^.Process != thread^.ActualProcess THEN
+        KeCrash ( "KeExitThread: exited while attached to other process\n" )
     END
 #END
 

@@ -403,12 +403,19 @@ EXTERN FN KeInitializeThread (
 
 #DEFINE KE_PROCESS_THREAD_MAX 65536
 
+#DEFINE KI_PROCESS_RESIDENT 1
+#DEFINE KI_PROCESS_OUTSWAPPED 2
+#DEFINE KI_PROCESS_TRANSITION 3
+
 STRUCT KeProcess
     Name : UBYTE[KE_DEBUG_NAME_LENGTH],
 
     ThreadListHead : RtlListEntry,
 
     SignalThread : ^KeThread,
+
+    SwapNext : ^KeProcess,
+    SwapListHead : ^KeThread,
 
     Pushlock : KePushlock,
 
@@ -418,10 +425,16 @@ STRUCT KeProcess
     AsidTable : ^KiAsidInfoEntry,
 #END
 
-    TerminationStatus : ULONG,
+#IF BLD_MP
+    SwapStateSpinlock : KiSpinlock,
+#END
 
+    TerminationStatus : ULONG,
+    ResidentThreadCount : ULONG,
     ThreadCount : ULONG,
+
     Terminated : UBYTE,
+    MemoryState : UBYTE,
 END
 
 #DEFINE KI_THREAD_WAIT_BLOCKS 4
@@ -781,7 +794,9 @@ EXTERN FN KeCancelRequestQueue (
 
 EXTERN KeStackSwapperEvent : KeEvent
 
-EXTERN FN KeFlushSwapperQueue () : ^KeThread
+EXTERN FN KeFlushThreadInSwapQueue () : ^KeThread
+EXTERN FN KeFlushProcessInSwapQueue () : ^KeProcess
+EXTERN FN KeFlushProcessOutSwapQueue () : ^KeProcess
 
 EXTERN FN KeHarvestSwapCandidates (
     IN procid : UWORD,
@@ -789,6 +804,10 @@ EXTERN FN KeHarvestSwapCandidates (
 
 EXTERN FN KeReadyInswappedThread (
     IN thread : ^KeThread,
+)
+
+EXTERN FN KeReadyInswappedProcess (
+    IN process : ^KeProcess,
 )
 
 EXTERN KeReaperEvent : KeEvent
