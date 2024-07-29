@@ -25,6 +25,10 @@ KiReaperListLock : KiSpinlock = KI_INITIAL_SPINLOCK
     KiReleaseSpinlockLower ( &KiReaperListLock, ipl )
 ]
 
+#MACRO KiAcquireReaperListElevated () [
+    KiAcquireSpinlock ( &KiReaperListLock )
+]
+
 #MACRO KiReleaseReaperListElevated () [
     KiReleaseSpinlock ( &KiReaperListLock )
 ]
@@ -38,6 +42,8 @@ KiReaperListLock : KiSpinlock = KI_INITIAL_SPINLOCK
 #MACRO KiReleaseReaperList ( ipl ) [
     KiLowerIpl ( ipl )
 ]
+
+#MACRO KiAcquireReaperListElevated () []
 
 #MACRO KiReleaseReaperListElevated () []
 
@@ -100,9 +106,10 @@ FN KeInitializeThread (
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
-)
+) : UWORD
 
-    // Initialize a thread object.
+    // Initialize a thread object. Returns TRUE upon success, FALSE if the
+    // process was terminated.
 
     RtlCopyString (
         &thread^.Name[0], // dest
@@ -189,6 +196,15 @@ FN KeInitializeThread (
     thread^.TimeoutWaitBlock.WakeStatus = OS_STATUS_WAIT_TIMEOUT
     thread^.TimeoutWaitBlock.Thread = thread
 
+    // Initialize the termination event.
+
+    KeInitializeEvent (
+        &thread^.TerminationEvent, // event
+        "Termination", // name
+        TRUE, // notification
+        FALSE, // signalstate
+    )
+
     // Initialize the thread lock.
 
 #IF BLD_MP
@@ -219,12 +235,6 @@ FN KeInitializeThread (
 
     // Add to the process's thread list.
 
-    IF NOT process^.SignalThread THEN
-        // This is synchronized by the process's CreateDelete lock.
-
-        process^.SignalThread = thread
-    END
-
 #IF BLD_MP
     IF process == &KiIdleProcess THEN
         KiAcquireSpinlock ( &KiBootLock )
@@ -235,6 +245,18 @@ FN KeInitializeThread (
 #ELSE
     KeAcquirePushlockExclusive ( &process^.Pushlock )
 #END
+
+    IF process^.Terminated THEN
+        // The process is terminated, we can't add new threads to it.
+
+        KeReleasePushlock ( &process^.Pushlock )
+
+        RETURN FALSE
+    END
+
+    IF NOT process^.SignalThread THEN
+        process^.SignalThread = thread
+    END
 
     RtlInsertAtTailList (
         &process^.ThreadListHead, // head
@@ -258,14 +280,17 @@ FN KeInitializeThread (
         process, // process
         thread, // thread
     )
+
+    RETURN TRUE
 END
 
 FN KeUninitializeThread (
     IN thread : ^KeThread,
-)
+) : UWORD
 
-    // Called to uninitialize a thread at the time it is destroyed.
-    // It has context switched off its stack for the last time by now.
+    // Called to uninitialize a thread, from within the context of that thread.
+    // Returns TRUE if the process was marked terminated due to the thread count
+    // dropping to zero, FALSE otherwise.
 
 #IF BLD_CHK
     IF NOT thread^.KernelStackResident THEN
@@ -273,12 +298,13 @@ FN KeUninitializeThread (
     END
 #END
 
+    terminated := FALSE
+
     process := thread^.Process
 
-    // Remove the thread from the process's thread list and decrement its thread
-    // count.
-
     KeAcquirePushlockExclusive ( &process^.Pushlock )
+
+    // Remove from the process's list of threads.
 
     RtlRemoveEntryList ( &thread^.ProcessListEntry )
 
@@ -288,11 +314,50 @@ FN KeUninitializeThread (
     END
 #END
 
-    process^.ThreadCount -= 1
+    // Decrement the thread count.
+
+    oldcount := process^.ThreadCount
+    process^.ThreadCount = oldcount - 1
+
+    IF oldcount == 1 THEN
+        // We just decremented the thread count to zero, so mark the process
+        // terminated.
+
+#IF BLD_CHK
+        IF process^.SignalThread != thread THEN
+            KeCrash ( "KeUninitializeThread: last wasn't signal thread\n" )
+        END
+#END
+
+        terminated = TRUE
+
+        process^.Terminated = TRUE
+        process^.SignalThread = NULLPTR
+
+    ELSEIF process^.SignalThread == thread THEN
+        // Pick another thread to handle the signals.
+
+#IF BLD_CHK
+        IF RtlEmptyList ( &process^.ThreadListHead ) THEN
+            KeCrash ( "KeUninitializeThread: no threads to replace with\n" )
+        END
+#END
+
+        // Replace it with the thread on the head of the process's list.
+
+        process^.SignalThread = CONTAINEROF process^.ThreadListHead.Next TO
+            KeThread.ProcessListEntry
+    END
 
     KeReleasePushlock ( &process^.Pushlock )
 
     // Remove the thread's resident stack from the process's counter.
+    // Note that we have to do this *after* decrementing the thread count, or
+    // a race condition with KeDetachProcess is possible in which it will see a
+    // nonzero thread count while decrementing the resident count, and enqueue
+    // the process to be outswapped. By decrementing the resident count
+    // afterward, we guarantee that KeDetachProcess won't see it transition to
+    // zero after the process's threads have all died.
 
     ipl := KiAcquireSwapState ( process )
 
@@ -305,6 +370,8 @@ FN KeUninitializeThread (
     process^.ResidentThreadCount -= 1
 
     KiReleaseSwapState ( process, ipl )
+
+    RETURN terminated
 END
 
 EXPORT FN KeSuspendThread (
@@ -761,9 +828,21 @@ FN KeExitThread (
 
     KiDisassociateFromBalancedQueue ( thread )
 
+    // Raise IPL.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+    // Signal our termination event with raised IPL to ensure we make it out of
+    // here quickly.
+
+    KeSignalEvent (
+        &thread^.TerminationEvent, // event
+        0, // priorityboost
+    )
+
     // Add to reaper list.
 
-    KiAcquireReaperList ()
+    KiAcquireReaperListElevated ()
 
     // Reuse SwapNext link as it can never be used again.
 

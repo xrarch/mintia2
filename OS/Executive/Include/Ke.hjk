@@ -397,7 +397,7 @@ EXTERN FN KeInitializeThread (
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
-)
+) : UWORD
 
 #DEFINE KE_DEBUG_NAME_LENGTH 32
 
@@ -497,6 +497,8 @@ STRUCT KeThread
     WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
     TimeoutWaitBlock : KiWaitBlock,
     Timeout : KeTimer,
+
+    TerminationEvent : KeEvent,
 
 #IF BLD_MP
     Spinlock : KiSpinlock,

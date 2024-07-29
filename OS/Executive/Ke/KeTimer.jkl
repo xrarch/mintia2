@@ -192,6 +192,10 @@ EXPORT FN KeEnqueueTimer (
         timer^.Dpc^.Context2 = context2
     END
 
+    // Reset the timer.
+
+    timer^.Header.SignalCount = 0
+
     KiReleaseObjectElevated ( &timer^.Header )
 
     KiReleaseTimerTree ( prb, ipl )
