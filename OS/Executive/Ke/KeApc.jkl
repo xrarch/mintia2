@@ -555,16 +555,14 @@ END
 
 FN KeMaskApcs ()
 
-    // Get the current thread.
-
-    current := KeCurrentThread ()
-
     // Raise to KI_IPL_APC.
 
     KiRaiseIpl ( KI_IPL_APC )
 
     // Increment the pushlock depth so that releasing APC-safe pushlocks doesn't
     // cause IPL to drop to LOW.
+
+    current := KeCurrentThread ()
 
     current^.ApcPushlockDepth += 1
 END
