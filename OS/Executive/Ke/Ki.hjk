@@ -642,6 +642,10 @@ EXTERN FN KiStealWork ()
 
 EXTERN KiWorkBalanceDpc : KeDpc
 
+#MACRO KiPrbFromNumber ( procid ) [
+    (CAST KeLoaderBlock.VirtualPrbBase + (procid) * BL_PRB_SIZE TO ^KiPrb)
+]
+
 #ELSE
 
 #MACRO KiAcquireObject ( object ) [
@@ -691,6 +695,10 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #MACRO KiAcquireSwapStateElevated ( process ) []
 
 #MACRO KiReleaseSwapStateElevated ( process ) []
+
+#MACRO KiPrbFromNumber ( procid ) [
+    (KI_CURRENT_PRB)
+]
 
 #END
 
@@ -771,10 +779,6 @@ EXTERN KiWorkBalanceDpc : KeDpc
 ]
 
 #END
-
-#MACRO KiPrbFromNumber ( procid ) [
-    (CAST KeLoaderBlock.VirtualPrbBase + (procid) * BL_PRB_SIZE TO ^KiPrb)
-]
 
 #MACRO KiInitializeDispatchObject ( hdr, name, type ) [
     RtlInitializeList ( &(hdr)^.WaitListHead )
