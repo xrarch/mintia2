@@ -476,14 +476,6 @@ STRUCT KeThread
 #END
     SwapCandidatePrb : ^KiPrb,
 
-    SuspendLapc : KeApc,
-    SuspendHeader : KiDispatchHeader,
-
-    TimeoutWaitBlock : KiWaitBlock,
-    Timeout : KeTimer,
-
-    TerminationEvent : KeEvent,
-
 #IF BLD_MP
     Spinlock : KiSpinlock,
     ApcSpinlock : KiSpinlock,
@@ -527,10 +519,10 @@ STRUCT KeThread
     // Put large fields at the end to increase odds that the commonly accessed
     // ones are within range of immediate offsets on various architectures.
 
-    ProcessListEntry : RtlListEntry,
     ReadyEntry : RtlListEntry,
     BalancedQueueEntry : RtlListEntry,
     WaitEntry : RtlListEntry,
+    ProcessListEntry : RtlListEntry,
 
     KapcListHead : RtlListEntry,
     LapcListHead : RtlListEntry,
@@ -539,6 +531,14 @@ STRUCT KeThread
     UserTimeMs : RtlUquad,
     DpcTimeMs : RtlUquad,
     SystemTimeMs : RtlUquad,
+
+    SuspendLapc : KeApc,
+    SuspendHeader : KiDispatchHeader,
+
+    TimeoutWaitBlock : KiWaitBlock,
+    Timeout : KeTimer,
+
+    TerminationEvent : KeEvent,
 
     WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
 
