@@ -91,15 +91,32 @@ FN KiInitializePrb (
     IN bootprocessor : UWORD,
 )
 
-    // Initialize this PRB. It has already been filled with zeroes by the Loader
-    // so avoid doing that again for those fields where zeroes (and NULLPTR) are
-    // the initial state.
+    // Initialize this Prb.
 
-    // First thing to do is to put the ID stashed by Loader in its proper field.
+    // Loader stashed words in the Prb at the following indices:
+    // 0 - Processor ID
+    // 1 - Software IDT pointer
+    // 2 - Idle stack pointer
 
-    idword := (CAST prb TO ^UWORD)[0]
+    idword := CAST prb TO ^UWORD
 
-    prb^.Id = idword
+    id := idword[0]
+    irqdt := idword[1]
+    stackbase := idword[2]
+
+    // Clear the Prb.
+
+    RtlFillMemoryWithUlong (
+        prb, // ptr
+        BL_PRB_SIZE, // sz
+        0, // ulong
+    )
+
+    // Place the stashed words at their proper place.
+
+    prb^.Id = id
+    prb^.IrqDispatchTable = CAST irqdt TO ^VOID
+    prb^.IdleStackBase = CAST stackbase TO ^VOID
 
     // On some architectures, the thing we get from KI_CURRENT_PRB is not a
     // globally visible address for this Prb.
@@ -183,8 +200,8 @@ FN KiInitializePrb (
         &KiIdleProcess, // process
         &prb^.IdleThread, // thread
         "IdleThread", // name
-        &prb^.IdleStack[0], // kstack
-        KI_IDLE_STACK_SIZE, // kstacksize
+        prb^.IdleStackBase, // kstack
+        BL_IDLE_STACK_SIZE, // kstacksize
         startfunc, // startfunc
         0, // context1
         0, // context2
