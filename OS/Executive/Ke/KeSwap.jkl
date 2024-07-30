@@ -30,6 +30,24 @@ PUBLIC KeStackSwapperEvent : KeEvent
     KiReleaseSpinlockLower ( &(prb)^.StackSwapListLock, ipl )
 ]
 
+#MACRO KiInsertInSwapList ( headptr, item ) [
+    WHILE TRUE DO
+        head := (headptr)^
+        NOTHING (item)^.SwapNext = head
+
+        IF KeCompareSwapPtr (
+            headptr, // ptr
+            item, // newvalue
+            head, // expectedvalue
+        ) == head THEN
+
+            // Inserted.
+
+            BREAK
+        END
+    END
+]
+
 #ELSE
 
 #MACRO KiAcquireCandidateListElevated ( prb ) []
@@ -42,6 +60,11 @@ PUBLIC KeStackSwapperEvent : KeEvent
 
 #MACRO KiReleaseCandidateList ( prb, ipl ) [
     KiLowerIpl ( ipl )
+]
+
+#MACRO KiInsertInSwapList ( headptr, item ) [
+    NOTHING (item)^.SwapNext = (headptr)^
+    NOTHING (headptr)^ = item
 ]
 
 #END
@@ -297,23 +320,10 @@ FN KeHarvestSwapCandidates (
 
                     process^.MemoryState = KI_PROCESS_TRANSITION
 
-                    // Use a CAS loop to insert the process in the list.
-
-                    WHILE TRUE DO
-                        headv := KiProcessOutSwapListHead
-                        process^.SwapNext = headv
-
-                        IF KeCompareSwapPtr (
-                            &KiProcessOutSwapListHead, // ptr
-                            process, // newvalue
-                            headv, // expectedvalue
-                        ) == headv THEN
-
-                            // Inserted.
-
-                            BREAK
-                        END
-                    END
+                    KiInsertInSwapList (
+                        &KiProcessOutSwapListHead, // headptr
+                        process, // item
+                    )
                 END
 
                 KiReleaseSwapStateElevated ( process )
@@ -398,23 +408,10 @@ FN KiReadyThreadOutswappedProcess (
 
         process^.MemoryState = KI_PROCESS_TRANSITION
 
-        // Use a CAS loop to insert the process in the list.
-
-        WHILE TRUE DO
-            head := KiProcessSwapListHead
-            process^.SwapNext = head
-
-            IF KeCompareSwapPtr (
-                &KiProcessSwapListHead, // ptr
-                process, // newvalue
-                head, // expectedvalue
-            ) == head THEN
-
-                // Inserted.
-
-                BREAK
-            END
-        END
+        KiInsertInSwapList (
+            &KiProcessSwapListHead, // headptr
+            process, // item
+        )
     END
 
     KiReleaseSwapStateElevated ( process )
@@ -471,23 +468,10 @@ FN KiReadyOutswappedThread (
     // The process was still resident, so we're going to enqueue the thread
     // in the global thread in-swap list.
 
-    // Use a CAS loop to insert the thread in the list.
-
-    WHILE TRUE DO
-        head := KiStackSwapListHead
-        thread^.SwapNext = head
-
-        IF KeCompareSwapPtr (
-            &KiStackSwapListHead, // ptr
-            thread, // newvalue
-            head, // expectedvalue
-        ) == head THEN
-
-            // Inserted.
-
-            BREAK
-        END
-    END
+    KiInsertInSwapList (
+        &KiStackSwapListHead, // headptr
+        thread, // item
+    )
 
     // Set READY and in the swap list.
 
@@ -647,23 +631,10 @@ FN KeAttachProcess (
 
         process^.MemoryState = KI_PROCESS_TRANSITION
 
-        // Use a CAS loop to insert the process in the list.
-
-        WHILE TRUE DO
-            head := KiProcessSwapListHead
-            process^.SwapNext = head
-
-            IF KeCompareSwapPtr (
-                &KiProcessSwapListHead, // ptr
-                process, // newvalue
-                head, // expectedvalue
-            ) == head THEN
-
-                // Inserted.
-
-                BREAK
-            END
-        END
+        KiInsertInSwapList (
+            &KiProcessSwapListHead, // headptr
+            process, // item
+        )
     END
 
     KiReleaseSwapStateElevated ( process )
@@ -748,23 +719,10 @@ FN KeDetachProcess (
 
         oldprocess^.MemoryState = KI_PROCESS_TRANSITION
 
-        // Use a CAS loop to insert the process in the list.
-
-        WHILE TRUE DO
-            head := KiProcessOutSwapListHead
-            oldprocess^.SwapNext = head
-
-            IF KeCompareSwapPtr (
-                &KiProcessOutSwapListHead, // ptr
-                oldprocess, // newvalue
-                head, // expectedvalue
-            ) == head THEN
-
-                // Inserted.
-
-                BREAK
-            END
-        END
+        KiInsertInSwapList (
+            &KiProcessOutSwapListHead, // headptr
+            process, // item
+        )
 
         // Wake the swapper to get it to deal with this outswapped process.
 
