@@ -71,7 +71,7 @@ END
 #DEFINE KI_VIRTUAL_PRB 0
 
 #ELSE
-    #ERROR ( STRCAT "Unknown architecture " ARCHITECTURE )
+    #ERROR "Unknown architecture\n"
 #END
 
 #DEFINE KI_VOLATILE_LOCAL_PRB ( AND ( NOT KI_VIRTUAL_PRB ) BLD_MP )
@@ -133,10 +133,7 @@ FNPTR KiIpiF (
 // The per-processor block (Prb) is an architectural page size, but is at
 // minimum 4KB. It contains all per-processor information.
 
-#DEFINE KI_IDLE_STACK_SIZE 2048
-
 STRUCT KiPrb
-    IdleStack : UBYTE[KI_IDLE_STACK_SIZE],
 
 #IF BLD_MP
     // Give the spinlocks their own cache lines.
@@ -173,7 +170,8 @@ STRUCT KiPrb
 
     TimerTreeRoot : ^RtlHeapEntry,
 
-    IrqDispatchTable : ^KeInterrupt[HAL_VECTOR_MAX],
+    IrqDispatchTable : ^^KeInterrupt,
+    IdleStackBase : ^VOID,
 
     IdleThread : KeThread,
 
@@ -183,57 +181,11 @@ STRUCT KiPrb
 
     FrozenContext : ^OsContext,
 
-    // Inspired by ULE of FreeBSD:
-    //
-    // The real time list heads are indexed by thread priority, with all ready
-    // threads of the same priority being chained together off of that list
-    // head. The scheduler will *always* select the highest priority available
-    // thread from the real time ready queues if one exists.
-    //
-    // The threads in this queue come from those with "real time priority", and
-    // also those with lower priority that have been temporarily designated as
-    // as "interactive" in order to increase responsiveness.
-
-    RealTimeListHeads : RtlListEntry[OS_PRIORITY_MAX],
-
-    // The calendar list heads form a "clock" whose hand ticks once every 20ms,
-    // or the length of the system tick, whichever is greater. When the real
-    // time queues are empty, the next thread to run is taken from the queue
-    // pointed to by the CalendarRunIndex. After all threads are emptied from
-    // this queue (i.e. they have all gotten a chance to run), the
-    // CalendarRunIndex is incremented to the next queue which contains threads,
-    // in order to make sure the processor doesn't waste time idling.
-    //
-    // The CalendarEnqueueIndex is the ticking hand. Newly enqueued threads are
-    // inserted into the queue pointed to by:
-    //
-    //   CalendarEnqueueIndex + KI_TIMESHARED_DISTANCE - thread^.Priority
-    //
-    // That is, threads are placed into a "further" queue when they have lower
-    // priority. This accomplishes a relative ratio of CPU time granted to each
-    // thread based on their priorities.
-    //
-    // If CalendarRunIndex is incremented and equals CalendarEnqueueIndex, the
-    // latter is incremented in order to make sure the queue being run is
-    // flushed before more stuff is put on it.
-    //
-    // Threads on these lists are called "timeshared threads".
-
-    CalendarListHeads : RtlListEntry[KI_TIMESHARED_QUEUES],
-
     // Idle threads (priority 0) go on this list.
 
     IdleListHead : RtlListEntry,
 
     TimerInterrupt : KeInterrupt,
-
-    ClockTicks : RtlUquad,
-    DpcTimeMs : RtlUquad,
-    UserTimeMs : RtlUquad,
-    SystemTimeMs : RtlUquad,
-    EarliestTimerMs : RtlUquad,
-
-    IplTimes : RtlUquad[KI_IPL_MAX],
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     AsidSequenceNumber : RtlUquad,
@@ -282,6 +234,54 @@ STRUCT KiPrb
     StealWork : UBYTE,
 #END
 
+    // Put big stuff at the end to make sure the common fields are readily in
+    // reach of immediate offset ranges on various architectures.
+
+    ClockTicks : RtlUquad,
+    DpcTimeMs : RtlUquad,
+    UserTimeMs : RtlUquad,
+    SystemTimeMs : RtlUquad,
+    EarliestTimerMs : RtlUquad,
+
+    // Inspired by ULE of FreeBSD:
+    //
+    // The real time list heads are indexed by thread priority, with all ready
+    // threads of the same priority being chained together off of that list
+    // head. The scheduler will *always* select the highest priority available
+    // thread from the real time ready queues if one exists.
+    //
+    // The threads in this queue come from those with "real time priority", and
+    // also those with lower priority that have been temporarily designated as
+    // as "interactive" in order to increase responsiveness.
+
+    RealTimeListHeads : RtlListEntry[OS_PRIORITY_MAX],
+
+    // The calendar list heads form a "clock" whose hand ticks once every 20ms,
+    // or the length of the system tick, whichever is greater. When the real
+    // time queues are empty, the next thread to run is taken from the queue
+    // pointed to by the CalendarRunIndex. After all threads are emptied from
+    // this queue (i.e. they have all gotten a chance to run), the
+    // CalendarRunIndex is incremented to the next queue which contains threads,
+    // in order to make sure the processor doesn't waste time idling.
+    //
+    // The CalendarEnqueueIndex is the ticking hand. Newly enqueued threads are
+    // inserted into the queue pointed to by:
+    //
+    //   CalendarEnqueueIndex + KI_TIMESHARED_DISTANCE - thread^.Priority
+    //
+    // That is, threads are placed into a "further" queue when they have lower
+    // priority. This accomplishes a relative ratio of CPU time granted to each
+    // thread based on their priorities.
+    //
+    // If CalendarRunIndex is incremented and equals CalendarEnqueueIndex, the
+    // latter is incremented in order to make sure the queue being run is
+    // flushed before more stuff is put on it.
+    //
+    // Threads on these lists are called "timeshared threads".
+
+    CalendarListHeads : RtlListEntry[KI_TIMESHARED_QUEUES],
+
+    IplTimes : RtlUquad[KI_IPL_MAX],
 END
 
 // KiRaiseIpl and KiLowerIpl may only be used to move between the software IPLs:

@@ -13,17 +13,15 @@
 // The Prb (per-processor block) will be the greater of this size and the
 // architectural page size.
 
-#IF ( == BLD_BITS 32 )
-    // 4KB on 32 bits.
-
-    #DEFINE BL_PRB_SHIFT 12
-#ELSE
-    // 8KB on 64 bits.
-
-    #DEFINE BL_PRB_SHIFT 13
-#END
-
+#DEFINE BL_PRB_SHIFT 12
 #DEFINE BL_PRB_SIZE ( << 1 BL_PRB_SHIFT )
+
+#DEFINE BL_IDT_STACK_SHIFT 12
+#DEFINE BL_IDT_STACK_SIZE ( << 1 BL_IDT_STACK_SHIFT )
+#DEFINE BL_IDLE_STACK_SHIFT ( - BL_IDT_STACK_SHIFT 1 )
+#DEFINE BL_IDLE_STACK_SIZE ( << 1 BL_IDLE_STACK_SHIFT )
+#DEFINE BL_IDT_SHIFT ( - BL_IDT_STACK_SHIFT 1 )
+#DEFINE BL_IDT_SIZE ( << 1 BL_IDT_SHIFT )
 
 FNPTR BlStartProcessorF ()
 

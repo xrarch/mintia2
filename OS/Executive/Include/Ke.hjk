@@ -459,21 +459,6 @@ END
 #DEFINE KE_SUSPEND_MAX 255
 
 STRUCT KeThread
-    Name : UBYTE[KE_DEBUG_NAME_LENGTH],
-
-    ProcessListEntry : RtlListEntry,
-    ReadyEntry : RtlListEntry,
-    BalancedQueueEntry : RtlListEntry,
-    WaitEntry : RtlListEntry,
-
-    KapcListHead : RtlListEntry,
-    LapcListHead : RtlListEntry,
-    UapcListHead : RtlListEntry,
-
-    UserTimeMs : RtlUquad,
-    DpcTimeMs : RtlUquad,
-    SystemTimeMs : RtlUquad,
-
     WaitBlockTable : ^KiWaitBlock,
     Context : ^OsContext,
     Process : ^KeProcess,
@@ -494,7 +479,6 @@ STRUCT KeThread
     SuspendLapc : KeApc,
     SuspendHeader : KiDispatchHeader,
 
-    WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
     TimeoutWaitBlock : KiWaitBlock,
     Timeout : KeTimer,
 
@@ -540,6 +524,25 @@ STRUCT KeThread
     CurrentMode : UBYTE,
 #END
 
+    // Put large fields at the end to increase odds that the commonly accessed
+    // ones are within range of immediate offsets on various architectures.
+
+    ProcessListEntry : RtlListEntry,
+    ReadyEntry : RtlListEntry,
+    BalancedQueueEntry : RtlListEntry,
+    WaitEntry : RtlListEntry,
+
+    KapcListHead : RtlListEntry,
+    LapcListHead : RtlListEntry,
+    UapcListHead : RtlListEntry,
+
+    UserTimeMs : RtlUquad,
+    DpcTimeMs : RtlUquad,
+    SystemTimeMs : RtlUquad,
+
+    WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
+
+    Name : UBYTE[KE_DEBUG_NAME_LENGTH],
 END
 
 EXTERN FN KeInitializeEvent (
