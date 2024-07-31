@@ -1,15 +1,10 @@
-## WIP rewrite; See [Old MINTIA](http://github.com/limnarch/mintia) for a working OS.
+## WIP rewrite; See [Old MINTIA](http://github.com/xrarch/mintia) for a working OS.
 
 # MINTIA
 
 MINTIA is a custom operating system written in a custom programming language, as
 part of a half-decade personal project to create a fully from-scratch RISC
 workstation computer called [XR/station](https://github.com/xrarch/xremu).
-
-Its kernel design pays homage to the Windows NT operating system. In particular
-the virtual memory manager has been written with similar goals, with the
-capability to swap to disk not only user pages but also kernel stacks, page
-tables, and even ~50% of its own kernel code and heap.
 
 MINTIA aims to be something that might have come off of a weird workstation
 computer made by a doomed company in 1989, and that might have been considered
