@@ -66,6 +66,16 @@ KeCurrentThread:
     ret
 
 // outputs:
+// a3 - process
+KeCurrentProcess:
+.export KeCurrentProcess
+
+    mov  t0, [(0xFFFFF000 + KiPrb_CurrentThread)]
+    mov  a3, [t0 + KeThread_Process]
+
+    ret
+
+// outputs:
 // a3 - current processor ID
 KiCurrentProcessor:
 .global KiCurrentProcessor
@@ -97,4 +107,56 @@ KeBreakpoint:
 
     ret
 
+KiFlushMyTb:
+.global KiFlushMyTb
+
+    // Set the page directory back to that of the current process.
+
+    mov  t0, [(0xFFFFF000 + KiPrb_CurrentThread)]
+    mov  t0, [t0 + KeThread_Process]
+    mov  t0, [t0 + KeProcess_PageDirectoryPfn]
+    sla  t0, 12
+    tlb  t0
+
+    ret
+
+// a0 - virtual address
+KiFlushMyTbAddress:
+.global KiFlushMyTbAddress
+
+    flp  a0
+
+    ret
+
 ]
+
+FN KeSweepTb ()
+
+    // Flush the entire TB on all processors.
+
+    KiFlushMyTb ()
+END
+
+FN KeFlushSingleTb (
+    IN vaddr : ^VOID,
+)
+
+    // Flush a single TB entry on all processors.
+
+    KiFlushMyTbAddress ( vaddr )
+END
+
+FN KeFlushMultipleTb (
+    IN vaddrtable : ^^VOID,
+    IN pagecount : UWORD,
+)
+
+    // Flush multiple TB entries on all processors.
+
+    WHILE pagecount DO
+        KiFlushMyTbAddress ( vaddrtable^ )
+
+        vaddrtable += SIZEOF ^VOID
+        pagecount -= 1
+    END
+END
