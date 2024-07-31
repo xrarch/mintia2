@@ -107,8 +107,8 @@ KeBreakpoint:
 
     ret
 
-KiFlushMyTb:
-.global KiFlushMyTb
+KeSweepMyTb:
+.global KeSweepMyTb
 
     // Set the page directory back to that of the current process.
 
@@ -121,8 +121,8 @@ KiFlushMyTb:
     ret
 
 // a0 - virtual address
-KiFlushMyTbAddress:
-.global KiFlushMyTbAddress
+KeFlushMyTbAddress:
+.global KeFlushMyTbAddress
 
     flp  a0
 
@@ -134,7 +134,7 @@ FN KeSweepTb ()
 
     // Flush the entire TB on all processors.
 
-    KiFlushMyTb ()
+    KeSweepMyTb ()
 END
 
 FN KeFlushSingleTb (
@@ -143,7 +143,7 @@ FN KeFlushSingleTb (
 
     // Flush a single TB entry on all processors.
 
-    KiFlushMyTbAddress ( vaddr )
+    KeFlushMyTbAddress ( vaddr )
 END
 
 FN KeFlushMultipleTb (
@@ -154,7 +154,7 @@ FN KeFlushMultipleTb (
     // Flush multiple TB entries on all processors.
 
     WHILE pagecount DO
-        KiFlushMyTbAddress ( vaddrtable^ )
+        KeFlushMyTbAddress ( vaddrtable^ )
 
         vaddrtable += SIZEOF ^VOID
         pagecount -= 1
