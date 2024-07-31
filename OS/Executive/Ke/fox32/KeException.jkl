@@ -1,0 +1,1110 @@
+//
+// Implements low-level exception handling for XR/17032.
+//
+
+#INCLUDE "../Ki.hjk"
+#INCLUDE "<ll>/System/OsContext.hjk"
+
+// The exact interface to the HAL for interrupts is private to the architecture.
+
+EXTERN FN HalInterrupt (
+    IN context : ^OsContext,
+    IN vector : UWORD,
+)
+
+KiCurrentExceptionCode := 0
+
+#ASM [
+
+#MACRO KiFox32Exception ( code ) [
+    mov [KiCurrentExceptionCode], code
+    rjmp KiExceptionVector
+]
+
+StartOfFirst:
+
+KiFox32Exception ( 0 )
+
+EndOfFirst:
+
+KiFox32Exception ( 1 )
+KiFox32Exception ( 2 )
+KiFox32Exception ( 3 )
+KiFox32Exception ( 4 )
+KiFox32Exception ( 5 )
+KiFox32Exception ( 6 )
+KiFox32Exception ( 7 )
+KiFox32Exception ( 8 )
+KiFox32Exception ( 9 )
+KiFox32Exception ( 10 )
+KiFox32Exception ( 11 )
+KiFox32Exception ( 12 )
+KiFox32Exception ( 13 )
+KiFox32Exception ( 14 )
+KiFox32Exception ( 15 )
+KiFox32Exception ( 16 )
+KiFox32Exception ( 17 )
+KiFox32Exception ( 18 )
+KiFox32Exception ( 19 )
+KiFox32Exception ( 20 )
+KiFox32Exception ( 21 )
+KiFox32Exception ( 22 )
+KiFox32Exception ( 23 )
+KiFox32Exception ( 24 )
+KiFox32Exception ( 25 )
+KiFox32Exception ( 26 )
+KiFox32Exception ( 27 )
+KiFox32Exception ( 28 )
+KiFox32Exception ( 29 )
+KiFox32Exception ( 30 )
+KiFox32Exception ( 31 )
+KiFox32Exception ( 32 )
+KiFox32Exception ( 33 )
+KiFox32Exception ( 34 )
+KiFox32Exception ( 35 )
+KiFox32Exception ( 36 )
+KiFox32Exception ( 37 )
+KiFox32Exception ( 38 )
+KiFox32Exception ( 39 )
+KiFox32Exception ( 40 )
+KiFox32Exception ( 41 )
+KiFox32Exception ( 42 )
+KiFox32Exception ( 43 )
+KiFox32Exception ( 44 )
+KiFox32Exception ( 45 )
+KiFox32Exception ( 46 )
+KiFox32Exception ( 47 )
+KiFox32Exception ( 48 )
+KiFox32Exception ( 49 )
+KiFox32Exception ( 50 )
+KiFox32Exception ( 51 )
+KiFox32Exception ( 52 )
+KiFox32Exception ( 53 )
+KiFox32Exception ( 54 )
+KiFox32Exception ( 55 )
+KiFox32Exception ( 56 )
+KiFox32Exception ( 57 )
+KiFox32Exception ( 58 )
+KiFox32Exception ( 59 )
+KiFox32Exception ( 60 )
+KiFox32Exception ( 61 )
+KiFox32Exception ( 62 )
+KiFox32Exception ( 63 )
+KiFox32Exception ( 64 )
+KiFox32Exception ( 65 )
+KiFox32Exception ( 66 )
+KiFox32Exception ( 67 )
+KiFox32Exception ( 68 )
+KiFox32Exception ( 69 )
+KiFox32Exception ( 70 )
+KiFox32Exception ( 71 )
+KiFox32Exception ( 72 )
+KiFox32Exception ( 73 )
+KiFox32Exception ( 74 )
+KiFox32Exception ( 75 )
+KiFox32Exception ( 76 )
+KiFox32Exception ( 77 )
+KiFox32Exception ( 78 )
+KiFox32Exception ( 79 )
+KiFox32Exception ( 80 )
+KiFox32Exception ( 81 )
+KiFox32Exception ( 82 )
+KiFox32Exception ( 83 )
+KiFox32Exception ( 84 )
+KiFox32Exception ( 85 )
+KiFox32Exception ( 86 )
+KiFox32Exception ( 87 )
+KiFox32Exception ( 88 )
+KiFox32Exception ( 89 )
+KiFox32Exception ( 90 )
+KiFox32Exception ( 91 )
+KiFox32Exception ( 92 )
+KiFox32Exception ( 93 )
+KiFox32Exception ( 94 )
+KiFox32Exception ( 95 )
+KiFox32Exception ( 96 )
+KiFox32Exception ( 97 )
+KiFox32Exception ( 98 )
+KiFox32Exception ( 99 )
+KiFox32Exception ( 100 )
+KiFox32Exception ( 101 )
+KiFox32Exception ( 102 )
+KiFox32Exception ( 103 )
+KiFox32Exception ( 104 )
+KiFox32Exception ( 105 )
+KiFox32Exception ( 106 )
+KiFox32Exception ( 107 )
+KiFox32Exception ( 108 )
+KiFox32Exception ( 109 )
+KiFox32Exception ( 110 )
+KiFox32Exception ( 111 )
+KiFox32Exception ( 112 )
+KiFox32Exception ( 113 )
+KiFox32Exception ( 114 )
+KiFox32Exception ( 115 )
+KiFox32Exception ( 116 )
+KiFox32Exception ( 117 )
+KiFox32Exception ( 118 )
+KiFox32Exception ( 119 )
+KiFox32Exception ( 120 )
+KiFox32Exception ( 121 )
+KiFox32Exception ( 122 )
+KiFox32Exception ( 123 )
+KiFox32Exception ( 124 )
+KiFox32Exception ( 125 )
+KiFox32Exception ( 126 )
+KiFox32Exception ( 127 )
+KiFox32Exception ( 128 )
+KiFox32Exception ( 129 )
+KiFox32Exception ( 130 )
+KiFox32Exception ( 131 )
+KiFox32Exception ( 132 )
+KiFox32Exception ( 133 )
+KiFox32Exception ( 134 )
+KiFox32Exception ( 135 )
+KiFox32Exception ( 136 )
+KiFox32Exception ( 137 )
+KiFox32Exception ( 138 )
+KiFox32Exception ( 139 )
+KiFox32Exception ( 140 )
+KiFox32Exception ( 141 )
+KiFox32Exception ( 142 )
+KiFox32Exception ( 143 )
+KiFox32Exception ( 144 )
+KiFox32Exception ( 145 )
+KiFox32Exception ( 146 )
+KiFox32Exception ( 147 )
+KiFox32Exception ( 148 )
+KiFox32Exception ( 149 )
+KiFox32Exception ( 150 )
+KiFox32Exception ( 151 )
+KiFox32Exception ( 152 )
+KiFox32Exception ( 153 )
+KiFox32Exception ( 154 )
+KiFox32Exception ( 155 )
+KiFox32Exception ( 156 )
+KiFox32Exception ( 157 )
+KiFox32Exception ( 158 )
+KiFox32Exception ( 159 )
+KiFox32Exception ( 160 )
+KiFox32Exception ( 161 )
+KiFox32Exception ( 162 )
+KiFox32Exception ( 163 )
+KiFox32Exception ( 164 )
+KiFox32Exception ( 165 )
+KiFox32Exception ( 166 )
+KiFox32Exception ( 167 )
+KiFox32Exception ( 168 )
+KiFox32Exception ( 169 )
+KiFox32Exception ( 170 )
+KiFox32Exception ( 171 )
+KiFox32Exception ( 172 )
+KiFox32Exception ( 173 )
+KiFox32Exception ( 174 )
+KiFox32Exception ( 175 )
+KiFox32Exception ( 176 )
+KiFox32Exception ( 177 )
+KiFox32Exception ( 178 )
+KiFox32Exception ( 179 )
+KiFox32Exception ( 180 )
+KiFox32Exception ( 181 )
+KiFox32Exception ( 182 )
+KiFox32Exception ( 183 )
+KiFox32Exception ( 184 )
+KiFox32Exception ( 185 )
+KiFox32Exception ( 186 )
+KiFox32Exception ( 187 )
+KiFox32Exception ( 188 )
+KiFox32Exception ( 189 )
+KiFox32Exception ( 190 )
+KiFox32Exception ( 191 )
+KiFox32Exception ( 192 )
+KiFox32Exception ( 193 )
+KiFox32Exception ( 194 )
+KiFox32Exception ( 195 )
+KiFox32Exception ( 196 )
+KiFox32Exception ( 197 )
+KiFox32Exception ( 198 )
+KiFox32Exception ( 199 )
+KiFox32Exception ( 200 )
+KiFox32Exception ( 201 )
+KiFox32Exception ( 202 )
+KiFox32Exception ( 203 )
+KiFox32Exception ( 204 )
+KiFox32Exception ( 205 )
+KiFox32Exception ( 206 )
+KiFox32Exception ( 207 )
+KiFox32Exception ( 208 )
+KiFox32Exception ( 209 )
+KiFox32Exception ( 210 )
+KiFox32Exception ( 211 )
+KiFox32Exception ( 212 )
+KiFox32Exception ( 213 )
+KiFox32Exception ( 214 )
+KiFox32Exception ( 215 )
+KiFox32Exception ( 216 )
+KiFox32Exception ( 217 )
+KiFox32Exception ( 218 )
+KiFox32Exception ( 219 )
+KiFox32Exception ( 220 )
+KiFox32Exception ( 221 )
+KiFox32Exception ( 222 )
+KiFox32Exception ( 223 )
+KiFox32Exception ( 224 )
+KiFox32Exception ( 225 )
+KiFox32Exception ( 226 )
+KiFox32Exception ( 227 )
+KiFox32Exception ( 228 )
+KiFox32Exception ( 229 )
+KiFox32Exception ( 230 )
+KiFox32Exception ( 231 )
+KiFox32Exception ( 232 )
+KiFox32Exception ( 233 )
+KiFox32Exception ( 234 )
+KiFox32Exception ( 235 )
+KiFox32Exception ( 236 )
+KiFox32Exception ( 237 )
+KiFox32Exception ( 238 )
+KiFox32Exception ( 239 )
+KiFox32Exception ( 240 )
+KiFox32Exception ( 241 )
+KiFox32Exception ( 242 )
+KiFox32Exception ( 243 )
+KiFox32Exception ( 244 )
+KiFox32Exception ( 245 )
+KiFox32Exception ( 246 )
+KiFox32Exception ( 247 )
+KiFox32Exception ( 248 )
+KiFox32Exception ( 249 )
+KiFox32Exception ( 250 )
+KiFox32Exception ( 251 )
+KiFox32Exception ( 252 )
+KiFox32Exception ( 253 )
+KiFox32Exception ( 254 )
+KiFox32Exception ( 255 )
+KiFox32Exception ( 256 )
+KiFox32Exception ( 257 )
+KiFox32Exception ( 258 )
+KiFox32Exception ( 259 )
+KiFox32Exception ( 260 )
+KiFox32Exception ( 261 )
+KiFox32Exception ( 262 )
+KiFox32Exception ( 263 )
+KiFox32Exception ( 264 )
+KiFox32Exception ( 265 )
+KiFox32Exception ( 266 )
+KiFox32Exception ( 267 )
+KiFox32Exception ( 268 )
+KiFox32Exception ( 269 )
+KiFox32Exception ( 270 )
+KiFox32Exception ( 271 )
+KiFox32Exception ( 272 )
+KiFox32Exception ( 273 )
+KiFox32Exception ( 274 )
+KiFox32Exception ( 275 )
+KiFox32Exception ( 276 )
+KiFox32Exception ( 277 )
+KiFox32Exception ( 278 )
+KiFox32Exception ( 279 )
+KiFox32Exception ( 280 )
+KiFox32Exception ( 281 )
+KiFox32Exception ( 282 )
+KiFox32Exception ( 283 )
+KiFox32Exception ( 284 )
+KiFox32Exception ( 285 )
+KiFox32Exception ( 286 )
+KiFox32Exception ( 287 )
+KiFox32Exception ( 288 )
+KiFox32Exception ( 289 )
+KiFox32Exception ( 290 )
+KiFox32Exception ( 291 )
+KiFox32Exception ( 292 )
+KiFox32Exception ( 293 )
+KiFox32Exception ( 294 )
+KiFox32Exception ( 295 )
+KiFox32Exception ( 296 )
+KiFox32Exception ( 297 )
+KiFox32Exception ( 298 )
+KiFox32Exception ( 299 )
+KiFox32Exception ( 300 )
+KiFox32Exception ( 301 )
+KiFox32Exception ( 302 )
+KiFox32Exception ( 303 )
+KiFox32Exception ( 304 )
+KiFox32Exception ( 305 )
+KiFox32Exception ( 306 )
+KiFox32Exception ( 307 )
+KiFox32Exception ( 308 )
+KiFox32Exception ( 309 )
+KiFox32Exception ( 310 )
+KiFox32Exception ( 311 )
+KiFox32Exception ( 312 )
+KiFox32Exception ( 313 )
+KiFox32Exception ( 314 )
+KiFox32Exception ( 315 )
+KiFox32Exception ( 316 )
+KiFox32Exception ( 317 )
+KiFox32Exception ( 318 )
+KiFox32Exception ( 319 )
+KiFox32Exception ( 320 )
+KiFox32Exception ( 321 )
+KiFox32Exception ( 322 )
+KiFox32Exception ( 323 )
+KiFox32Exception ( 324 )
+KiFox32Exception ( 325 )
+KiFox32Exception ( 326 )
+KiFox32Exception ( 327 )
+KiFox32Exception ( 328 )
+KiFox32Exception ( 329 )
+KiFox32Exception ( 330 )
+KiFox32Exception ( 331 )
+KiFox32Exception ( 332 )
+KiFox32Exception ( 333 )
+KiFox32Exception ( 334 )
+KiFox32Exception ( 335 )
+KiFox32Exception ( 336 )
+KiFox32Exception ( 337 )
+KiFox32Exception ( 338 )
+KiFox32Exception ( 339 )
+KiFox32Exception ( 340 )
+KiFox32Exception ( 341 )
+KiFox32Exception ( 342 )
+KiFox32Exception ( 343 )
+KiFox32Exception ( 344 )
+KiFox32Exception ( 345 )
+KiFox32Exception ( 346 )
+KiFox32Exception ( 347 )
+KiFox32Exception ( 348 )
+KiFox32Exception ( 349 )
+KiFox32Exception ( 350 )
+KiFox32Exception ( 351 )
+KiFox32Exception ( 352 )
+KiFox32Exception ( 353 )
+KiFox32Exception ( 354 )
+KiFox32Exception ( 355 )
+KiFox32Exception ( 356 )
+KiFox32Exception ( 357 )
+KiFox32Exception ( 358 )
+KiFox32Exception ( 359 )
+KiFox32Exception ( 360 )
+KiFox32Exception ( 361 )
+KiFox32Exception ( 362 )
+KiFox32Exception ( 363 )
+KiFox32Exception ( 364 )
+KiFox32Exception ( 365 )
+KiFox32Exception ( 366 )
+KiFox32Exception ( 367 )
+KiFox32Exception ( 368 )
+KiFox32Exception ( 369 )
+KiFox32Exception ( 370 )
+KiFox32Exception ( 371 )
+KiFox32Exception ( 372 )
+KiFox32Exception ( 373 )
+KiFox32Exception ( 374 )
+KiFox32Exception ( 375 )
+KiFox32Exception ( 376 )
+KiFox32Exception ( 377 )
+KiFox32Exception ( 378 )
+KiFox32Exception ( 379 )
+KiFox32Exception ( 380 )
+KiFox32Exception ( 381 )
+KiFox32Exception ( 382 )
+KiFox32Exception ( 383 )
+KiFox32Exception ( 384 )
+KiFox32Exception ( 385 )
+KiFox32Exception ( 386 )
+KiFox32Exception ( 387 )
+KiFox32Exception ( 388 )
+KiFox32Exception ( 389 )
+KiFox32Exception ( 390 )
+KiFox32Exception ( 391 )
+KiFox32Exception ( 392 )
+KiFox32Exception ( 393 )
+KiFox32Exception ( 394 )
+KiFox32Exception ( 395 )
+KiFox32Exception ( 396 )
+KiFox32Exception ( 397 )
+KiFox32Exception ( 398 )
+KiFox32Exception ( 399 )
+KiFox32Exception ( 400 )
+KiFox32Exception ( 401 )
+KiFox32Exception ( 402 )
+KiFox32Exception ( 403 )
+KiFox32Exception ( 404 )
+KiFox32Exception ( 405 )
+KiFox32Exception ( 406 )
+KiFox32Exception ( 407 )
+KiFox32Exception ( 408 )
+KiFox32Exception ( 409 )
+KiFox32Exception ( 410 )
+KiFox32Exception ( 411 )
+KiFox32Exception ( 412 )
+KiFox32Exception ( 413 )
+KiFox32Exception ( 414 )
+KiFox32Exception ( 415 )
+KiFox32Exception ( 416 )
+KiFox32Exception ( 417 )
+KiFox32Exception ( 418 )
+KiFox32Exception ( 419 )
+KiFox32Exception ( 420 )
+KiFox32Exception ( 421 )
+KiFox32Exception ( 422 )
+KiFox32Exception ( 423 )
+KiFox32Exception ( 424 )
+KiFox32Exception ( 425 )
+KiFox32Exception ( 426 )
+KiFox32Exception ( 427 )
+KiFox32Exception ( 428 )
+KiFox32Exception ( 429 )
+KiFox32Exception ( 430 )
+KiFox32Exception ( 431 )
+KiFox32Exception ( 432 )
+KiFox32Exception ( 433 )
+KiFox32Exception ( 434 )
+KiFox32Exception ( 435 )
+KiFox32Exception ( 436 )
+KiFox32Exception ( 437 )
+KiFox32Exception ( 438 )
+KiFox32Exception ( 439 )
+KiFox32Exception ( 440 )
+KiFox32Exception ( 441 )
+KiFox32Exception ( 442 )
+KiFox32Exception ( 443 )
+KiFox32Exception ( 444 )
+KiFox32Exception ( 445 )
+KiFox32Exception ( 446 )
+KiFox32Exception ( 447 )
+KiFox32Exception ( 448 )
+KiFox32Exception ( 449 )
+KiFox32Exception ( 450 )
+KiFox32Exception ( 451 )
+KiFox32Exception ( 452 )
+KiFox32Exception ( 453 )
+KiFox32Exception ( 454 )
+KiFox32Exception ( 455 )
+KiFox32Exception ( 456 )
+KiFox32Exception ( 457 )
+KiFox32Exception ( 458 )
+KiFox32Exception ( 459 )
+KiFox32Exception ( 460 )
+KiFox32Exception ( 461 )
+KiFox32Exception ( 462 )
+KiFox32Exception ( 463 )
+KiFox32Exception ( 464 )
+KiFox32Exception ( 465 )
+KiFox32Exception ( 466 )
+KiFox32Exception ( 467 )
+KiFox32Exception ( 468 )
+KiFox32Exception ( 469 )
+KiFox32Exception ( 470 )
+KiFox32Exception ( 471 )
+KiFox32Exception ( 472 )
+KiFox32Exception ( 473 )
+KiFox32Exception ( 474 )
+KiFox32Exception ( 475 )
+KiFox32Exception ( 476 )
+KiFox32Exception ( 477 )
+KiFox32Exception ( 478 )
+KiFox32Exception ( 479 )
+KiFox32Exception ( 480 )
+KiFox32Exception ( 481 )
+KiFox32Exception ( 482 )
+KiFox32Exception ( 483 )
+KiFox32Exception ( 484 )
+KiFox32Exception ( 485 )
+KiFox32Exception ( 486 )
+KiFox32Exception ( 487 )
+KiFox32Exception ( 488 )
+KiFox32Exception ( 489 )
+KiFox32Exception ( 490 )
+KiFox32Exception ( 491 )
+KiFox32Exception ( 492 )
+KiFox32Exception ( 493 )
+KiFox32Exception ( 494 )
+KiFox32Exception ( 495 )
+KiFox32Exception ( 496 )
+KiFox32Exception ( 497 )
+KiFox32Exception ( 498 )
+KiFox32Exception ( 499 )
+KiFox32Exception ( 500 )
+KiFox32Exception ( 501 )
+KiFox32Exception ( 502 )
+KiFox32Exception ( 503 )
+KiFox32Exception ( 504 )
+KiFox32Exception ( 505 )
+KiFox32Exception ( 506 )
+KiFox32Exception ( 507 )
+KiFox32Exception ( 508 )
+KiFox32Exception ( 509 )
+KiFox32Exception ( 510 )
+KiFox32Exception ( 511 )
+
+KiExceptionVector:
+.export KiExceptionVector
+
+    push fp
+    push r31
+    push tp
+    push at
+    push s17
+    push s16
+    push s15
+    push s14
+    push s13
+    push s12
+    push s11
+    push s10
+    push s9
+    push s8
+    push s7
+    push s6
+    push s5
+    push s4
+    push s3
+    push s2
+    push s1
+    push s0
+    push a3
+    push a2
+    push a1
+    push a0
+    push t6
+    push t5
+    push t4
+    push t3
+    push t2
+    push t1
+    push t0
+    sub  sp, 4 // Skip OldIpl
+    mov  a0, sp
+    mov  fp, sp
+
+    sub  sp, 3 // Alignment
+
+    mov  a1, [KiCurrentExceptionCode]
+    call KiExceptionHandler
+
+    add  sp, 7 // Alignment + OldIpl
+    pop  t0
+    pop  t1
+    pop  t2
+    pop  t3
+    pop  t4
+    pop  t5
+    pop  t6
+    pop  a0
+    pop  a1
+    pop  a2
+    pop  a3
+    pop  s0
+    pop  s1
+    pop  s2
+    pop  s3
+    pop  s4
+    pop  s5
+    pop  s6
+    pop  s7
+    pop  s8
+    pop  s9
+    pop  s10
+    pop  s11
+    pop  s12
+    pop  s13
+    pop  s14
+    pop  s15
+    pop  s16
+    pop  s17
+    pop  at
+    pop  tp
+    pop  r31
+    pop  fp
+    add  sp, 4
+    reti
+
+
+DbgExcEnd:
+.export DbgExcEnd
+
+// a0 - newipl
+// outputs:
+// a3 - oldipl
+KiRaiseIpl:
+.global KiRaiseIpl
+
+    // Load the old IPL.
+
+    movz.8 a3, [(0xFFFFF000 + KiPrb_Ipl)]
+
+    // Store the new IPL.
+
+    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], a0
+
+#IF BLD_CHK
+
+    cmp  a0, a3
+    iflt rjmp .badraise
+
+#END
+
+    ret
+
+#IF BLD_CHK
+
+.badraise:
+
+    push fp
+    mov  fp, sp
+
+    mov  a0, KiBadRaiseMessage
+    mov  a1, 0
+    mov  a2, 0
+    call KeCrash
+
+#END
+
+// a0 - newipl
+KiLowerIpl:
+.global KiLowerIpl
+
+#IF BLD_CHK
+
+    movz.8 t0, [(0xFFFFF000 + KiPrb_Ipl)]
+    cmp  t0, a0
+    iflt rjmp .badlower
+
+#END
+
+    // Store the new IPL.
+
+    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], a0
+
+    mov  t0, [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)]
+    srl  t0, a0
+    ifnz jmp KiDispatchSoftwareInterrupts
+
+    ret
+
+#IF BLD_CHK
+
+.badlower:
+
+    push fp
+    mov  fp, sp
+
+    mov  a0, KiBadLowerMessage
+    mov  a1, 0
+    mov  a2, 0
+    call KeCrash
+
+#END
+
+KiBadRaiseMessage:
+    .ds "KiRaiseIpl: oldipl > newipl\n"
+    .db 0
+
+KiBadLowerMessage:
+    .ds "KiLowerIpl: newipl > oldipl\n"
+    .db 0
+
+.align 4
+
+// a0 - process
+KiSwitchAddressSpace:
+.global KiSwitchAddressSpace
+
+    mov  t0, [a0 + KeProcess_PageDirectoryPfn]
+    sla  t0, 12
+    tlb  t0
+
+    ret
+
+KiThreadTrampoline:
+
+    // This is where a new thread begins execution.
+    // s0 contains the start function, s1 and s2 contain context pointers.
+
+    // We're at KI_IPL_DPC, so lower that now.
+
+    mov  a0, KI_IPL_LOW
+    call KiLowerIpl
+
+    // Set FP to 0 so that stack traces terminate here.
+
+    mov  fp, 0
+
+    // Jump to the start function.
+
+    mov  a0, s1
+    mov  a1, s2
+    jmp  s0
+
+
+// a0 - newthread
+// a1 - oldthread
+KiSwitchContext:
+.global KiSwitchContext
+
+    // Save the current context and restore the new.
+    // We only need to save the callee-saved registers as this has the same
+    // considerations as a function call that trashes them all.
+    // We must also release the old thread's thread lock on our way out, after
+    // we have fully left its context.
+
+    sub  sp, 13 // Skip Eflags, BadAddr, Epc, Sp
+    push fp
+    push r31
+    push tp
+    push at
+    push s17
+    push s16
+    push s15
+    push s14
+    push s13
+    push s12
+    push s11
+    push s10
+    push s9
+    push s8
+    push s7
+    push s6
+    push s5
+    push s4
+    push s3
+    push s2
+    push s1
+    push s0
+    sub  sp, 48 // Skip volatile fields
+
+    mov  [a1 + KeThread_Context], sp
+
+    // Fall-through
+
+// a0 - thread
+KiJumpIntoThread:
+.global KiJumpIntoThread
+
+    mov  esp, [a0 + KeThread_KernelStackTop]
+    mov  sp, [a0 + KeThread_Context]
+
+    // Set new thread parameters in Prb.
+
+    mov  [(0xFFFFF000 + KiPrb_CurrentThread)], a0
+
+    // Set thread to RUNNING.
+
+    mov.8 [a0 + KeThread_Status], KI_THREAD_RUNNING
+
+    add  sp, 48 // Skip volatile fields
+    pop  s0
+    pop  s1
+    pop  s2
+    pop  s3
+    pop  s4
+    pop  s5
+    pop  s6
+    pop  s7
+    pop  s8
+    pop  s9
+    pop  s10
+    pop  s11
+    pop  s12
+    pop  s13
+    pop  s14
+    pop  s15
+    pop  s16
+    pop  s17
+    pop  at
+    pop  tp
+    pop  r31
+    pop  fp
+    add  sp, 13 // Skip Eflags, BadAddr, Epc, Sp
+
+    ret
+
+]
+
+EXTERN FN KiThreadTrampoline ()
+
+EXTERN KiRestartableSections : UBYTE
+EXTERN KiRestartableSectionsEnd : UBYTE
+
+EXTERN KiIncrementUlongEnd : UBYTE
+EXTERN KiOrUlongEnd : UBYTE
+EXTERN KiMaskUlongEnd : UBYTE
+EXTERN KiFetchAndSetUlongEnd : UBYTE
+EXTERN KiCompareSwapUlongEnd : UBYTE
+EXTERN KiAcquirePushlockSharedEnd : UBYTE
+EXTERN KiAcquirePushlockExclusiveEnd : UBYTE
+EXTERN KiReleasePushlockStart : UBYTE
+EXTERN KiReleasePushlockEnd : UBYTE
+EXTERN KiReleaseApcSafePushlockStart : UBYTE
+EXTERN KiReleaseApcSafePushlockEnd : UBYTE
+
+FN KiResetPc (
+    IN context : ^OsContext,
+)
+
+    // An exception occurred while the program counter was inside a restartable
+    // section. Figure out which one and reset the PC back to the start of it.
+
+    epc := context^.Epc
+
+    IF epc >= &KeIncrementUlong AND
+        epc < &KiIncrementUlongEnd THEN
+
+        context^.Epc = &KeIncrementUlong
+
+        LEAVE
+    END
+
+    IF epc >= &KeOrUlong AND
+        epc < &KiOrUlongEnd THEN
+
+        context^.Epc = &KeOrUlong
+
+        LEAVE
+    END
+
+    IF epc >= &KeMaskUlong AND
+        epc < &KiMaskUlongEnd THEN
+
+        context^.Epc = &KeMaskUlong
+
+        LEAVE
+    END
+
+    IF epc >= &KeFetchAndSetUlong AND
+        epc < &KiFetchAndSetUlongEnd THEN
+
+        context^.Epc = &KeFetchAndSetUlong
+
+        LEAVE
+    END
+
+    IF epc >= &KeCompareSwapUlong AND
+        epc < &KiCompareSwapUlongEnd THEN
+
+        context^.Epc = &KeCompareSwapUlong
+
+        LEAVE
+    END
+
+    IF epc >= &KeAcquirePushlockShared AND
+        epc < &KiAcquirePushlockSharedEnd THEN
+
+        context^.Epc = &KeAcquirePushlockShared
+
+        LEAVE
+    END
+
+    IF epc >= &KeAcquirePushlockExclusive AND
+        epc < &KiAcquirePushlockExclusiveEnd THEN
+
+        context^.Epc = &KeAcquirePushlockExclusive
+
+        LEAVE
+    END
+
+    IF epc >= &KiReleasePushlockStart AND
+        epc < &KiReleasePushlockEnd THEN
+
+        context^.Epc = &KiReleasePushlockStart
+
+        LEAVE
+    END
+
+    IF epc >= &KiReleaseApcSafePushlockStart AND
+        epc < &KiReleaseApcSafePushlockEnd THEN
+
+        context^.Epc = &KiReleaseApcSafePushlockStart
+
+        LEAVE
+    END
+END
+
+FNPTR KiExceptionHandlerF (
+    IN context : ^OsContext,
+)
+
+FN (KiExceptionHandlerF) KiDivByZero (
+    IN context : ^OsContext,
+)
+
+    KeCrash ( "Division by zero at %p\n", context^.Epc )
+END
+
+FN (KiExceptionHandlerF) KiIllegalOpcode (
+    IN context : ^OsContext,
+)
+
+    KeCrash ( "Illegal opcode at %p\n", context^.Epc )
+END
+
+FN (KiExceptionHandlerF) KiReadFault (
+    IN context : ^OsContext,
+)
+
+    KeCrash ( "Read fault of %p at %p\n", context^.BadAddr, context^.Epc )
+END
+
+FN (KiExceptionHandlerF) KiWriteFault (
+    IN context : ^OsContext,
+)
+
+    KeCrash ( "Write fault of %p at %p\n", context^.BadAddr, context^.Epc )
+END
+
+FN (KiExceptionHandlerF) KiDebugger (
+    IN context : ^OsContext,
+)
+
+    IF context^.Eflags & 8 THEN
+        KeCrash ( "NYI usermode breakpoints\n" )
+
+    ELSE
+        IF KeDebuggerEntry THEN
+            KeDebuggerEntry ( context )
+
+        ELSE
+            KeCrash ( "Unhandled kernel mode breakpoint\n" )
+        END
+    END
+END
+
+FN (KiExceptionHandlerF) KiBusError (
+    IN context : ^OsContext,
+)
+
+    KeCrash ( "Bus error of %p at %p\n", context^.BadAddr, context^.Epc )
+END
+
+KiExceptionHandlers : KiExceptionHandlerF[16] = {
+    [0] = &KiDivByZero,
+    [1] = &KiIllegalOpcode,
+    [2] = &KiReadFault,
+    [3] = &KiWriteFault,
+    [4] = &KiDebugger,
+    [5] = &KiBusError,
+}
+
+EXTERN KiInterruptsDisabled : UWORD
+
+FN KiExceptionHandler (
+    IN context : ^OsContext,
+    IN exc : UWORD,
+)
+
+    dis := KiInterruptsDisabled
+    KiInterruptsDisabled = TRUE
+
+    IF context^.Epc >= &KiRestartableSections AND
+        context^.Epc < &KiRestartableSectionsEnd THEN
+
+        KiResetPc ( context )
+    END
+
+    IF exc >= 256 THEN
+        KiExceptionHandlers[exc - 256] ( context )
+
+    ELSE
+        HalInterrupt (
+            context, // context
+            exc, // vector
+        )
+
+        prb := KI_CURRENT_PRB
+
+        ipl := prb^.Ipl
+
+        IF prb^.PendingSoftwareInterrupts >> ipl THEN
+            KiDispatchSoftwareInterrupts ( ipl )
+        END
+    END
+
+    KiInterruptsDisabled = dis
+END
+
+EXTERN StartOfFirst : UBYTE
+EXTERN EndOfFirst : UBYTE
+
+#SECTION "INIT$text"
+FN KiInitializeArchitecture (
+    IN prb : ^KiPrb,
+)
+
+    // Here we must initialize the fox32 IVT in low memory. We still have an
+    // identity mapping of the low 4MB from Loader, so we can easily access it
+    // through that.
+
+    // Here lay the only intentional use of a null pointer in the whole of the
+    // land of MINTIA.
+
+    vec : ^^VOID = 0
+
+    size : UWORD = &EndOfFirst - &StartOfFirst
+    ptr := &StartOfFirst
+
+    i := 0
+
+    WHILE i < 512 DO
+        vec[i] = ptr
+
+        ptr += size
+
+        i += 1
+    END
+END
+
+FN KiInitializeContext (
+    IN process : ^KeProcess,
+    IN kstack : ^VOID,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : ^OsContext
+
+    // Initialize the context for a thread that is about to begin execution.
+
+    retaddr := CAST kstack - 4 TO ^ULONG
+
+    retaddr[0] = &KiThreadTrampoline
+
+    context := CAST (retaddr - SIZEOF OsContext) TO ^OsContext
+
+    context^.S0 = CAST startfunc TO ULONG
+    context^.S1 = CAST context1 TO ULONG
+    context^.S2 = CAST context2 TO ULONG
+
+    RETURN context
+END
+
+FN KiInterruptUsermode (
+    IN dispatchfunc : ^VOID,
+    IN trapframe : ^OsContext,
+    IN userfunc : UWORD,
+    IN context : UWORD,
+)
+
+    // Cause a usermode interrupt of the current thread by saving the context
+    // on the user stack and redirecting the trapframe to the usermode
+    // interrupt handler. This is used to implement signal and APC dispatch.
+
+    usp := trapframe^.Sp
+
+    usp -= SIZEOF OsContext
+
+    // Save the trapframe to the user stack.
+    // If that fails, and the thread has a panic stack, switch to it and copy
+    // out to that instead.
+
+    // Can't implement this until we get copy-out figured out.
+    KeCrash ( "NYI KiInterruptUsermode\n" )
+
+    // Redirect the trapframe to the usermode interrupt handler.
+
+    trapframe^.Sp = usp
+    trapframe^.Epc = dispatchfunc
+    trapframe^.A0 = context
+    trapframe^.A1 = usp
+    trapframe^.A2 = userfunc
+END

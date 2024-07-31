@@ -1,0 +1,95 @@
+//
+// Implements interrupt support for the fox32 HAL.
+//
+
+#INCLUDE "Halp.hjk"
+#INCLUDE "<ll>/System/OsContext.hjk"
+
+FN HalRaiseHardwareIpl (
+    IN ipl : UWORD,
+) : UWORD
+
+    // This isn't part of KiRaiseIpl since that is written in a tightly
+    // optimized manner around the most common usage (changing between software
+    // IPLs, which need not reprogram the hardware interrupt masks).
+
+    prb := KI_CURRENT_PRB_LOCAL
+
+    oldipl := prb^.Ipl
+
+    IF ipl > KI_IPL_DPC THEN
+        KiDisableInterrupts ()
+    END
+
+    prb^.Ipl = ipl
+
+    RETURN oldipl
+END
+
+FN HalLowerHardwareIpl (
+    IN ipl : UWORD,
+)
+
+    // This isn't part of KiLowerIpl since that is written in a tightly
+    // optimized manner around the most common usage (changing between software
+    // IPLs, which need not reprogram the hardware interrupt masks).
+
+    prb := KI_CURRENT_PRB_LOCAL
+    prb^.Ipl = ipl
+
+    IF ipl <= KI_IPL_DPC THEN
+        KiEnableInterrupts ()
+    END
+
+    // We don't need to check this in the disabled interrupts section because if
+    // we get a stale PendingSoftwareInterrupts value from another processor, we
+    // will harmlessly call KiDispatchSoftwareInterrupts which does nothing. And
+    // we can't "miss" any since all events that switch us to another processor
+    // will cause software interrupt dispatch anyway.
+
+    IF prb^.PendingSoftwareInterrupts >> ipl THEN
+        KiDispatchSoftwareInterrupts ( ipl )
+    END
+END
+
+FN HalInterrupt (
+    IN context : ^OsContext,
+    IN vector : UWORD,
+)
+
+    prb := KI_CURRENT_PRB
+
+    int := prb^.IrqDispatchTable[vector]
+
+    // Capture old IPL and set new in Prb.
+
+    oldipl := prb^.Ipl
+    prb^.Ipl = int^.Ipl
+
+    context^.OldIpl = oldipl
+
+    // Call the routine.
+    // We leave interrupts disabled for all hardware interrupts on fox32 as
+    // there are no priority levels or per-interrupt masking on that platform.
+
+    int^.Routine (
+        int, // interrupt
+        context, // context
+    )
+
+    // Reset the Prb IPL.
+
+    prb^.Ipl = oldipl
+END
+
+FN (KeInterruptF) HalpTimerInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+    KiClockTick (
+        HAL_TIMER_INTERVAL, // intervalms
+        context^.Eflags & 8, // usermode
+        context^.OldIpl, // previpl
+    )
+END

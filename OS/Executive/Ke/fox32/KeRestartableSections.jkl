@@ -1,0 +1,281 @@
+//
+// Contains all of the "restartable sections" for atomics on fox32.
+// If an exception occurs during one of these sections, the program counter is
+// reset to the beginning. We group them together so that we don't have to check
+// for PC being inbetween each of them on every exception, only when we found it
+// between KiRestartableSections and KiRestartableSectionsEnd.
+//
+
+#INCLUDE "../Ki.hjk"
+
+#ASM [
+
+KiRestartableSections:
+.global KiRestartableSections
+
+
+// a0 - ptr
+// a1 - inc
+// outputs:
+// a3 - old value
+KeIncrementUlong:
+.export KeIncrementUlong
+
+    mov  a3, [a0]
+    add  [a0], a1
+
+KiIncrementUlongEnd:
+.global KiIncrementUlongEnd
+
+    ret
+
+// a0 - ptr
+// a1 - bitset
+// outputs:
+// a3 - origvalue
+KeOrUlong:
+.export KeOrUlong
+
+    mov  a3, [a0]
+    or   [a0], a1
+
+KiOrUlongEnd:
+.global KiOrUlongEnd
+
+    ret
+
+// a0 - ptr
+// a1 - bitmask
+// outputs:
+// a3 - origvalue
+KeMaskUlong:
+.export KeMaskUlong
+
+    mov  a3, [a0]
+    and  [a0], a1
+
+KiMaskUlongEnd:
+.global KiMaskUlongEnd
+
+    ret
+
+// a0 - ptr
+// a1 - newvalue
+// outputs:
+// a3 - origvalue
+KeFetchAndSetUlong:
+.export KeFetchAndSetUlong
+
+    mov  a3, [a0]
+    mov  [a0], a1
+
+KiFetchAndSetUlongEnd:
+.global KiFetchAndSetUlongEnd
+
+    ret
+
+// a0 - ptr
+// a1 - newvalue
+// a2 - expectedvalue
+// outputs:
+// a3 - origvalue
+KeCompareSwapUlong:
+.export KeCompareSwapUlong
+    
+    mov  a3, [a0]
+    cmp  a3, a2
+    ifnz jmp KiCompareSwapUlongEnd
+    mov  [a0], a1
+
+KiCompareSwapUlongEnd:
+.global KiCompareSwapUlongEnd
+
+    ret
+
+#MACRO ApcSafe ( x ) [
+    // The pushlock is APC-safe, so raise to KI_IPL_APC and increment the
+    // pushlock depth.
+
+    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], 1
+
+    // Acquire a pointer to the current thread.
+
+    mov  t0, [(0xFFFFF000 + KiPrb_CurrentThread)]
+
+    // Increment the pushlock depth. This is synchronized as only the current
+    // thread can modify its pushlock depth.
+
+    add  [t0 + KeThread_ApcPushlockDepth], 1
+]
+
+// a0 - pushlock
+KeAcquireApcSafePushlockShared:
+.export KeAcquireApcSafePushlockShared
+
+    ApcSafe ( x )
+
+    // Fall through.
+
+// a0 - pushlock
+KeAcquirePushlockShared:
+.export KeAcquirePushlockShared
+
+    // Fast path: Load the pushlock word. If it's zero, set it to LOCKED with a
+    // single shared holder and return.
+    
+    cmp  [a0], 0
+    ifnz jmp KiAcquirePushlockShared
+    mov  [a0], (KI_PUSHLOCK_LOCKED | KI_PUSHLOCK_SHARE_INC)
+
+KiAcquirePushlockSharedEnd:
+.global KiAcquirePushlockSharedEnd
+
+    ret
+
+// a0 - pushlock
+KeAcquireApcSafePushlockExclusive:
+.export KeAcquireApcSafePushlockExclusive
+
+    ApcSafe ( x )
+
+    // Fall through.
+
+// a0 - pushlock
+KeAcquirePushlockExclusive:
+.export KeAcquirePushlockExclusive
+
+    // Fast path: Load the pushlock word. If the LOCKED bit is clear, set it and
+    // return.
+
+    mov  t0, [a0]
+    and  t0, KI_PUSHLOCK_LOCKED
+    ifnz jmp KiAcquirePushlockExclusive
+    or   [a0], KI_PUSHLOCK_LOCKED
+
+KiAcquirePushlockExclusiveEnd:
+.global KiAcquirePushlockExclusiveEnd
+
+    ret
+
+#MACRO ReleasePushlock ( startlabel, endlabel, slow ) [
+
+#IF BLD_CHK
+    mov  t0, [a0]
+    and  t0, KI_PUSHLOCK_LOCKED
+    ifz  call KiNotLocked
+#END
+
+startlabel:
+.global startlabel
+
+    // Load the pushlock word.
+
+    mov  t0, [a0]
+
+    // Isolate the WAITING bit. If it's set, take the slow path.
+
+    mov  t1, t0
+    and  t1, KI_PUSHLOCK_WAITING
+    ifnz jmp slow
+
+    // Isolate the share count.
+
+    mov  t1, t0
+    srl  t1, KI_PUSHLOCK_SHARE_SHIFT
+
+    // Load the value to store.
+
+    movz.8 t2, 0
+
+    // Compare share count <= 1.
+    // If > 1, we are a shared holder and must subtract from the shared count.
+
+    cmp  t1, 1
+    ifgt mov t2, t0
+    ifgt sub t2, KI_PUSHLOCK_SHARE_INC
+
+    // Store the new pushlock word.
+
+    mov  [a0], t2
+
+endlabel:
+.global endlabel
+
+]
+
+// a0 - pushlock
+KeReleasePushlock:
+.export KeReleasePushlock
+
+    ReleasePushlock ( KiReleasePushlockStart, KiReleasePushlockEnd, KiReleasePushlock )
+
+    ret
+
+// a0 - pushlock
+KeReleaseApcSafePushlock:
+.export KeReleaseApcSafePushlock
+
+    ReleasePushlock ( KiReleaseApcSafePushlockStart, KiReleaseApcSafePushlockEnd, KiReleaseSlow )
+
+    rjmp KiReleaseApcSafe
+
+KiReleaseSlow:
+
+    push fp
+    mov  fp, sp
+    
+    call KiReleasePushlock
+
+    pop  fp
+
+    // Fall through.
+
+KiReleaseApcSafe:
+
+    // The pushlock is APC-safe, so decrement the pushlock count of the current
+    // thread.
+
+    mov  t0, [(0xFFFFF000 + KiPrb_CurrentThread)]
+
+    sub  [t0 + KeThread_ApcPushlockDepth], 1
+
+    // If the count became 0, drop to KI_IPL_LOW.
+
+    ifnz rjmp .dontdrop
+
+    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], 0
+
+    mov  t0, [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)]
+    cmp  t0, 0
+    ifnz movz.8 a0, 0
+    ifnz jmp KiDispatchSoftwareInterrupts
+
+.dontdrop:
+    
+    ret
+
+#IF BLD_CHK
+
+KiNotLocked:
+
+    push fp
+    mov  fp, sp
+
+    mov  a0, KiNotLockedMessage
+    mov  a1, 0
+    mov  a2, 0
+    call KeCrash
+
+KiNotLockedMessage:
+    .ds "KeReleasePushlock: pushlock not locked\n"
+    .db 0
+
+.align 4
+
+#END
+
+
+KiRestartableSectionsEnd:
+.global KiRestartableSectionsEnd
+
+]

@@ -11,6 +11,7 @@
 entry:
     icl
     mov  sp, 0x2000
+    mov  fp, 0
     jmp  BxEntry
 
 BxEnableVirtualAddressing:
@@ -722,14 +723,33 @@ FN BxInitializeIo (
     BlInfoBlock.BootFbHeight = 480
 END
 
+FNPTR SysEntry (
+    IN loaderblock : ^BlInfoRecord,
+)
+
 FN BxStartSystem (
     IN entrypoint : ^VOID,
     IN prbphysical : ^VOID,
 )
 
-    WHILE TRUE DO END
+    // Map the Prb at 0xFFFFF000.
+
+    BxMapPage (
+        0xFFFFF000, // vaddr
+        prbphysical, // phyaddr
+        BL_MEMORY_USED, // pttype
+        FALSE, // noncached
+    )
+
+    // Jump to the system entrypoint.
+
+    entry := CAST entrypoint TO SysEntry
+
+    entry ( &BlInfoBlock )
 END
 
 FN BxExit ()
+    RtlPrint ( "BxExit called\n" )
+
     WHILE TRUE DO END
 END

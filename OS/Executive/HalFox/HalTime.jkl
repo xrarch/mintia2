@@ -1,0 +1,106 @@
+//
+// Implements time management for the fox32 HAL.
+//
+
+#INCLUDE "Halp.hjk"
+
+#DEFINE HAL_RTC_PORT 0x80000700
+#DEFINE HAL_RTC_YEAR 0
+#DEFINE HAL_RTC_MONTH 1
+#DEFINE HAL_RTC_DAY 2
+#DEFINE HAL_RTC_HOUR 3
+#DEFINE HAL_RTC_MIN 4
+#DEFINE HAL_RTC_SEC 5
+#DEFINE HAL_RTC_UPTME 6
+#DEFINE HAL_RTC_ISDST 7
+
+HalpBootTimeSeconds : ULONG
+HalpBootUptimeMs : ULONG
+
+FN HalpMakeUnixTime ()
+
+    // Make the initial unix timestamp that we base our time calculations from.
+
+    // The fox32 RTC presents the date in a split up format that we need to
+    // convert to milliseconds since 1970.
+
+    year := HalFox32In ( HAL_RTC_PORT | HAL_RTC_YEAR )
+
+    month := HalFox32In ( HAL_RTC_PORT | HAL_RTC_MONTH )
+
+    IF month <= 2 THEN
+        month += 12
+        year -= 1
+    END
+
+    day := HalFox32In ( HAL_RTC_PORT | HAL_RTC_DAY )
+
+    hour := HalFox32In ( HAL_RTC_PORT | HAL_RTC_HOUR )
+
+    min := HalFox32In ( HAL_RTC_PORT | HAL_RTC_MIN )
+
+    secpart := HalFox32In ( HAL_RTC_PORT | HAL_RTC_SEC )
+
+    isdst := HalFox32In ( HAL_RTC_PORT | HAL_RTC_ISDST )
+
+    // Years to days
+
+    day += (year * 365) + (year / 4) - (year / 100) + (year / 400)
+
+    // Months to days
+
+    day += (month * 30) + (((month + 1) * 3) / 5)
+
+    // Unix epoch
+
+    day -= 719561
+
+    secpart += (day * 86400) + (hour * 3600) + (min * 60)
+
+    IF isdst THEN
+        // Subtract an hour worth of seconds to normalize against daylight
+        // savings time.
+
+        secpart -= 3600
+    END
+
+    HalpBootTimeSeconds = secpart
+
+    HalpBootUptimeMs = HalFox32In ( HAL_RTC_PORT | HAL_RTC_UPTME )
+END
+
+FN HalQueryTime (
+    IN time : ^RtlUquad,
+)
+
+    // Query the time in milliseconds. This is called from the timer interrupt.
+
+    uptime := HalFox32In ( HAL_RTC_PORT | HAL_RTC_UPTME )
+
+    uptime -= HalpBootUptimeMs
+
+    sec := HalpBootTimeSeconds + (uptime / 1000)
+    ms := uptime % 1000
+
+    // Perform a 32x16->48 multiply of the seconds part by 1000.
+
+    part1 := (sec & 0xFFFF) * 1000
+    part2 := (sec >> 16) * 1000
+
+    // Upper 16 bits of part2 become low 16 bits of high part of 64 bit result.
+
+    time^.High = part2 >> 16
+
+    // Low 16 bits of part2 become high 16 bits of low part.
+
+    time^.Low = part2 << 16
+
+    // Add part1 and milliseconds.
+
+    part1 += ms
+
+    RtlAddUlongToUquad (
+        time, // quad
+        part1, // val
+    )
+END

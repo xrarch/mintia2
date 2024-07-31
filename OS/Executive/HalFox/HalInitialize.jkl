@@ -1,0 +1,77 @@
+//
+// Implements initialization for the fox32 HAL.
+//
+
+#INCLUDE "Halp.hjk"
+
+#ASM [
+
+// a0 - port
+// outputs:
+// a3 - value
+HalFox32In:
+.global HalFox32In
+    in   a3, a0
+    ret
+
+// a0 - port
+// a1 - value
+HalFox32Out:
+.global HalFox32Out
+    out  a0, a1
+    ret
+
+]
+
+#SECTION "INIT$text"
+FN HalpInitializeInterrupts ()
+
+    prb := KI_CURRENT_PRB
+
+    // Initialize the timer interrupt object.
+
+    int := &prb^.TimerInterrupt
+
+    KeInitializeInterrupt (
+        int, // interrupt
+        &HalpTimerInterrupt, // routine
+        0, // context
+        0xFF, // vector
+        KI_IPL_CLOCK, // ipl
+        FALSE, // edgetriggered
+        FALSE, // sharevector
+        0, // procid
+    )
+
+    // Manually insert in PRB.
+
+    prb^.IrqDispatchTable[0xFF] = int
+
+    // Enable interrupts.
+
+    KiEnableInterrupts ()
+END
+
+#SECTION "INIT$text"
+FN HalProcessorInitialize (
+    IN prb : ^KiPrb,
+)
+
+    // Do whatever is needed to initialize the current processor.
+
+    HalpInitializeInterrupts ()
+END
+
+#SECTION "INIT$text"
+FN HalEarlyInitialize ()
+
+    // This initialization routine is called before there is a system thread
+    // context. Here we have to establish everything required for base line
+    // functionality, including a simple boot console of some variety.
+
+    HalpInitializeConsole ()
+
+    // Make the initial Unix timestamp.
+
+    HalpMakeUnixTime ()
+END

@@ -1,0 +1,100 @@
+//
+// Various architecture-specific functions.
+//
+
+#INCLUDE "../Ki.hjk"
+
+PUBLIC KiInterruptsDisabled := TRUE
+
+#ASM [
+
+// outputs:
+// a3 - old interrupt state
+KiDisableInterrupts:
+.global KiDisableInterrupts
+
+    icl
+
+    mov  a3, [KiInterruptsDisabled]
+    mov  [KiInterruptsDisabled], 1
+
+    ret
+
+// a0 - old interrupt state
+KiRestoreInterrupts:
+.global KiRestoreInterrupts
+
+    icl
+
+    mov  [KiInterruptsDisabled], a0
+
+    cmp  a0, 1
+    ifz  jmp .dontenable
+
+    cmp.8 [(0xFFFFF000 + KiPrb_Ipl)], KI_IPL_DPC
+    ifgt jmp .dontenable
+
+    ise
+
+.dontenable:
+    
+    ret
+
+KiEnableInterrupts:
+.global KiEnableInterrupts
+
+    icl
+
+    mov  [KiInterruptsDisabled], 0
+
+    cmp.8 [(0xFFFFF000 + KiPrb_Ipl)], KI_IPL_DPC
+    ifgt jmp .dontenable
+
+    ise
+
+.dontenable:
+
+    ret
+
+// outputs:
+// a3 - thread
+KeCurrentThread:
+.export KeCurrentThread
+
+    mov  a3, [(0xFFFFF000 + KiPrb_CurrentThread)]
+
+    ret
+
+// outputs:
+// a3 - current processor ID
+KiCurrentProcessor:
+.global KiCurrentProcessor
+
+    mov  a3, 0
+
+    ret
+
+KiWaitForInterrupt:
+.global KiWaitForInterrupt
+
+    halt
+
+    ret
+
+// outputs:
+// a3 - current IPL
+KiCurrentIpl:
+.global KiCurrentIpl
+
+    movz.8 a3, [(0xFFFFF000 + KiPrb_Ipl)]
+
+    ret
+
+KeBreakpoint:
+.export KeBreakpoint
+
+    brk
+
+    ret
+
+]

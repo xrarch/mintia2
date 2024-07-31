@@ -1,0 +1,198 @@
+//
+// Implements stack tracing for the fox32 architecture.
+//
+
+#INCLUDE "../Dbg.hjk"
+#INCLUDE "<ll>/System/OsContext.hjk"
+
+#ASM [
+
+DbgGetLinks:
+    mov  a2, fp
+    ret
+
+]
+
+EXTERN FN DbgGetLinks (
+    OUT fp : ^VOID,
+)
+
+EXTERN KiExceptionVector : UBYTE
+EXTERN DbgExcEnd : UBYTE
+
+#DEFINE DBG_TRACE_NAME_MAX 40
+
+DbgTraceNameBuffer : UBYTE[DBG_TRACE_NAME_MAX]
+
+FN DbgTrace (
+    IN fp : ^VOID,
+    IN pc : ^VOID,
+)
+
+    infostr := "InstrPtr FramePtr Name"
+
+    RtlPrint ( "%s\n", infostr )
+
+    links := 0
+
+    WHILE fp DO
+        IF links >= 128 THEN
+            RtlPrint ( "!! Maximum trace !!\n" )
+
+            LEAVE
+        END
+
+        dll : ^BlDll
+        symvalue : ^VOID
+        symname : ^UBYTE
+        dllname : ^UBYTE
+
+        sym := DbgGetSymbolAndDll (
+            pc, // address
+            OUT dll, // dll
+            OUT symvalue, // symvalue
+            OUT symname, // symname
+        )
+
+        IF NOT sym THEN
+            symname = "UNKNOWN"
+            symvalue = 0
+            dllname = "UNK"
+        
+        ELSE
+            dllname = &dll^.Name[0]
+        END
+
+        RtlFormat (
+            &DbgTraceNameBuffer[0], // dest
+            DBG_TRACE_NAME_MAX, // bufsize
+            "%s!%s+0x%x", // fmt
+            dllname,
+            symname,
+            pc - symvalue,
+        )
+
+        RtlPrint ( "%p %p %s\n", pc, fp, &DbgTraceNameBuffer[0] )
+
+        IF NOT fp THEN
+            RtlPrint ( "!! FP=0 !!\n" )
+
+            LEAVE
+        END
+
+        IF pc < 0x80000000 THEN
+            RtlPrint ( "!! PC < 0x80000000 !!\n" )
+
+            LEAVE
+        END
+
+        IF pc >= 0xA0000000 THEN
+            RtlPrint ( "!! PC >= 0xA0000000 !!\n" )
+
+            LEAVE
+        END
+
+        // Get next link.
+
+        IF pc >= &KiExceptionVector AND pc < &DbgExcEnd THEN
+            // Step out of the exception handler. The "stack frame" is really
+            // an OsContext record.
+
+            ctx := CAST fp TO ^OsContext
+
+            IF NOT MmIsVirtualValid ( ctx ) THEN
+                RtlPrint ( "#\n" )
+
+                LEAVE
+            END
+
+            IF NOT MmIsVirtualValid ( ctx + SIZEOF OsContext ) THEN
+                RtlPrint ( "#\n" )
+
+                LEAVE
+            END
+
+            IF ctx^.Eflags & 8 THEN
+                // Was usermode. Can't step there.
+
+                LEAVE
+            END
+
+            fp = CAST ctx^.Fp TO ^VOID
+            pc = CAST ctx^.Epc TO ^VOID
+
+        ELSE
+            frame := CAST fp TO ^^VOID
+
+            pc = frame[1]
+            fp = frame[0]
+        END
+
+        links += 1
+    END
+END
+
+FN (KeCrashCallbackF) DbgStackTrace (
+    IN columns : UWORD,
+)
+
+    fp : ^VOID
+
+    DbgGetLinks (
+        OUT fp, // fp
+    )
+
+    DbgTrace (
+        fp, // fp
+        &DbgStackTrace, // pc
+    )
+END
+
+FN DbgDumpRegisters (
+    IN context : ^OsContext,
+)
+
+    RtlPrint (
+        " t0=%08x  t1=%08x  t2=%08x  t3=%08x  t4=%08x  t5=%08x\n", // fmt
+        context^.T0, context^.T1, context^.T2, context^.T3, context^.T4,
+        context^.T5,
+    )
+
+    RtlPrint (
+        " t6=%08x  a0=%08x  a1=%08x  a2=%08x  a3=%08x\n", // fmt
+        context^.T6, context^.A0, context^.A1, context^.A2, context^.A3,
+    )
+
+    RtlPrint (
+        " s0=%08x  s1=%08x  s2=%08x  s3=%08x  s4=%08x  s5=%08x\n", // fmt
+        context^.S0, context^.S1, context^.S2, context^.S3, context^.S4,
+        context^.S5,
+    )
+
+    RtlPrint (
+        " s6=%08x  s7=%08x  s8=%08x  s9=%08x s10=%08x s11=%08x\n", // fmt
+        context^.S6, context^.S7, context^.S8, context^.S9, context^.S10,
+        context^.S11,
+    )
+
+    RtlPrint (
+        "s12=%08x s13=%08x s14=%08x s15=%08x s16=%08x s17=%08x\n", // fmt
+        context^.S12, context^.S13, context^.S14, context^.S15, context^.S16,
+        context^.S17,
+    )
+
+    RtlPrint (
+        " at=%08x  tp=%08x  sp=%08x epc=%08x  eflags=%02x\n", // fmt
+        context^.At, context^.Tp, context^.Sp, context^.Epc, context^.Eflags,
+    )
+END
+
+FN DbgTraceContext (
+    IN context : ^OsContext,
+)
+
+    DbgTrace (
+        CAST context^.Fp TO ^VOID, // fp
+        CAST context^.Epc TO ^VOID, // pc
+    )
+END
