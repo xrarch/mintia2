@@ -757,8 +757,19 @@ FN KiExceptionHandler (
     dis := KiInterruptsDisabled
     KiInterruptsDisabled = TRUE
 
+    current := KI_CURRENT_PRB^.CurrentThread
+
+    IF context^.Eflags & 8 THEN
+        // We interrupted usermode. Set the user trapframe pointer.
+
+        current^.UserFrame = context
+    END
+
     IF context^.Epc >= &KiRestartableSections AND
         context^.Epc < &KiRestartableSectionsEnd THEN
+
+        // We interrupted an atomic restartable section, so reset PC to the
+        // beginning.
 
         KiResetPc ( context )
     END
@@ -778,6 +789,14 @@ FN KiExceptionHandler (
 
         IF prb^.PendingSoftwareInterrupts >> ipl THEN
             KiDispatchSoftwareInterrupts ( ipl )
+        END
+    END
+
+    IF context^.Eflags & 8 THEN
+        // We interrupted usermode. See if any usermode interrupts are pending.
+
+        IF current^.UserInterrupt THEN
+            KiDispatchUserInterrupts ()
         END
     END
 
