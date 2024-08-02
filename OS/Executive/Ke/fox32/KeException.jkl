@@ -792,12 +792,10 @@ FN KiExceptionHandler (
         END
     END
 
-    IF context^.Eflags & 8 THEN
+    IF context^.Eflags & 8 AND current^.UserInterrupt THEN
         // We interrupted usermode. See if any usermode interrupts are pending.
 
-        IF current^.UserInterrupt THEN
-            KiDispatchUserInterrupts ()
-        END
+        KiDispatchUserInterrupts ()
     END
 
     KiInterruptsDisabled = dis

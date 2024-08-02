@@ -1058,7 +1058,7 @@ FN KiSetPriorityThread (
     IN priority : UWORD,
 )
 
-    // Set the new priority for a thread.
+    // Set the new priority for a thread. The thread lock is held.
 
 #IF BLD_CHK
     IF KiCurrentIpl () != KI_IPL_DPC THEN
@@ -1067,9 +1067,7 @@ FN KiSetPriorityThread (
 #END
 
 #IF BLD_MP
-    // Lock the thread and any processor ready queue that it is enqueued to.
-
-    KiAcquireThreadElevated ( thread )
+    // Lock any processor ready queue that it is enqueued to.
 
     prb := thread^.CurrentPrb
 
@@ -1220,10 +1218,30 @@ FN KiSetPriorityThread (
     IF prb THEN
         KiReleaseReadyQueueElevated ( prb )
     END
-
-    KiReleaseThreadElevated ( thread )
 #END
 
+END
+
+EXPORT FN KeSetBasePriorityThread (
+    IN thread : ^KeThread,
+    IN priority : UWORD,
+)
+
+    // Set a new base priority for the given thread. If the new base is higher
+    // than the current priority, raise it.
+
+    ipl := KiAcquireThread ( thread )
+
+    thread^.BasePriority = priority
+
+    IF thread^.Priority < priority THEN
+        KiSetPriorityThread (
+            thread, // thread
+            priority, // priority
+        )
+    END
+
+    KiReleaseThread ( thread, ipl )
 END
 
 FN KiCheckInteractivity (
@@ -1279,41 +1297,42 @@ FN KiQuantumEnd (
 
     current^.RemainingQuantum = KI_DEFAULT_QUANTUM
 
-    // Decay priority by one.
+    KiAcquireThreadElevated ( current )
 
     IF current^.Priority > current^.BasePriority THEN
-        // If this thread should be preempted, this function will find by whom.
+        // Decay priority by one.
 
         KiSetPriorityThread (
             current, // thread
             current^.Priority - 1, // priority
         )
-
-    ELSE
-        // Lock the ready queue.
-
-        KiAcquireReadyQueueElevated ( prb )
-
-        IF NOT prb^.NextThread THEN
-            // Try to find a thread to preempt this one with.
-
-            next := KiSelectThread (
-                prb, // prb
-                current, // current
-                FALSE, // exclusive
-                FALSE, // migrate
-            )
-
-            IF next THEN
-                // Found one. Set it as the next thread.
-
-                next^.Status = KI_THREAD_STANDBY
-                prb^.NextThread = next
-            END
-        END
-
-        KiReleaseReadyQueueElevated ( prb )
     END
+
+    // Lock the ready queue.
+
+    KiAcquireReadyQueueElevated ( prb )
+
+    IF NOT prb^.NextThread THEN
+        // Try to find a thread to preempt this one with.
+
+        next := KiSelectThread (
+            prb, // prb
+            current, // current
+            FALSE, // exclusive
+            FALSE, // migrate
+        )
+
+        IF next THEN
+            // Found one. Set it as the next thread.
+
+            next^.Status = KI_THREAD_STANDBY
+            prb^.NextThread = next
+        END
+    END
+
+    KiReleaseReadyQueueElevated ( prb )
+
+    KiReleaseThreadElevated ( current )
 END
 
 FN KiYield (
