@@ -584,6 +584,14 @@ FN BlInitializeMemory ()
         BlCrash ( "Failed to allocate IDTs and idle stacks\n" )
     END
 
+    // Zero the IDTs and stacks.
+
+    RtlFillMemoryWithUlong (
+        idtstackbase, // ptr
+        totalsize, // sz
+        0, // ulong
+    )
+
     // Allocate the Prbs.
 
     totalsize = BlInfoBlock.ProcessorCount << BL_PRB_SHIFT
@@ -604,7 +612,13 @@ FN BlInitializeMemory ()
     BlInfoBlock.PhysicalPrbBase =
         CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID
 
-    // Stash the processor ID at the zeroth word of each Prb.
+    // Zero the Prbs.
+
+    RtlFillMemoryWithUlong (
+        BlInfoBlock.VirtualPrbBase, // ptr
+        totalsize, // sz
+        0, // ulong
+    )
 
     // Stash words in the Prb at the following indices:
     // 0 - Processor ID
