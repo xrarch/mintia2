@@ -93,14 +93,20 @@ EXPORT FN KeEnqueueKapc (
 
     thread := apc^.Thread
 
+    // Acquire the thread.
+
+    ipl := KiAcquireThread ( thread )
+
     // Acquire the APC queue.
 
-    ipl := KiAcquireApcQueue ( thread )
+    KiAcquireApcQueueElevated ( thread )
 
     IF apc^.Enqueued THEN
         // Already enqueued.
 
-        KiReleaseApcQueue ( thread, ipl )
+        KiReleaseApcQueueElevated ( thread )
+
+        KiReleaseThread ( thread, ipl )
 
         RETURN FALSE
     END
@@ -117,13 +123,9 @@ EXPORT FN KeEnqueueKapc (
     apc^.Context1 = context1
     apc^.Context2 = context2
 
-    // Release APC queue but keep IPL elevated.
+    // Release APC queue but keep IPL elevated and thread lock held.
 
     KiReleaseApcQueueElevated ( thread )
-
-    // Acquire the thread lock.
-
-    KiAcquireThreadElevated ( thread )
 
     IF thread^.Status == KI_THREAD_RUNNING THEN
         // Need to trigger an APC interrupt.
@@ -200,14 +202,20 @@ EXPORT FN KeEnqueueUapc (
     END
 #END
 
+    // Acquire the thread.
+
+    ipl := KiAcquireThread ( thread )
+
     // Acquire the APC queue.
 
-    ipl := KiAcquireApcQueue ( thread )
+    KiAcquireApcQueueElevated ( thread )
 
     IF apc^.Enqueued THEN
         // Already enqueued.
 
-        KiReleaseApcQueue ( thread, ipl )
+        KiReleaseApcQueueElevated ( thread )
+
+        KiReleaseThread ( thread, ipl )
 
         RETURN FALSE
     END
@@ -224,13 +232,9 @@ EXPORT FN KeEnqueueUapc (
     apc^.Context1 = context1
     apc^.Context2 = context2
 
-    // Release APC queue but keep IPL elevated.
+    // Release APC queue but keep IPL elevated and thread lock held.
 
     KiReleaseApcQueueElevated ( thread )
-
-    // Acquire the thread lock.
-
-    KiAcquireThreadElevated ( thread )
 
     IF (thread^.Status == KI_THREAD_WAITING
 #IF BLD_MP
@@ -279,14 +283,20 @@ EXPORT FN KeEnqueueLapc (
 
     thread := apc^.Thread
 
+    // Acquire the thread.
+
+    ipl := KiAcquireThread ( thread )
+
     // Acquire the APC queue.
 
-    ipl := KiAcquireApcQueue ( thread )
+    KiAcquireApcQueueElevated ( thread )
 
     IF apc^.Enqueued THEN
         // Already enqueued.
 
-        KiReleaseApcQueue ( thread, ipl )
+        KiReleaseApcQueueElevated ( thread )
+
+        KiReleaseThread ( thread, ipl )
 
         RETURN FALSE
     END
@@ -303,13 +313,9 @@ EXPORT FN KeEnqueueLapc (
     apc^.Context1 = context1
     apc^.Context2 = context2
 
-    // Release APC queue but keep IPL elevated.
+    // Release APC queue but keep thread lock, and IPL elevated.
 
     KiReleaseApcQueueElevated ( thread )
-
-    // Acquire the thread lock.
-
-    KiAcquireThreadElevated ( thread )
 
     // Set user interrupt pending to make sure the thread checks his lazy APC
     // queue on the way back out to usermode.
