@@ -92,6 +92,11 @@ FN KiJumpIntoIdleThread (
 
     KiSetProcessorIdle ( prb )
 
+    // Set parameters for new thread.
+
+    prb^.CurrentThread = &prb^.IdleThread
+    prb^.KernelStackTop = prb^.IdleThread.KernelStackTop
+
     // Switch into our idle thread.
 
     KiJumpIntoThread ( &prb^.IdleThread )
@@ -265,6 +270,16 @@ FN KiSwitchThread (
 
         KiSwitchAddressSpace ( nextproc )
     END
+
+    // Set parameters for new thread. We have to do this *before* we call
+    // KiSwitchContext since we've lost custody of the thread immediately
+    // after it releases the spinlock, so it would be incorrect for the interval
+    // timer interrupt or anyone else to think its safe to reference it through
+    // the CurrentThread field of the Prb after that moment. We want that to
+    // always be safe so here we do this.
+
+    prb^.CurrentThread = thread
+    prb^.KernelStackTop = thread^.KernelStackTop
 
     // Note that KiSwitchContext releases the old thread's lock.
     // It is not reacquired before switching back in.
