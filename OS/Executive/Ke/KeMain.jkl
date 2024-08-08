@@ -4,7 +4,7 @@
 
 #INCLUDE "Ki.hjk"
 
-PUBLIC KiIdleProcess : KeProcess
+PUBLIC KeIdleProcess : KeProcess
 
 EXPORT KeLoaderBlock : BlInfoRecord
 
@@ -197,7 +197,7 @@ FN KiInitializePrb (
     END
 
     KeInitializeThread (
-        &KiIdleProcess, // process
+        &KeIdleProcess, // process
         &prb^.IdleThread, // thread
         "IdleThread", // name
         prb^.IdleStackBase, // kstack
@@ -247,6 +247,8 @@ END
 
 #END
 
+EXTERN FN ExStartExecutive ()
+
 #SECTION "INIT$text"
 FN (KeStartThreadF) KiThreadedMain (
     IN context1 : UWORD,
@@ -255,6 +257,8 @@ FN (KeStartThreadF) KiThreadedMain (
 
     // This is the first code that runs in thread context during the lifetime of
     // the system. We need to perform phase 0 initialization of the Executive.
+
+    ExStartExecutive ()
 
     // Go into the idle loop.
 
@@ -332,11 +336,11 @@ EXPORT FN KeMain (
     // Initialize the idle process.
 
     KeInitializeProcess (
-        &KiIdleProcess, // process
+        &KeIdleProcess, // process
         "Idle", // name
     )
 
-    KiIdleProcess.PageDirectoryPfn = KeLoaderBlock.SystemPageDirectoryPfn
+    KeIdleProcess.PageDirectoryPfn = KeLoaderBlock.SystemPageDirectoryPfn
 
     // Initialize the Prbs.
 

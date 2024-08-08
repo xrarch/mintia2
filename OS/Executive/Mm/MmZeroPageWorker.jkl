@@ -1,0 +1,26 @@
+//
+// Implements the MINTIA Zero Page Worker thread.
+//
+
+#INCLUDE "Mi.hjk"
+
+FN MmZeroPageWorker ()
+
+    // Loop waiting on an event object which is signaled when there are more
+    // than a threshold of free pages. Then, zero them out and place them on
+    // the zeroed page list.
+
+    interval : RtlUquad
+    interval.High = 1
+    interval.Low = 0
+
+    WHILE TRUE DO
+        // TMP
+
+        KeSleep (
+            &interval, // interval
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+        )
+    END
+END

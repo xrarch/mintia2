@@ -746,6 +746,19 @@ FN KiReadyThread (
 
 END
 
+FN KeReadyThread (
+    IN thread : ^KeThread,
+)
+
+    // External interface for readying a thread.
+
+    ipl := KiAcquireThread ( thread )
+
+    KiReadyThread ( thread )
+
+    KiReleaseThread ( thread, ipl )
+END
+
 FN KiSelectRealTimeThread (
     IN prb : ^KiPrb,
     IN migrate : UWORD,

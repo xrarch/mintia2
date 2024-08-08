@@ -20,6 +20,8 @@ STRUCT KePushlock
     Ptr : UWORD,
 END
 
+#DEFINE KE_STACK_PAGES 1
+
 #DEFINE KE_KERNEL_MODE 1
 #DEFINE KE_USER_MODE 2
 
@@ -571,6 +573,10 @@ EXTERN FN KeSetBasePriorityThread (
     IN priority : UWORD,
 )
 
+EXTERN FN KeReadyThread (
+    IN thread : ^KeThread,
+)
+
 EXTERN FN KeInitializeSemaphore (
     IN semaphore : ^KeSemaphore,
     IN name : ^UBYTE,
@@ -863,3 +869,5 @@ EXTERN FN KeFlushIcachePages (
     IN pfntable : ^^VOID,
     IN pagecount : UWORD,
 )
+
+EXTERN KeIdleProcess : KeProcess
