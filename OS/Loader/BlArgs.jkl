@@ -4,19 +4,19 @@
 
 #INCLUDE "Bl.hjk"
 
-PUBLIC BlArgCount : UWORD
-PUBLIC BlArgTable : ^^UBYTE
-
 FN BlGetExistenceArg (
     IN str : ^UBYTE,
 ) : UWORD
 
     // Check if an argument matching the provided string was passed.
 
+    argcount := BlInfoBlock.ArgCount
+    argtable := BlInfoBlock.ArgTable
+
     i := 0
 
-    WHILE i < BlArgCount DO
-        IF RtlCompareString ( str, BlArgTable[i] ) == 0 THEN
+    WHILE i < argcount DO
+        IF RtlCompareString ( str, argtable[i] ) == 0 THEN
             RETURN TRUE
         END
 
@@ -34,10 +34,13 @@ FN BlGetValueArg (
     // This is a pointer into the argument string itself and shouldn't
     // be manipulated. If the key does not exist, NULLPTR is returned.
 
+    argcount := BlInfoBlock.ArgCount
+    argtable := BlInfoBlock.ArgTable
+
     i := 0
 
-    WHILE i < BlArgCount DO
-        str := BlArgTable[i]
+    WHILE i < argcount DO
+        str := argtable[i]
         j := 0
         name : UBYTE[16]
 

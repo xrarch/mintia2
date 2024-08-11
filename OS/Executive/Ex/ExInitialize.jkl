@@ -3,13 +3,108 @@
 //
 
 #INCLUDE "Exp.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
+#INCLUDE "<ll>/System/OsBootFlags.hjk"
 
 ExZeroPageWorker : KeThread
 ExZeroPageWorkerStack : UBYTE[(KE_STACK_PAGES << RTL_PAGE_SHIFT) + 32]
 
+ExBootFlags : ULONG = 0
+
 EXTERN FN MmZeroPageWorker ()
 
-#SECTION "INIT$text"
+#SECTION "INITtext"
+FN ExpGetExistenceArg (
+    IN str : ^UBYTE,
+) : UWORD
+
+    // Check if an argument matching the provided string was passed.
+
+    argcount := KeLoaderBlock.ArgCount
+    argtable := KeLoaderBlock.ArgTable
+
+    i := 0
+
+    WHILE i < argcount DO
+        IF RtlCompareString ( str, argtable[i] ) == 0 THEN
+            RETURN TRUE
+        END
+
+        i += 1
+    END
+
+    RETURN FALSE
+END
+
+#SECTION "INITtext"
+FN ExpGetValueArg (
+    IN key : ^UBYTE,
+) : ^UBYTE
+
+    // Return a pointer to the value part of a key=value argument.
+    // This is a pointer into the argument string itself and shouldn't
+    // be manipulated. If the key does not exist, NULLPTR is returned.
+
+    argcount := KeLoaderBlock.ArgCount
+    argtable := KeLoaderBlock.ArgTable
+
+    i := 0
+
+    WHILE i < argcount DO
+        str := argtable[i]
+        j := 0
+        name : UBYTE[16]
+
+        WHILE str^ DO
+            IF str^ == '=' THEN
+                name[j] = 0
+
+                IF RtlCompareString ( key, &name[0] ) == 0 THEN
+                    RETURN str + 1
+                END
+
+                BREAK
+            END
+
+            IF j == 15 THEN
+                BREAK
+            END
+
+            name[j] = str^
+
+            j += 1
+            str += 1
+        END
+
+        i += 1
+    END
+
+    RETURN NULLPTR
+END
+
+#SECTION "INITtext"
+FN ExpInitializeBootFlags ()
+
+    IF ExpGetExistenceArg ( "-s" ) THEN
+        // Boot the system in single user mode.
+
+        ExBootFlags |= OS_BOOT_SINGLE_USER
+    END
+
+    IF ExpGetExistenceArg ( "-nonpagedexec" ) THEN
+        // Force the paged executive, nonpaged.
+
+        ExBootFlags |= OS_BOOT_NONPAGED_EXECUTIVE
+    END
+
+    IF ExpGetExistenceArg ( "-nonpagedpool" ) THEN
+        // Force the paged pool, nonpaged.
+
+        ExBootFlags |= OS_BOOT_NONPAGED_POOL
+    END
+END
+
+#SECTION "INITtext"
 FN (KeStartThreadF) ExpInitializeExecutive (
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -18,14 +113,20 @@ FN (KeStartThreadF) ExpInitializeExecutive (
     // Initialize the Executive. Called in the context of the future Zero Page
     // Worker (ZPW) thread.
 
-    // ...
+    // First check for and initialize the boot flags.
+
+    ExpInitializeBootFlags ()
+
+    // Initialize physical memory allocation.
+
+    // MmInitializeStage1 ()
 
     // The Executive is initialized, become the ZPW.
 
     MmZeroPageWorker ()
 END
 
-#SECTION "INIT$text"
+#SECTION "INITtext"
 FN ExStartExecutive ()
 
     // Called by the Kernel (Ke) after it finishes its own self-initialization.
