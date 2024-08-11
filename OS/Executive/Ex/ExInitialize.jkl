@@ -11,7 +11,12 @@ ExZeroPageWorkerStack : UBYTE[(KE_STACK_PAGES << RTL_PAGE_SHIFT) + 32]
 
 ExBootFlags : ULONG = 0
 
-EXTERN FN MmZeroPageWorker ()
+EXTERN FN (KeStartThreadF) MmZeroPageWorker (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN MmInitializeStage1 ()
 
 #SECTION "INITtext"
 FN ExpGetExistenceArg (
@@ -119,11 +124,14 @@ FN (KeStartThreadF) ExpInitializeExecutive (
 
     // Initialize physical memory allocation.
 
-    // MmInitializeStage1 ()
+    MmInitializeStage1 ()
 
     // The Executive is initialized, become the ZPW.
 
-    MmZeroPageWorker ()
+    MmZeroPageWorker (
+        0, // context1
+        0, // context2
+    )
 END
 
 #SECTION "INITtext"

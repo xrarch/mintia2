@@ -4,18 +4,29 @@
 
 #INCLUDE "Mi.hjk"
 
-FN MmZeroPageWorker ()
+FN (KeStartThreadF) MmZeroPageWorker (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
 
     // Loop waiting on an event object which is signaled when there are more
     // than a threshold of free pages. Then, zero them out and place them on
     // the zeroed page list.
+
+    partition := CAST context1 TO ^MiPartition
+
+    IF NOT partition THEN
+        partition = &MiSystemPartition
+    END
+
+    // TEMP
 
     interval : RtlUquad
     interval.High = 1
     interval.Low = 0
 
     WHILE TRUE DO
-        // TMP
+        // TEMP
 
         KeSleep (
             &interval, // interval

@@ -1,3 +1,8 @@
+//
+// Private header file for the Memory Management component of the MINTIA
+// Executive.
+//
+
 #INCLUDE "<ll>/Rtl.hjk"
 #INCLUDE "<inc>/Ke.hjk"
 #INCLUDE "<inc>/Mm.hjk"
@@ -11,3 +16,92 @@
 #ELSE
     #ERROR "Unknown architecture"
 #END
+
+#DEFINE MI_UNINITIALIZED_PFE_TYPE 0
+#DEFINE MI_FREE_PFE_TYPE 1
+#DEFINE MI_FILE_PFE_TYPE 2
+#DEFINE MI_ANON_PFE_TYPE 3
+
+#DEFINE MI_MODIFIED_PFE_FLAG 1
+#DEFINE MI_DELETED_PFE_FLAG 2
+
+STRUCT MiFreePfe
+    Next : ^MiPfe,
+END
+
+STRUCT MiFilePfe
+    OffsetInFile : RtlUquad,
+    AvlLeftChild : ^VOID,
+    AvlRightChild : ^VOID,
+    AvlParent : ^VOID,
+END
+
+STRUCT MiAnonPfe
+    BackingEntry : ^MiPte,
+END
+
+UNION MiInUseUnion
+    File : MiFilePfe,
+    Anon : MiAnonPfe,
+END
+
+STRUCT MiPfe
+    U : MiInUseUnion,
+    Object : ^MmObject,
+    Entry : RtlListEntry,
+
+    References : ULONG,
+    Type : UBYTE,
+    Flags : UBYTE,
+END
+
+STRUCT MiPartition
+    FreeListHeads : RtlListEntry[MI_COLOR_COUNT],
+    ZeroListHeads : RtlListEntry[MI_COLOR_COUNT],
+    StandbyListHeads : RtlListEntry[MI_COLOR_COUNT],
+    ModifiedListHead : RtlListEntry,
+
+    FreePageCount : UWORD,
+    AvailablePageCount : UWORD,
+    FluidPageCount : UWORD,
+    ModifiedPageCount : UWORD,
+    StandbyPageCount : UWORD,
+    ZeroPageCount : UWORD,
+
+    CommitUsage : UWORD,
+    CommitLimit : UWORD,
+    PhysicalLimit : UWORD,
+    TheoreticalCommitLimit : UWORD,
+
+    ListLock : KePushlock,
+
+    LowMemoryEvent : KeEvent,
+    PageAvailableEvent : KeEvent,
+    LowPageAvailableEvent : KeEvent,
+    ModifiedPageEvent : KeEvent,
+    ZeroPageEvent : KeEvent,
+END
+
+EXTERN MiSystemPartition : MiPartition
+
+EXTERN MiPfnDatabase : ^MiPfe
+
+// Keep this synchronized with Loader.hjk
+
+#IF ( == BLD_BITS 32 )
+    #DEFINE MI_PFE_SIZE 40
+#ELSE
+    #DEFINE MI_PFE_SIZE 64
+#END
+
+#MACRO MI_PFN_TO_PFE ( pfn ) [
+    (CAST ((pfn) * MI_PFE_SIZE) + MiPfnDatabase TO ^MiPfe)
+]
+
+#MACRO MI_PFE_TO_PFN ( pfe ) [
+    (CAST (((pfe) - MiPfnDatabase) / MI_PFE_SIZE) TO UWORD)
+]
+
+EXTERN FN MiInitializePartitionStage1 (
+    IN partition : ^MiPartition,
+)

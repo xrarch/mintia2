@@ -1,0 +1,83 @@
+//
+// Implements support for Partition objects.
+//
+
+#INCLUDE "Mi.hjk"
+
+FN MiInitializePartitionStage1 (
+    IN partition : ^MiPartition,
+)
+
+    // Perform the first part of initialization for a memory partition.
+    // This is split in two so that we can use it while initializing the system
+    // partition.
+
+    // Initialize the list lock.
+
+    KeInitializePushlock ( &partition^.ListLock )
+
+    // Initialize the events.
+
+    KeInitializeEvent (
+        &partition^.LowMemoryEvent, // event
+        "LowMemory", // name
+        TRUE, // notification
+        FALSE, // signalstate
+    )
+
+    KeInitializeEvent (
+        &partition^.PageAvailableEvent, // event
+        "PageAvailable", // name
+        TRUE, // notification
+        TRUE, // signalstate
+    )
+
+    KeInitializeEvent (
+        &partition^.LowPageAvailableEvent, // event
+        "LowPageAvailable", // name
+        TRUE, // notification
+        TRUE, // signalstate
+    )
+
+    KeInitializeEvent (
+        &partition^.ModifiedPageEvent, // event
+        "ModifiedPages", // name
+        FALSE, // notification
+        FALSE, // signalstate
+    )
+
+    KeInitializeEvent (
+        &partition^.ZeroPageEvent, // event
+        "ZeroPages", // name
+        FALSE, // notification
+        FALSE, // signalstate
+    )
+
+    // Initialize the list heads.
+
+    RtlInitializeList ( &partition^.ModifiedListHead )
+    partition^.ModifiedPageCount = 0
+
+    i := 0
+
+    WHILE i < MI_COLOR_COUNT DO
+        RtlInitializeList ( &partition^.FreeListHeads[i] )
+        RtlInitializeList ( &partition^.ZeroListHeads[i] )
+        RtlInitializeList ( &partition^.StandbyListHeads[i] )
+
+        i += 1
+    END
+
+    partition^.FreePageCount = 0
+    partition^.StandbyPageCount = 0
+    partition^.ZeroPageCount = 0
+
+    partition^.AvailablePageCount = 0
+    partition^.FluidPageCount = 0
+
+    // Initialize commit.
+
+    partition^.CommitUsage = 0
+    partition^.CommitLimit = 0
+    partition^.PhysicalLimit = 0
+END

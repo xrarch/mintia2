@@ -1,0 +1,118 @@
+//
+// Implements initialization for the Memory Manager (Mm) component of the MINTIA
+// Executive.
+//
+
+#INCLUDE "Mi.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
+
+PUBLIC MiSystemPartition : MiPartition
+
+PUBLIC MiPfnDatabase : ^MiPfe
+
+PUBLIC MiTotalPages := 0
+
+#SECTION "INITtext"
+FN MmInitializeStage1 ()
+
+    // Stage 1 initialization for Memory Management. Here we have to initialize
+    // the system memory partition enough to get physical memory allocation
+    // working.
+
+#IF BLD_CHK
+    IF SIZEOF MiPfe > MI_PFE_SIZE THEN
+        KeCrash ( "MmInitializeStage1: bad PFE size\n" )
+    END
+#END
+
+    sys := &MiSystemPartition
+
+    // Copy the address of the PFN database.
+
+    MiPfnDatabase = KeLoaderBlock.PfnDatabase
+
+    // Initialize the integral data structures of the system partition.
+
+    MiInitializePartitionStage1 ( sys )
+
+    // Walk the memory descriptor list.
+
+    head := &KeLoaderBlock.DescriptorListHead
+    listentry := head^.Next
+
+    WHILE listentry != head DO
+        desc := CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+        // Include as part of the total memory of the system.
+
+        MiTotalPages += desc^.PageCount
+
+        IF desc^.Type == BL_MEMORY_FREE THEN
+            // Place all page frames within this descriptor's bounds on the free
+            // list of the system partition.
+
+            pages := desc^.PageCount
+
+            sys^.FluidPageCount += pages
+            sys^.AvailablePageCount += pages
+            sys^.FreePageCount += pages
+
+            pfn := desc^.StartPfn
+            pfe := MI_PFN_TO_PFE ( pfn )
+
+            WHILE pages DO
+                pfe^.Type = MI_FREE_PFE_TYPE
+
+                RtlInsertAtTailList (
+                    &sys^.FreeListHeads[MI_PFN_COLOR(pfn)], // head
+                    &pfe^.Entry, // entry
+                )
+
+                pfe += MI_PFE_SIZE
+                pfn += 1
+                pages -= 1
+            END
+        END
+
+        listentry = listentry^.Next
+    END
+
+    RtlPrint ( "MmInitialize: %u KB\n", (MiTotalPages << RTL_PAGE_SHIFT) >> 10 )
+
+    // Initialize the system virtual address allocator.
+
+    // MiInitializeVmem ()
+
+    // Initialize the system pools.
+
+    // MiInitializePools ()
+
+    // Initialize commit to something acceptable before creation of the
+    // pagefiles.
+
+    sys^.CommitLimit = sys^.AvailablePageCount + 100
+    sys^.TheoreticalCommitLimit = sys^.CommitLimit
+    sys^.PhysicalLimit = sys^.CommitLimit
+
+    // Reclaim boot time memory. Nothing in "loader space" is safe to access
+    // after this point.
+
+    // MiReclaimMemory ()
+
+    // Hook for the architecture to do what it wants.
+
+    // MiInitializeArchitecture ()
+
+    // Initialize the zones for quick MDL allocation.
+
+    // MiInitializeMdlZones ()
+
+    // Allocate one virtual page for each CPU to map stuff into.
+
+    // MiInitializeQuickPages ()
+
+    // Allocate one page which just remains constantly zeroed for the lifetime
+    // of the system.
+
+    // MiInitializeZeroedPage ()
+END

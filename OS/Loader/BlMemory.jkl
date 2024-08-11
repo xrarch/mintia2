@@ -415,9 +415,9 @@ FN BlCreatePfnDatabase (
     // Calculate the offset into the PFN database of the first page frame of the
     // region.
 
-    vaddr := BlInfoBlock.PfnDatabase + (desc^.StartPfn * BL_PFN_ELEMENT_SIZE)
+    vaddr := BlInfoBlock.PfnDatabase + (desc^.StartPfn * BL_PFE_SIZE)
 
-    endaddr := vaddr + (desc^.PageCount * BL_PFN_ELEMENT_SIZE)
+    endaddr := vaddr + (desc^.PageCount * BL_PFE_SIZE)
 
     // Round vaddr down.
     
@@ -505,7 +505,7 @@ FN BlInitializePfnDatabase ()
     // Reserve the virtual PFN database region.
 
     vaddr := BlAllocateKernelSpace (
-        ((maxpfn * BL_PFN_ELEMENT_SIZE) + (RTL_PAGE_SIZE - 1))
+        ((maxpfn * BL_PFE_SIZE) + (RTL_PAGE_SIZE - 1))
         >> RTL_PAGE_SHIFT, // pages
         BL_KERNEL_STRUCTURES, // preferredva
         FALSE, // fixed
