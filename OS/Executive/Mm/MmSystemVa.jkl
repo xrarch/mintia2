@@ -1,0 +1,183 @@
+//
+// Implements system address space allocation for the MINTIA Memory Manager.
+//
+
+#INCLUDE "Mi.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
+
+STRUCT MiChunkEntry
+    Next : ^MiChunkEntry,
+END
+
+STRUCT MiChunkSpace
+    EntryShift : UWORD,
+    EntryCount : UWORD,
+    FreeListHead : ^MiChunkEntry,
+END
+
+MiNonpagedSpace : MiChunkSpace
+MiCacheSpace : MiChunkSpace
+
+MiDynamicSpaceRoot : RtlAvlNode
+
+#SECTION "INITtext"
+FN MiInitializeChunkSpace (
+    IN chunkspace : ^MiChunkSpace,
+    IN base : ^VOID,
+    IN entryshift : UWORD,
+    IN pages : UWORD,
+)
+
+    // Initialize a chunked region of system space.
+
+    entrysize := 1 << entryshift
+    entrycount := (pages << RTL_PAGE_SHIFT) / entrysize
+    entrypages := entrysize >> RTL_PAGE_SHIFT
+
+    chunkspace^.EntryShift = entryshift
+    chunkspace^.EntryCount = entrycount
+    chunkspace^.FreeListHead = NULLPTR
+
+    // Link the chunks through the PTEs.
+
+    pte := CAST MI_PTE_ADDRESS ( base ) TO ^MiPte
+
+    WHILE entrycount DO
+        entry := CAST pte TO ^MiChunkEntry
+
+        entry^.Next = chunkspace^.FreeListHead
+        chunkspace^.FreeListHead = entry
+
+        entrycount -= 1
+        pte += entrypages * SIZEOF MiPte
+    END
+END
+
+FN MiAllocateChunkSpace (
+    IN chunkspace : ^MiChunkSpace,
+) : ^VOID
+
+    // Allocate a chunk from the given chunk space.
+    // Returns the virtual address of the chunk. Nothing is mapped into the
+    // returned virtual address - this is the caller's responsibility.
+    // Returns NULLPTR if no chunks remaining.
+
+    chunk := chunkspace^.FreeListHead
+
+    IF NOT chunk THEN
+        RETURN NULLPTR
+    END
+
+    chunkspace^.FreeListHead = chunk^.Next
+
+    RETURN MI_VIRTUAL_ADDRESS ( chunk )
+END
+
+FN MiFreeChunkSpace (
+    IN chunkspace : ^MiChunkSpace,
+    IN ptr : ^VOID,
+)
+
+    // Return a chunk to the given chunk space.
+
+    chunk := CAST MI_PTE_ADDRESS ( ptr ) TO ^MiChunkEntry
+
+    chunk^.Next = chunkspace^.FreeListHead
+    chunkspace^.FreeListHead = chunk
+END
+
+#SECTION "INITtext"
+FN MiInitializeSystemVa ()
+
+    // Initialize the system space allocation.
+
+    // There are three regions of dynamically managed system space:
+    //
+    // MI_NONPAGED_SPACE: Sized at boot time with enough page tables for a
+    //                    quantity of virtual space equivalent to the total
+    //                    physical memory in the system. Allocated in fixed size
+    //                    chunks, varying in size depending on the system size:
+    //
+    //                    Tiny:   16KB
+    //                    *:      32KB
+    //                    Large+: 64KB
+    //
+    //                    The free list for these chunks is threaded through the
+    //                    page tables.
+    //
+    //                    Maximum size on 32-bit is capped at 256MB.
+    //
+    //
+    // MI_CACHE_SPACE:    Occupies 4x phys mem of virtual space. Page tables are
+    //                    allocated at boot time. Used to map demand-paged views
+    //                    of cached files. Allocated in fixed size chunks,
+    //                    varying in size depending on the system size:
+    //
+    //                    Tiny:   32KB
+    //                    *:      64KB
+    //                    Large+: 256KB
+    //
+    //                    The free list for these chunks is threaded through the
+    //                    page tables.
+    //
+    //                    Maximum size on 32-bit is capped at 256MB.
+    //
+    //
+    // MI_DYNAMIC_SPACE:  Page tables are allocated at boot time. Allocations
+    //                    can be any count of pages. Used to map kernel stacks,
+    //                    MDLs, paged pool, etc.
+    //
+    //                    An AVL tree is used to allocate this space. The AVL
+    //                    nodes (containing parent, left child, right child, and
+    //                    an optional MmObject pointer) are allocated in bulk
+    //                    from nonpaged pool on-demand and stored in a lookaside
+    //                    list.
+    //
+    //                    Maximum size on 32-bit is capped at 256MB.
+
+    size := MiSystemPartition.SizeLevel
+
+    entryshift : UWORD
+
+    // Initialize nonpaged space.
+
+    IF size <= MI_TINY_SYSTEM THEN
+        entryshift = 14 // 1 << 14 = 16KB
+
+    ELSEIF size < MI_LARGE_SYSTEM THEN
+        entryshift = 15 // 1 << 15 = 32KB
+
+    ELSE
+        entryshift = 16 // 1 << 16 = 64KB
+    END
+
+    MiInitializeChunkSpace (
+        &MiNonpagedSpace, // chunkspace
+        MI_NONPAGED_SPACE, // base
+        entryshift, // entryshift
+        KeLoaderBlock.NonpagedSpaceSize, // pages
+    )
+
+    // Initialize cache space.
+
+    IF size <= MI_TINY_SYSTEM THEN
+        entryshift = 15 // 1 << 15 = 32KB
+
+    ELSEIF size < MI_LARGE_SYSTEM THEN
+        entryshift = 16 // 1 << 16 = 64KB
+
+    ELSE
+        entryshift = 18 // 1 << 18 = 256KB
+    END
+
+    MiInitializeChunkSpace (
+        &MiCacheSpace, // chunkspace
+        MI_CACHE_SPACE, // base
+        entryshift, // entryshift
+        KeLoaderBlock.CacheSpaceSize, // pages
+    )
+
+    // Initialize dynamic space.
+
+    RtlInitializeAvl ( &MiDynamicSpaceRoot )
+END

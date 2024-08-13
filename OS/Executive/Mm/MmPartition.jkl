@@ -79,5 +79,93 @@ FN MiInitializePartitionStage1 (
 
     partition^.CommitUsage = 0
     partition^.CommitLimit = 0
+    partition^.PhysicalUsage = 0
     partition^.PhysicalLimit = 0
+    partition^.TheoreticalCommitLimit = 0
+
+    // Initialize thresholds.
+
+    partition^.LowPageCount = 0
+    partition^.SufficientPageCount = 0
+    partition^.ModifiedPageMaximum = 0
+    partition^.ZeroingThreshold = 0
+
+    partition^.SizeLevel = MI_UNINITIALIZED_SYSTEM
+END
+
+FN MiSetPartitionSize (
+    IN partition : ^MiPartition,
+)
+
+    // Calculate the partition size and various threshold values.
+
+    membytes := partition^.TotalPages << RTL_PAGE_SHIFT
+    size : UWORD
+
+    IF membytes <= 3 * 1024 * 1024 THEN
+        // Tiny, 0-3MB.
+
+        size = MI_TINY_SYSTEM
+
+    ELSEIF membytes <= 5 * 1024 * 1024 THEN
+        // Small, 3-5MB.
+
+        size = MI_SMALL_SYSTEM
+
+    ELSEIF membytes <= 9 * 1024 * 1024 THEN
+        // Medium, 5-9MB.
+
+        size = MI_MEDIUM_SYSTEM
+
+    ELSEIF membytes <= 33 * 1024 * 1024 THEN
+        // Large, 9-33MB.
+
+        size = MI_LARGE_SYSTEM
+
+    ELSE
+        // Massive, >33MB.
+
+        size = MI_MASSIVE_SYSTEM
+    END
+
+    partition^.SizeLevel = size
+
+    // Set the modified page maximum.
+
+    IF size <= MI_TINY_SYSTEM THEN
+        partition^.ModifiedPageMaximum = 50
+
+    ELSEIF size <= MI_LARGE_SYSTEM THEN
+        partition^.ModifiedPageMaximum = 100
+
+    ELSE
+        partition^.ModifiedPageMaximum = 300
+    END
+
+    // Set the page zeroing threshold.
+
+    IF size <= MI_TINY_SYSTEM THEN
+        partition^.ZeroingThreshold = 75
+
+    ELSEIF size <= MI_MEDIUM_SYSTEM THEN
+        partition^.ZeroingThreshold = 150
+
+    ELSE
+        partition^.ZeroingThreshold = 500
+    END
+
+    // Set the paging thresholds.
+
+    IF size <= MI_TINY_SYSTEM THEN
+        partition^.LowPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 8
+        partition^.SufficientPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 50
+
+    ELSEIF size <= MI_LARGE_SYSTEM THEN
+        partition^.LowPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 20
+        partition^.SufficientPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 100
+
+    ELSE
+        partition^.LowPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 100
+        partition^.SufficientPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 500
+    END
 END

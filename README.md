@@ -10,6 +10,14 @@ MINTIA aims to be something that might have come off of a weird workstation
 computer made by a doomed company in 1989, and that might have been considered
 a pretty strong system at the time. It is also intended to be very portable.
 
+## Kernel Design Acknowledgements
+
+The scheduler design is inspired by FreeBSD's ULE. The overall system structure,
+particularly the usage of a hierarchical interrupt structure and the usage of
+software interrupts for deferred events, is inspired by the Windows NT kernel.
+The memory manager is inspired by VMS, NT, and Mach (via UVM). The IO system,
+particularly its fundamentally asynchronous nature, is inspired by VMS and NT.
+
 ## Supported Architectures
 
 <a href="https://github.com/xrarch/xremu"><img src="https://raw.githubusercontent.com/xrarch/mintia2/main/badge-17032.png" width="256"></a>

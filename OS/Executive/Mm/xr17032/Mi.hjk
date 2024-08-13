@@ -10,6 +10,20 @@
 
 #DEFINE MI_TABLE_LEVELS 2
 
+// Describes base and bounds of the three dynamic areas.
+
+#DEFINE MI_NONPAGED_SPACE 0xC0000000
+#DEFINE MI_NONPAGED_SPACE_SIZE [(256 * 1024 * 1024)]
+#DEFINE MI_NONPAGED_SPACE_END 0xD0000000
+
+#DEFINE MI_DYNAMIC_SPACE 0xD0000000
+#DEFINE MI_DYNAMIC_SPACE_SIZE [(256 * 1024 * 1024)]
+#DEFINE MI_DYNAMIC_SPACE_END 0xE0000000
+
+#DEFINE MI_CACHE_SPACE 0xE0000000
+#DEFINE MI_CACHE_SPACE_SIZE [(256 * 1024 * 1024)]
+#DEFINE MI_CACHE_SPACE_END 0xF0000000
+
 // Describes whether the page table gives a "complete" picture of the address
 // space. This is not the case on architectures where there is an architectural
 // mapping of physical memory (such as MIPS) or where the TLB can be used to
@@ -23,6 +37,10 @@ TYPE MiPte : ULONG
 
 #MACRO MI_PTE_ADDRESS ( vaddr ) [
     (MI_TABLE_BASE + ((vaddr >> 12) << 2))
+]
+
+#MACRO MI_VIRTUAL_ADDRESS ( pteaddr ) [
+    ((((pteaddr) - MI_TABLE_BASE) >> 2) << 12)
 ]
 
 // We use a fixed TB entry to map the PRB at this address on all processors.

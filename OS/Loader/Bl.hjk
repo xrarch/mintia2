@@ -6,6 +6,16 @@
 
 #INCLUDE "Headers/Loader.hjk"
 
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    #INCLUDE "../Executive/Mm/xr17032/Mi.hjk"
+
+#ELSEIF ( STRCMP ARCHITECTURE "fox32" )
+    #INCLUDE "../Executive/Mm/fox32/Mi.hjk"
+
+#ELSE
+    #ERROR ( STRCAT "Unknown architecture " ARCHITECTURE )
+#END
+
 #IF ( STRCMP PLATFORM "XRstation" )
     #INCLUDE "XRstation/Bl.hjk"
 
@@ -26,6 +36,8 @@ EXTERN BlDoRelinkAll : UWORD
 
 EXTERN BlHeapTop : ^VOID
 EXTERN BlHeapPointer : ^VOID
+
+EXTERN BlTotalPages : UWORD
 
 EXTERN BlTemporaryBuffer : UBYTE[1024]
 
@@ -78,6 +90,11 @@ EXTERN FN BxMapPage (
     IN pttype : BlMemoryDescriptorType,
     IN noncached : UWORD,
 )
+
+EXTERN FN BxCreateVirtualSpace (
+    IN base : UWORD,
+    IN pages : UWORD,
+) : UWORD
 
 EXTERN FN BlAllocateKernelSpace (
     IN pages : UWORD,

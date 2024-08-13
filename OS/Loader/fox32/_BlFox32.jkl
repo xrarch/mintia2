@@ -552,6 +552,8 @@ FN BxInitializeMemory ()
     // On fox32, this function has to populate the memory
     // descriptor list, identity map memory, and then enable paging.
 
+    BlTotalPages = (64 * 1024 * 1024) / 4096
+
     descidx := 0
 
     desc := &BxInitialDescriptors[descidx]
@@ -636,6 +638,60 @@ FN BxInitializeMemory ()
     // Enable paging.
 
     BxInitializeMemoryMapping ()
+END
+
+FN BxCreateVirtualSpace (
+    IN base : UWORD,
+    IN pages : UWORD,
+) : UWORD
+
+    // Create the page tables required to map the given range of virtual space.
+
+    // 1024 pages can be mapped by a page table.
+
+    pagetables := (pages + 1023) / 1024
+
+    // Calculate the real length of the region, rounded up to our page table
+    // size.
+
+    realpages := pagetables * 1024
+
+    // Allocate the page tables.
+
+    desc := BlAllocatePhysicalRange (
+        pagetables, // pages
+        BL_MEMORY_USED, // type
+    )
+
+    IF NOT desc THEN
+        BlCrash ( "Failed to create virtual space\n" )
+    END
+
+    pfn := desc^.StartPfn
+
+    // Insert them into the page directory.
+
+    pde := &BxPageDirectory[base >> 22]
+
+    WHILE pagetables DO
+        pde[0] = (pfn << 12) | PTE_V | PTE_W
+
+        pfn += 1
+        pde += 4
+        pagetables -= 1
+    END
+
+    // Zero them out through the recursive mapping.
+
+    ptebase := CAST MI_PTE_ADDRESS ( base ) TO ^VOID
+
+    RtlFillMemoryWithUlong (
+        ptebase, // ptr
+        pagetables << RTL_PAGE_SHIFT, // sz
+        0x00000000, // ulong
+    )
+
+    RETURN realpages
 END
 
 FN (BlReadF) BxReadPartition (

@@ -12,6 +12,8 @@ PUBLIC MiPfnDatabase : ^MiPfe
 
 PUBLIC MiTotalPages := 0
 
+PUBLIC MiSystemSize := 0
+
 #SECTION "INITtext"
 FN MmInitializeStage1 ()
 
@@ -45,7 +47,7 @@ FN MmInitializeStage1 ()
 
         // Include as part of the total memory of the system.
 
-        MiTotalPages += desc^.PageCount
+        sys^.TotalPages += desc^.PageCount
 
         IF desc^.Type == BL_MEMORY_FREE THEN
             // Place all page frames within this descriptor's bounds on the free
@@ -77,11 +79,17 @@ FN MmInitializeStage1 ()
         listentry = listentry^.Next
     END
 
-    RtlPrint ( "MmInitialize: %u KB\n", (MiTotalPages << RTL_PAGE_SHIFT) >> 10 )
+    membytes := sys^.TotalPages << RTL_PAGE_SHIFT
+
+    RtlPrint ( "MmInitialize: %u KB\n", membytes / 1024 )
+
+    // Determine system size.
+
+    MiSetPartitionSize ( sys )
 
     // Initialize the system virtual address allocator.
 
-    // MiInitializeVmem ()
+    MiInitializeSystemVa ()
 
     // Initialize the system pools.
 
@@ -99,7 +107,7 @@ FN MmInitializeStage1 ()
 
     // MiReclaimMemory ()
 
-    // Hook for the architecture to do what it wants.
+    // Hook for the architecture code to do what it wants.
 
     // MiInitializeArchitecture ()
 

@@ -617,6 +617,8 @@ FN BxInitializeMemory ()
 
     ramslotzero := FwDeviceDatabase^.Ram[0].PageFrameCount
 
+    BlTotalPages = ramslotzero
+
     // Initialize first descriptor as a reclaimable area covering the firmware
     // data region up to the end of our BSS section.
 
@@ -675,6 +677,8 @@ FN BxInitializeMemory ()
                 &BlInfoBlock.DescriptorListHead, // head
                 &desc^.Entry, // entry
             )
+
+            BlTotalPages += pagecount
         END
 
         base += 32 * 1024 * 1024
@@ -838,6 +842,60 @@ FN BxVirtualToPfn (
     END
 
     RETURN -1
+END
+
+FN BxCreateVirtualSpace (
+    IN base : UWORD,
+    IN pages : UWORD,
+) : UWORD
+
+    // Create the page tables required to map the given range of virtual space.
+
+    // 1024 pages can be mapped by a page table.
+
+    pagetables := (pages + 1023) / 1024
+
+    // Calculate the real length of the region, rounded up to our page table
+    // size.
+
+    realpages := pagetables * 1024
+
+    // Allocate the page tables.
+
+    desc := BlAllocatePhysicalRange (
+        pagetables, // pages
+        BL_MEMORY_USED, // type
+    )
+
+    IF NOT desc THEN
+        BlCrash ( "Failed to create virtual space\n" )
+    END
+
+    pfn := desc^.StartPfn
+
+    // Insert them into the page directory.
+
+    pde := &BxPageDirectory[base >> 22]
+
+    WHILE pagetables DO
+        pde[0] = (pfn << 5) | PTE_V | PTE_W | PTE_K | PTE_G
+
+        pfn += 1
+        pde += 4
+        pagetables -= 1
+    END
+
+    // Zero them out through the recursive mapping.
+
+    ptebase := CAST MI_PTE_ADDRESS ( base ) TO ^VOID
+
+    RtlFillMemoryWithUlong (
+        ptebase, // ptr
+        pagetables << RTL_PAGE_SHIFT, // sz
+        0x00000010, // ulong
+    )
+
+    RETURN realpages
 END
 
 FN BxDiskNameToNumbers (

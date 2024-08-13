@@ -17,6 +17,13 @@
     #ERROR "Unknown architecture"
 #END
 
+#DEFINE MI_UNINITIALIZED_SYSTEM 0
+#DEFINE MI_TINY_SYSTEM 1
+#DEFINE MI_SMALL_SYSTEM 2
+#DEFINE MI_MEDIUM_SYSTEM 3
+#DEFINE MI_LARGE_SYSTEM 4
+#DEFINE MI_MASSIVE_SYSTEM 5
+
 #DEFINE MI_UNINITIALIZED_PFE_TYPE 0
 #DEFINE MI_FREE_PFE_TYPE 1
 #DEFINE MI_FILE_PFE_TYPE 2
@@ -70,8 +77,16 @@ STRUCT MiPartition
 
     CommitUsage : UWORD,
     CommitLimit : UWORD,
+    PhysicalUsage : UWORD,
     PhysicalLimit : UWORD,
     TheoreticalCommitLimit : UWORD,
+
+    TotalPages : UWORD,
+
+    LowPageCount : UWORD,
+    SufficientPageCount : UWORD,
+    ModifiedPageMaximum : UWORD,
+    ZeroingThreshold : UWORD,
 
     ListLock : KePushlock,
 
@@ -80,11 +95,15 @@ STRUCT MiPartition
     LowPageAvailableEvent : KeEvent,
     ModifiedPageEvent : KeEvent,
     ZeroPageEvent : KeEvent,
+
+    SizeLevel : UBYTE,
 END
 
 EXTERN MiSystemPartition : MiPartition
 
 EXTERN MiPfnDatabase : ^MiPfe
+
+EXTERN MiSystemSize : UWORD
 
 // Keep this synchronized with Loader.hjk
 
@@ -105,3 +124,11 @@ EXTERN MiPfnDatabase : ^MiPfe
 EXTERN FN MiInitializePartitionStage1 (
     IN partition : ^MiPartition,
 )
+
+EXTERN FN MiSetPartitionSize (
+    IN partition : ^MiPartition,
+)
+
+EXTERN FN MiInitializeSystemVa ()
+
+#DEFINE MI_BLOCK_FOR_PAGES_THRESHOLD 16
