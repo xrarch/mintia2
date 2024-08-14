@@ -332,9 +332,6 @@ FN BxEntry ()
     WHILE TRUE DO END
 END
 
-#DEFINE PTE_V 1
-#DEFINE PTE_W 2
-
 BxPageDirectory : ^ULONG
 
 FN BxMapPage (
@@ -362,7 +359,7 @@ FN BxMapPage (
 
         pagetable = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
 
-        newpde := (desc^.StartPfn << 12) | PTE_V | PTE_W
+        newpde := (desc^.StartPfn << 12) | MI_PTE_V | MI_PTE_W
 
         RtlFillMemoryWithUlong (
             pagetable, // dest
@@ -376,12 +373,12 @@ FN BxMapPage (
     pteptr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
 
 #IF BLD_CHK
-    IF pteptr^ & PTE_V THEN
+    IF pteptr^ & MI_PTE_V THEN
         BlCrash ( "VPN %x already mapped\n", vaddr >> RTL_PAGE_SHIFT )
     END
 #END
 
-    newpte := CAST phyaddr | PTE_V | PTE_W TO ULONG
+    newpte := CAST phyaddr | MI_PTE_V | MI_PTE_W TO ULONG
 
     pteptr^ = newpte
 END
@@ -424,7 +421,7 @@ FN BxVirtualToPfn (
 
     pte := pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
 
-    IF pte & PTE_V THEN
+    IF pte & MI_PTE_V THEN
         RETURN pte >> 12
     END
 
@@ -448,11 +445,11 @@ FN BxRemapCodePage (
     pteaddr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
     pte := pteaddr^
 
-    IF NOT (pte & PTE_V) THEN
+    IF NOT (pte & MI_PTE_V) THEN
         BlCrash ( "BxRemapCodePage 2\n" )
     END
 
-    pte &= ~(PTE_W)
+    pte &= ~(MI_PTE_W)
     pteaddr^ = pte
 
     // Purge TB page.
@@ -528,7 +525,7 @@ FN BxInitializeMemoryMapping ()
 
     pdeptr := &BxPageDirectory[0xB0000000 >> 22]
 
-    pdeptr^ = ((BxPageDirectory >> 12) << 12) | PTE_V | PTE_W
+    pdeptr^ = ((BxPageDirectory >> 12) << 12) | MI_PTE_V | MI_PTE_W
 
     // Identity-map the first page of the ROM so the fox32 HAL can jump there
     // for resets.
@@ -674,7 +671,7 @@ FN BxCreateVirtualSpace (
     pde := &BxPageDirectory[base >> 22]
 
     WHILE pagetables DO
-        pde[0] = (pfn << 12) | PTE_V | PTE_W
+        pde[0] = (pfn << 12) | MI_PTE_V | MI_PTE_W
 
         pfn += 1
         pde += 4

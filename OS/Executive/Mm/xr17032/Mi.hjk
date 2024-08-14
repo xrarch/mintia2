@@ -12,9 +12,9 @@
 
 // Describes base and bounds of the three dynamic areas.
 
-#DEFINE MI_NONPAGED_SPACE 0xC0000000
-#DEFINE MI_NONPAGED_SPACE_SIZE [(256 * 1024 * 1024)]
-#DEFINE MI_NONPAGED_SPACE_END 0xD0000000
+#DEFINE MI_POOL_SPACE 0xC0000000
+#DEFINE MI_POOL_SPACE_SIZE [(256 * 1024 * 1024)]
+#DEFINE MI_POOL_SPACE_END 0xD0000000
 
 #DEFINE MI_DYNAMIC_SPACE 0xD0000000
 #DEFINE MI_DYNAMIC_SPACE_SIZE [(256 * 1024 * 1024)]
@@ -32,15 +32,27 @@
 #DEFINE MI_COMPLETE_TABLE 0
 
 #DEFINE MI_PTE_V 1
+#DEFINE MI_PTE_W 2
+#DEFINE MI_PTE_K 4
+#DEFINE MI_PTE_NC 8
+#DEFINE MI_PTE_G 16
 
 TYPE MiPte : ULONG
 
 #MACRO MI_PTE_ADDRESS ( vaddr ) [
-    (MI_TABLE_BASE + ((vaddr >> 12) << 2))
+    (CAST (MI_TABLE_BASE + ((vaddr >> 12) << 2)) TO ^MiPte)
 ]
 
 #MACRO MI_VIRTUAL_ADDRESS ( pteaddr ) [
-    ((((pteaddr) - MI_TABLE_BASE) >> 2) << 12)
+    (CAST ((((pteaddr) - MI_TABLE_BASE) >> 2) << 12) TO ^VOID)
+]
+
+#MACRO MI_PFN_FROM_PTE ( pte ) [
+    ((pte) >> 5)
+]
+
+#MACRO MI_BUILD_POOL_PTE ( pfn ) [
+    (((pfn) << 5) | (MI_PTE_V | MI_PTE_W | MI_PTE_K | MI_PTE_G))
 ]
 
 // We use a fixed TB entry to map the PRB at this address on all processors.

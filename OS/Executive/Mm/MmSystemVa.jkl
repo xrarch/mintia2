@@ -13,12 +13,20 @@ STRUCT MiChunkSpace
     EntryShift : UWORD,
     EntryCount : UWORD,
     FreeListHead : ^MiChunkEntry,
+    Pushlock : KePushlock,
 END
 
-MiNonpagedSpace : MiChunkSpace
+MiPoolSpace : MiChunkSpace
 MiCacheSpace : MiChunkSpace
 
+PUBLIC MiPoolSpaceChunkPages : UWORD
+PUBLIC MiCacheSpaceChunkPages : UWORD
+PUBLIC MiPoolSpaceChunkMask : UWORD
+
 MiDynamicSpaceRoot : RtlAvlNode
+MiDynamicSpacePushlock : KePushlock
+
+MiDynamicSpacePages : UWORD
 
 #SECTION "INITtext"
 FN MiInitializeChunkSpace (
@@ -38,9 +46,11 @@ FN MiInitializeChunkSpace (
     chunkspace^.EntryCount = entrycount
     chunkspace^.FreeListHead = NULLPTR
 
+    KeInitializePushlock ( &chunkspace^.Pushlock )
+
     // Link the chunks through the PTEs.
 
-    pte := CAST MI_PTE_ADDRESS ( base ) TO ^MiPte
+    pte := MI_PTE_ADDRESS ( base )
 
     WHILE entrycount DO
         entry := CAST pte TO ^MiChunkEntry
@@ -62,13 +72,19 @@ FN MiAllocateChunkSpace (
     // returned virtual address - this is the caller's responsibility.
     // Returns NULLPTR if no chunks remaining.
 
+    ipl := KeAcquireApcSafePushlockExclusive ( &chunkspace^.Pushlock )
+
     chunk := chunkspace^.FreeListHead
 
     IF NOT chunk THEN
+        KeReleaseApcSafePushlock ( &chunkspace^.Pushlock, ipl )
+
         RETURN NULLPTR
     END
 
     chunkspace^.FreeListHead = chunk^.Next
+
+    KeReleaseApcSafePushlock ( &chunkspace^.Pushlock, ipl )
 
     RETURN MI_VIRTUAL_ADDRESS ( chunk )
 END
@@ -82,8 +98,31 @@ FN MiFreeChunkSpace (
 
     chunk := CAST MI_PTE_ADDRESS ( ptr ) TO ^MiChunkEntry
 
+    ipl := KeAcquireApcSafePushlockExclusive ( &chunkspace^.Pushlock )
+
     chunk^.Next = chunkspace^.FreeListHead
     chunkspace^.FreeListHead = chunk
+
+    KeReleaseApcSafePushlock ( &chunkspace^.Pushlock, ipl )
+END
+
+FN MiAllocatePoolSpace () : ^VOID
+
+    // Allocate a chunk of pool space.
+
+    RETURN MiAllocateChunkSpace ( &MiPoolSpace )
+END
+
+FN MiFreePoolSpace (
+    IN ptr : ^VOID,
+)
+
+    // Free a chunk of pool space.
+
+    MiFreeChunkSpace (
+        &MiPoolSpace, // chunkspace
+        ptr, // ptr
+    )
 END
 
 #SECTION "INITtext"
@@ -93,7 +132,7 @@ FN MiInitializeSystemVa ()
 
     // There are three regions of dynamically managed system space:
     //
-    // MI_NONPAGED_SPACE: Sized at boot time with enough page tables for a
+    // MI_POOL_SPACE:     Sized at boot time with enough page tables for a
     //                    quantity of virtual space equivalent to the total
     //                    physical memory in the system. Allocated in fixed size
     //                    chunks, varying in size depending on the system size:
@@ -125,7 +164,7 @@ FN MiInitializeSystemVa ()
     //
     // MI_DYNAMIC_SPACE:  Page tables are allocated at boot time. Allocations
     //                    can be any count of pages. Used to map kernel stacks,
-    //                    MDLs, paged pool, etc.
+    //                    MDLs, etc.
     //
     //                    An AVL tree is used to allocate this space. The AVL
     //                    nodes (containing parent, left child, right child, and
@@ -151,11 +190,19 @@ FN MiInitializeSystemVa ()
         entryshift = 16 // 1 << 16 = 64KB
     END
 
+    // Initialize a count of pages per chunk.
+
+    MiPoolSpaceChunkPages = (1 << entryshift) >> RTL_PAGE_SHIFT
+
+    // Initialize a mask by which the chunk base can be found from a pointer.
+
+    MiPoolSpaceChunkMask = ~((1 << entryshift) - 1)
+
     MiInitializeChunkSpace (
-        &MiNonpagedSpace, // chunkspace
-        MI_NONPAGED_SPACE, // base
+        &MiPoolSpace, // chunkspace
+        MI_POOL_SPACE, // base
         entryshift, // entryshift
-        KeLoaderBlock.NonpagedSpaceSize, // pages
+        KeLoaderBlock.PoolSpaceSize, // pages
     )
 
     // Initialize cache space.
@@ -170,6 +217,8 @@ FN MiInitializeSystemVa ()
         entryshift = 18 // 1 << 18 = 256KB
     END
 
+    MiCacheSpaceChunkPages = (1 << entryshift) >> RTL_PAGE_SHIFT
+
     MiInitializeChunkSpace (
         &MiCacheSpace, // chunkspace
         MI_CACHE_SPACE, // base
@@ -180,4 +229,66 @@ FN MiInitializeSystemVa ()
     // Initialize dynamic space.
 
     RtlInitializeAvl ( &MiDynamicSpaceRoot )
+
+    KeInitializePushlock ( &MiDynamicSpacePushlock )
+
+    // Trim enough pages off the end of dynamic space to allow each CPU to have
+    // its own page for 'quick' mappings.
+
+    dsize := KeLoaderBlock.DynamicSpaceSize
+
+    IF dsize < KeLoaderBlock.ProcessorCount THEN
+        KeCrash ( "Dynamic space too small\n" )
+    END
+
+    dsize -= KeLoaderBlock.ProcessorCount
+
+    MiDynamicSpacePages = dsize
+
+    // Set each processor's quick PTE.
+
+    basepte := MI_PTE_ADDRESS ( MI_DYNAMIC_SPACE + (dsize << RTL_PAGE_SHIFT) )
+
+    KeSetQuickPtes (
+        basepte, // basepte
+        SIZEOF MiPte, // ptesize
+    )
+END
+
+FN MiFindDynamicSpaceNode (
+    IN ptr : ^VOID,
+) : ^MiDynamicSpaceNode
+
+    // Find the dynamic space node in which the pointer resides.
+    // Returns NULLPTR if no such node exists.
+
+    node : ^MiDynamicSpaceNode
+
+    ipl := KeAcquireApcSafePushlockShared ( &MiDynamicSpacePushlock )
+
+    avlnode := MiDynamicSpaceRoot.Right
+
+    WHILE TRUE DO
+        IF NOT avlnode THEN
+            node = NULLPTR
+
+            BREAK
+        END
+
+        node = CONTAINEROF avlnode TO MiDynamicSpaceNode.Entry
+
+        IF ptr < node^.StartVa THEN
+            avlnode = avlnode^.Left
+
+        ELSEIF ptr >= node^.EndVa THEN
+            avlnode = avlnode^.Right
+
+        ELSE
+            BREAK
+        END
+    END
+
+    KeReleaseApcSafePushlock ( &MiDynamicSpacePushlock, ipl )
+
+    RETURN node
 END

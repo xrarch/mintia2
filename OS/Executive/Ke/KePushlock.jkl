@@ -229,7 +229,8 @@ END
 
 FN KiAcquirePushlockExclusive (
     IN pushlock : ^KePushlock,
-)
+    IN oldipl : UWORD,
+) : UWORD
 
     // Acquire a pushlock exclusive.
     // The fundamental structure of this routine is an atomic CAS loop.
@@ -264,7 +265,7 @@ FN KiAcquirePushlockExclusive (
             IF new == current THEN
                 // Got it.
 
-                LEAVE
+                RETURN oldipl
             END
 
             // Failed to CAS, try again.
@@ -385,7 +386,8 @@ END
 
 FN KiAcquirePushlockShared (
     IN pushlock : ^KePushlock,
-)
+    IN oldipl : UWORD,
+) : UWORD
 
     // Acquire a pushlock shared.
     // The fundamental structure of this routine is an atomic CAS loop.
@@ -433,7 +435,7 @@ FN KiAcquirePushlockShared (
             IF new == current THEN
                 // Got the lock, leave.
 
-                LEAVE
+                RETURN oldipl
             END
 
             // Failed to CAS, retry.

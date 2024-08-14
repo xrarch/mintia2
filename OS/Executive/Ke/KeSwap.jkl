@@ -583,11 +583,11 @@ FN KeAttachProcess (
 
     // Mask KAPCs since we won't be in the right address space to receive them.
 
-    KeMaskApcs ()
+    thread^.AttachIpl = KiRaiseIpl ( KI_IPL_APC )
 
     // Acquire the current thread's lock.
 
-    ipl := KiAcquireThread ( thread )
+    KiAcquireThread ( thread )
 
     KiAcquireSwapStateElevated ( process )
 
@@ -597,9 +597,7 @@ FN KeAttachProcess (
 
         KiReleaseSwapStateElevated ( process )
 
-        KiReleaseThread ( thread, ipl )
-
-        KeUnmaskApcs ()
+        KiReleaseThread ( thread, thread^.AttachIpl )
 
         RETURN FALSE
     END
@@ -614,7 +612,7 @@ FN KeAttachProcess (
 
         KiSwitchAddressSpace ( process )
 
-        KiReleaseThread ( thread, ipl )
+        KiReleaseThread ( thread, KI_IPL_APC )
 
         RETURN TRUE
     END
@@ -683,7 +681,7 @@ FN KeDetachProcess (
 
     // Lock the thread.
 
-    ipl := KiAcquireThread ( thread )
+    KiAcquireThread ( thread )
 
     // Lock the old process's swap state.
 
@@ -741,7 +739,5 @@ FN KeDetachProcess (
 
     // Release thread lock, lower IPL, unmask APCs.
 
-    KiReleaseThread ( thread, ipl )
-
-    KeUnmaskApcs ()
+    KiReleaseThread ( thread, thread^.AttachIpl )
 END

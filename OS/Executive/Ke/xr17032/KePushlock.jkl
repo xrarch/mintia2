@@ -13,21 +13,13 @@
     // pushlock depth.
 
     subi t1, zero, 4096             // Acquire a pointer to the Prb.
-    mov  byte [t1 + KiPrb_Ipl], 1   // Store the new IPL.
-
-    // Acquire a pointer to the current thread.
-
-    mov  t2, long [t1 + KiPrb_CurrentThread]
-
-    // Increment the pushlock depth. This is synchronized as only the current
-    // thread can modify its pushlock depth.
-
-    mov  t3, long [t2 + KeThread_ApcPushlockDepth]
-    addi t3, t3, 1
-    mov  long [t2 + KeThread_ApcPushlockDepth], t3
+    mov  a3, byte [t1 + KiPrb_Ipl]  // Load old IPL.
+    mov  byte [t1 + KiPrb_Ipl], KI_IPL_APC
 ]
 
 // a0 - pushlock
+// outputs:
+// a3 - oldipl
 KeAcquireApcSafePushlockShared:
 .export KeAcquireApcSafePushlockShared
 
@@ -61,9 +53,12 @@ KeAcquirePushlockShared:
     ret
 
 .slow:
+    mov  a1, a3
     j    KiAcquirePushlockShared
 
 // a0 - pushlock
+// outputs:
+// a3 - oldipl
 KeAcquireApcSafePushlockExclusive:
 .export KeAcquireApcSafePushlockExclusive
 
@@ -95,6 +90,7 @@ KeAcquirePushlockExclusive:
     ret
 
 .slow:
+    mov  a1, a3
     j    KiAcquirePushlockExclusive
 
 #MACRO ReleasePushlock ( x ) [
@@ -155,6 +151,7 @@ KeReleasePushlock:
     j    KiReleasePushlock
 
 // a0 - pushlock
+// a1 - oldipl
 KeReleaseApcSafePushlock:
 .export KeReleaseApcSafePushlock
 
@@ -166,49 +163,35 @@ KeReleaseApcSafePushlock:
 
 .slow:
 
-    subi sp, sp, 4
-    mov  long [sp], lr
+    subi sp, sp, 8
+    mov  long [sp], a1
+    mov  long [sp + 4], lr
 
     jal  KiReleasePushlock
 
-    mov  lr, long [sp]
-    addi sp, sp, 4
+    mov  a1, long [sp]
+    mov  lr, long [sp + 4]
+    addi sp, sp, 8
 
     // Fall through.
 
 .apcsafe:
 
-    // The pushlock is APC-safe, so decrement the pushlock count of the current
-    // thread.
+    // The pushlock is APC-safe, so restore the old IPL.
+    // This is KiLowerIpl inlined.
 
-    subi t1, zero, 4096             // Acquire a pointer to the Prb.
-
-    // Acquire a pointer to the current thread.
-
-    mov  t2, long [t1 + KiPrb_CurrentThread]
-
-    // Decrement the count.
-
-    mov  t3, long [t2 + KeThread_ApcPushlockDepth]
-    subi t3, t3, 1
-    mov  long [t2 + KeThread_ApcPushlockDepth], t3
-
-    // If the count became 0, drop to KI_IPL_LOW.
-
-    bne  t3, .dontdrop
-
-    mov  byte [t1 + KiPrb_Ipl], 0   // Store the new IPL.
-    mov  t2, long [t1 + KiPrb_PendingSoftwareInterrupts]
+    subi t0, zero, 4096
+    mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.
+    mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
+    rsh  t2, t1, a1                 // Right shift pending by new IPL.
     bne  t2, .dispatch              // If zero, none pending at new IPL.
-
-.dontdrop:
 
     ret
 
 .dispatch:
-
-    li   a0, 0
+    mov  a0, a1
     j    KiDispatchSoftwareInterrupts
+
 
 #IF BLD_CHK
 

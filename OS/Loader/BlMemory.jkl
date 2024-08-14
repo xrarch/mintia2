@@ -665,22 +665,22 @@ FN BlInitializeMemory ()
     BlInfoBlock.PhysicalSharedUserPage =
         CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID
 
-    // Create the dynamic system areas.
+    // Create the dynamic system virtual memory areas.
 
-    // MI_NONPAGED_SPACE is equal to physical memory.
+    // MI_POOL_SPACE is equal to 4x physical memory.
 
-    pages = BlTotalPages
+    pages = BlTotalPages * 4
 
-    IF pages > (MI_NONPAGED_SPACE_SIZE / RTL_PAGE_SIZE) THEN
-        pages = (MI_NONPAGED_SPACE_SIZE / RTL_PAGE_SIZE)
+    IF pages > (MI_POOL_SPACE_SIZE / RTL_PAGE_SIZE) THEN
+        pages = MI_POOL_SPACE_SIZE / RTL_PAGE_SIZE
     END
 
     // The true page count is returned by BxCreateVirtualSpace since it will
     // round up in some architecture-specific way, and we want to use all of the
     // space available.
 
-    BlInfoBlock.NonpagedSpaceSize = BxCreateVirtualSpace (
-        MI_NONPAGED_SPACE, // base
+    BlInfoBlock.PoolSpaceSize = BxCreateVirtualSpace (
+        MI_POOL_SPACE, // base
         pages, // pages
     )
 
@@ -689,7 +689,7 @@ FN BlInitializeMemory ()
     pages = BlTotalPages * 4
 
     IF pages > (MI_CACHE_SPACE_SIZE / RTL_PAGE_SIZE) THEN
-        pages = (MI_CACHE_SPACE_SIZE / RTL_PAGE_SIZE)
+        pages = MI_CACHE_SPACE_SIZE / RTL_PAGE_SIZE
     END
 
     BlInfoBlock.CacheSpaceSize = BxCreateVirtualSpace (
@@ -697,41 +697,12 @@ FN BlInitializeMemory ()
         pages, // pages
     )
 
-    // MI_DYNAMIC_SPACE scales nonlinearly with physical memory size.
+    // MI_DYNAMIC_SPACE is equal to 8x physical memory.
 
-#IF ( == BLD_BITS 32 )
-    // On 32 bit we might be on a system with more than 4GB of physical memory.
-    // Be careful not to overflow totalsize in that case.
-
-    IF BlTotalPages >= (0xFFFFFFFF >> RTL_PAGE_SHIFT) + 1 THEN
-        totalsize = 0xFFFFFFFF
-
-    ELSE
-        totalsize = BlTotalPages << RTL_PAGE_SHIFT
-    END
-
-#ELSE
-    totalsize = BlTotalPages << RTL_PAGE_SHIFT
-#END
-
-    IF totalsize <= (2 * 1024 * 1024) THEN
-        pages = (8 * 1024 * 1024) >> RTL_PAGE_SHIFT
-
-    ELSEIF totalsize <= (5 * 1024 * 1024) THEN
-        pages = (16 * 1024 * 1024) >> RTL_PAGE_SHIFT
-
-    ELSEIF totalsize <= (9 * 1024 * 1024) THEN
-        pages = (32 * 1024 * 1024) >> RTL_PAGE_SHIFT
-
-    ELSEIF totalsize <= (33 * 1024 * 1024) THEN
-        pages = (128 * 1024 * 1024) >> RTL_PAGE_SHIFT
-
-    ELSE
-        pages = (256 * 1024 * 1024) >> RTL_PAGE_SHIFT
-    END
+    pages = BlTotalPages * 8
 
     IF pages > (MI_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE) THEN
-        pages = (MI_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE)
+        pages = MI_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE
     END
 
     BlInfoBlock.DynamicSpaceSize = BxCreateVirtualSpace (

@@ -446,3 +446,24 @@ EXPORT FN KeMain (
 
     KeCrash ( "KiJumpIntoThread returned\n" )
 END
+
+#SECTION "INITtext"
+FN KeSetQuickPtes (
+    IN basepte : ^VOID,
+    IN ptesize : UWORD,
+)
+
+    // Set the quick PTE address for each CPU.
+
+    i := 0
+    prb := KiPrbFromNumber ( 0 )
+    count := KeLoaderBlock.ProcessorCount
+
+    WHILE i < count DO
+        prb^.QuickPte = basepte
+
+        basepte += ptesize
+        i += 1
+        prb += BL_PRB_SIZE
+    END
+END

@@ -24,15 +24,15 @@ EXPORT FN MmIsVirtualValid (
     END
 #END
 
-    l1 := CAST MI_PTE_ADDRESS ( vaddr ) TO ^MiPte
-    l2 := CAST MI_PTE_ADDRESS ( l1 ) TO ^MiPte
+    l1 := MI_PTE_ADDRESS ( vaddr )
+    l2 := MI_PTE_ADDRESS ( l1 )
 
 #IF ( >= MI_TABLE_LEVELS 3 )
-    l3 := CAST MI_PTE_ADDRESS ( l2 ) TO ^MiPte
+    l3 := MI_PTE_ADDRESS ( l2 )
 #END
 
 #IF ( >= MI_TABLE_LEVELS 4 )
-    l4 := CAST MI_PTE_ADDRESS ( l3 ) TO ^MiPte
+    l4 := MI_PTE_ADDRESS ( l3 )
 
     IF NOT ( MI_IS_PTE_VALID ( l4^ ) ) THEN
         RETURN FALSE

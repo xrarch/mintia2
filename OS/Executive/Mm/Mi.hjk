@@ -26,29 +26,29 @@
 
 #DEFINE MI_UNINITIALIZED_PFE_TYPE 0
 #DEFINE MI_FREE_PFE_TYPE 1
-#DEFINE MI_FILE_PFE_TYPE 2
+#DEFINE MI_BACKED_PFE_TYPE 2
 #DEFINE MI_ANON_PFE_TYPE 3
 
 #DEFINE MI_MODIFIED_PFE_FLAG 1
 #DEFINE MI_DELETED_PFE_FLAG 2
+#DEFINE MI_PAGED_POOL_PFE_FLAG 4
 
 STRUCT MiFreePfe
     Next : ^MiPfe,
 END
 
-STRUCT MiFilePfe
-    OffsetInFile : RtlUquad,
-    AvlLeftChild : ^VOID,
-    AvlRightChild : ^VOID,
-    AvlParent : ^VOID,
+STRUCT MiBackedPfe
+    OffsetInObject : RtlUquad,
+    Entry : RtlAvlNode,
 END
 
 STRUCT MiAnonPfe
-    BackingEntry : ^MiPte,
+    TrackingTableEntry : ^MiPte,
+    Backing : MiPte,
 END
 
 UNION MiInUseUnion
-    File : MiFilePfe,
+    Backed : MiBackedPfe,
     Anon : MiAnonPfe,
 END
 
@@ -62,18 +62,20 @@ STRUCT MiPfe
     Flags : UBYTE,
 END
 
+STRUCT MiAvailablePageList
+    Heads : RtlListEntry[MI_COLOR_COUNT],
+    Count : UWORD,
+END
+
 STRUCT MiPartition
-    FreeListHeads : RtlListEntry[MI_COLOR_COUNT],
-    ZeroListHeads : RtlListEntry[MI_COLOR_COUNT],
-    StandbyListHeads : RtlListEntry[MI_COLOR_COUNT],
+    FreeList : MiAvailablePageList,
+    ZeroList : MiAvailablePageList,
+    StandbyList : MiAvailablePageList,
     ModifiedListHead : RtlListEntry,
 
-    FreePageCount : UWORD,
     AvailablePageCount : UWORD,
     FluidPageCount : UWORD,
     ModifiedPageCount : UWORD,
-    StandbyPageCount : UWORD,
-    ZeroPageCount : UWORD,
 
     CommitUsage : UWORD,
     CommitLimit : UWORD,
@@ -129,6 +131,77 @@ EXTERN FN MiSetPartitionSize (
     IN partition : ^MiPartition,
 )
 
+EXTERN FN MiAllocateChunkSpace (
+    IN chunkspace : ^MiChunkSpace,
+) : ^VOID
+
+EXTERN FN MiFreeChunkSpace (
+    IN chunkspace : ^MiChunkSpace,
+    IN ptr : ^VOID,
+)
+
+EXTERN MiPoolSpaceChunkPages : UWORD
+EXTERN MiCacheSpaceChunkPages : UWORD
+
+EXTERN FN MiAllocatePoolSpace () : ^VOID
+
+EXTERN FN MiFreePoolSpace (
+    IN ptr : ^VOID,
+)
+
 EXTERN FN MiInitializeSystemVa ()
 
+EXTERN FN MiInitializePools ()
+
 #DEFINE MI_BLOCK_FOR_PAGES_THRESHOLD 16
+
+STRUCT MiDynamicSpaceNode
+    Entry : RtlAvlNode,
+    
+    StartVa : ^VOID,
+    EndVa : ^VOID,
+
+    MappedObject : ^MmObject,
+END
+
+EXTERN FN MiFindDynamicSpaceNode (
+    IN ptr : ^VOID,
+) : ^MiDynamicSpaceNode
+
+EXTERN FN MiAllocatePage (
+    IN partition : ^MiPartition,
+    IN zeroed : UWORD,
+    IN low : UWORD,
+    IN color : UWORD,
+) : ^MiPfe
+
+EXTERN FN MiFreePage (
+    IN partition : ^MiPartition,
+    IN pfe : ^MiPfe,
+)
+
+EXTERN MiPoolSpaceChunkMask : UWORD
+
+#MACRO MiAcquireListExclusive ( partition ) [
+    KeAcquireApcSafePushlockExclusive ( &(partition)^.ListLock )
+]
+
+#MACRO MiAcquireListShared ( partition ) [
+    KeAcquireApcSafePushlockShared ( &(partition)^.ListLock )
+]
+
+#MACRO MiReleaseList ( partition, ipl ) [
+    KeReleaseApcSafePushlock ( &(partition)^.ListLock, ipl )
+]
+
+#MACRO MiAcquireObjectExclusive ( object ) [
+    KeAcquireApcSafePushlockExclusive ( &(object)^.Pushlock )
+]
+
+#MACRO MiAcquireObjectShared ( object ) [
+    KeAcquireApcSafePushlockShared ( &(object)^.Pushlock )
+]
+
+#MACRO MiReleaseObject ( object, ipl ) [
+    KeReleaseApcSafePushlock ( &(object)^.Pushlock, ipl )
+]

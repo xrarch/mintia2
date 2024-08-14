@@ -57,7 +57,8 @@ FN MmInitializeStage1 ()
 
             sys^.FluidPageCount += pages
             sys^.AvailablePageCount += pages
-            sys^.FreePageCount += pages
+
+            sys^.FreeList.Count += pages
 
             pfn := desc^.StartPfn
             pfe := MI_PFN_TO_PFE ( pfn )
@@ -66,7 +67,7 @@ FN MmInitializeStage1 ()
                 pfe^.Type = MI_FREE_PFE_TYPE
 
                 RtlInsertAtTailList (
-                    &sys^.FreeListHeads[MI_PFN_COLOR(pfn)], // head
+                    &sys^.FreeList.Heads[MI_PFN_COLOR(pfn)], // head
                     &pfe^.Entry, // entry
                 )
 
@@ -93,7 +94,7 @@ FN MmInitializeStage1 ()
 
     // Initialize the system pools.
 
-    // MiInitializePools ()
+    MiInitializePools ()
 
     // Initialize commit to something acceptable before creation of the
     // pagefiles.
@@ -114,10 +115,6 @@ FN MmInitializeStage1 ()
     // Initialize the zones for quick MDL allocation.
 
     // MiInitializeMdlZones ()
-
-    // Allocate one virtual page for each CPU to map stuff into.
-
-    // MiInitializeQuickPages ()
 
     // Allocate one page which just remains constantly zeroed for the lifetime
     // of the system.

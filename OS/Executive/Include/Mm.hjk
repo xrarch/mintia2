@@ -3,6 +3,49 @@
 // Executive.
 //
 
+#INCLUDE "<ll>/Rtl.hjk"
+
 EXTERN FN MmIsVirtualValid (
     IN vaddr : ^VOID,
 ) : UWORD
+
+// Allocation flags.
+
+#DEFINE MM_ALLOCATION_CAN_BLOCK 1
+
+STRUCT MmObject
+    // The object lock is superior to the page list lock.
+
+    Pushlock : KePushlock,
+
+    // The structure lock is inferior to the page list lock.
+
+    StructurePushlock : KePushlock,
+
+    SizeInBytes : RtlUquad,
+END
+
+STRUCT MmBackedObject
+    Hdr : MmObject,
+
+    PageTreeRoot : RtlAvlNode,
+END
+
+// With three levels this can describe 4,311,810,312 pages, or about 18TB.
+
+#DEFINE MI_EMBEDDED_PAGES 8
+#DEFINE MI_LEVEL_ENTRIES 256
+#DEFINE MI_DIRECT [(MI_EMBEDDED_PAGES + MI_LEVEL_ENTRIES)]
+#DEFINE MI_INDIRECT [(MI_DIRECT + (MI_LEVEL_ENTRIES * MI_LEVEL_ENTRIES))]
+#DEFINE MI_DBLY_INDIRECT [(MI_INDIRECT + (MI_LEVEL_ENTRIES * MI_LEVEL_ENTRIES * MI_LEVEL_ENTRIES))]
+#DEFINE MI_TPLY_INDIRECT [(MI_DBLY_INDIRECT + (MI_LEVEL_ENTRIES * MI_LEVEL_ENTRIES * MI_LEVEL_ENTRIES * MI_LEVEL_ENTRIES))]
+
+STRUCT MmExtensibleObject
+    Hdr : MmObject,
+
+    EmbeddedArray : UWORD[MI_EMBEDDED_PAGES],
+    DirectArray : ^UWORD,
+    IndirectArray : ^^UWORD,
+    DoublyIndirectArray : ^^^UWORD,
+    TriplyIndirectArray : ^^^^UWORD,
+END

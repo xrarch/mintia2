@@ -93,22 +93,16 @@ KiCompareSwapUlongEnd:
     ret
 
 #MACRO ApcSafe ( x ) [
-    // The pushlock is APC-safe, so raise to KI_IPL_APC and increment the
-    // pushlock depth.
+    // The pushlock is APC-safe, so raise to KI_IPL_APC.
 
-    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], 1
-
-    // Acquire a pointer to the current thread.
-
-    mov  t0, [(0xFFFFF000 + KiPrb_CurrentThread)]
-
-    // Increment the pushlock depth. This is synchronized as only the current
-    // thread can modify its pushlock depth.
-
-    add  [t0 + KeThread_ApcPushlockDepth], 1
+    movz.8 a3, [(0xFFFFF000 + KiPrb_Ipl)]
+    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], KI_IPL_APC
+    mov    a1, a3
 ]
 
 // a0 - pushlock
+// outputs:
+// a3 - oldipl
 KeAcquireApcSafePushlockShared:
 .export KeAcquireApcSafePushlockShared
 
@@ -133,6 +127,8 @@ KiAcquirePushlockSharedEnd:
     ret
 
 // a0 - pushlock
+// outputs:
+// a3 - oldipl
 KeAcquireApcSafePushlockExclusive:
 .export KeAcquireApcSafePushlockExclusive
 
@@ -212,6 +208,7 @@ KeReleasePushlock:
     ret
 
 // a0 - pushlock
+// a1 - oldipl
 KeReleaseApcSafePushlock:
 .export KeReleaseApcSafePushlock
 
@@ -223,36 +220,30 @@ KiReleaseSlow:
 
     push fp
     mov  fp, sp
+    push a1
     
     call KiReleasePushlock
 
+    pop  a1
     pop  fp
 
     // Fall through.
 
 KiReleaseApcSafe:
 
-    // The pushlock is APC-safe, so decrement the pushlock count of the current
-    // thread.
+    // The pushlock is APC-safe, so lower IPL.
 
-    mov  t0, [(0xFFFFF000 + KiPrb_CurrentThread)]
-
-    sub  [t0 + KeThread_ApcPushlockDepth], 1
-
-    // If the count became 0, drop to KI_IPL_LOW.
-
-    ifnz rjmp .dontdrop
-
-    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], 0
+    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], a1
 
     mov  t0, [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)]
-    cmp  t0, 0
-    ifnz movz.8 a0, 0
-    ifnz jmp KiDispatchSoftwareInterrupts
+    srl  t0, a1
+    ifnz rjmp .dispatch
 
-.dontdrop:
-    
     ret
+
+.dispatch:
+    mov  a0, a1
+    jmp  KiDispatchSoftwareInterrupts
 
 #IF BLD_CHK
 

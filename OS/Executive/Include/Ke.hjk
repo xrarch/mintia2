@@ -368,9 +368,11 @@ EXTERN FN KeDequeueApc (
     IN apc : ^KeApc,
 ) : UWORD
 
-EXTERN FN KeMaskApcs ()
+EXTERN FN KeMaskApcs () : UWORD
 
-EXTERN FN KeUnmaskApcs ()
+EXTERN FN KeUnmaskApcs (
+    IN oldipl : UWORD,
+)
 
 STRUCT KeEvent
     Header : KiDispatchHeader,
@@ -483,7 +485,6 @@ STRUCT KeThread
     ApcSpinlock : KiSpinlock,
 #END
 
-    ApcPushlockDepth : ULONG,
     SignalMask : ULONG,
     SignalAcceptMask : ULONG,
     SignalDeliverOnWaitMask : ULONG,
@@ -510,6 +511,7 @@ STRUCT KeThread
     KernelStackResident : UBYTE,
     IgnoreEventCount : UBYTE,
     KernelStackSwappable : UBYTE,
+    AttachIpl : UBYTE,
 
 #IF BLD_MP
     WaitAttempt : UBYTE,
@@ -606,13 +608,15 @@ EXTERN FN KeReleasePushlock (
 
 EXTERN FN KeAcquireApcSafePushlockShared (
     IN pushlock : ^KePushlock,
-)
+) : UWORD
+
 EXTERN FN KeAcquireApcSafePushlockExclusive (
     IN pushlock : ^KePushlock,
-)
+) : UWORD
 
 EXTERN FN KeReleaseApcSafePushlock (
     IN pushlock : ^KePushlock,
+    IN oldipl : UWORD,
 )
 
 EXTERN FN KeConvertPushlockToShared (
@@ -868,6 +872,15 @@ EXTERN FN KeSweepIcache ()
 EXTERN FN KeFlushIcachePages (
     IN pfntable : ^^VOID,
     IN pagecount : UWORD,
+)
+
+EXTERN FN KeSetQuickPtes (
+    IN basepte : ^VOID,
+    IN ptesize : UWORD,
+)
+
+EXTERN FN KeZeroPage (
+    IN pfn : UWORD,
 )
 
 EXTERN KeIdleProcess : KeProcess

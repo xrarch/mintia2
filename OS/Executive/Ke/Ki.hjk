@@ -171,8 +171,6 @@ STRUCT KiPrb
     IrqDispatchTable : ^^KeInterrupt,
     IdleStackBase : ^VOID,
 
-    IdleThread : KeThread,
-
 #IF KI_VIRTUAL_PRB
     RealVirtual : ^KiPrb,
 #END
@@ -193,6 +191,8 @@ STRUCT KiPrb
     KernelStackTop : ^VOID,
     CurrentThread : ^KeThread,
     NextThread : ^KeThread,
+
+    QuickPte : ^VOID,
 
     DpcListHead : RtlListEntry,
 
@@ -234,6 +234,8 @@ STRUCT KiPrb
 
     // Put big stuff at the end to make sure the common fields are readily in
     // reach of immediate offset ranges on various architectures.
+
+    IdleThread : KeThread,
 
     ClockTicks : RtlUquad,
     DpcTimeMs : RtlUquad,
@@ -361,11 +363,13 @@ EXTERN FN KiInterruptUsermode (
 
 EXTERN FN KiAcquirePushlockShared (
     IN pushlock : ^KePushlock,
-)
+    IN oldipl : UWORD,
+) : UWORD
 
 EXTERN FN KiAcquirePushlockExclusive (
     IN pushlock : ^KePushlock,
-)
+    IN oldipl : UWORD,
+) : UWORD
 
 EXTERN FN KiReleasePushlock (
     IN pushlock : ^KePushlock,

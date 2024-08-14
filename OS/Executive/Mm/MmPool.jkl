@@ -1,0 +1,265 @@
+//
+// Implements system memory pool management.
+//
+
+#INCLUDE "Mi.hjk"
+
+// This is the shift for the minimum block size (i.e. 1 << 5 = 32).
+
+#DEFINE MI_BLOCK_SIZE_SHIFT 5
+#DEFINE MI_BLOCK_MIN_SIZE [(1 << MI_BLOCK_SIZE_SHIFT)]
+#DEFINE MI_BLOCK_SIZE_MASK [(MI_BLOCK_MIN_SIZE - 1)]
+
+// We track block sizes in units of minimum block sizes. Since we store this in
+// a byte, the maximum block size is the minimum block size times 256 (or,
+// shifted left by 8).
+
+#DEFINE MI_BLOCK_BUCKETS 8
+#DEFINE MI_BLOCK_MAX_SIZE_SHIFT [(MI_BLOCK_SIZE_SHIFT + MI_BLOCK_BUCKETS)]
+
+#DEFINE MI_BLOCK_SWIFT_MAGIC 0xC0
+#DEFINE MI_BLOCK_FREE_MAGIC 0xE4
+
+STRUCT MiBlock
+    BucketIndex : UBYTE,
+    LastSize : UBYTE,
+    Magic : UBYTE,
+    Size : UBYTE,
+
+    Tag : ULONG,
+END
+
+STRUCT MiFreeBlock
+    Block : MiBlock,
+
+    Entry : RtlListEntry,
+END
+
+STRUCT MiPoolExtension
+    References : ULONG,
+END
+
+FNPTR MiPoolGetMemoryF () : ^VOID
+
+FNPTR MiPoolReturnMemoryF (
+    IN ptr : ^VOID,
+)
+
+STRUCT MiPool
+    Pushlock : KePushlock,
+
+    GetMemory : MiPoolGetMemoryF,
+    ReturnMemory : MiPoolReturnMemoryF,
+
+    BytesUsedInternally : UWORD,
+    BytesUsedExternally : UWORD,
+    BytesUsedPeak : UWORD,
+
+    ListHeads : RtlListEntry[MI_BLOCK_BUCKETS],
+END
+
+MiNonpagedPool : MiPool
+MiPagedPool : MiPool
+MiPageTrackingPool : MiPool
+
+MiNonpagedPoolColor := 0
+
+FN MiFreePartialExtension (
+    IN vaddr : ^VOID,
+    IN pages : UWORD,
+)
+
+    // Free a partially allocated nonpaged pool extension.
+
+    pte := MI_PTE_ADDRESS ( vaddr )
+
+    WHILE pages DO
+        ptecontents := pte[0]
+
+        MiFreePage (
+            &MiSystemPartition, // partition
+            MI_PFN_TO_PFE ( MI_PFN_FROM_PTE ( ptecontents ) ), // pfe
+        )
+
+        pages -= 1
+        pte += SIZEOF MiPte
+    END
+END
+
+FN (MiPoolGetMemoryF) MiGetNonpagedExtension () : ^VOID
+    
+    // Allocate an extension for nonpaged pool. If all of the required page
+    // frames can't be immediately allocated, signal the low memory event and
+    // return NULLPTR. Caller will decide whether to wait for free memory and
+    // retry the allocation, or give up.
+
+    printed := FALSE
+
+@Retry
+
+    ext := CAST MiAllocatePoolSpace () TO ^MiPoolExtension
+
+    IF NOT ext THEN
+        // Uh-oh! If we're out of pool space there isn't much good to be done.
+        // Sleep for 500ms and retry.
+
+        IF NOT printed THEN
+            RtlPrint ( "Out of pool space!\n" )
+
+            printed = TRUE
+        END
+
+        interval : RtlUquad
+        
+        RtlSetUquadToUlong ( &interval, 500 )
+
+        KeSleep (
+            &interval, // interval
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+        )
+
+        GOTO Retry
+    END
+
+    // Fill up this space with page frames.
+
+    pte := MI_PTE_ADDRESS ( ext )
+
+    pages := MiPoolSpaceChunkPages
+    i := 0
+    color := MiNonpagedPoolColor
+
+    WHILE i < pages DO
+        pfe := MiAllocatePage (
+            &MiSystemPartition, // partition
+            FALSE, // zeroed
+            FALSE, // low
+            color, // color
+        )
+
+        IF NOT pfe THEN
+            // Free all the PFNs we already allocated.
+
+            MiFreePartialExtension (
+                ext, // vaddr
+                i, // pages
+            )
+
+            // Free the nonpaged space chunk.
+
+            MiFreePoolSpace ( ext )
+
+            RETURN NULLPTR
+        END
+
+        pte[0] = MI_BUILD_POOL_PTE ( MI_PFE_TO_PFN ( pfe ) )
+
+        color += 1
+        i += 1
+        pte += SIZEOF MiPte
+    END
+
+    MiNonpagedPoolColor = color
+
+    // Initialize the extension header.
+
+    ext^.References = 0
+
+    RETURN ext
+END
+
+FN (MiPoolReturnMemoryF) MiReturnNonpagedExtension (
+    IN ptr : ^VOID,
+)
+
+    // Free the page frames within this extension and return it to nonpaged
+    // space.
+
+    MiFreePartialExtension (
+        ptr, // vaddr
+        MiPoolSpaceChunkPages, // pages
+    )
+
+    MiFreePoolSpace ( ptr )
+END
+
+FN (MiPoolGetMemoryF) MiGetPagedExtension () : ^VOID
+    
+    // Allocate an extension for paged pool.
+
+    KeCrash ( "NYI MiGetPagedExtension\n" )
+END
+
+FN (MiPoolReturnMemoryF) MiReturnPagedExtension (
+    IN ptr : ^VOID,
+)
+
+    // Free an extension for paged pool.
+
+    KeCrash ( "NYI MiReturnPagedExtension\n" )
+END
+
+#MACRO MiFindPoolExtension ( ptr ) [
+    (CAST (ptr) & MiPoolSpaceChunkMask TO ^MiPoolExtension)
+]
+
+#SECTION "INITtext"
+FN MiInitializePool (
+    IN pool : ^MiPool,
+)
+
+    // Initialize a pool.
+
+    KeInitializePushlock ( &pool^.Pushlock )
+
+    pool^.BytesUsedInternally = 0
+    pool^.BytesUsedExternally = 0
+    pool^.BytesUsedPeak = 0
+
+    i := 0
+
+    WHILE i < MI_BLOCK_BUCKETS DO
+        RtlInitializeList ( &pool^.ListHeads[i] )
+
+        i += 1
+    END
+END
+
+#SECTION "INITtext"
+FN MiInitializeNonpagedPool (
+    IN pool : ^MiPool,
+)
+
+    // Initialize a nonpaged pool.
+
+    MiInitializePool ( pool )
+
+    pool^.GetMemory = &MiGetNonpagedExtension
+    pool^.ReturnMemory = &MiReturnNonpagedExtension
+END
+
+#SECTION "INITtext"
+FN MiInitializePagedPool (
+    IN pool : ^MiPool,
+)
+
+    // Initialize a paged pool.
+
+    MiInitializePool ( pool )
+
+    pool^.GetMemory = &MiGetPagedExtension
+    pool^.ReturnMemory = &MiReturnPagedExtension
+END
+
+#SECTION "INITtext"
+FN MiInitializePools ()
+
+    // Initialize the system pools.
+
+    MiInitializeNonpagedPool ( &MiNonpagedPool )
+
+    MiInitializePagedPool ( &MiPagedPool )
+
+    MiInitializePagedPool ( &MiPageTrackingPool )
+END

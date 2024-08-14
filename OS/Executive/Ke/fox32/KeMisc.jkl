@@ -3,6 +3,7 @@
 //
 
 #INCLUDE "../Ki.hjk"
+#INCLUDE "../../Mm/fox32/Mi.hjk"
 
 PUBLIC KiInterruptsDisabled := TRUE
 
@@ -159,4 +160,36 @@ FN KeFlushMultipleTb (
         vaddrtable += SIZEOF ^VOID
         pagecount -= 1
     END
+END
+
+FN KeZeroPage (
+    IN pfn : UWORD,
+)
+
+    // Zero out the page with the given PFN.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+    pteaddr := CAST KI_CURRENT_PRB^.QuickPte TO ^ULONG
+    vaddr := MI_VIRTUAL_ADDRESS ( pteaddr )
+
+    // Map it with the quick page.
+
+    pte := (pfn << 12) | MI_PTE_V | MI_PTE_W
+
+    pteaddr[0] = pte
+
+    // Flush TB.
+
+    KeFlushMyTbAddress ( vaddr )
+
+    // Zero out the page.
+
+    RtlFillMemoryWithUlong (
+        vaddr, // ptr
+        RTL_PAGE_SIZE, // sz
+        0, // ulong
+    )
+
+    KiLowerIpl ( ipl )
 END

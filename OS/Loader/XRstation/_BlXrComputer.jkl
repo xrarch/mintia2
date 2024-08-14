@@ -222,7 +222,7 @@ BxEnableVirtualAddressing:
     mov  t0, long [BxPageDirectory]
     rshi t0, t0, 12
     lshi t0, t0, 5
-    ori  t0, t0, 0x7 // PTE_V | PTE_W | PTE_K
+    ori  t0, t0, 0x7 // MI_PTE_V | MI_PTE_W | MI_PTE_K
     mtcr dtbpte, t0
 
     rshi t0, a0, 12
@@ -230,7 +230,7 @@ BxEnableVirtualAddressing:
 
     rshi t0, a1, 12
     lshi t0, t0, 5
-    ori  t0, t0, 0x17 // PTE_V | PTE_W | PTE_G | PTE_K
+    ori  t0, t0, 0x17 // MI_PTE_V | MI_PTE_W | MI_PTE_G | MI_PTE_K
     mtcr itbpte, t0
 
     // Re-initialize TB replacement indices to 4, to skip over the 4 reserved
@@ -275,7 +275,7 @@ BxStartSystem:
 
     rshi t1, a1, 12
     lshi t1, t1, 5
-    ori  t1, t1, 0x17 // PTE_V | PTE_W | PTE_G | PTE_K
+    ori  t1, t1, 0x17 // MI_PTE_V | MI_PTE_W | MI_PTE_G | MI_PTE_K
     mtcr dtbpte, t1
 
     mtcr dtbindex, t0
@@ -477,12 +477,6 @@ EXTERN FN BxEnableVirtualAddressing (
     IN excblock : ^VOID,
 )
 
-#DEFINE PTE_V 1
-#DEFINE PTE_W 2
-#DEFINE PTE_K 4
-#DEFINE PTE_NC 8
-#DEFINE PTE_G 16
-
 EXTERN BlDescriptorIndex : UWORD
 
 FN BxInitializeMemoryMapping ()
@@ -598,7 +592,7 @@ FN BxInitializeMemoryMapping ()
 
     pdeptr := &BxPageDirectory[0xB0000000 >> 22]
 
-    pdeptr^ = ((BxPageDirectory >> 12) << 5) | PTE_V | PTE_W | PTE_K
+    pdeptr^ = ((BxPageDirectory >> 12) << 5) | MI_PTE_V | MI_PTE_W | MI_PTE_K
 
     // Now we can enable virtual addressing.
 
@@ -713,7 +707,7 @@ FN BxMapPage (
 
         pagetable = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
 
-        newpde := (desc^.StartPfn << 5) | PTE_V | PTE_W | PTE_K
+        newpde := (desc^.StartPfn << 5) | MI_PTE_V | MI_PTE_W | MI_PTE_K
 
         IF vaddr >= BL_KERNEL_SPACE THEN
             RtlFillMemoryWithUlong (
@@ -722,7 +716,7 @@ FN BxMapPage (
                 0x00000010, // ulong
             )
 
-            newpde |= PTE_G
+            newpde |= MI_PTE_G
 
         ELSE
             RtlFillMemoryWithUlong (
@@ -738,20 +732,20 @@ FN BxMapPage (
     pteptr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
 
 #IF BLD_CHK
-    IF pteptr^ & PTE_V THEN
+    IF pteptr^ & MI_PTE_V THEN
         BlCrash ( "VPN %x already mapped\n", vaddr >> RTL_PAGE_SHIFT )
     END
 #END
 
     newpte := CAST (phyaddr >> RTL_PAGE_SHIFT) << 5 TO ULONG
-    newpte |= PTE_V | PTE_W | PTE_K
+    newpte |= MI_PTE_V | MI_PTE_W | MI_PTE_K
 
     IF vaddr >= BL_KERNEL_SPACE THEN
-        newpte |= PTE_G
+        newpte |= MI_PTE_G
     END
 
     IF noncached THEN
-        newpte |= PTE_NC
+        newpte |= MI_PTE_NC
     END
 
     pteptr^ = newpte
@@ -796,11 +790,11 @@ FN BxRemapCodePage (
     pteaddr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
     pte := pteaddr^
 
-    IF NOT (pte & PTE_V) THEN
+    IF NOT (pte & MI_PTE_V) THEN
         BlCrash ( "BxRemapCodePage 2\n" )
     END
 
-    pte &= ~(PTE_W)
+    pte &= ~(MI_PTE_W)
     pteaddr^ = pte
 
     // Purge TB page.
@@ -837,7 +831,7 @@ FN BxVirtualToPfn (
 
     pte := pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
 
-    IF pte & PTE_V THEN
+    IF pte & MI_PTE_V THEN
         RETURN pte >> 5
     END
 
@@ -878,7 +872,7 @@ FN BxCreateVirtualSpace (
     pde := &BxPageDirectory[base >> 22]
 
     WHILE pagetables DO
-        pde[0] = (pfn << 5) | PTE_V | PTE_W | PTE_K | PTE_G
+        pde[0] = (pfn << 5) | MI_PTE_V | MI_PTE_W | MI_PTE_K | MI_PTE_G
 
         pfn += 1
         pde += 4
