@@ -140,7 +140,6 @@ EXTERN FN MiFreeChunkSpace (
     IN ptr : ^VOID,
 )
 
-EXTERN MiPoolSpaceChunkPages : UWORD
 EXTERN MiCacheSpaceChunkPages : UWORD
 
 EXTERN FN MiAllocatePoolSpace () : ^VOID
@@ -180,7 +179,17 @@ EXTERN FN MiFreePage (
     IN pfe : ^MiPfe,
 )
 
-EXTERN MiPoolSpaceChunkMask : UWORD
+EXTERN FN MiWaitForPages (
+    IN partition : ^MiPartition,
+    IN low : UWORD,
+) : UWORD
+
+EXTERN FN MiAllocatePageWait (
+    IN partition : ^MiPartition,
+    IN zeroed : UWORD,
+    IN low : UWORD,
+    IN color : UWORD,
+) : ^MiPfe
 
 #MACRO MiAcquireListExclusive ( partition ) [
     KeAcquireApcSafePushlockExclusive ( &(partition)^.ListLock )

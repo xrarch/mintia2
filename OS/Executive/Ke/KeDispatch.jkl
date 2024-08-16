@@ -1553,7 +1553,7 @@ FN (KeDpcF) KiBalanceWork (
             CONTINUE
         END
 
-        IF diff <= 1 THEN
+        IF diff < 1 THEN
             // Balance is achieved.
 
             LEAVE
@@ -1563,6 +1563,12 @@ FN (KeDpcF) KiBalanceWork (
             leastloaded, // destprb
             mostloaded, // srcprb
         )
+
+        IF diff == 1 THEN
+            // We just moved a thread around. Don't do that again.
+
+            BREAK
+        END
 
         j += 1
     END

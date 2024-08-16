@@ -518,3 +518,106 @@ FN MiFreePage (
 
     MiNewAvailablePage ( partition, avail )
 END
+
+FN MiWaitForPages (
+    IN partition : ^MiPartition,
+    IN low : UWORD,
+) : UWORD
+
+    // Wait for available pages to exist from the given partition.
+    // This function provides no guarantees - caller will have to repeatedly
+    // call it until MiAllocatePage yields a page.
+
+    // Returns TRUE if a timeout occurred, FALSE otherwise.
+    // If a timeout occurred, that indicates that the partition did not have
+    // enough fluid pages for its workload, or is missing a pagefile, and has
+    // deadlocked.
+
+    threshold : UWORD
+    event : ^KeEvent
+    timeout : RtlUquad
+
+    RtlSetUquadToUlong ( &timeout, 5000 )
+
+    IF low THEN
+        threshold = 0
+        event = &partition^.LowPageAvailableEvent
+
+    ELSE
+        threshold = MI_BLOCK_FOR_PAGES_THRESHOLD
+        event = &partition^.PageAvailableEvent
+    END
+
+    ipl := MiAcquireListShared ( partition )
+
+    WHILE partition^.AvailablePageCount <= threshold DO
+        // Wait on the event until we catch the available page count at a
+        // sufficient level.
+
+        KeResetEvent ( event )
+
+        MiReleaseList ( partition, ipl )
+
+        status := KeWaitForSingleObject (
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+            &timeout, // timeout
+            &event^.Header, // object
+        )
+
+        IF status == OS_STATUS_WAIT_TIMEOUT THEN
+            IF partition == &MiSystemPartition THEN
+                // If the system partition is deadlocked, this is a fatal
+                // condition.
+
+                KeCrash (
+                    "Mm: Deadlocked. EVI=%u FRE=%u ZRO=%u MOD=%u AVL=%u\n",
+                    partition^.StandbyList.Count,
+                    partition^.FreeList.Count,
+                    partition^.ZeroList.Count,
+                    partition^.ModifiedPageCount,
+                    partition^.AvailablePageCount,
+                )
+            END
+
+            RETURN TRUE
+        END
+
+        ipl = MiAcquireListShared ( partition )
+    END
+
+    MiReleaseList ( partition, ipl )
+
+    RETURN FALSE
+END
+
+FN MiAllocatePageWait (
+    IN partition : ^MiPartition,
+    IN zeroed : UWORD,
+    IN low : UWORD,
+    IN color : UWORD,
+) : ^MiPfe
+
+    // Allocate a page with the given parameters. Allowed to wait. Returns
+    // NULLPTR on timeout (partition deadlock).
+
+    WHILE TRUE DO
+        pfe := MiAllocatePage (
+            partition, // partition
+            zeroed, // zeroed
+            low, // low
+            color, // color
+        )
+
+        IF pfe THEN
+            RETURN pfe
+        END
+
+        IF MiWaitForPages (
+            partition, // partition
+            low, // low
+        ) THEN
+            RETURN NULLPTR
+        END
+    END
+END

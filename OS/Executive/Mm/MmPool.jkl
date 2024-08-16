@@ -12,10 +12,22 @@
 
 // We track block sizes in units of minimum block sizes. Since we store this in
 // a byte, the maximum block size is the minimum block size times 256 (or,
-// shifted left by 8).
+// shifted left by 8). Actually, here we use 6 (1 << 6 = 64 units max) to keep
+// the size of the pool structures down.
 
-#DEFINE MI_BLOCK_BUCKETS 8
-#DEFINE MI_BLOCK_MAX_SIZE_SHIFT [(MI_BLOCK_SIZE_SHIFT + MI_BLOCK_BUCKETS)]
+#DEFINE MI_BLOCK_MAX_UNITS_SHIFT 6
+#DEFINE MI_BLOCK_MAX_SIZE_SHIFT [(MI_BLOCK_SIZE_SHIFT + MI_BLOCK_MAX_UNITS_SHIFT)]
+#DEFINE MI_BLOCK_MAX_SIZE [(1 << MI_BLOCK_MAX_SIZE_SHIFT)]
+#DEFINE MI_BLOCK_MAX_SIZE_MASK [(MI_BLOCK_MAX_SIZE - 1)]
+
+// The maximum request size is half the maximum block size.
+
+#DEFINE MI_BLOCK_MAX_REQUEST_UNITS [(1 << (MI_BLOCK_MAX_UNITS_SHIFT - 1))]
+
+#DEFINE MI_FULL_BLOCKS_PER_EXTENSION [(RTL_PAGE_SIZE / MI_BLOCK_MAX_SIZE - 1)]
+
+#DEFINE MI_BLOCK_LOG_BUCKETS [(MI_BLOCK_MAX_UNITS_SHIFT + 1)]
+#DEFINE MI_BLOCK_SIZE_BUCKETS [(1 << MI_BLOCK_MAX_UNITS_SHIFT) + 1]
 
 #DEFINE MI_BLOCK_SWIFT_MAGIC 0xC0
 #DEFINE MI_BLOCK_FREE_MAGIC 0xE4
@@ -27,19 +39,24 @@ STRUCT MiBlock
     Size : UBYTE,
 
     Tag : ULONG,
+
 END
 
 STRUCT MiFreeBlock
     Block : MiBlock,
 
-    Entry : RtlListEntry,
+    LogEntry : RtlListEntry,
+    SizeEntry : RtlListEntry,
 END
 
 STRUCT MiPoolExtension
+    Pool : ^MiPool,
     References : ULONG,
 END
 
-FNPTR MiPoolGetMemoryF () : ^VOID
+FNPTR MiPoolGetMemoryF (
+    IN pool : ^MiPool,
+) : ^MiPoolExtension
 
 FNPTR MiPoolReturnMemoryF (
     IN ptr : ^VOID,
@@ -54,44 +71,25 @@ STRUCT MiPool
     BytesUsedInternally : UWORD,
     BytesUsedExternally : UWORD,
     BytesUsedPeak : UWORD,
+    Color : UWORD,
 
-    ListHeads : RtlListEntry[MI_BLOCK_BUCKETS],
+    LogListHeads : RtlListEntry[MI_BLOCK_LOG_BUCKETS],
+    SizeListHeads : RtlListEntry[MI_BLOCK_SIZE_BUCKETS],
 END
 
-MiNonpagedPool : MiPool
+PUBLIC MiNonpagedPool : MiPool
 MiPagedPool : MiPool
 MiPageTrackingPool : MiPool
 
 MiNonpagedPoolColor := 0
 
-FN MiFreePartialExtension (
-    IN vaddr : ^VOID,
-    IN pages : UWORD,
-)
-
-    // Free a partially allocated nonpaged pool extension.
-
-    pte := MI_PTE_ADDRESS ( vaddr )
-
-    WHILE pages DO
-        ptecontents := pte[0]
-
-        MiFreePage (
-            &MiSystemPartition, // partition
-            MI_PFN_TO_PFE ( MI_PFN_FROM_PTE ( ptecontents ) ), // pfe
-        )
-
-        pages -= 1
-        pte += SIZEOF MiPte
-    END
-END
-
-FN (MiPoolGetMemoryF) MiGetNonpagedExtension () : ^VOID
+FN (MiPoolGetMemoryF) MiGetNonpagedExtension (
+    IN pool : ^MiPool,
+) : ^MiPoolExtension
     
-    // Allocate an extension for nonpaged pool. If all of the required page
-    // frames can't be immediately allocated, signal the low memory event and
-    // return NULLPTR. Caller will decide whether to wait for free memory and
-    // retry the allocation, or give up.
+    // Allocate an extension for nonpaged pool. If the required page frame can't
+    // be immediately allocated, return NULLPTR. Caller will decide whether to
+    // wait for free memory and retry the allocation, or give up.
 
     printed := FALSE
 
@@ -122,49 +120,30 @@ FN (MiPoolGetMemoryF) MiGetNonpagedExtension () : ^VOID
         GOTO Retry
     END
 
-    // Fill up this space with page frames.
+    // Allocate a page frame to place here.
+
+    pfe := MiAllocatePage (
+        &MiSystemPartition, // partition
+        FALSE, // zeroed
+        FALSE, // low
+        pool^.Color, // color
+    )
+
+    IF NOT pfe THEN
+        // Free the nonpaged space chunk.
+
+        MiFreePoolSpace ( ext )
+
+        RETURN NULLPTR
+    END
+
+    pool^.Color += 1
+
+    // Map the page frame.
 
     pte := MI_PTE_ADDRESS ( ext )
 
-    pages := MiPoolSpaceChunkPages
-    i := 0
-    color := MiNonpagedPoolColor
-
-    WHILE i < pages DO
-        pfe := MiAllocatePage (
-            &MiSystemPartition, // partition
-            FALSE, // zeroed
-            FALSE, // low
-            color, // color
-        )
-
-        IF NOT pfe THEN
-            // Free all the PFNs we already allocated.
-
-            MiFreePartialExtension (
-                ext, // vaddr
-                i, // pages
-            )
-
-            // Free the nonpaged space chunk.
-
-            MiFreePoolSpace ( ext )
-
-            RETURN NULLPTR
-        END
-
-        pte[0] = MI_BUILD_POOL_PTE ( MI_PFE_TO_PFN ( pfe ) )
-
-        color += 1
-        i += 1
-        pte += SIZEOF MiPte
-    END
-
-    MiNonpagedPoolColor = color
-
-    // Initialize the extension header.
-
-    ext^.References = 0
+    pte[0] = MI_BUILD_POOL_PTE ( MI_PFE_TO_PFN ( pfe ) )
 
     RETURN ext
 END
@@ -176,15 +155,20 @@ FN (MiPoolReturnMemoryF) MiReturnNonpagedExtension (
     // Free the page frames within this extension and return it to nonpaged
     // space.
 
-    MiFreePartialExtension (
-        ptr, // vaddr
-        MiPoolSpaceChunkPages, // pages
+    pte := MI_PTE_ADDRESS ( ptr )
+    ptecontents := pte[0]
+
+    MiFreePage (
+        &MiSystemPartition, // partition
+        MI_PFN_TO_PFE ( MI_PFN_FROM_PTE ( ptecontents ) ), // pfe
     )
 
     MiFreePoolSpace ( ptr )
 END
 
-FN (MiPoolGetMemoryF) MiGetPagedExtension () : ^VOID
+FN (MiPoolGetMemoryF) MiGetPagedExtension (
+    IN pool : ^MiPool,
+) : ^MiPoolExtension
     
     // Allocate an extension for paged pool.
 
@@ -201,7 +185,7 @@ FN (MiPoolReturnMemoryF) MiReturnPagedExtension (
 END
 
 #MACRO MiFindPoolExtension ( ptr ) [
-    (CAST (ptr) & MiPoolSpaceChunkMask TO ^MiPoolExtension)
+    (CAST (ptr) & RTL_PAGE_NUMBER_MASK TO ^MiPoolExtension)
 ]
 
 #SECTION "INITtext"
@@ -216,11 +200,20 @@ FN MiInitializePool (
     pool^.BytesUsedInternally = 0
     pool^.BytesUsedExternally = 0
     pool^.BytesUsedPeak = 0
+    pool^.Color = 0
 
     i := 0
 
-    WHILE i < MI_BLOCK_BUCKETS DO
-        RtlInitializeList ( &pool^.ListHeads[i] )
+    WHILE i < MI_BLOCK_LOG_BUCKETS DO
+        RtlInitializeList ( &pool^.LogListHeads[i] )
+
+        i += 1
+    END
+
+    i = 0
+
+    WHILE i < MI_BLOCK_SIZE_BUCKETS DO
+        RtlInitializeList ( &pool^.SizeListHeads[i] )
 
         i += 1
     END
@@ -262,4 +255,356 @@ FN MiInitializePools ()
     MiInitializePagedPool ( &MiPagedPool )
 
     MiInitializePagedPool ( &MiPageTrackingPool )
+END
+
+MiEightBitLog : UBYTE[256] = {
+    0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
+    4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+}
+
+#MACRO MiAcquirePool ( pool ) [
+    KeAcquireApcSafePushlockExclusive ( &pool^.Pushlock )
+]
+
+#MACRO MiReleasePool ( pool, ipl ) [
+    KeReleaseApcSafePushlock ( &pool^.Pushlock, ipl )
+]
+
+FN MiAllocateFromPool (
+    IN pool : ^MiPool,
+    IN bytes : UWORD,
+    IN tag : ULONG,
+    IN wait : UWORD,
+) : ^VOID
+
+    // Allocate a block of memory of at least the given number of bytes from the
+    // specified pool.
+
+    bytes += SIZEOF MiBlock
+
+    bytes += MI_BLOCK_SIZE_MASK
+    bytes >>= MI_BLOCK_SIZE_SHIFT
+
+#IF BLD_CHK
+    IF bytes > MI_BLOCK_MAX_REQUEST_UNITS THEN
+        KeCrash ( "MiAllocateFromPool: too large %u\n", bytes )
+    END
+#END
+
+    // Bytes now stores size units rather than real bytes.
+
+    // We want to start searching in the bucket ceil(log_2(units)).
+    // We place blocks in bucket floor(log_2(units)).
+
+    insertindex := MiEightBitLog[bytes]
+
+    bucketindex := insertindex
+
+    IF 1 << insertindex != bytes THEN
+        // Not a power of two number of units, so ceil log is floor log + 1.
+
+        bucketindex += 1
+    END
+
+@Retry
+
+    // Do some work outside the pool lock.
+
+    listhead := &pool^.SizeListHeads[bytes]
+    i := bytes
+    max := 1 << bucketindex
+
+    block : ^MiFreeBlock
+
+    // Lock the pool.
+
+    ipl := MiAcquirePool ( pool )
+
+    // Search the inbetween lists up to the next power of two.
+
+    WHILE i < max DO
+        IF NOT RtlEmptyList ( listhead ) THEN
+            // Found a block.
+
+            block = CONTAINEROF listhead^.Next TO MiFreeBlock.SizeEntry
+
+#IF BLD_CHK
+            IF block^.Block.Size != i THEN
+                KeCrash ( "MiAllocateFromPool: bad 2 %p\n", block )
+            END
+#END
+
+            GOTO FoundBlock
+        END
+
+        i += 1
+        listhead += SIZEOF RtlListEntry
+    END
+
+    // Search the log lists.
+
+    listhead = &pool^.LogListHeads[bucketindex]
+    i = bucketindex
+
+    WHILE i < MI_BLOCK_LOG_BUCKETS DO
+        IF NOT RtlEmptyList ( listhead ) THEN
+            // Found a block.
+
+            block = CONTAINEROF listhead^.Next TO MiFreeBlock.LogEntry
+
+#IF BLD_CHK
+            IF block^.Block.BucketIndex != i THEN
+                KeCrash ( "MiAllocateFromPool: bad 3 %p\n", block )
+            END
+#END
+
+            GOTO FoundBlock
+        END
+
+        i += 1
+        listhead += SIZEOF RtlListEntry
+    END
+
+    // No sufficient block. We need to allocate a new pool extension.
+
+    ext := pool^.GetMemory ( pool )
+
+    IF NOT ext THEN
+        // Failed to allocate a pool extension.
+
+        MiReleasePool ( pool, ipl )
+
+        IF NOT wait THEN
+            // Caller requested that we don't wait upon failure.
+
+            RETURN NULLPTR
+        END
+
+        // Wait for free memory and retry.
+
+        MiWaitForPages (
+            &MiSystemPartition, // partition
+            FALSE, // low
+        )
+
+        GOTO Retry
+    END
+
+    // Initialize the extension header.
+
+    ext^.Pool = pool
+    ext^.References = 1
+
+    // We need to initialize the extension as a single block of the maximum size
+    // minus whatever is used by the extension header, minus whatever we need
+    // for our allocation.
+
+    // Here we assume that a maximum size block is <= the chunk size, i.e.,
+    // there's always room for at least one within a new extension.
+
+    // We also assume that the extension header fits within a single block unit
+    // (currently 32 bytes).
+
+    block = CAST ext + MI_BLOCK_MIN_SIZE TO ^MiFreeBlock
+
+    // Initialize the block we'll be returning to the caller.
+
+    block^.Block.Magic = MI_BLOCK_SWIFT_MAGIC
+    block^.Block.Size = bytes
+    block^.Block.BucketIndex = insertindex
+    block^.Block.LastSize = 0
+
+    // Initialize the new block.
+
+    newblock := block + (bytes << MI_BLOCK_SIZE_SHIFT)
+
+    newblocksize := (1 << MI_BLOCK_MAX_UNITS_SHIFT) - 1
+
+#IF BLD_CHK
+    IF bytes > newblocksize THEN
+        // If the allocation request was this large, it should have been
+        // dispatched to the page aligned allocator.
+
+        KeCrash ( "MiAllocateFromPool: large allocation\n" )
+    END
+#END
+
+    newblocksize -= bytes
+
+    newbucketindex := MiEightBitLog[newblocksize]
+
+    newblock^.Block.Magic = MI_BLOCK_FREE_MAGIC
+    newblock^.Block.Size = newblocksize
+    newblock^.Block.BucketIndex = newbucketindex
+    newblock^.Block.LastSize = bytes
+
+    // Insert the new block in the free list.
+
+    RtlInsertAtHeadList (
+        &pool^.LogListHeads[newbucketindex], // head
+        &newblock^.LogEntry, // entry
+    )
+
+    RtlInsertAtHeadList (
+        &pool^.SizeListHeads[newblocksize], // head
+        &newblock^.SizeEntry, // entry
+    )
+
+    newblock += newblocksize << MI_BLOCK_SIZE_SHIFT
+
+    i = 0
+
+    WHILE i < MI_FULL_BLOCKS_PER_EXTENSION DO
+        // Initialize this full block.
+
+        newblock^.Block.Magic = MI_BLOCK_FREE_MAGIC
+        newblock^.Block.Size = 1 << MI_BLOCK_MAX_UNITS_SHIFT
+        newblock^.Block.BucketIndex = MI_BLOCK_MAX_UNITS_SHIFT
+        newblock^.Block.LastSize = 0
+
+        // Insert the new block into the buckets indexed by floor-log and size.
+
+        RtlInsertAtHeadList (
+            &pool^.LogListHeads[MI_BLOCK_MAX_UNITS_SHIFT], // head
+            &newblock^.LogEntry, // entry
+        )
+
+        RtlInsertAtHeadList (
+            &pool^.SizeListHeads[1 << MI_BLOCK_MAX_UNITS_SHIFT], // head
+            &newblock^.SizeEntry,
+        )
+
+        newblock += MI_BLOCK_MAX_SIZE
+        i += 1
+    END
+
+    // Unlock the pool.
+
+    MiReleasePool ( pool, ipl )
+
+    // Return the block.
+
+    RETURN block + SIZEOF MiBlock
+
+@FoundBlock
+
+#IF BLD_CHK
+    IF block^.Block.Magic != MI_BLOCK_FREE_MAGIC THEN
+        KeCrash ( "MiAllocateFromPool: bad %p\n", block )
+    END
+#END
+
+    // This block is either perfectly sized, or at least big enough to
+    // satisfy the allocation request. In either case, we want to
+    // unlink it from the bucket's free list now.
+
+    RtlRemoveEntryList ( &block^.SizeEntry )
+
+    RtlRemoveEntryList ( &block^.LogEntry )
+
+    // Increment the reference count on the pool extension to which this
+    // free block belongs, since in any case, we're going to be adding
+    // a new allocated block to it.
+
+    ext = MiFindPoolExtension ( block )
+    ext^.References += 1
+
+    // Set magic to indicate allocated, since in either case we'll be
+    // returning this block to the caller.
+
+    block^.Block.Magic = MI_BLOCK_SWIFT_MAGIC
+
+    // Increment pool statistics.
+
+    pool^.BytesUsedInternally += bytes << MI_BLOCK_SIZE_SHIFT
+
+    IF pool^.BytesUsedInternally > pool^.BytesUsedPeak THEN
+        pool^.BytesUsedPeak = pool^.BytesUsedInternally
+    END
+
+    // Set tag.
+
+    block^.Block.Tag = tag
+
+    // Load the block size and check.
+
+    newblocksize = block^.Block.Size
+
+    IF newblocksize != bytes THEN
+        // The block is too big and must be split.
+
+#IF BLD_CHK
+        IF newblocksize < bytes THEN
+            KeCrash ( "MiAllocateFromPool: smaller block\n" )
+        END
+#END
+
+        // Set new bucketindex and size in old block header.
+
+        block^.Block.BucketIndex = insertindex
+        block^.Block.Size = bytes
+
+        // Calculate the size of the new block.
+
+        newblocksize -= bytes
+
+        // Calculate the index of the bucket to place the new block in.
+
+        newbucketindex = MiEightBitLog[newblocksize]
+
+        // Get a pointer to the new block.
+
+        newblock = block + (bytes << MI_BLOCK_SIZE_SHIFT)
+
+        // Create new block header.
+
+        newblock^.Block.Size = newblocksize
+        newblock^.Block.LastSize = bytes
+        newblock^.Block.BucketIndex = newbucketindex
+        newblock^.Block.Magic = MI_BLOCK_FREE_MAGIC
+
+        // Insert the new block into the buckets indexed by floor-log and size.
+
+        RtlInsertAtHeadList (
+            &pool^.LogListHeads[newbucketindex], // head
+            &newblock^.LogEntry, // entry
+        )
+
+        RtlInsertAtHeadList (
+            &pool^.SizeListHeads[newblocksize], // head
+            &newblock^.SizeEntry,
+        )
+
+        // Update next block to point to the new block, unless it is
+        // aligned to a maximum block size, in which case there is no next
+        // block.
+
+        newblock += newblocksize << MI_BLOCK_SIZE_SHIFT
+
+        IF newblock & MI_BLOCK_MAX_SIZE_MASK THEN
+            newblock^.Block.LastSize = newblocksize
+        END
+    END
+
+    // Unlock the pool.
+
+    MiReleasePool ( pool, ipl )
+
+    // Return the block.
+
+    RETURN block + SIZEOF MiBlock
 END

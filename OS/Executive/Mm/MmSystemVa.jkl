@@ -19,9 +19,7 @@ END
 MiPoolSpace : MiChunkSpace
 MiCacheSpace : MiChunkSpace
 
-PUBLIC MiPoolSpaceChunkPages : UWORD
 PUBLIC MiCacheSpaceChunkPages : UWORD
-PUBLIC MiPoolSpaceChunkMask : UWORD
 
 MiDynamicSpaceRoot : RtlAvlNode
 MiDynamicSpacePushlock : KePushlock
@@ -134,14 +132,9 @@ FN MiInitializeSystemVa ()
     //
     // MI_POOL_SPACE:     Sized at boot time with enough page tables for a
     //                    quantity of virtual space equivalent to the total
-    //                    physical memory in the system. Allocated in fixed size
-    //                    chunks, varying in size depending on the system size:
+    //                    physical memory in the system.
     //
-    //                    Tiny:   16KB
-    //                    *:      32KB
-    //                    Large+: 64KB
-    //
-    //                    The free list for these chunks is threaded through the
+    //                    The free list for these pages is threaded through the
     //                    page tables.
     //
     //                    Maximum size on 32-bit is capped at 256MB.
@@ -176,36 +169,24 @@ FN MiInitializeSystemVa ()
 
     size := MiSystemPartition.SizeLevel
 
-    entryshift : UWORD
+#IF BLD_CHK
+    IF SIZEOF MiChunkEntry > SIZEOF MiPte THEN
+        KeCrash ( "MiChunkEntry > MiPte\n" )
+    END
+#END
 
     // Initialize nonpaged space.
-
-    IF size <= MI_TINY_SYSTEM THEN
-        entryshift = 14 // 1 << 14 = 16KB
-
-    ELSEIF size < MI_LARGE_SYSTEM THEN
-        entryshift = 15 // 1 << 15 = 32KB
-
-    ELSE
-        entryshift = 16 // 1 << 16 = 64KB
-    END
-
-    // Initialize a count of pages per chunk.
-
-    MiPoolSpaceChunkPages = (1 << entryshift) >> RTL_PAGE_SHIFT
-
-    // Initialize a mask by which the chunk base can be found from a pointer.
-
-    MiPoolSpaceChunkMask = ~((1 << entryshift) - 1)
 
     MiInitializeChunkSpace (
         &MiPoolSpace, // chunkspace
         MI_POOL_SPACE, // base
-        entryshift, // entryshift
+        RTL_PAGE_SHIFT, // entryshift
         KeLoaderBlock.PoolSpaceSize, // pages
     )
 
     // Initialize cache space.
+
+    entryshift : UWORD
 
     IF size <= MI_TINY_SYSTEM THEN
         entryshift = 15 // 1 << 15 = 32KB
