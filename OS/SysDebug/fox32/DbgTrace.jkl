@@ -196,3 +196,15 @@ FN DbgTraceContext (
         CAST context^.Epc TO ^VOID, // pc
     )
 END
+
+FN DbgTraceThreadContext (
+    IN context : ^OsContext,
+)
+
+    fp := context + SIZEOF OsContext
+
+    DbgTrace (
+        context + SIZEOF OsContext, // fp
+        (CAST fp TO ^^VOID)[1], // pc
+    )
+END

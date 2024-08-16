@@ -13,16 +13,18 @@
 // We track block sizes in units of minimum block sizes. Since we store this in
 // a byte, the maximum block size is the minimum block size times 256 (or,
 // shifted left by 8). Actually, here we use 6 (1 << 6 = 64 units max) to keep
-// the size of the pool structures down.
+// the size of the pool structures, and time spent scanning list heads down.
 
 #DEFINE MI_BLOCK_MAX_UNITS_SHIFT 6
 #DEFINE MI_BLOCK_MAX_SIZE_SHIFT [(MI_BLOCK_SIZE_SHIFT + MI_BLOCK_MAX_UNITS_SHIFT)]
 #DEFINE MI_BLOCK_MAX_SIZE [(1 << MI_BLOCK_MAX_SIZE_SHIFT)]
 #DEFINE MI_BLOCK_MAX_SIZE_MASK [(MI_BLOCK_MAX_SIZE - 1)]
 
-// The maximum request size is half the maximum block size.
+// The maximum request size is four units less than the maximum size.
+// This avoids some weird edge cases. It's also more time-efficient to use the
+// page-aligned allocator for larger requests.
 
-#DEFINE MI_BLOCK_MAX_REQUEST_UNITS [(1 << (MI_BLOCK_MAX_UNITS_SHIFT - 1))]
+#DEFINE MI_BLOCK_MAX_REQUEST_UNITS [((1 << MI_BLOCK_MAX_UNITS_SHIFT) - 4)]
 
 #DEFINE MI_FULL_BLOCKS_PER_EXTENSION [(RTL_PAGE_SIZE / MI_BLOCK_MAX_SIZE - 1)]
 
@@ -31,6 +33,7 @@
 
 #DEFINE MI_BLOCK_SWIFT_MAGIC 0xC0
 #DEFINE MI_BLOCK_FREE_MAGIC 0xE4
+#DEFINE MI_BLOCK_INVALID_MAGIC 0xA5
 
 STRUCT MiBlock
     BucketIndex : UBYTE,
@@ -39,7 +42,6 @@ STRUCT MiBlock
     Size : UBYTE,
 
     Tag : ULONG,
-
 END
 
 STRUCT MiFreeBlock
@@ -95,7 +97,9 @@ FN (MiPoolGetMemoryF) MiGetNonpagedExtension (
 
 @Retry
 
-    ext := CAST MiAllocatePoolSpace () TO ^MiPoolExtension
+    ext := CAST MiAllocateChunkSpace (
+        &MiPoolSpace, // chunkspace
+    ) TO ^MiPoolExtension
 
     IF NOT ext THEN
         // Uh-oh! If we're out of pool space there isn't much good to be done.
@@ -130,9 +134,14 @@ FN (MiPoolGetMemoryF) MiGetNonpagedExtension (
     )
 
     IF NOT pfe THEN
-        // Free the nonpaged space chunk.
+        // Free the pool space chunk.
+        // No need to flush TB since we didn't access it.
 
-        MiFreePoolSpace ( ext )
+        MiFreeChunkSpace (
+            &MiPoolSpace, // chunkspace
+            ext, // ptr
+            FALSE, // flush
+        )
 
         RETURN NULLPTR
     END
@@ -140,6 +149,8 @@ FN (MiPoolGetMemoryF) MiGetNonpagedExtension (
     pool^.Color += 1
 
     // Map the page frame.
+    // Note that no TB entry exists for this page in any CPU if we've been
+    // given it by the pool space allocator.
 
     pte := MI_PTE_ADDRESS ( ext )
 
@@ -153,17 +164,33 @@ FN (MiPoolReturnMemoryF) MiReturnNonpagedExtension (
 )
 
     // Free the page frames within this extension and return it to nonpaged
-    // space.
+    // space. The space allocator will deal with flushing the TB.
 
     pte := MI_PTE_ADDRESS ( ptr )
     ptecontents := pte[0]
+
+    // Clear the PTE, makes it more likely we'll see it if a bad pointer within
+    // this chunk is used later. Due to the TB it's not 100% though.
+
+    pte[0] = MI_INVALID_KERNEL_PTE
+
+#IF BLD_CHK
+    // Make it even more likely by at least flushing this page on the current
+    // processor.
+
+    KeFlushMyTbAddress ( ptr )
+#END
 
     MiFreePage (
         &MiSystemPartition, // partition
         MI_PFN_TO_PFE ( MI_PFN_FROM_PTE ( ptecontents ) ), // pfe
     )
 
-    MiFreePoolSpace ( ptr )
+    MiFreeChunkSpace (
+        &MiPoolSpace, // chunkspace
+        ptr, // ptr
+        TRUE, // flush
+    )
 END
 
 FN (MiPoolGetMemoryF) MiGetPagedExtension (
@@ -404,6 +431,18 @@ FN MiAllocateFromPool (
         GOTO Retry
     END
 
+    // Increment external usage. Note that a pool chunk is one page frame.
+
+    pool^.BytesUsedExternally += RTL_PAGE_SIZE
+
+    // Increment pool statistics.
+
+    pool^.BytesUsedInternally += bytes << MI_BLOCK_SIZE_SHIFT
+
+    IF pool^.BytesUsedInternally > pool^.BytesUsedPeak THEN
+        pool^.BytesUsedPeak = pool^.BytesUsedInternally
+    END
+
     // Initialize the extension header.
 
     ext^.Pool = pool
@@ -427,6 +466,7 @@ FN MiAllocateFromPool (
     block^.Block.Size = bytes
     block^.Block.BucketIndex = insertindex
     block^.Block.LastSize = 0
+    block^.Block.Tag = tag
 
     // Initialize the new block.
 
@@ -607,4 +647,208 @@ FN MiAllocateFromPool (
     // Return the block.
 
     RETURN block + SIZEOF MiBlock
+END
+
+FN MiFreeToPool (
+    IN ptr : ^VOID,
+    IN tag : ULONG,
+)
+
+    // Free the pool block. We're only passed blocks that were small enough to
+    // go in POOLSPACE.
+
+    otherblock : ^MiFreeBlock
+
+    // Acquire a pointer to the block.
+
+    block := CAST ptr - SIZEOF MiBlock TO ^MiFreeBlock
+
+    IF tag != block^.Block.Tag THEN
+        KeCrash ( "MiFreeToPool: wrong tag %x on %p (expected %x)\n", block^.Block.Tag, ptr, tag )
+    END
+
+    // Acquire a pointer to the pool extension.
+
+    ext := MiFindPoolExtension ( block )
+
+    pool := ext^.Pool
+
+    merged := FALSE
+
+    blocksize := block^.Block.Size
+
+    // Lock the pool in which the block resides.
+
+    ipl := MiAcquirePool ( pool )
+
+    pool^.BytesUsedInternally -= blocksize << MI_BLOCK_SIZE_SHIFT
+
+    IF block^.Block.LastSize THEN
+        // Check the block to the left for merging.
+
+        otherblock = block - (block^.Block.LastSize << MI_BLOCK_SIZE_SHIFT)
+
+#IF BLD_CHK
+        IF otherblock^.Block.Size != block^.Block.LastSize THEN
+            KeCrash ( "MiFreeBlock: bad block left %p %p\n", otherblock, block )
+        END
+#END
+
+        IF otherblock^.Block.Magic == MI_BLOCK_FREE_MAGIC THEN
+            // Free! Merge left.
+
+            merged = TRUE
+
+            // Remove it from old free lists.
+
+            RtlRemoveEntryList ( &otherblock^.LogEntry )
+
+            RtlRemoveEntryList ( &otherblock^.SizeEntry )
+
+            // Increment our block size.
+
+            blocksize += otherblock^.Block.Size
+
+#IF BLD_CHK
+            // Invalidate magic number of old block, since it's now in the
+            // middle of this new block.
+
+            block^.Block.Magic = MI_BLOCK_INVALID_MAGIC
+#END
+
+            // Set block pointer to left block.
+
+            block = otherblock
+        END
+    END
+
+    // Get a pointer to the block to the right.
+
+    otherblock = block + (blocksize << MI_BLOCK_SIZE_SHIFT)
+
+    IF otherblock & MI_BLOCK_MAX_SIZE_MASK THEN
+        // A block to the right exists if it's not aligned to the maximum block
+        // size.
+
+        IF otherblock^.Block.Magic == MI_BLOCK_FREE_MAGIC THEN
+            // Free! Merge right.
+
+            merged = TRUE
+
+            // Remove it from old free lists.
+
+            RtlRemoveEntryList ( &otherblock^.LogEntry )
+
+            RtlRemoveEntryList ( &otherblock^.SizeEntry )
+
+            // Increment our block size.
+
+            blocksize += otherblock^.Block.Size
+
+#IF BLD_CHK
+            // Invalidate magic number of old block, since it's now in the
+            // middle of the new block.
+
+            otherblock^.Block.Magic = MI_BLOCK_INVALID_MAGIC
+#END
+        END
+    END
+
+    // Decrement the refcount on the extension.
+
+    ext^.References -= 1
+
+    IF NOT ext^.References THEN
+        // The extension is totally empty and should be released.
+        // This involves removing all of its blocks (except this one!) from the
+        // free lists and then returning the extension from whence it came.
+
+        // The form of the extension should be a partial block (with a piece cut
+        // out for the extension header) plus a number of maximum sized blocks.
+        // First unlink the partial block.
+
+        otherblock = CAST ext + MI_BLOCK_MIN_SIZE TO ^MiFreeBlock
+
+        IF otherblock != block THEN
+#IF BLD_CHK
+            IF otherblock^.Block.Magic != MI_BLOCK_FREE_MAGIC THEN
+                KeCrash ( "MiFreeToPool: not free 1 %p\n", otherblock )
+            END
+#END
+
+            RtlRemoveEntryList ( &otherblock^.LogEntry )
+
+            RtlRemoveEntryList ( &otherblock^.SizeEntry )
+        END
+
+        // Now unlink the full blocks.
+
+        otherblock += MI_BLOCK_MAX_SIZE - MI_BLOCK_MIN_SIZE
+
+        i := 0
+
+        WHILE i < MI_FULL_BLOCKS_PER_EXTENSION DO
+            IF otherblock != block THEN
+#IF BLD_CHK
+                IF otherblock^.Block.Magic != MI_BLOCK_FREE_MAGIC THEN
+                    KeCrash ( "MiFreeToPool: not free 2 %p\n", otherblock )
+                END
+#END
+
+                RtlRemoveEntryList ( &otherblock^.LogEntry )
+
+                RtlRemoveEntryList ( &otherblock^.SizeEntry )
+            END
+
+            i += 1
+            otherblock += MI_BLOCK_MAX_SIZE
+        END
+
+        // Now return the extension.
+
+        pool^.BytesUsedExternally -= RTL_PAGE_SIZE
+
+        pool^.ReturnMemory ( ext )
+
+        // Unlock pool and return.
+
+        MiReleasePool ( pool, ipl )
+
+        LEAVE
+    END
+
+    IF merged THEN
+        // Re-calculate bucket index and set new fields.
+
+        block^.Block.BucketIndex = MiEightBitLog[blocksize]
+        block^.Block.Size = blocksize
+
+        // Set last size of block to our right.
+
+        otherblock = block + (blocksize << MI_BLOCK_SIZE_SHIFT)
+
+        IF otherblock & MI_BLOCK_MAX_SIZE_MASK THEN
+            otherblock^.Block.LastSize = blocksize
+        END
+    END
+
+    // Set free magic.
+
+    block^.Block.Magic = MI_BLOCK_FREE_MAGIC
+
+    // Put on free lists.
+
+    RtlInsertAtHeadList (
+        &pool^.LogListHeads[block^.Block.BucketIndex], // head
+        &block^.LogEntry, // entry
+    )
+
+    RtlInsertAtHeadList (
+        &pool^.SizeListHeads[blocksize], // head
+        &block^.SizeEntry, // entry
+    )
+
+    // Unlock pool and return.
+
+    MiReleasePool ( pool, ipl )
 END

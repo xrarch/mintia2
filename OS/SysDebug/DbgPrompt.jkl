@@ -5,6 +5,16 @@
 #INCLUDE "Dbg.hjk"
 #INCLUDE "<ll>/System/OsContext.hjk"
 
+#IF ( == BLD_BITS 64 )
+
+#DEFINE DBG_POINTER_ALIGN_MASK 7
+
+#ELSE
+
+#DEFINE DBG_POINTER_ALIGN_MASK 3
+
+#END
+
 #DEFINE DBG_TOKEN_BUFFER_SIZE 128
 #DEFINE DBG_MONITOR_HEIGHT 24
 
@@ -197,11 +207,6 @@ FN (DbgCommandF) DbgCommandPcSym ()
         symname,
         numval - symvalue,
     )
-END
-
-FN (DbgCommandF) DbgCommandTrace ()
-
-    DbgTraceContext ( DbgCurrentContext )
 END
 
 FN (DbgCommandF) DbgCommandPeekUlong ()
@@ -515,6 +520,258 @@ FN (DbgCommandF) DbgCommandReady ()
     END
 END
 
+DbgThreadStatusName : ^UBYTE[8] = {
+    [KI_THREAD_RUNNING] = "RUNNING",
+    [KI_THREAD_READY] = "READY",
+    [KI_THREAD_WAITING] = "WAITING",
+    [KI_THREAD_INITIALIZED] = "INIT",
+    [KI_THREAD_STANDBY] = "STANDBY",
+    [KI_THREAD_INFLIGHT] = "INFLIGHT",
+    [KI_THREAD_TERMINATED] = "TERM",
+}
+
+FN (DbgCommandF) DbgCommandThreads ()
+
+    num : UBYTE[32]
+
+    IF NOT DbgNextToken (
+        &num[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: threads [proc]\n" )
+
+        LEAVE
+    END
+
+    numval : UWORD
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        32, // bufsize
+        OUT numval, // num
+    ) THEN
+
+        RtlPrint ( "Usage: threads [proc]\n" )
+
+        LEAVE
+    END
+
+    proc := CAST numval TO ^KeProcess
+
+    IF proc & DBG_POINTER_ALIGN_MASK THEN
+        RtlPrint ( "Unaligned pointer %p\n", proc )
+
+        LEAVE
+    END
+
+    IF NOT MmIsVirtualValid ( proc ) OR
+        NOT MmIsVirtualValid ( proc + SIZEOF KeProcess - 1 ) THEN
+
+        RtlPrint ( "Process object %p overlaps invalid page\n", proc )
+
+        LEAVE
+    END
+
+    RtlPrint ( "%-10s %-22s %-8s %-4s\n", "PTR", "NAME", "STATUS", "PRI" )
+
+    listhead := &proc^.ThreadListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        thread := CONTAINEROF listentry TO KeThread.ProcessListEntry
+
+        IF thread & DBG_POINTER_ALIGN_MASK THEN
+            RtlPrint ( "Unaligned thread object %p\n", thread )
+
+            LEAVE
+        END
+
+        IF NOT MmIsVirtualValid ( thread ) OR
+            NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+
+            RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
+
+            LEAVE
+        END
+
+        RtlPrint (
+            "%p %-22s %-8s %-4u\n",
+            thread,
+            &thread^.Name[0],
+            DbgThreadStatusName[thread^.Status],
+            thread^.Priority,
+        )
+
+        listentry = listentry^.Next
+    END
+END
+
+FN (DbgCommandF) DbgCommandWait ()
+
+    num : UBYTE[32]
+
+    IF NOT DbgNextToken (
+        &num[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: wait [thread]\n" )
+
+        LEAVE
+    END
+
+    numval : UWORD
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        32, // bufsize
+        OUT numval, // num
+    ) THEN
+
+        RtlPrint ( "Usage: wait [thread]\n" )
+
+        LEAVE
+    END
+
+    thread := CAST numval TO ^KeThread
+
+    IF thread & DBG_POINTER_ALIGN_MASK THEN
+        RtlPrint ( "Unaligned pointer %p\n", thread )
+
+        LEAVE
+    END
+
+    IF NOT MmIsVirtualValid ( thread ) OR
+        NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+
+        RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
+
+        LEAVE
+    END
+
+    RtlPrint ( "Thread timer: %p ", &thread^.Timeout )
+
+    IF thread^.Timeout.EnqueuedTo THEN
+        RtlPrint ( "(enqueued to %p)", thread^.Timeout.EnqueuedTo )
+    END
+
+    RtlPrint ( "\n" )
+
+    waitblock := thread^.WaitBlockTable
+
+    count := thread^.WaitCount
+
+    RtlPrint ( "Waiting on %u objects\n", count )
+
+    i := 0
+
+    WHILE count DO
+        IF waitblock & DBG_POINTER_ALIGN_MASK THEN
+            RtlPrint ( "Unaligned waitblock %p\n", waitblock )
+
+            LEAVE
+        END
+
+        IF NOT MmIsVirtualValid ( waitblock ) OR
+            NOT MmIsVirtualValid ( waitblock + SIZEOF KiWaitBlock - 1 ) THEN
+
+            RtlPrint ( "Wait block %p overlaps invalid page\n", waitblock )
+
+            LEAVE
+        END
+
+        object := waitblock^.Object
+
+        IF object & DBG_POINTER_ALIGN_MASK THEN
+            RtlPrint ( "Unaligned object %p\n", object )
+
+            LEAVE
+        END
+
+        IF NOT MmIsVirtualValid ( object ) OR
+            NOT MmIsVirtualValid ( object + SIZEOF KiDispatchHeader - 1 ) THEN
+
+            RtlPrint ( "Object %p overlaps invalid page\n", object )
+
+            LEAVE
+        END
+
+        name := object^.Name
+
+        IF NOT name THEN
+            name = "NO NAME"
+        END
+
+        RtlPrint ( "wait(%u): %p '%s'\n", i, waitblock^.Object, name )
+
+        waitblock += SIZEOF KiWaitBlock
+        count -= 1
+        i += 1
+    END
+END
+
+FN (DbgCommandF) DbgCommandTrace ()
+
+    num : UBYTE[32]
+
+    IF NOT DbgNextToken (
+        &num[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+        // Trace the CPU.
+
+        DbgTraceContext ( DbgCurrentContext )
+
+        LEAVE
+    END
+
+    numval : UWORD
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        32, // bufsize
+        OUT numval, // num
+    ) THEN
+        RtlPrint ( "Usage: trace [thread]\n" )
+
+        LEAVE
+    END
+
+    thread := CAST numval TO ^KeThread
+
+    IF thread & DBG_POINTER_ALIGN_MASK THEN
+        RtlPrint ( "Unaligned pointer %p\n", thread )
+
+        LEAVE
+    END
+
+    IF NOT MmIsVirtualValid ( thread ) OR
+        NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+
+        RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
+
+        LEAVE
+    END
+
+    IF thread^.Status == KI_THREAD_RUNNING THEN
+        RtlPrint ( "Running - no context.\n" )
+
+#IF BLD_MP
+        id := thread^.CurrentPrb^.Id
+#ELSE
+        id := 0
+#END
+
+
+        RtlPrint ( "Was running on CPU %u, switch there and run trace.\n", id )
+
+        LEAVE
+    END
+
+    DbgTraceThreadContext ( thread^.Context )
+END
+
 #SECTION "text"
 DbgCommandTable : DbgCommand[] = {
     {
@@ -577,6 +834,23 @@ DbgCommandTable : DbgCommand[] = {
         [Function] = &DbgCommandReady,
         [Help] = "Dump the ready queues of the current CPU.",
     },
+    {
+        [Name] = "threads",
+        [Function] = &DbgCommandThreads,
+        [Help] = "Dump the threads of the given process.",
+    },
+    {
+        [Name] = "wait",
+        [Function] = &DbgCommandWait,
+        [Help] = "Dump wait information for a thread.",
+    },
+#IF 0
+    {
+        [Name] = "dispatch",
+        [Function] = &DbgCommandDispatch,
+        [Help] = "Dump wait information for a dispatch object.",
+    },
+#END
 
     // Sentinel.
 

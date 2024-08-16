@@ -148,8 +148,6 @@ STRUCT KiPrb
     StackSwapListLock : KiSpinlock,
     CacheAlign4 : UBYTE[KI_CACHE_ALIGN - SIZEOF KiSpinlock],
 
-    IpiInterrupt : KeInterrupt,
-
     IpiFunction : KiIpiF,
 
     IdlePrbListEntry : RtlListEntry,
@@ -236,6 +234,10 @@ STRUCT KiPrb
     // reach of immediate offset ranges on various architectures.
 
     IdleThread : KeThread,
+
+#IF BLD_MP
+    IpiInterrupt : KeInterrupt,
+#END
 
     ClockTicks : RtlUquad,
     DpcTimeMs : RtlUquad,

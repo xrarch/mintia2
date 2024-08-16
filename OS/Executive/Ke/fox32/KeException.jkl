@@ -510,6 +510,8 @@ KiSwitchContext:
     // We must also release the old thread's thread lock on our way out, after
     // we have fully left its context.
 
+    push fp
+
     sub  sp, 13 // Skip Eflags, BadAddr, Epc, Sp
     push fp
     push r31
@@ -573,7 +575,7 @@ KiJumpIntoThread:
     pop  tp
     pop  r31
     pop  fp
-    add  sp, 13 // Skip Eflags, BadAddr, Epc, Sp
+    add  sp, 17 // Skip Eflags, BadAddr, Epc, Sp, fp
 
     ret
 
@@ -838,9 +840,10 @@ FN KiInitializeContext (
 
     // Initialize the context for a thread that is about to begin execution.
 
-    retaddr := CAST kstack - 4 TO ^ULONG
+    retaddr := CAST kstack - 8 TO ^ULONG
 
-    retaddr[0] = &KiThreadTrampoline
+    retaddr[1] = &KiThreadTrampoline
+    retaddr[0] = 0
 
     context := CAST (retaddr - SIZEOF OsContext) TO ^OsContext
 

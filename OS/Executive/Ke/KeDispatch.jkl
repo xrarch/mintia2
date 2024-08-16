@@ -2179,12 +2179,9 @@ EXPORT FN KeWaitForObjects (
         KeCrash ( "KeWaitForObjects: objectcount == 0\n" )
     END
 
-#IF ( == BLD_BITS 64 )
-    IF objectcount > 0xFFFFFFFF THEN
-        KeCrash ( "KeWaitForObjects: objectcount > ULONG size\n" )
+    IF objectcount > 0xFF THEN
+        KeCrash ( "KeWaitForObjects: objectcount > UBYTE size\n" )
     END
-#END
-
 #END
 
     thread := KeCurrentThread ()

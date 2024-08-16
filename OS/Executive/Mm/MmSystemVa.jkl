@@ -9,15 +9,8 @@ STRUCT MiChunkEntry
     Next : ^MiChunkEntry,
 END
 
-STRUCT MiChunkSpace
-    EntryShift : UWORD,
-    EntryCount : UWORD,
-    FreeListHead : ^MiChunkEntry,
-    Pushlock : KePushlock,
-END
-
-MiPoolSpace : MiChunkSpace
-MiCacheSpace : MiChunkSpace
+PUBLIC MiPoolSpace : MiChunkSpace
+PUBLIC MiCacheSpace : MiChunkSpace
 
 PUBLIC MiCacheSpaceChunkPages : UWORD
 
@@ -44,6 +37,8 @@ FN MiInitializeChunkSpace (
     chunkspace^.EntryCount = entrycount
     chunkspace^.FreeListHead = NULLPTR
 
+    chunkspace^.PendingFlushCount = 0
+
     KeInitializePushlock ( &chunkspace^.Pushlock )
 
     // Link the chunks through the PTEs.
@@ -61,6 +56,46 @@ FN MiInitializeChunkSpace (
     END
 END
 
+FN MiFlushChunkSpace (
+    IN chunkspace : ^MiChunkSpace,
+)
+
+    // Flush TB entries across all processors for the delayed chunks.
+
+    // Insert these entries into the free list.
+
+    i := 0
+    max := chunkspace^.PendingFlushCount
+
+    WHILE i < max DO
+        chunk := CAST MI_PTE_ADDRESS ( chunkspace^.PendingFlush[i] )
+            TO ^MiChunkEntry
+
+        chunk^.Next = chunkspace^.FreeListHead
+        chunkspace^.FreeListHead = chunk
+
+        i += 1
+    END
+
+    chunkspace^.PendingFlushCount = 0
+
+    // Flush the TB.
+
+    IF chunkspace^.EntryShift == RTL_PAGE_SHIFT THEN
+        // Chunks are pages, flush individually.
+
+        KeFlushMultipleTb (
+            &chunkspace^.PendingFlush[0], // vaddrtable
+            max, // pagecount
+        )
+
+    ELSE
+        // Chunks are multiple pages. Flush everyone's entire TB.
+
+        KeSweepTb ()
+    END
+END
+
 FN MiAllocateChunkSpace (
     IN chunkspace : ^MiChunkSpace,
 ) : ^VOID
@@ -75,9 +110,18 @@ FN MiAllocateChunkSpace (
     chunk := chunkspace^.FreeListHead
 
     IF NOT chunk THEN
-        KeReleaseApcSafePushlock ( &chunkspace^.Pushlock, ipl )
+        IF NOT chunkspace^.PendingFlushCount THEN
+            KeReleaseApcSafePushlock ( &chunkspace^.Pushlock, ipl )
 
-        RETURN NULLPTR
+            RETURN NULLPTR
+        END
+
+        // There are chunks pending flush.
+        // We can flush them and grab the first freed one.
+
+        MiFlushChunkSpace ( chunkspace )
+
+        chunk = chunkspace^.FreeListHead
     END
 
     chunkspace^.FreeListHead = chunk^.Next
@@ -90,37 +134,39 @@ END
 FN MiFreeChunkSpace (
     IN chunkspace : ^MiChunkSpace,
     IN ptr : ^VOID,
+    IN flush : UWORD,
 )
 
     // Return a chunk to the given chunk space.
 
-    chunk := CAST MI_PTE_ADDRESS ( ptr ) TO ^MiChunkEntry
-
     ipl := KeAcquireApcSafePushlockExclusive ( &chunkspace^.Pushlock )
 
-    chunk^.Next = chunkspace^.FreeListHead
-    chunkspace^.FreeListHead = chunk
+    IF flush THEN
+        // Insert on the delayed flush table.
+
+        count := chunkspace^.PendingFlushCount
+
+        IF count == MI_MAXIMUM_CHUNKS_PENDING_FLUSH THEN
+            // Full. Flush it.
+
+            MiFlushChunkSpace ( chunkspace )
+
+            count = 0
+        END
+
+        chunkspace^.PendingFlush[count] = ptr
+        chunkspace^.PendingFlushCount = count + 1
+
+    ELSE
+        // Insert directly into the free chunk list.
+
+        chunk := CAST MI_PTE_ADDRESS ( ptr ) TO ^MiChunkEntry
+
+        chunk^.Next = chunkspace^.FreeListHead
+        chunkspace^.FreeListHead = chunk
+    END
 
     KeReleaseApcSafePushlock ( &chunkspace^.Pushlock, ipl )
-END
-
-FN MiAllocatePoolSpace () : ^VOID
-
-    // Allocate a chunk of pool space.
-
-    RETURN MiAllocateChunkSpace ( &MiPoolSpace )
-END
-
-FN MiFreePoolSpace (
-    IN ptr : ^VOID,
-)
-
-    // Free a chunk of pool space.
-
-    MiFreeChunkSpace (
-        &MiPoolSpace, // chunkspace
-        ptr, // ptr
-    )
 END
 
 #SECTION "INITtext"

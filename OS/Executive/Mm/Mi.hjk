@@ -138,15 +138,25 @@ EXTERN FN MiAllocateChunkSpace (
 EXTERN FN MiFreeChunkSpace (
     IN chunkspace : ^MiChunkSpace,
     IN ptr : ^VOID,
+    IN flush : UWORD,
 )
+
+#DEFINE MI_MAXIMUM_CHUNKS_PENDING_FLUSH 32
+
+STRUCT MiChunkSpace
+    EntryShift : UWORD,
+    EntryCount : UWORD,
+    FreeListHead : ^MiChunkEntry,
+    Pushlock : KePushlock,
+
+    PendingFlush : ^VOID[MI_MAXIMUM_CHUNKS_PENDING_FLUSH],
+    PendingFlushCount : UBYTE,
+END
+
+EXTERN MiPoolSpace : MiChunkSpace
+EXTERN MiCacheSpace : MiChunkSpace
 
 EXTERN MiCacheSpaceChunkPages : UWORD
-
-EXTERN FN MiAllocatePoolSpace () : ^VOID
-
-EXTERN FN MiFreePoolSpace (
-    IN ptr : ^VOID,
-)
 
 EXTERN FN MiInitializeSystemVa ()
 

@@ -400,19 +400,19 @@ FN KeSweepTb ()
 
     // Flush the entire TB on all processors.
 
+#IF BLD_MP
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
-#IF BLD_MP
     KiExecuteOnEveryoneElse (
         &KiSweepTb, // function
         0, // context1
         0, // context2
     )
+
+    KiLowerIpl ( ipl )
 #END
 
     KeSweepMyTb ()
-
-    KiLowerIpl ( ipl )
 END
 
 FN KeFlushSingleTb (
@@ -421,19 +421,19 @@ FN KeFlushSingleTb (
 
     // Flush a single TB entry on all processors.
 
+#IF BLD_MP
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
-#IF BLD_MP
     KiExecuteOnEveryoneElse (
         &KiFlushSingleTb, // function
         vaddr, // context1
         0, // context2
     )
+
+    KiLowerIpl ( ipl )
 #END
 
     KeFlushMyTbAddress ( vaddr )
-
-    KiLowerIpl ( ipl )
 END
 
 FN KeFlushMultipleTb (
@@ -443,14 +443,16 @@ FN KeFlushMultipleTb (
 
     // Flush multiple TB entries on all processors.
 
+#IF BLD_MP
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
-#IF BLD_MP
     KiExecuteOnEveryoneElse (
         &KiFlushMultipleTb, // function
         vaddrtable, // context1
         pagecount, // context2
     )
+
+    KiLowerIpl ( ipl )
 #END
 
     WHILE pagecount DO
@@ -459,27 +461,25 @@ FN KeFlushMultipleTb (
         vaddrtable += SIZEOF ^VOID
         pagecount -= 1
     END
-
-    KiLowerIpl ( ipl )
 END
 
 FN KeSweepDcache ()
 
     // Flush the entire Dcache on all processors.
 
+#IF BLD_MP
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
-#IF BLD_MP
     KiExecuteOnEveryoneElse (
         &KiSweepDcache, // function
         0, // context1
         0, // context2
     )
+
+    KiLowerIpl ( ipl )
 #END
 
     KiFlushMyDcache ()
-
-    KiLowerIpl ( ipl )
 END
 
 FN KeFlushDcachePages (
@@ -489,14 +489,16 @@ FN KeFlushDcachePages (
 
     // Flush pages of the Dcache on all processors.
 
+#IF BLD_MP
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
-#IF BLD_MP
     KiExecuteOnEveryoneElse (
         &KiFlushMultipleDcache, // function
         pfntable, // context1
         pagecount, // context2
     )
+
+    KiLowerIpl ( ipl )
 #END
 
     WHILE pagecount DO
@@ -505,27 +507,25 @@ FN KeFlushDcachePages (
         pfntable += SIZEOF ^VOID
         pagecount -= 1
     END
-
-    KiLowerIpl ( ipl )
 END
 
 FN KeSweepIcache ()
 
     // Flush the entire Icache on all processors.
 
+#IF BLD_MP
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
-#IF BLD_MP
     KiExecuteOnEveryoneElse (
         &KiSweepIcache, // function
         0, // context1
         0, // context2
     )
+
+    KiLowerIpl ( ipl )
 #END
 
     KiFlushMyIcache ()
-
-    KiLowerIpl ( ipl )
 END
 
 FN KeFlushIcachePages (
@@ -535,14 +535,16 @@ FN KeFlushIcachePages (
 
     // Flush pages of the Icache on all processors.
 
+#IF BLD_MP
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
-#IF BLD_MP
     KiExecuteOnEveryoneElse (
         &KiFlushMultipleIcache, // function
         pfntable, // context1
         pagecount, // context2
     )
+
+    KiLowerIpl ( ipl )
 #END
 
     WHILE pagecount DO
@@ -551,8 +553,6 @@ FN KeFlushIcachePages (
         pfntable += SIZEOF ^VOID
         pagecount -= 1
     END
-
-    KiLowerIpl ( ipl )
 END
 
 FN KeZeroPage (
@@ -560,6 +560,8 @@ FN KeZeroPage (
 )
 
     // Zero out the page with the given PFN.
+
+    // We use a per-CPU mapping, so raise to block preemption.
 
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
