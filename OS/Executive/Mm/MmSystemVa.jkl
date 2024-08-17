@@ -81,8 +81,11 @@ FN MiFlushChunkSpace (
 
     // Flush the TB.
 
-    IF chunkspace^.EntryShift == RTL_PAGE_SHIFT THEN
-        // Chunks are pages, flush individually.
+    IF chunkspace^.EntryShift == RTL_PAGE_SHIFT AND
+        max < 16 THEN
+
+        // Chunks are pages, and there's fewer than 16.
+        // Flush them individually.
 
         KeFlushMultipleTb (
             &chunkspace^.PendingFlush[0], // vaddrtable
@@ -90,9 +93,10 @@ FN MiFlushChunkSpace (
         )
 
     ELSE
-        // Chunks are multiple pages. Flush everyone's entire TB.
+        // Chunks are multiple pages, or there's more than 16.
+        // Flush everyone's entire TB. Don't keep global pages.
 
-        KeSweepTb ()
+        KeSweepTb ( FALSE )
     END
 END
 

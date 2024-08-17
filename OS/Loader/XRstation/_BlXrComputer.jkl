@@ -222,7 +222,7 @@ BxEnableVirtualAddressing:
     mov  t0, long [BxPageDirectory]
     rshi t0, t0, 12
     lshi t0, t0, 5
-    ori  t0, t0, 0x7 // MI_PTE_V | MI_PTE_W | MI_PTE_K
+    ori  t0, t0, (MI_PTE_V | MI_PTE_W | MI_PTE_G | MI_PTE_K)
     mtcr dtbpte, t0
 
     rshi t0, a0, 12
@@ -230,7 +230,7 @@ BxEnableVirtualAddressing:
 
     rshi t0, a1, 12
     lshi t0, t0, 5
-    ori  t0, t0, 0x17 // MI_PTE_V | MI_PTE_W | MI_PTE_G | MI_PTE_K
+    ori  t0, t0, (MI_PTE_V | MI_PTE_W | MI_PTE_G | MI_PTE_K)
     mtcr itbpte, t0
 
     // Re-initialize TB replacement indices to 4, to skip over the 4 reserved

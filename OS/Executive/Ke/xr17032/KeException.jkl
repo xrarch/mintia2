@@ -709,7 +709,10 @@ FN KiSwitchAddressSpace (
                 1, // ulong
             )
 
-            KeSweepMyTb ()
+            // Flush my TB. Keep global pages because we only use ASIDs for
+            // private pages, no need to waste system space TB entries.
+
+            KeSweepMyTb ( TRUE )
         END
 
         asidentry^.Asid = asid

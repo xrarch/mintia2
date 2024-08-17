@@ -229,10 +229,22 @@ KiFlushMyDcache:
 
     ret
 
+// inputs:
+// a0 - keepglobal
 KeSweepMyTb:
 .global KeSweepMyTb
 
+    beq  a0, .flushglobal
+
     li   t0, 2
+    mtcr itbctrl, t0
+    mtcr dtbctrl, t0
+
+    ret
+
+.flushglobal:
+
+    li   t0, 1
     mtcr itbctrl, t0
     mtcr dtbctrl, t0
 
@@ -310,7 +322,7 @@ FN (KiIpiF) KiSweepTb (
 
     // Executes on the target processor of a TB shootdown.
 
-    KeSweepMyTb ()
+    KeSweepMyTb ( context1 )
 END
 
 FN (KiIpiF) KiFlushSingleTb (
@@ -396,7 +408,9 @@ END
 
 #END
 
-FN KeSweepTb ()
+FN KeSweepTb (
+    IN keepglobal : UWORD,
+)
 
     // Flush the entire TB on all processors.
 
@@ -405,14 +419,14 @@ FN KeSweepTb ()
 
     KiExecuteOnEveryoneElse (
         &KiSweepTb, // function
-        0, // context1
+        keepglobal, // context1
         0, // context2
     )
 
     KiLowerIpl ( ipl )
 #END
 
-    KeSweepMyTb ()
+    KeSweepMyTb ( keepglobal )
 END
 
 FN KeFlushSingleTb (

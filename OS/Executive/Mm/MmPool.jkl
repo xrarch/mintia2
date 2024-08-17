@@ -73,7 +73,6 @@ STRUCT MiPool
     BytesUsedInternally : UWORD,
     BytesUsedExternally : UWORD,
     BytesUsedPeak : UWORD,
-    Color : UWORD,
 
     LogListHeads : RtlListEntry[MI_BLOCK_LOG_BUCKETS],
     SizeListHeads : RtlListEntry[MI_BLOCK_SIZE_BUCKETS],
@@ -83,7 +82,7 @@ PUBLIC MiNonpagedPool : MiPool
 MiPagedPool : MiPool
 MiPageTrackingPool : MiPool
 
-MiNonpagedPoolColor := 0
+MiNonpagedPoolColor : ULONG = 0
 
 FN (MiPoolGetMemoryF) MiGetNonpagedExtension (
     IN pool : ^MiPool,
@@ -124,13 +123,18 @@ FN (MiPoolGetMemoryF) MiGetNonpagedExtension (
         GOTO Retry
     END
 
+    color := KeIncrementUlong (
+        &MiNonpagedPoolColor, // ptr
+        1, // inc
+    )
+
     // Allocate a page frame to place here.
 
     pfe := MiAllocatePage (
         &MiSystemPartition, // partition
         FALSE, // zeroed
         FALSE, // low
-        pool^.Color, // color
+        color, // color
     )
 
     IF NOT pfe THEN
@@ -145,8 +149,6 @@ FN (MiPoolGetMemoryF) MiGetNonpagedExtension (
 
         RETURN NULLPTR
     END
-
-    pool^.Color += 1
 
     // Map the page frame.
     // Note that no TB entry exists for this page in any CPU if we've been
@@ -227,7 +229,6 @@ FN MiInitializePool (
     pool^.BytesUsedInternally = 0
     pool^.BytesUsedExternally = 0
     pool^.BytesUsedPeak = 0
-    pool^.Color = 0
 
     i := 0
 
@@ -371,7 +372,7 @@ FN MiAllocateFromPool (
 
 #IF BLD_CHK
             IF block^.Block.Size != i THEN
-                KeCrash ( "MiAllocateFromPool: bad 2 %p\n", block )
+                KeCrash ( "MiAllocateFromPool: bad 2 %p %u\n", block, i )
             END
 #END
 
@@ -395,7 +396,7 @@ FN MiAllocateFromPool (
 
 #IF BLD_CHK
             IF block^.Block.BucketIndex != i THEN
-                KeCrash ( "MiAllocateFromPool: bad 3 %p\n", block )
+                KeCrash ( "MiAllocateFromPool: bad 3 %p %u\n", block, i )
             END
 #END
 
@@ -479,7 +480,7 @@ FN MiAllocateFromPool (
         // If the allocation request was this large, it should have been
         // dispatched to the page aligned allocator.
 
-        KeCrash ( "MiAllocateFromPool: large allocation\n" )
+        KeCrash ( "MiAllocateFromPool: large allocation %u\n", bytes )
     END
 #END
 

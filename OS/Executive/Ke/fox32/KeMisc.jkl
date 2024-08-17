@@ -108,6 +108,7 @@ KeBreakpoint:
 
     ret
 
+// a0 - keepglobal
 KeSweepMyTb:
 .global KeSweepMyTb
 
@@ -131,11 +132,13 @@ KeFlushMyTbAddress:
 
 ]
 
-FN KeSweepTb ()
+FN KeSweepTb (
+    IN keepglobal : UWORD,
+)
 
     // Flush the entire TB on all processors.
 
-    KeSweepMyTb ()
+    KeSweepMyTb ( keepglobal )
 END
 
 FN KeFlushSingleTb (
