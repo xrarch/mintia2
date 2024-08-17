@@ -359,6 +359,7 @@ FN KiServiceIpi (
     // in usermode, etc.
 
     prb := KI_CURRENT_PRB
+    pendingset : UWORD
 
     IF prb^.IpiPendingSet THEN
         // There are pending IPIs.
@@ -367,7 +368,7 @@ FN KiServiceIpi (
         // Any IPIs sent after we do this we will catch on the next
         // IPI which will remain pending until we exit here.
 
-        pendingset := KeFetchAndSetUlong (
+        pendingset = KeFetchAndSetUlong (
             &prb^.IpiPendingSet, // ptr
             0, // newvalue
         )
@@ -428,6 +429,17 @@ FN KiServiceIpi (
         )
 
         prb^.FrozenContext = NULLPTR
+    END
+
+    IF prb^.SetIplPending THEN
+        pendingset = KeFetchAndSetUlong (
+            &prb^.SetIplPending, // ptr
+            0, // newvalue
+        )
+
+        // OR this set of pending soft ints into our mask.
+
+        prb^.PendingSoftwareInterrupts |= pendingset
     END
 END
 

@@ -13,33 +13,6 @@
 
 #IF BLD_MP
 
-KiActiveProcessorBitmap : ULONG[(KI_MAXIMUM_PROCESSORS + 31) / 32]
-KiIdleProcessorCount : ULONG
-
-#MACRO KiSetProcessorIdle ( prb ) [
-    KeMaskUlong (
-        &KiActiveProcessorBitmap[(prb)^.Id / 32], // ptr
-        ~(1 << ((prb^).Id % 32)), // mask
-    )
-
-    KeIncrementUlong (
-        &KiIdleProcessorCount, // ptr
-        1, // ulong
-    )
-]
-
-#MACRO KiClearProcessorIdle ( prb ) [
-    KeIncrementUlong (
-        &KiIdleProcessorCount, // ptr
-        0xFFFFFFFF, // ulong
-    )
-
-    KeOrUlong (
-        &KiActiveProcessorBitmap[(prb)^.Id / 32], // ptr
-        1 << ((prb^).Id % 32), // bitset
-    )
-]
-
 #MACRO KiAcquireReadyQueueElevated ( prb ) [
     KiAcquireSpinlock ( &(prb)^.ReadyQueueLock )
 ]
@@ -62,11 +35,15 @@ KiIdleProcessorCount : ULONG
     END
 ]
 
+#MACRO KiDecrementLoad ( prb ) [
+    NOTHING (prb)^.Load -= 1
+]
+
+#MACRO KiIncrementLoad ( prb ) [
+    NOTHING (prb)^.Load += 1
+]
+
 #ELSE
-
-#MACRO KiSetProcessorIdle ( prb ) []
-
-#MACRO KiClearProcessorIdle ( prb ) []
 
 #MACRO KiAcquireReadyQueueElevated ( prb ) []
 
@@ -75,6 +52,10 @@ KiIdleProcessorCount : ULONG
 #MACRO KiSetWaitAttempt ( thread, state ) []
 
 #MACRO KiWaitForSwitch ( thread ) []
+
+#MACRO KiDecrementLoad ( prb ) []
+
+#MACRO KiIncrementLoad ( prb ) []
 
 #END
 
@@ -89,8 +70,6 @@ FN KiJumpIntoIdleThread (
 
     // Called by a processor when it first enters the system to initially jump
     // into its idle thread.
-
-    KiSetProcessorIdle ( prb )
 
     // Set parameters for new thread.
 
@@ -242,19 +221,6 @@ FN KiSwitchThread (
 
 #IF BLD_MP
     thread^.AffinityPrb = prb
-
-    IF thread^.Priority == OS_PRIORITY_IDLE THEN
-        IF current^.Priority != OS_PRIORITY_IDLE THEN
-            // We were non-idle and are switching into an idle thread.
-
-            KiSetProcessorIdle ( prb )
-        END
-
-    ELSEIF current^.Priority == OS_PRIORITY_IDLE THEN
-        // We were idle and are switching into a non-idle thread.
-
-        KiClearProcessorIdle ( prb )
-    END
 #END
 
     // Store tick the new thread started running on.
@@ -330,7 +296,7 @@ FN KiInsertThread (
 
     // Increment count of ready threads on this processor.
 
-    prb^.Load += 1
+    KiIncrementLoad ( prb )
 #END
 
     current := prb^.CurrentThread
@@ -426,12 +392,10 @@ FN KiInsertThread (
         END
     END
 
-#IF BLD_MP
     // Decrement count of ready threads. We don't count standby and running
     // threads in this counter.
 
-    prb^.Load -= 1
-#END
+    KiDecrementLoad ( prb )
 
     // Cause a preemption.
 
@@ -474,11 +438,16 @@ END
 
 FN KiWouldPreempt (
     IN thread1 : ^KeThread,
-    IN thread2 : ^KeThread,
     IN targetprb : ^KiPrb,
 ) : UWORD
 
     // Returns TRUE if thread1 would preempt thread2.
+
+    thread2 := targetprb^.NextThread
+
+    IF NOT thread2 THEN
+        thread2 = targetprb^.CurrentThread
+    END
 
     pri1 := thread1^.Priority
     pri2 := thread2^.Priority
@@ -522,39 +491,6 @@ END
 
 #IF BLD_MP
 
-FN KiFindIdleProcessor () : ^KiPrb
-
-    // Find an idle processor and return the pointer.
-
-    bytes := CAST &KiActiveProcessorBitmap[0] TO ^UBYTE
-
-    i := 0
-    procs := KeLoaderBlock.ProcessorCount
-    fbc := &KiIndexFirstBitClear[0]
-
-    WHILE i < procs DO
-        index := fbc[bytes[i / 8]]
-
-        IF index != 8 THEN
-            // Found one.
-
-            index += i
-
-            IF index < procs THEN
-                RETURN KiPrbFromNumber ( index )
-            END
-
-            // The index was beyond the actual processor count.
-
-            RETURN NULLPTR
-        END
-
-        i += 8
-    END
-
-    RETURN NULLPTR
-END
-
 FN KiFindProcessor (
     IN thread : ^KeThread,
 ) : ^KiPrb
@@ -574,13 +510,10 @@ FN KiFindProcessor (
     WHILE i < procs DO
         prb = KiPrbFromNumber ( i )
 
-        preempt : UWORD
-
         KiAcquireReadyQueueElevated ( prb )
 
-        preempt = KiWouldPreempt (
-            thread, // thread1
-            prb^.CurrentThread, // thread2
+        preempt := KiWouldPreempt (
+            thread, // thread
             prb, // targetprb
         )
 
@@ -692,7 +625,6 @@ FN KiReadyThread (
 
         IF thread^.Pinned OR KiWouldPreempt (
             thread, // thread1
-            prb^.CurrentThread, // thread2
             prb, // targetprb
         ) THEN
 
@@ -700,18 +632,6 @@ FN KiReadyThread (
         END
 
         KiReleaseReadyQueueElevated ( prb )
-    END
-
-    IF KiIdleProcessorCount THEN
-        // Search the idle processor bitmap.
-
-        prb = KiFindIdleProcessor ()
-
-        IF prb THEN
-            KiAcquireReadyQueueElevated ( prb )
-
-            GOTO Found
-        END
     END
 
     // Scan for the preemptible processor with the lowest load.
@@ -792,11 +712,9 @@ FN KiSelectRealTimeThread (
                     prb^.RealTimeReady = readybits & ~(1 << i)
                 END
 
-#IF BLD_MP
                 // Decrement count of ready threads.
 
-                prb^.Load -= 1
-#END
+                KiDecrementLoad ( prb )
 
                 RETURN thread
 #IF BLD_MP
@@ -879,11 +797,9 @@ FN KiSelectTimesharedThread (
 #END
         END
 
-#IF BLD_MP
         // Decrement count of ready threads.
 
-        prb^.Load -= 1
-#END
+        KiDecrementLoad ( prb )
 
         RETURN thread
 #IF BLD_MP
@@ -1000,11 +916,9 @@ FN KiSelectThread (
 
         RtlRemoveEntryList ( &next^.ReadyEntry )
 
-#IF BLD_MP
         // Decrement count of ready threads.
 
-        prb^.Load -= 1
-#END
+        KiDecrementLoad ( prb )
 
         RETURN next
     END

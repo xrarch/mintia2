@@ -214,6 +214,8 @@ STRUCT KiPrb
     // 32-bit count of threads enqueued ready on this processor.
 
     Load : ULONG,
+
+    SetIplPending : ULONG,
 #END
 
     Id : UINT,
@@ -473,10 +475,7 @@ EXTERN FN KiDisassociateFromBalancedQueue (
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
 
 #MACRO KiSoftInterruptSelf ( prb, ipl ) [
-    KeOrUlong (
-        &(prb)^.PendingSoftwareInterrupts, // ptr
-        KiPendingIpl ( ipl ), // bitset
-    )
+    NOTHING (prb)^.PendingSoftwareInterrupts |= KiPendingIpl ( ipl )
 ]
 
 #IF BLD_MP
@@ -518,7 +517,7 @@ EXTERN FN KiExecuteOnEveryoneElse (
     // Cause a software interrupt on another processor.
 
     oldvalue := KeOrUlong (
-        &(targetprb)^.PendingSoftwareInterrupts, // ptr
+        &(targetprb)^.SetIplPending, // ptr
         KiPendingIpl ( ipl ), // bitset
     )
 

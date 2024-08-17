@@ -434,14 +434,22 @@ FN (DbgCommandF) DbgCommandReady ()
         idleempty = 0
     END
 
+    RtlPrint ( "Current=%p Next=%p\n", prb^.CurrentThread, prb^.NextThread )
+
     RtlPrint (
-        "RT=%08x TS=%08x Idle=%d TSR=%d TSE=%d\n", // fmt
+        "RT=%08x TS=%08x Idle=%d TSR=%d TSE=%d", // fmt
         prb^.RealTimeReady,
         prb^.CalendarReady,
         idleempty,
         prb^.CalendarRunIndex,
         prb^.CalendarEnqueueIndex,
     )
+
+#IF BLD_MP
+    RtlPrint ( " LOAD=%d", prb^.Load )
+#END
+
+    RtlPrint ( "\n" )
 
     RtlPrint ( "\nRT Queues\n" )
 

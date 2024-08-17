@@ -87,10 +87,8 @@ FN (KiHighLevelHandlerF) KiHandleInterrupt (
 
     prb := KI_CURRENT_PRB_LOCAL
 
-    currentipl := prb^.Ipl
-
-    IF prb^.PendingSoftwareInterrupts >> currentipl THEN
-        KiDispatchSoftwareInterrupts ( currentipl )
+    IF prb^.PendingSoftwareInterrupts >> prb^.Ipl THEN
+        KiDispatchSoftwareInterrupts ( prb^.Ipl )
     END
 END
 

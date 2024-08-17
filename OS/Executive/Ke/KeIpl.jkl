@@ -11,18 +11,7 @@
     END
 #END
 
-    // Note that we subtract 1 from the IPL shift so that we can do a right
-    // shift by IPL to check for pending bits later (which is the hotter path).
-    // Also this assumes interrupts disabled.
-
-#IF BLD_MP
-    KeMaskUlong (
-        &prb^.PendingSoftwareInterrupts, // ptr
-        ~(KiPendingIpl ( ipl )), // mask
-    )
-#ELSE
     NOTHING (prb)^.PendingSoftwareInterrupts &= ~(KiPendingIpl ( ipl ))
-#END
 ]
 
 FNPTR KiSoftwareInterruptHandlerF (
@@ -128,9 +117,7 @@ FN KiDispatchSoftwareInterrupts (
     pending := prb^.PendingSoftwareInterrupts & (3 << newipl)
 
     WHILE pending DO
-        KiSoftwareInterruptPriorityTable[pending] (
-            prb, // prb
-        )
+        KiSoftwareInterruptPriorityTable[pending] ( prb )
 
 #IF KI_VOLATILE_LOCAL_PRB
         // Recapture the Prb since it might have changed due to activity of the
