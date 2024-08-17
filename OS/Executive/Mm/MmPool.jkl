@@ -57,11 +57,13 @@ STRUCT MiPoolExtension
 END
 
 FNPTR MiPoolGetMemoryF (
-    IN pool : ^MiPool,
-) : ^MiPoolExtension
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+) : UWORD
 
 FNPTR MiPoolReturnMemoryF (
     IN ptr : ^VOID,
+    IN pages : UWORD,
 )
 
 STRUCT MiPool
@@ -78,19 +80,13 @@ STRUCT MiPool
     SizeListHeads : RtlListEntry[MI_BLOCK_SIZE_BUCKETS],
 END
 
-PUBLIC MiNonpagedPool : MiPool
-MiPagedPool : MiPool
-MiPageTrackingPool : MiPool
-
 MiNonpagedPoolColor : ULONG = 0
 
-FN (MiPoolGetMemoryF) MiGetNonpagedExtension (
-    IN pool : ^MiPool,
-) : ^MiPoolExtension
-    
-    // Allocate an extension for nonpaged pool. If the required page frame can't
-    // be immediately allocated, return NULLPTR. Caller will decide whether to
-    // wait for free memory and retry the allocation, or give up.
+MiPoolTable : MiPool[MM_MAXIMUM_POOL]
+
+FN MiAllocateExtensionSpace () : ^MiPoolExtension
+
+    // Allocate space for a pool extension.
 
     printed := FALSE
 
@@ -100,76 +96,39 @@ FN (MiPoolGetMemoryF) MiGetNonpagedExtension (
         &MiPoolSpace, // chunkspace
     ) TO ^MiPoolExtension
 
-    IF NOT ext THEN
-        // Uh-oh! If we're out of pool space there isn't much good to be done.
-        // Sleep for 500ms and retry.
-
-        IF NOT printed THEN
-            RtlPrint ( "Out of pool space!\n" )
-
-            printed = TRUE
-        END
-
-        interval : RtlUquad
-        
-        RtlSetUquadToUlong ( &interval, 500 )
-
-        KeSleep (
-            &interval, // interval
-            KE_KERNEL_MODE, // waitmode
-            FALSE, // alertable
-        )
-
-        GOTO Retry
+    IF ext THEN
+        RETURN ext
     END
 
-    color := KeIncrementUlong (
-        &MiNonpagedPoolColor, // ptr
-        1, // inc
-    )
+    // Uh-oh! If we're out of pool space there isn't much good to be done.
+    // Sleep for 500ms and retry.
 
-    // Allocate a page frame to place here.
+    IF NOT printed THEN
+        RtlPrint ( "Out of pool space!\n" )
 
-    pfe := MiAllocatePage (
-        &MiSystemPartition, // partition
-        FALSE, // zeroed
-        FALSE, // low
-        color, // color
-    )
-
-    IF NOT pfe THEN
-        // Free the pool space chunk.
-        // No need to flush TB since we didn't access it.
-
-        MiFreeChunkSpace (
-            &MiPoolSpace, // chunkspace
-            ext, // ptr
-            FALSE, // flush
-        )
-
-        RETURN NULLPTR
+        printed = TRUE
     END
 
-    // Map the page frame.
-    // Note that no TB entry exists for this page in any CPU if we've been
-    // given it by the pool space allocator.
+    interval : RtlUquad
+    
+    RtlSetUquadToUlong ( &interval, 500 )
 
-    pte := MI_PTE_ADDRESS ( ext )
+    KeSleep (
+        &interval, // interval
+        KE_KERNEL_MODE, // waitmode
+        FALSE, // alertable
+    )
 
-    pte[0] = MI_BUILD_POOL_PTE ( MI_PFE_TO_PFN ( pfe ) )
-
-    RETURN ext
+    GOTO Retry
 END
 
-FN (MiPoolReturnMemoryF) MiReturnNonpagedExtension (
-    IN ptr : ^VOID,
+FN MiFreeExtensionSpace (
+    IN ext : ^MiPoolExtension,
 )
 
-    // Free the page frames within this extension and return it to nonpaged
-    // space. The space allocator will deal with flushing the TB.
+    // Free the virtual space for the pool extension.
 
-    pte := MI_PTE_ADDRESS ( ptr )
-    ptecontents := pte[0]
+    pte := MI_PTE_ADDRESS ( ext )
 
     // Clear the PTE, makes it more likely we'll see it if a bad pointer within
     // this chunk is used later. Due to the TB it's not 100% though.
@@ -180,37 +139,110 @@ FN (MiPoolReturnMemoryF) MiReturnNonpagedExtension (
     // Make it even more likely by at least flushing this page on the current
     // processor.
 
-    KeFlushMyTbAddress ( ptr )
+    KeFlushMyTbAddress ( ext )
 #END
-
-    MiFreePage (
-        &MiSystemPartition, // partition
-        MI_PFN_TO_PFE ( MI_PFN_FROM_PTE ( ptecontents ) ), // pfe
-    )
 
     MiFreeChunkSpace (
         &MiPoolSpace, // chunkspace
-        ptr, // ptr
+        ext, // ptr
         TRUE, // flush
     )
 END
 
-FN (MiPoolGetMemoryF) MiGetPagedExtension (
-    IN pool : ^MiPool,
-) : ^MiPoolExtension
-    
-    // Allocate an extension for paged pool.
+FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
 
-    KeCrash ( "NYI MiGetPagedExtension\n" )
+    // Free the page frames within this extension and return it to nonpaged
+    // space. The space allocator will deal with flushing the TB.
+
+    pte := MI_PTE_ADDRESS ( ptr )
+
+    i := 0
+
+    WHILE i < pages DO
+        ptecontents := pte[i]
+
+        MiFreePage (
+            &MiSystemPartition, // partition
+            MI_PFN_TO_PFE ( MI_PFN_FROM_PTE ( ptecontents ) ), // pfe
+        )
+
+        i += 1
+    END
 END
 
-FN (MiPoolReturnMemoryF) MiReturnPagedExtension (
+FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
     IN ptr : ^VOID,
+    IN pages : UWORD,
+) : UWORD
+    
+    // Allocate an extension for nonpaged pool. If the required page frame can't
+    // be immediately allocated, return NULLPTR. Caller will decide whether to
+    // wait for free memory and retry the allocation, or give up.
+
+    i := 0
+    pte := MI_PTE_ADDRESS ( ptr )
+
+    WHILE i < pages DO
+        color := KeIncrementUlong (
+            &MiNonpagedPoolColor, // ptr
+            1, // inc
+        )
+
+        // Allocate a page frame to place here.
+
+        pfe := MiAllocatePage (
+            &MiSystemPartition, // partition
+            FALSE, // zeroed
+            FALSE, // low
+            color, // color
+        )
+
+        IF NOT pfe THEN
+            // Free everything we just did.
+
+            IF i THEN
+                MiFreeNonpagedMemory (
+                    ptr, // ptr
+                    i, // pages
+                )
+            END
+
+            RETURN FALSE
+        END
+
+        // Map the page frame.
+        // Note that no TB entry exists for this page in any CPU if we've been
+        // given it by the pool space allocator.
+
+        pte[i] = MI_BUILD_POOL_PTE ( MI_PFE_TO_PFN ( pfe ) )
+
+        i += 1
+    END
+
+    RETURN TRUE
+END
+
+FN (MiPoolReturnMemoryF) MiFreePagedMemory (
+    IN ptr : ^VOID,
+    IN pages : UWORD,
 )
 
     // Free an extension for paged pool.
 
-    KeCrash ( "NYI MiReturnPagedExtension\n" )
+    KeCrash ( "NYI MiFreePagedMemory\n" )
+END
+
+FN (MiPoolGetMemoryF) MiGetPagedMemory (
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+) : UWORD
+    
+    // Allocate an extension for paged pool.
+
+    KeCrash ( "NYI MiGetPagedMemory\n" )
 END
 
 #MACRO MiFindPoolExtension ( ptr ) [
@@ -256,8 +288,8 @@ FN MiInitializeNonpagedPool (
 
     MiInitializePool ( pool )
 
-    pool^.GetMemory = &MiGetNonpagedExtension
-    pool^.ReturnMemory = &MiReturnNonpagedExtension
+    pool^.GetMemory = &MiGetNonpagedMemory
+    pool^.ReturnMemory = &MiFreeNonpagedMemory
 END
 
 #SECTION "INITtext"
@@ -269,8 +301,8 @@ FN MiInitializePagedPool (
 
     MiInitializePool ( pool )
 
-    pool^.GetMemory = &MiGetPagedExtension
-    pool^.ReturnMemory = &MiReturnPagedExtension
+    pool^.GetMemory = &MiGetPagedMemory
+    pool^.ReturnMemory = &MiFreePagedMemory
 END
 
 #SECTION "INITtext"
@@ -278,11 +310,11 @@ FN MiInitializePools ()
 
     // Initialize the system pools.
 
-    MiInitializeNonpagedPool ( &MiNonpagedPool )
+    MiInitializeNonpagedPool ( &MiPoolTable[MM_NONPAGED_POOL] )
 
-    MiInitializePagedPool ( &MiPagedPool )
+    MiInitializePagedPool ( &MiPoolTable[MM_PAGED_POOL] )
 
-    MiInitializePagedPool ( &MiPageTrackingPool )
+    MiInitializePagedPool ( &MiPoolTable[MM_PAGE_TRACKING_POOL] )
 END
 
 MiEightBitLog : UBYTE[256] = {
@@ -409,10 +441,16 @@ FN MiAllocateFromPool (
 
     // No sufficient block. We need to allocate a new pool extension.
 
-    ext := pool^.GetMemory ( pool )
+    ext := MiAllocateExtensionSpace ()
 
-    IF NOT ext THEN
+    IF NOT pool^.GetMemory (
+        ext, // ptr
+        1, // pages
+    ) THEN
+
         // Failed to allocate a pool extension.
+
+        MiFreeExtensionSpace ( ext )
 
         MiReleasePool ( pool, ipl )
 
@@ -805,13 +843,18 @@ FN MiFreeToPool (
             otherblock += MI_BLOCK_MAX_SIZE
         END
 
-        // Now return the extension.
-
         pool^.BytesUsedExternally -= RTL_PAGE_SIZE
 
-        pool^.ReturnMemory ( ext )
+        // Return the extension.
 
-        // Unlock pool and return.
+        pool^.ReturnMemory (
+            ext, // ptr
+            1, // pages
+        )
+
+        MiFreeExtensionSpace ( ext )
+
+        // Unlock pool.
 
         MiReleasePool ( pool, ipl )
 
@@ -852,4 +895,154 @@ FN MiFreeToPool (
     // Unlock pool and return.
 
     MiReleasePool ( pool, ipl )
+END
+
+FN MiAllocatePageAligned (
+    IN pool : ^MiPool,
+    IN bytes : UWORD,
+    IN tag : ULONG,
+    IN wait : UWORD,
+) : ^VOID
+
+    // Perform a page-aligned allocation from the specified pool.
+
+    // Turn bytes into a rounded up count of pages.
+
+    bytes = ((bytes + RTL_PAGE_SIZE - 1) & ~(RTL_PAGE_SIZE - 1)) >>
+        RTL_PAGE_SHIFT
+
+    // First acquire some room in dynamic space.
+
+    node := MiAllocateDynamicSpace (
+        bytes, // pages
+        wait, // wait
+    )
+
+    IF NOT node THEN
+        RETURN NULLPTR
+    END
+
+    // Initialize the node as a page aligned pool node.
+
+    node^.U.Pool.Pool = pool
+    node^.U.Pool.Tag = tag
+
+    // Call the pool callback to initialize the allocation.
+
+@Retry
+
+    IF NOT pool^.GetMemory (
+        node^.StartVa, // ptr
+        bytes, // pages
+    ) THEN
+        IF NOT wait THEN
+            MiReleaseDynamicSpace ( node )
+
+            RETURN NULLPTR
+        END
+
+        MiWaitForPages (
+            &MiSystemPartition, // partition
+            FALSE, // low
+        )
+
+        GOTO Retry
+    END
+
+    RETURN node^.StartVa
+END
+
+FN MiFreePageAligned (
+    IN ptr : ^VOID,
+    IN tag : ULONG,
+)
+
+    // Free a page-aligned allocation to pool.
+
+    // Look up the dynamic space node.
+
+    node := MiFindDynamicSpaceNode ( ptr )
+
+#IF BLD_CHK
+    IF NOT node THEN
+        KeCrash ( "MiFreePageAligned: no allocation\n" )
+    END
+
+    IF node^.StartVa != ptr THEN
+        KeCrash ( "MiFreePageAligned: middle of allocation\n" )
+    END
+#END
+
+    IF node^.U.Pool.Tag != tag THEN
+        KeCrash ( "MiFreePageAligned: wrong tag %x on %p, expected %x\n", node^.StartVa, node^.U.Pool.Tag, tag )
+    END
+
+    // Uninitialize the allocation.
+
+    node^.U.Pool.Pool^.ReturnMemory (
+        ptr, // ptr
+        (node^.EndVa - node^.StartVa) >> RTL_PAGE_SHIFT, // pages
+    )
+
+    // Free the dynamic space.
+
+    MiReleaseDynamicSpace ( node )
+END
+
+FN MmAllocatePool (
+    IN poolindex : UWORD,
+    IN bytes : UWORD,
+    IN tag : ULONG,
+    IN wait : UWORD,
+) : ^VOID
+
+    // Allocate a block of memory from the specified pool.
+
+    pool := &MiPoolTable[poolindex]
+
+    IF bytes < (MI_BLOCK_MAX_REQUEST_UNITS << MI_BLOCK_SIZE_SHIFT) THEN
+        // Allocate from the small block pool.
+
+        RETURN MiAllocateFromPool (
+            pool, // pool
+            bytes, // bytes
+            tag, // tag
+            wait, // wait
+        )
+    END
+
+    // Allocate from page aligned pool.
+
+    RETURN MiAllocatePageAligned (
+        pool, // pool
+        bytes, // bytes
+        tag, // tag
+        wait, // wait
+    )
+END
+
+FN MmFreePool (
+    IN ptr : ^VOID,
+    IN tag : ULONG,
+)
+
+    // Free the block of pool.
+
+    IF ptr >= MI_POOL_SPACE AND ptr < MI_POOL_SPACE_END THEN
+        // This block resides in small pool.
+
+        MiFreeToPool (
+            ptr, // ptr
+            tag, // tag
+        )
+
+        LEAVE
+    END
+
+    // Page aligned pool.
+
+    MiFreePageAligned (
+        ptr, // ptr
+        tag, // tag
+    )
 END

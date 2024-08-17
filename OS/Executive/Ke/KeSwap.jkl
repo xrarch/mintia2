@@ -158,61 +158,50 @@ FN KeFlushProcessInSwapQueue () : ^KeProcess
     ) TO ^KeProcess
 END
 
+FN KeSetProcessOutswapped (
+    IN process : ^KeProcess,
+) : UWORD
+
+    // Try to set the given process outswapped. Returns TRUE on success, FALSE
+    // otherwise. If FALSE is returned, the process should be ignored by the
+    // caller. If the caller is interested in the next process in the list, it
+    // should grab that pointer before calling this routine.
+
+    ipl := KiAcquireSwapState ( process )
+
+    hadthreads := process^.SwapListHead
+
+    IF NOT hadthreads THEN
+        process^.MemoryState = KI_PROCESS_OUTSWAPPED
+    END
+
+    KiReleaseSwapState ( process, ipl )
+
+    IF hadthreads THEN
+        // Threads were enqueued to the process while it was in TRANSITION.
+        // Set it RESIDENT and ready the deferred threads.
+
+        KeReadyInswappedProcess ( process )
+
+        RETURN FALSE
+    END
+
+    RETURN TRUE
+END
+
 FN KeFlushProcessOutSwapQueue () : ^KeProcess
 
     // Atomically detaches the current contents of the process outswap list
     // and returns the head item of a singly linked list. If it was empty,
     // NULLPTR is returned.
 
-    head := CAST KeFetchAndSetPtr (
+    // These processes are in TRANSITION, so the caller should call
+    // KeSetProcessOutSwapped before doing anything else with them.
+
+    RETURN CAST KeFetchAndSetPtr (
         &KiProcessOutSwapListHead, // ptr
         NULLPTR, // newvalue
     ) TO ^KeProcess
-
-    // These processes are no longer in TRANSITION, so walk them and set them
-    // all OUTSWAPPED.
-
-    process := head
-    last : ^KeProcess = NULLPTR
-
-    WHILE process DO
-        nextprocess := process^.SwapNext
-
-        ipl := KiAcquireSwapState ( process )
-
-        hadthreads := process^.SwapListHead
-
-        IF NOT hadthreads THEN
-            process^.MemoryState = KI_PROCESS_OUTSWAPPED
-        END
-
-        KiReleaseSwapState ( process, ipl )
-
-        IF hadthreads THEN
-            // Threads were enqueued to the process while it was in TRANSITION.
-            
-            // Remove it from the singly linked list by setting the last's next
-            // to our next.
-
-            IF last THEN
-                last^.SwapNext = nextprocess
-
-            ELSE
-                head = nextprocess
-            END
-
-            // Set it RESIDENT and ready the deferred threads.
-
-            KeReadyInswappedProcess ( process )
-
-        ELSE
-            last = process
-        END
-
-        process = nextprocess
-    END
-
-    RETURN head
 END
 
 FN KeHarvestSwapCandidates (

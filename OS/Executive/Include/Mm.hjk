@@ -9,9 +9,25 @@ EXTERN FN MmIsVirtualValid (
     IN vaddr : ^VOID,
 ) : UWORD
 
-// Allocation flags.
+EXTERN FN MmAllocatePool (
+    IN poolindex : UWORD,
+    IN bytes : UWORD,
+    IN tag : ULONG,
+    IN wait : UWORD,
+) : ^VOID
 
-#DEFINE MM_ALLOCATION_CAN_BLOCK 1
+EXTERN FN MmFreePool (
+    IN ptr : ^VOID,
+    IN tag : ULONG,
+)
+
+ENUM MmPoolIndices : UBYTE
+    MM_NONPAGED_POOL,
+    MM_PAGED_POOL,
+    MM_PAGE_TRACKING_POOL,
+
+    MM_MAXIMUM_POOL,
+END
 
 STRUCT MmObject
     // The object lock is superior to the page list lock.

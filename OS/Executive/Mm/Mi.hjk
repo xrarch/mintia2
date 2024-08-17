@@ -164,18 +164,51 @@ EXTERN FN MiInitializePools ()
 
 #DEFINE MI_BLOCK_FOR_PAGES_THRESHOLD 16
 
+STRUCT MiDynamicSpaceDemandNode
+    MappedObject : ^MmObject,
+    Offset : RtlUquad,
+END
+
+STRUCT MiDynamicSpacePoolNode
+    Pool : ^MiPool,
+    Tag : ULONG,
+END
+
+UNION MiDynamicSpaceNodeUnion
+    Demand : MiDynamicSpaceDemandNode,
+    Pool : MiDynamicSpacePoolNode,
+END
+
 STRUCT MiDynamicSpaceNode
     Entry : RtlAvlNode,
     
     StartVa : ^VOID,
     EndVa : ^VOID,
 
-    MappedObject : ^MmObject,
+    U : MiDynamicSpaceNodeUnion,
 END
 
 EXTERN FN MiFindDynamicSpaceNode (
     IN ptr : ^VOID,
 ) : ^MiDynamicSpaceNode
+
+EXTERN FN MiAllocateDynamicPages (
+    IN pages : UWORD,
+) : ^VOID
+
+EXTERN FN MiReleaseDynamicPages (
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
+
+EXTERN FN MiAllocateDynamicSpace (
+    IN pages : UWORD,
+    IN wait : UWORD,
+) : ^MiDynamicSpaceNode
+
+EXTERN FN MiReleaseDynamicSpace (
+    IN node : ^MiDynamicSpaceNode,
+)
 
 EXTERN FN MiAllocatePage (
     IN partition : ^MiPartition,
