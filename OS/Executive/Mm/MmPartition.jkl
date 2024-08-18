@@ -283,11 +283,13 @@ FN MiAllocatePageFromList (
 END
 
 FN MiAllocatePageFromStandbyList (
-    IN list : ^MiAvailablePageList,
+    IN partition : ^MiPartition,
     IN color : UWORD,
 ) : ^MiPfe
 
     // Allocate a page from the given standby list.
+
+    list := &partition^.StandbyList
 
     pfe := MiAllocatePageFromList (
         list, // list
@@ -295,8 +297,8 @@ FN MiAllocatePageFromStandbyList (
     )
 
     // Disassociate it from its object.
-    // If this is paged pool or paged executive, this is a "dummy object" used
-    // only for locking purposes.
+    // If this is paged pool, paged executive, or a page table, this is a "dummy
+    // object" used only for locking purposes.
 
     object := pfe^.Object
 
@@ -343,6 +345,20 @@ FN MiAllocatePageFromStandbyList (
         // Note that if it WAS paged pool or paged executive, the containing
         // page for the tracking PTE was an actual system space page table -
         // we never page those out!
+        //
+        // The comment above was written before deciding that *user* page tables
+        // will be reclaimed by placing them on the standby list when they no
+        // longer track any valid pages. For bottom level page tables, this is
+        // done at working set trim time when the last user page is trimmed from
+        // a page table; its PDE is set to transition, its refcount is
+        // decremented and it may be placed on the standby list. For upper level
+        // page tables, they are placed on the standby list when the last page
+        // table tracked by them is removed from the standby list (which we may
+        // be doing here, now). If a page table is reclaimed and it matters for
+        // the architecture that its upper level table entry was invalidated
+        // (with a corresponding TB flush if relevant), that must have been done
+        // by the time it ended up on the standby list, by trimming special
+        // working set entries or through some other mechanism.
 
         IF pfe^.Flags & MI_PAGED_POOL_PFE_FLAG == 0 THEN
             poolpfe := MI_PFN_TO_PFE (
@@ -358,16 +374,34 @@ FN MiAllocatePageFromStandbyList (
                 KeCrash ( "poolpfe not anonymous\n" )
             END
 
-            // This page of tracking pool should have at least 2 references: one
-            // for being pinned (due to having this tracking entry resident),
-            // and another for being in the system working set.
+            IF entry < MI_TABLE_BASE OR entry >= MI_TABLE_END THEN
+                // This page is not in the page table range, so it must be
+                // tracking pool.
+                // This page of tracking pool should have at least 2
+                // references: one for being pinned (due to having this tracking
+                // entry resident), and another for being in the system working
+                // set.
 
-            IF poolpfe^.References < 2 THEN
-                KeCrash ( "poolpfe not referenced\n" )
+                IF poolpfe^.References < 2 THEN
+                    KeCrash ( "poolpfe not referenced\n" )
+                END
+
+            ELSEIF poolpfe^.References < 1 THEN
+                KeCrash ( "poolpfe not referenced 2\n" )
             END
 #END
 
             poolpfe^.References -= 1
+
+            IF poolpfe^.References == 0 THEN
+                // Place it on the standby list.
+
+                MiInsertPageIntoList (
+                    &partition^.StandbyList, // list
+                    poolpfe, // pfe
+                    FALSE, // head
+                )
+            END
         END
     END
 
@@ -431,7 +465,7 @@ FN MiAllocatePage (
 
             ELSE
                 pfe = MiAllocatePageFromStandbyList (
-                    &partition^.StandbyList, // list
+                    partition, // partition
                     color, // color
                 )
             END
@@ -451,7 +485,7 @@ FN MiAllocatePage (
 
     ELSE
         pfe = MiAllocatePageFromStandbyList (
-            &partition^.StandbyList, // list
+            partition, // partition
             color, // color
         )
     END
