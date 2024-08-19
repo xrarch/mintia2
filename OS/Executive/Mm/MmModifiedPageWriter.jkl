@@ -1,0 +1,26 @@
+//
+// Implements the modified page writer (MPW) thread for the Memory Manager.
+//
+
+#INCLUDE "Mi.hjk"
+
+FN MiExpandPageFiles (
+    IN partition : ^MiPartition,
+    IN wait : UWORD,
+    IN full : UWORD,
+) : OsStatus
+
+    // Attempt to expand the pagefiles. We are in the context of some random
+    // thread which could be holding god knows what locks, so just signal a
+    // worker thread to perform this action. If wait = TRUE, we don't return
+    // until that worker thread has done its job, otherwise we return instantly
+    // in all cases. If full = FALSE, this is being called in response to the
+    // commit limit being hit, and the result of this function should be to get
+    // the pagefiles large enough to fulfill all of the commit usage. If
+    // full = TRUE, this is being called in response to the modified page list
+    // having lots of pages, but the pagefiles not having enough space to
+    // accommodate them. In that case, we want to grow the pagefiles enough to
+    // contain the current commit usage *and* everything on the modified list.
+
+    KeCrash ( "MiExpandPageFiles NYI\n" )
+END

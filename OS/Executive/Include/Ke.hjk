@@ -20,6 +20,14 @@ STRUCT KePushlock
     Ptr : UWORD,
 END
 
+#DEFINE KE_INITIAL_PUSHLOCK [{
+    [Ptr] = 0,
+}]
+
+#MACRO KeInitializePushlock ( pushlock ) [
+    NOTHING (pushlock)^.Ptr = 0
+]
+
 #DEFINE KE_STACK_PAGES 1
 
 #DEFINE KE_KERNEL_MODE 1
@@ -591,10 +599,6 @@ EXTERN FN KeReleaseSemaphore (
     IN count : UWORD,
 ) : UWORD
 
-#MACRO KeInitializePushlock ( pushlock ) [
-    NOTHING (pushlock)^.Ptr = 0
-]
-
 EXTERN FN KeAcquirePushlockShared (
     IN pushlock : ^KePushlock,
 )
@@ -890,5 +894,3 @@ EXTERN FN KeSetQuickPtes (
 EXTERN FN KeZeroPage (
     IN pfn : UWORD,
 )
-
-EXTERN KeIdleProcess : KeProcess

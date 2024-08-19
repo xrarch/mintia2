@@ -86,8 +86,6 @@ FN MiInitializePartitionStage1 (
 
     partition^.CommitUsage = 0
     partition^.CommitLimit = 0
-    partition^.PhysicalUsage = 0
-    partition^.PhysicalLimit = 0
     partition^.TheoreticalCommitLimit = 0
 
     // Initialize thresholds.
@@ -289,10 +287,8 @@ FN MiAllocatePageFromStandbyList (
 
     // Allocate a page from the given standby list.
 
-    list := &partition^.StandbyList
-
     pfe := MiAllocatePageFromList (
-        list, // list
+        &partition^.StandbyList, // list
         color, // color
     )
 
@@ -346,19 +342,10 @@ FN MiAllocatePageFromStandbyList (
         // page for the tracking PTE was an actual system space page table -
         // we never page those out!
         //
-        // The comment above was written before deciding that *user* page tables
-        // will be reclaimed by placing them on the standby list when they no
-        // longer track any valid pages. For bottom level page tables, this is
-        // done at working set trim time when the last user page is trimmed from
-        // a page table; its PDE is set to transition, its refcount is
-        // decremented and it may be placed on the standby list. For upper level
-        // page tables, they are placed on the standby list when the last page
-        // table tracked by them is removed from the standby list (which we may
-        // be doing here, now). If a page table is reclaimed and it matters for
-        // the architecture that its upper level table entry was invalidated
-        // (with a corresponding TB flush if relevant), that must have been done
-        // by the time it ended up on the standby list, by trimming special
-        // working set entries or through some other mechanism.
+        // Note that *user* page tables can be reclaimed, but are *not*
+        // reclaimed here. Freeing them up when the last PTE has been trimmed
+        // out of a page table is the province of architecture-specific pmap
+        // code.
 
         IF pfe^.Flags & MI_PAGED_POOL_PFE_FLAG == 0 THEN
             poolpfe := MI_PFN_TO_PFE (
@@ -374,34 +361,17 @@ FN MiAllocatePageFromStandbyList (
                 KeCrash ( "poolpfe not anonymous\n" )
             END
 
-            IF entry < MI_TABLE_BASE OR entry >= MI_TABLE_END THEN
-                // This page is not in the page table range, so it must be
-                // tracking pool.
-                // This page of tracking pool should have at least 2
-                // references: one for being pinned (due to having this tracking
-                // entry resident), and another for being in the system working
-                // set.
+            // This page of tracking pool should have at least 2
+            // references: one for being pinned (due to having this tracking
+            // entry resident), and another for being in the system working
+            // set.
 
-                IF poolpfe^.References < 2 THEN
-                    KeCrash ( "poolpfe not referenced\n" )
-                END
-
-            ELSEIF poolpfe^.References < 1 THEN
-                KeCrash ( "poolpfe not referenced 2\n" )
+            IF poolpfe^.References < 2 THEN
+                KeCrash ( "poolpfe not referenced\n" )
             END
 #END
 
             poolpfe^.References -= 1
-
-            IF poolpfe^.References == 0 THEN
-                // Place it on the standby list.
-
-                MiInsertPageIntoList (
-                    &partition^.StandbyList, // list
-                    poolpfe, // pfe
-                    FALSE, // head
-                )
-            END
         END
     END
 
@@ -633,7 +603,7 @@ FN MiAllocatePageWait (
 ) : ^MiPfe
 
     // Allocate a page with the given parameters. Allowed to wait. Returns
-    // NULLPTR on timeout (partition deadlock).
+    // NULLPTR on timeout (indicative of partition deadlock).
 
     WHILE TRUE DO
         pfe := MiAllocatePage (
@@ -654,4 +624,85 @@ FN MiAllocatePageWait (
             RETURN NULLPTR
         END
     END
+END
+
+FN MmChargeCommit (
+    IN partition : ^MiPartition,
+    IN pages : UWORD,
+    IN wait : UWORD,
+) : OsStatus
+
+    // Attempt to charge the specified commit to the memory partition.
+    // It would be unwise to page this routine as it can be called during
+    // nonpaged pool allocation.
+
+#IF BLD_CHK
+    IF partition^.CommitUsage + pages < pages THEN
+        KeCrash ( "commit overflow\n" )
+    END
+#END
+
+    IF partition^.CommitUsage + pages > partition^.TheoreticalCommitLimit THEN
+        // Don't even bother trying, there's no way to extend the pagefiles to
+        // accommodate this.
+
+        RETURN OS_STATUS_COMMIT_EXCEEDED
+    END
+
+    // Increase the commit usage.
+    // If it goes over the limit, us and anyone else trying to charge commit
+    // will spin below until a pagefile expansion succeeds.
+
+    old := KeIncrementPtr (
+        &partition^.CommitUsage, // ptr
+        pages, // inc
+    )
+
+    WHILE partition^.CommitUsage > partition^.CommitLimit DO
+        status := MiExpandPageFiles (
+            partition, // partition
+            wait, // wait
+            FALSE, // full
+        )
+
+        IF NOT wait THEN
+            // Proceed no matter what.
+
+            RETURN status
+        END
+
+        IF OsError ( status ) THEN
+            // Failed to increase commit limit.
+            // Remove the commit charge.
+
+            KeIncrementPtr (
+                &partition^.CommitUsage, // ptr
+                -pages, // inc
+            )
+
+            RETURN status
+        END
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+FN MmUnchargeCommit (
+    IN partition : ^MiPartition,
+    IN pages : UWORD,
+)
+
+    // Remove the specified commit charge from the partition.
+
+    old := KeIncrementPtr (
+        &partition^.CommitUsage, // ptr
+        -pages, // inc
+    )
+
+#IF BLD_CHK
+    IF pages > old THEN
+        KeCrash ( "commit underflow\n" )
+    END
+#END
+
 END

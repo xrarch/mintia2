@@ -171,6 +171,13 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
 
         i += 1
     END
+
+    // Uncharge the commit.
+
+    MmUnchargeCommit (
+        &MiSystemPartition, // partition
+        pages, // pages
+    )
 END
 
 FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
@@ -181,6 +188,14 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
     // Allocate an extension for nonpaged pool. If the required page frame can't
     // be immediately allocated, return NULLPTR. Caller will decide whether to
     // wait for free memory and retry the allocation, or give up.
+
+    // First charge commit for these pages.
+
+    MmChargeCommit (
+        &MiSystemPartition, // partition
+        pages, // pages
+        FALSE, // wait
+    )
 
     i := 0
     pte := MI_PTE_ADDRESS ( ptr )

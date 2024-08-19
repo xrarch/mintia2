@@ -1,0 +1,352 @@
+//
+// Implements quota management.
+//
+
+#INCLUDE "Mi.hjk"
+#INCLUDE "<ll>/System/OsQuota.hjk"
+
+MiQuotaBlockListHead : RtlListEntry
+
+MiQuotaListLock : KePushlock = KE_INITIAL_PUSHLOCK
+
+#SECTION "INITtext"
+FN MiInitializeQuota ()
+
+    RtlInitializeList ( &MiQuotaBlockListHead )
+END
+
+#SECTION "PAGEtext"
+FN MiInitializeQuotaBlock (
+    IN quotablock : ^MiQuotaBlock,
+    IN nplimit : UWORD,
+    IN pglimit : UWORD,
+    IN vmlimit : UWORD,
+    IN uid : UWORD,
+)
+
+    // Assumes that the quota list mutex is held.
+    // Also called from system initialization without that mutex held, but
+    // that's fine since the entire system is single-threaded at that point.
+
+    quotablock^.Uid = uid
+    quotablock^.References = 1
+
+    quotablock^.Pool[MM_NONPAGED_POOL].Used = 0
+    quotablock^.Pool[MM_NONPAGED_POOL].Limit = nplimit
+
+    quotablock^.Pool[MM_PAGED_POOL].Used = 0
+    quotablock^.Pool[MM_PAGED_POOL].Limit = pglimit
+
+    quotablock^.VmPages.Used = 0
+    quotablock^.VmPages.Limit = vmlimit
+
+    KeInitializePushlock ( &quotablock^.Pushlock )
+
+    // Insert in the quota block list.
+
+    RtlInsertAtTailList (
+        &MiQuotaBlockListHead, // head
+        &quotablock^.Entry, // entry
+    )
+END
+
+#SECTION "PAGEtext"
+FN MmReferenceQuotaBlock (
+    IN quotablock : ^MiQuotaBlock,
+)
+
+    // Increment the refcount of the quota block.
+
+    // Assumes there's no way the quotablock can be dereferenced to zero
+    // during this operation. This should be guaranteed anyway by virtue of
+    // the caller having a pointer to the quotablock, since otherwise that
+    // pointer could become meaningless at any moment.
+
+#IF BLD_CHK
+    IF quotablock^.References == 0xFFFFFFFF THEN
+        KeCrash ( "quota ref overflow\n" )
+    END
+
+    IF quotablock^.References == 0 THEN
+        KeCrash ( "quota ref zero\n" )
+    END
+#END
+
+    KeIncrementUlong (
+        &quotablock^.References, // ptr
+        1, // inc
+    )
+END
+
+#SECTION "PAGEtext"
+FN MmUnreferenceQuotaBlock (
+    IN quotablock : ^MiQuotaBlock,
+)
+
+    // Decrement the refcount of the quota block.
+
+    KeAcquirePushlockExclusive ( &MiQuotaListLock )
+
+    oldcount := KeIncrementUlong (
+        &quotablock^.References, // ptr
+        0xFFFFFFFF, // inc
+    )
+
+    IF oldcount == 1 THEN
+        // Remove from the list.
+
+        RtlRemoveEntryList ( &quotablock^.Entry )
+    END
+
+    KeReleasePushlock ( &MiQuotaListLock )
+
+    IF oldcount == 1 THEN
+        // Free.
+
+        MmFreePool (
+            quotablock, // ptr
+            'Quot', // tag
+        )
+    END
+END
+
+#SECTION "PAGEtext"
+FN MmLookupQuotaBlock (
+    IN uid : UWORD,
+    IN copyquotablock : ^MiQuotaBlock,
+) : ^MiQuotaBlock
+
+    // Look up the specified quota block by UID.
+    // If it can't be located, create a new one, copying in the parameters of
+    // the copyquotablock.
+
+    listhead := &MiQuotaBlockListHead
+
+    KeAcquirePushlockExclusive ( &MiQuotaListLock )
+
+    quotablock : ^MiQuotaBlock
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        quotablock = CONTAINEROF listentry TO MiQuotaBlock.Entry
+
+        IF quotablock^.Uid == uid THEN
+            MmReferenceQuotaBlock ( quotablock )
+
+            KeReleasePushlock ( &MiQuotaListLock )
+
+            RETURN quotablock
+        END
+
+        listentry = listentry^.Next
+    END
+
+    IF NOT copyquotablock THEN
+        // Just return failure.
+
+        KeReleasePushlock ( &MiQuotaListLock )
+
+        RETURN NULLPTR
+    END
+
+    // Allocate a quota block from paged pool.
+
+    quotablock = CAST MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
+        SIZEOF MiQuotaBlock, // bytes
+        'Quot', // tag
+        TRUE, // wait
+    ) TO ^MiQuotaBlock
+
+    IF NOT quotablock THEN
+        // Just return failure.
+
+        KeReleasePushlock ( &MiQuotaListLock )
+
+        RETURN NULLPTR
+    END
+
+    MiInitializeQuotaBlock (
+        quotablock, // quotablock
+        copyquotablock^.Pool[MM_NONPAGED_POOL].Limit, // nplimit
+        copyquotablock^.Pool[MM_PAGED_POOL].Limit, // pglimit
+        copyquotablock^.VmPages.Limit, // vmlimit
+        uid, // uid
+    )
+
+    KeReleasePushlock ( &MiQuotaListLock )
+
+    RETURN quotablock
+END
+
+#SECTION "PAGEtext"
+FN MmChargePoolQuota (
+    IN quotablock : ^MiQuotaBlock,
+    IN charge : UWORD,
+    IN poolindex : UWORD,
+) : OsStatus
+
+    // Apply the quota charge to the block.
+
+    limit := &quotablock^.Pool[poolindex]
+
+#IF BLD_CHK
+    IF limit^.Used + charge < charge THEN
+        KeCrash ( "quota overflow\n" )
+    END
+#END
+
+    old := KeIncrementPtr (
+        &limit^.Used, // ptr
+        charge, // inc
+    )
+
+    IF old + charge > limit^.Limit THEN
+        // Uncharge and return unsuccessful.
+
+        KeIncrementPtr (
+            &limit^.Used, // ptr
+            -charge, // inc
+        )
+
+        RETURN OS_STATUS_QUOTA_EXCEEDED
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN MmUnchargePoolQuota (
+    IN quotablock : ^MiQuotaBlock,
+    IN charge : UWORD,
+    IN poolindex : UWORD,
+)
+
+    // Remove the quota charge from the block.
+
+    limit := &quotablock^.Pool[poolindex]
+
+    old := KeIncrementPtr (
+        &limit^.Used, // ptr
+        -charge, // inc
+    )
+
+#IF BLD_CHK
+    IF charge > old THEN
+        KeCrash ( "quota underflow\n" )
+    END
+#END
+
+END
+
+#SECTION "PAGEtext"
+FN MmChargeVmQuota (
+    IN partition : ^MiPartition,
+    IN quotablock : ^MiQuotaBlock,
+    IN pages : UWORD,
+) : OsStatus
+
+    // Apply the vm charge to the block.
+
+#IF BLD_CHK
+    IF quotablock^.VmPages.Used + pages < pages THEN
+        KeCrash ( "vm quota overflow\n" )
+    END
+#END
+
+    old := KeIncrementPtr (
+        &quotablock^.VmPages.Used, // ptr
+        pages, // inc
+    )
+
+    IF old + pages > quotablock^.VmPages.Limit THEN
+        // Uncharge and return unsuccessful.
+
+        KeIncrementPtr (
+            &quotablock^.VmPages.Used, // ptr
+            -pages, // inc
+        )
+
+        RETURN OS_STATUS_QUOTA_EXCEEDED
+    END
+
+    // Charge commit.
+
+    status := MmChargeCommit (
+        partition, // partition
+        pages, // pages
+        TRUE, // wait
+    )
+
+    IF OsError ( status ) THEN
+        // Uncharge quota.
+
+        KeIncrementPtr (
+            &quotablock^.VmPages.Used, // ptr
+            -pages, // inc
+        )
+
+        RETURN status
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN MmUnchargeVmQuota (
+    IN partition : ^MiPartition,
+    IN quotablock : ^MiQuotaBlock,
+    IN pages : UWORD,
+)
+
+    // Remove the vm charge from the block.
+
+    old := KeIncrementPtr (
+        &quotablock^.VmPages.Used, // ptr
+        -pages, // inc
+    )
+
+#IF BLD_CHK
+    IF old < pages THEN
+        KeCrash ( "vm quota underflow\n" )
+    END
+#END
+
+    // Remove the commit charge.
+
+    MmUnchargeCommit (
+        partition, // partition
+        pages, // pages
+    )
+END
+
+#SECTION "PAGEtext"
+FN MmSetQuotaLimits (
+    IN quotablock : ^MiQuotaBlock,
+    IN query : ^OsQuotaQuery,
+)
+
+    // Set new limits on the quota block.
+
+    quotablock^.Pool[MM_NONPAGED_POOL].Limit = query^.NpPoolLimit
+    quotablock^.Pool[MM_PAGED_POOL].Limit = query^.PgPoolLimit
+    quotablock^.VmPages.Limit = query^.VmLimit
+END
+
+#SECTION "PAGEtext"
+FN MmQueryQuota (
+    IN quotablock : ^MiQuotaBlock,
+    IN query : ^OsQuotaQuery,
+)
+
+    // Query the quota block.
+
+    query^.NpPoolUsed = quotablock^.Pool[MM_NONPAGED_POOL].Used
+    query^.NpPoolLimit = quotablock^.Pool[MM_NONPAGED_POOL].Limit
+
+    query^.PgPoolUsed = quotablock^.Pool[MM_PAGED_POOL].Used
+    query^.PgPoolLimit = quotablock^.Pool[MM_PAGED_POOL].Limit
+
+    query^.VmUsed = quotablock^.VmPages.Used
+    query^.VmLimit = quotablock^.VmPages.Limit
+END

@@ -4,7 +4,8 @@
 
 #INCLUDE "Ki.hjk"
 
-PUBLIC KeIdleProcess : KeProcess
+PUBLIC KeIdleProcess : PsProcess
+KiIdleProcessPaged : PsPagedProcess
 
 EXPORT KeLoaderBlock : BlInfoRecord
 
@@ -197,7 +198,7 @@ FN KiInitializePrb (
     END
 
     KeInitializeThread (
-        &KeIdleProcess, // process
+        &KeIdleProcess.Pcb, // process
         &prb^.IdleThread, // thread
         "IdleThread", // name
         prb^.IdleStackBase, // kstack
@@ -336,11 +337,12 @@ EXPORT FN KeMain (
     // Initialize the idle process.
 
     KeInitializeProcess (
-        &KeIdleProcess, // process
+        &KeIdleProcess.Pcb, // process
         "Idle", // name
     )
 
-    KeIdleProcess.PageDirectoryPfn = KeLoaderBlock.SystemPageDirectoryPfn
+    KeIdleProcess.Pcb.PageDirectoryPfn = KeLoaderBlock.SystemPageDirectoryPfn
+    KeIdleProcess.Paged = &KiIdleProcessPaged
 
     // Initialize the Prbs.
 

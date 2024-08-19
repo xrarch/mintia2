@@ -4,6 +4,7 @@
 //
 
 #INCLUDE "Mi.hjk"
+#INCLUDE "<inc>/Ps.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
 PUBLIC MiSystemPartition : MiPartition
@@ -13,6 +14,8 @@ PUBLIC MiPfnDatabase : ^MiPfe
 PUBLIC MiTotalPages := 0
 
 PUBLIC MiSystemSize := 0
+
+MiSystemQuota : MiQuotaBlock
 
 #SECTION "INITtext"
 FN MmInitializeStage1 ()
@@ -101,7 +104,20 @@ FN MmInitializeStage1 ()
 
     sys^.CommitLimit = sys^.AvailablePageCount + 100
     sys^.TheoreticalCommitLimit = sys^.CommitLimit
-    sys^.PhysicalLimit = sys^.CommitLimit
+
+    // Give the idle process a quota block.
+
+    MiInitializeQuota ()
+
+    MiInitializeQuotaBlock (
+        &MiSystemQuota, // quotablock
+        -1, // nplimit
+        -1, // pglimit
+        -1, // vmlimit
+        0, // uid
+    )
+
+    KeIdleProcess.Paged^.QuotaBlock = &MiSystemQuota
 
     // Reclaim boot time memory. Nothing in "loader space" is safe to access
     // after this point.

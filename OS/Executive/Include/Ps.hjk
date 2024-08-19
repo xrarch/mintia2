@@ -4,8 +4,14 @@
 
 #INCLUDE "<inc>/Ke.hjk"
 
+STRUCT PsPagedProcess
+    QuotaBlock : ^MiQuotaBlock,
+END
+
 STRUCT PsProcess
     Pcb : KeProcess,
+
+    Paged : ^PsPagedProcess,
 END
 
 EXTERN PsSystemProcess : ^PsProcess
@@ -14,3 +20,5 @@ EXTERN PsUexecApcDispatcher : ^VOID
 EXTERN PsUexecSignalDispatcher : ^VOID
 
 EXTERN FN PsExitThread ()
+
+EXTERN KeIdleProcess : PsProcess

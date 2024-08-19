@@ -79,8 +79,6 @@ STRUCT MiPartition
 
     CommitUsage : UWORD,
     CommitLimit : UWORD,
-    PhysicalUsage : UWORD,
-    PhysicalLimit : UWORD,
     TheoreticalCommitLimit : UWORD,
 
     TotalPages : UWORD,
@@ -257,3 +255,36 @@ EXTERN FN MiAllocatePageWait (
 #MACRO MiReleaseObject ( object, ipl ) [
     KeReleaseApcSafePushlock ( &(object)^.Pushlock, ipl )
 ]
+
+STRUCT MiQuotaLimit
+    Used : UWORD,
+    Limit : UWORD,
+END
+
+STRUCT MiQuotaBlock
+    Entry : RtlListEntry,
+
+    Pool : MiQuotaLimit[MM_MAXIMUM_POOL],
+    VmPages : MiQuotaLimit,
+
+    Pushlock : KePushlock,
+
+    References : ULONG,
+    Uid : ULONG,
+END
+
+EXTERN FN MiInitializeQuota ()
+
+EXTERN FN MiInitializeQuotaBlock (
+    IN quotablock : ^MiQuotaBlock,
+    IN nplimit : UWORD,
+    IN pglimit : UWORD,
+    IN vmlimit : UWORD,
+    IN uid : UWORD,
+)
+
+EXTERN FN MiExpandPageFiles (
+    IN partition : ^MiPartition,
+    IN wait : UWORD,
+    IN full : UWORD,
+) : OsStatus
