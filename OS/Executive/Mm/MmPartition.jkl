@@ -644,7 +644,9 @@ FN MmChargeCommit (
 
     IF partition^.CommitUsage + pages > partition^.TheoreticalCommitLimit THEN
         // Don't even bother trying, there's no way to extend the pagefiles to
-        // accommodate this.
+        // accommodate this because the theoretical commit limit represents what
+        // we can theoretically increase the commit limit to if we were to
+        // extend all of the pagefiles to their maximum size.
 
         RETURN OS_STATUS_COMMIT_EXCEEDED
     END

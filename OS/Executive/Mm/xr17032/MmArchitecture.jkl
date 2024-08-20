@@ -1,0 +1,22 @@
+//
+// Architecture-specific code for the memory manager.
+//
+
+#INCLUDE "../Mi.hjk"
+
+#SECTION "INITtext"
+FN MiInitializeArchitecture ()
+
+    // Unmap the lower half mappings made by the Loader so that we catch illegal
+    // accesses to them.
+
+    RtlFillMemoryWithUlong (
+        CAST MI_DIRECTORY_BASE TO ^VOID, // ptr
+        2048, // sz
+        0, // ulong
+    )
+
+    // Flush TB.
+
+    KeSweepTb ( FALSE )
+END

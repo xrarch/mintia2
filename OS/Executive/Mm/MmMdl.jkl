@@ -1,0 +1,46 @@
+//
+// Implements support for pinning and unpinning Memory Descriptor Lists.
+//
+
+#INCLUDE "Mi.hjk"
+
+#DEFINE MI_SMALL_PAGES 8
+#DEFINE MI_SMALL_MDLS 40
+
+MiSmallMdlZone : MmZoneHeader
+
+#ENTERSECTION "INITtext"
+
+FN MiInitializeMdlZones ()
+
+    // Initialize the zones we use for quickly allocating MDLs.
+
+    mdlsize := SIZEOF MmMdlHeader + (MI_SMALL_PAGES << RTL_MACHINE_WORD_LOG)
+
+    RtlPrint ( "MiInitializeMdlZones: zonesize %u\n",
+        mdlsize * MI_SMALL_MDLS + MM_ZONE_OVERHEAD )
+
+    hunk := MmAllocatePool (
+        MM_NONPAGED_POOL, // poolindex
+        mdlsize * MI_SMALL_MDLS + MM_ZONE_OVERHEAD, // bytes
+        'MDLz', // tag
+        FALSE, // wait
+    )
+
+    IF NOT hunk THEN
+        KeCrash ( "MiInitializeMdlZones: failed to create zones\n" )
+    END
+
+    MmInitializeZone (
+        &MiSmallMdlZone, // zone
+        mdlsize, // blocksize
+    )
+
+    MmExtendZone (
+        &MiSmallMdlZone, // zone
+        hunk, // hunk
+        mdlsize * MI_SMALL_MDLS + MM_ZONE_OVERHEAD, // bytes
+    )
+END
+
+#LEAVESECTION

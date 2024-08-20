@@ -488,6 +488,12 @@ FN BlLoadDll (
     dll := BlpFindDll ( name )
 
     IF dll THEN
+        IF dll^.Flags & BL_DLL_DEFERRED_FREE THEN
+            // Failed to load it earlier.
+
+            RETURN NULLPTR
+        END
+
         dll^.LoadCount += 1
 
         RETURN dll
@@ -593,18 +599,6 @@ FN BlLoadDll (
     dll^.DriverEntrypoint = NULLPTR
     dll^.Base = NULLPTR
 
-    // Now map the module sections.
-
-    IF NOT BlpMapDll (
-        dll, // dll
-        file, // file
-    ) THEN
-
-        RtlPrint ( "LOAD: Failed to map %s\n", name )
-
-        RETURN NULLPTR
-    END
-
     // Insert in the DLL list.
 
     RtlInsertAtTailList (
@@ -612,11 +606,29 @@ FN BlLoadDll (
         &dll^.Entry, // entry
     )
 
+    BlInfoBlock.DllCount += 1
+
+    // Now map the module sections.
+
+    IF NOT BlpMapDll (
+        dll, // dll
+        file, // file
+    ) THEN
+
+        dll^.Flags |= BL_DLL_DEFERRED_FREE
+
+        RtlPrint ( "LOAD: Failed to map %s\n", name )
+
+        RETURN NULLPTR
+    END
+
     IF dll^.Flags & BL_DLL_RELOCATED THEN
         // One or more sections was loaded at a non-preferred base.
         // Process the relocations now.
 
         IF header.Flags & XLO_FILE_STRIPPED THEN
+            dll^.Flags |= BL_DLL_DEFERRED_FREE
+
             RtlPrint ( "LOAD: Stripped module %s\n", name )
 
             RETURN NULLPTR
@@ -632,6 +644,7 @@ FN BlLoadDll (
     // Process the import table.
 
     IF NOT BlpDoImports ( dll ) THEN
+        dll^.Flags |= BL_DLL_DEFERRED_FREE
 
         RETURN NULLPTR
     END

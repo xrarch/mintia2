@@ -59,6 +59,7 @@ END
 FNPTR MiPoolGetMemoryF (
     IN ptr : ^VOID,
     IN pages : UWORD,
+    IN low : UWORD,
 ) : UWORD
 
 FNPTR MiPoolReturnMemoryF (
@@ -183,6 +184,7 @@ END
 FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
     IN ptr : ^VOID,
     IN pages : UWORD,
+    IN low : UWORD,
 ) : UWORD
     
     // Allocate an extension for nonpaged pool. If the required page frame can't
@@ -211,7 +213,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
         pfe := MiAllocatePage (
             &MiSystemPartition, // partition
             FALSE, // zeroed
-            FALSE, // low
+            low, // low
             color, // color
         )
 
@@ -253,6 +255,7 @@ END
 FN (MiPoolGetMemoryF) MiGetPagedMemory (
     IN ptr : ^VOID,
     IN pages : UWORD,
+    IN low : UWORD,
 ) : UWORD
     
     // Allocate an extension for paged pool.
@@ -461,6 +464,7 @@ FN MiAllocateFromPool (
     IF NOT pool^.GetMemory (
         ext, // ptr
         1, // pages
+        wait == FALSE, // low
     ) THEN
 
         // Failed to allocate a pool extension.
@@ -949,6 +953,7 @@ FN MiAllocatePageAligned (
     IF NOT pool^.GetMemory (
         node^.StartVa, // ptr
         bytes, // pages
+        wait == FALSE, // low
     ) THEN
         IF NOT wait THEN
             MiReleaseDynamicSpace ( node )

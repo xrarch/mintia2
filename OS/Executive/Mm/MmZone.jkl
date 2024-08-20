@@ -1,0 +1,123 @@
+//
+// Implements a fast allocator for fixed size memory blocks.
+//
+
+#INCLUDE "Mi.hjk"
+
+STRUCT MiFreeZoneBlock
+    Next : ^MiFreeZoneBlock,
+END
+
+EXPORT FN MmInitializeZone (
+    IN zone : ^MmZoneHeader,
+    IN blocksize : UWORD,
+)
+
+    // Initialize a zone header.
+
+#IF BLD_CHK
+    IF blocksize & (RTL_MACHINE_WORD_SIZE - 1) THEN
+        KeCrash ( "MmInitializeZone: unaligned block size\n" )
+    END
+
+    IF blocksize < SIZEOF MiFreeZoneBlock THEN
+        KeCrash ( "MmInitializeZone: small block size\n" )
+    END
+#END
+
+    zone^.BlockSize = blocksize
+    zone^.ChunkListHead = NULLPTR
+    zone^.FreeListHead = NULLPTR
+END
+
+EXPORT FN MmExtendZone (
+    IN zone : ^MmZoneHeader,
+    IN hunk : ^VOID,
+    IN bytes : UWORD,
+)
+
+    // Add more blocks to the zone.
+
+#IF BLD_CHK
+    IF bytes & (RTL_MACHINE_WORD_SIZE - 1) THEN
+        KeCrash ( "MmExtendZone: unaligned chunk size\n" )
+    END
+
+    IF bytes < SIZEOF MiFreeZoneBlock + MM_ZONE_OVERHEAD THEN
+        KeCrash ( "MmExtendZone: small chunk\n" )
+    END
+#END
+
+    blocksize := zone^.BlockSize
+
+    // Add the chunk to the chunk list.
+
+    chunk := CAST hunk TO ^MiZoneChunk
+
+    chunk^.Next = zone^.ChunkListHead
+    zone^.ChunkListHead = chunk
+
+    // Initialize the chunk blocks.
+
+    block := CAST hunk + SIZEOF MiZoneChunk TO ^MiFreeZoneBlock
+    hunkend := hunk + bytes
+
+    WHILE block < hunkend DO
+        block^.Next = zone^.FreeListHead
+        zone^.FreeListHead = block
+
+        block += blocksize
+    END
+END
+
+EXPORT FN MmEmptyZone (
+    IN zone : ^MmZoneHeader,
+    IN tag : UWORD,
+)
+
+    // Free all of the chunks in the zone.
+
+    chunk := zone^.ChunkListHead
+
+    WHILE chunk DO
+        next := chunk^.Next
+
+        MmFreePool (
+            chunk, // ptr
+            tag, // tag
+        )
+
+        chunk = next
+    END
+
+    zone^.ChunkListHead = NULLPTR
+    zone^.FreeListHead = NULLPTR
+END
+
+EXPORT FN MmAllocateZone (
+    IN zone : ^MmZoneHeader,
+) : ^VOID
+
+    // Allocate a block from the zone.
+
+    ptr := zone^.FreeListHead
+
+    IF ptr THEN
+        zone^.FreeListHead = ptr^.Next
+    END
+
+    RETURN ptr
+END
+
+EXPORT FN MmFreeZone (
+    IN zone : ^MmZoneHeader,
+    IN ptr : ^VOID,
+)
+
+    // Free a block to the zone.
+
+    block := CAST ptr TO ^MiFreeZoneBlock
+
+    block^.Next = zone^.FreeListHead
+    zone^.FreeListHead = block
+END
