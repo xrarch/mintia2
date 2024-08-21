@@ -1028,10 +1028,22 @@ FN MmAllocatePool (
 
     pool := &MiPoolTable[poolindex]
 
+    ptr : ^VOID
+
     IF bytes < (MI_BLOCK_MAX_REQUEST_UNITS << MI_BLOCK_SIZE_SHIFT) THEN
         // Allocate from the small block pool.
 
-        RETURN MiAllocateFromPool (
+        ptr = MiAllocateFromPool (
+            pool, // pool
+            bytes, // bytes
+            tag, // tag
+            wait, // wait
+        )
+
+    ELSE
+        // Allocate from page aligned pool.
+
+        ptr = MiAllocatePageAligned (
             pool, // pool
             bytes, // bytes
             tag, // tag
@@ -1039,14 +1051,15 @@ FN MmAllocatePool (
         )
     END
 
-    // Allocate from page aligned pool.
-
-    RETURN MiAllocatePageAligned (
-        pool, // pool
-        bytes, // bytes
-        tag, // tag
-        wait, // wait
+#IF BLD_CHK
+    RtlFillMemoryWithUlong (
+        ptr, // ptr
+        bytes, // sz
+        0xABCDEFAF, // ulong
     )
+#END
+
+    RETURN ptr
 END
 
 FN MmFreePool (
