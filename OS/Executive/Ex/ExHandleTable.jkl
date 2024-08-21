@@ -4,53 +4,44 @@
 
 #INCLUDE "Exp.hjk"
 
-#MACRO ExAcquireHandleTableExclusive ( handletable ) [
-    KeAcquirePushlockExclusive ( &(handletable)^.Pushlock )
-]
-
-#MACRO ExAcquireHandleTableShared ( handletable ) [
-    KeAcquirePushlockShared ( &(handletable)^.Pushlock )
-]
-
-#MACRO ExReleaseHandleTable ( handletable ) [
-    KeReleasePushlock ( &(handletable)^.Pushlock )
-]
-
 #DEFINE EXP_FREE_HANDLE 1
 
-#SECTION "PAGE$text"
+#DEFINE EXP_NEXT_HANDLE_MASK [(~3)]
+#DEFINE EXP_NEXT_HANDLE_SHIFT 2
+
+#DEFINE EXP_EXTEND_BY 16
+
+STRUCT ExpFreeHandle
+    Next : UWORD,
+    Count : UWORD,
+END
+
+#SECTION "PAGEtext"
 FN ExInitializeHandleTable (
     IN handletable : ^ExHandleTable,
     IN entrysizelog : UWORD,
     IN quotablock : ^MiQuotaBlock,
-    IN context : UWORD,
 )
 
     // Initialize a handle table.
-    // Entry size log is given in units of pointers.
+    // Entry size log is given in units of 2 pointers.
 
-    KeInitializePushlock ( &handletable^.Pushlock )
-
-    handletable^.EntrySizeLog = entrysizelog + RTL_MACHINE_WORD_LOG
+    handletable^.EntrySizeLog = entrysizelog + RTL_MACHINE_WORD_LOG + 1
     handletable^.QuotaBlock = quotablock
     handletable^.Entries = 0
-    handletable^.FreeEntries = 0
-    handletable^.NextHandle = 0
-    handletable^.Context = context
     handletable^.FreeListHead = -1
     handletable^.Table = NULLPTR
 
     MmReferenceQuotaBlock ( quotablock )
 END
 
-#SECTION "PAGE$text"
-FN ExHandleLookup (
+#SECTION "PAGEtext"
+FN ExLookupHandle (
     IN handletable : ^ExHandleTable,
     IN handle : UWORD,
 ) : ^VOID
 
     // Look up a handle and return a pointer to the handle table entry.
-    // Assumes the handle table is locked.
 
     IF handle >= handletable^.Entries THEN
         RETURN NULLPTR
@@ -67,10 +58,42 @@ FN ExHandleLookup (
     RETURN entry
 END
 
-#SECTION "PAGE$text"
+#SECTION "PAGEtext"
+FN ExEnumerateHandleTable (
+    IN handletable : ^ExHandleTable,
+    IN func : ExHandleTableEnumerationF,
+    IN context : UWORD,
+)
+
+    // Call a function for each handle in the table.
+
+    i := 0
+    entries := handletable^.Entries
+
+    WHILE i < entries DO
+        entryptr := ExLookupHandle (
+            handletable, // handletable
+            i, // handle
+        )
+
+        IF entryptr THEN
+            func (
+                handletable, // handletable
+                i, // index
+                entryptr, // entryptr
+                context, // context
+            )
+        END
+
+        i += 1
+    END
+END
+
+#SECTION "PAGEtext"
 FN ExDeleteHandleTable (
     IN handletable : ^ExHandleTable,
     IN func : ExHandleTableEnumerationF,
+    IN context : UWORD,
 )
 
     // Prepare a handle table for deletion.
@@ -78,25 +101,11 @@ FN ExDeleteHandleTable (
     IF func THEN
         // Call a function for each handle.
 
-        i := 0
-        entries := handletable^.Entries
-
-        WHILE i < entries DO
-            entryptr := ExHandleLookup (
-                handletable, // handletable
-                i, // handle
-            )
-
-            IF entryptr THEN
-                func (
-                    handletable, // handletable
-                    i, // index
-                    entryptr, // entryptr
-                )
-            END
-
-            i += 1
-        END
+        ExEnumerateHandleTable (
+            handletable, // handletable
+            func, // func
+            context, // context
+        )
     END
 
     // Deallocate handle table structures.
@@ -104,8 +113,6 @@ FN ExDeleteHandleTable (
     table := handletable^.Table
 
     IF table THEN
-        charge := MmGetOverheadOfBlock ( table )
-
         MmFreePool (
             table, // ptr
             'HnTb', // tag
@@ -113,10 +120,282 @@ FN ExDeleteHandleTable (
 
         MmUnchargePoolQuota (
             handletable^.QuotaBlock, // quotablock
-            charge, // charge
+            handletable^.Entries << handletable^.EntrySizeLog, // charge
             MM_PAGED_POOL, // poolindex
         )
     END
 
     MmUnreferenceQuotaBlock ( handletable^.QuotaBlock )
+END
+
+#SECTION "PAGEtext"
+FN ExDeleteHandle (
+    IN handletable : ^ExHandleTable,
+    IN handle : UWORD,
+    IN entry : ^VOID,
+) : UWORD
+
+    // Delete the handle. Return TRUE if the handle was found and deleted,
+    // otherwise FALSE. Copy the contents of the table entry to the provided
+    // pointer.
+
+    entryptr := CAST ExLookupHandle (
+        handletable, // handletable
+        handle, // handle
+    ) TO ^ExpFreeHandle
+
+    IF NOT entryptr THEN
+        RETURN FALSE
+    END
+
+    log := handletable^.EntrySizeLog
+
+    IF entry THEN
+        RtlCopyBytes (
+            entry, // dest
+            entryptr, // src
+            1 << log, // sz
+        )
+    END
+
+    // Insertion sort the free handle into the list.
+
+    IF handletable^.FreeListHead == -1 THEN
+        // Empty list. Create a single free block of size one.
+
+        entryptr^.Next = EXP_NEXT_HANDLE_MASK | EXP_FREE_HANDLE
+        entryptr^.Count = 1
+
+        handletable^.FreeListHead = handle
+
+        RETURN TRUE
+    END
+
+    table := handletable^.Table
+
+    // Seek to the first chunk of handles that is after us.
+
+    prev : ^ExpFreeHandle = NULLPTR
+    next := CAST table + (handletable^.FreeListHead << log) TO ^ExpFreeHandle
+
+    WHILE next < entryptr DO
+        prev = next
+
+        IF next^.Next & EXP_NEXT_HANDLE_MASK == EXP_NEXT_HANDLE_MASK THEN
+            next = NULLPTR
+
+            BREAK
+        END
+
+        next = CAST table + ((next^.Next >>
+            EXP_NEXT_HANDLE_SHIFT) << log) TO ^ExpFreeHandle
+    END
+
+    entrycount := 1
+    count : UWORD
+
+    IF NOT prev THEN
+        // No prev means we are the head.
+
+        handletable^.FreeListHead = handle
+
+    ELSE
+        // Try to merge left.
+
+        count = prev^.Count
+
+        IF prev + (count << log) == entryptr THEN
+            // Merge left.
+
+            // First, set this entry free.
+
+            entryptr^.Next = EXP_FREE_HANDLE
+
+            entryptr = prev
+            entrycount += count
+
+        ELSE
+            // Make prev point to our new chunk.
+
+            prev^.Next = (prev^.Next & ~EXP_NEXT_HANDLE_MASK) |
+                (handle << EXP_NEXT_HANDLE_SHIFT)
+        END
+    END
+
+    IF next THEN
+        // Try to merge right.
+
+        IF entryptr + (entrycount << log) == next THEN
+            // We can merge right.
+
+            entrycount += next^.Count
+
+            IF next^.Next & EXP_NEXT_HANDLE_MASK == EXP_NEXT_HANDLE_MASK THEN
+                next = NULLPTR
+            
+            ELSE
+                next = CAST table + ((next^.Next >>
+                    EXP_NEXT_HANDLE_SHIFT) << log) TO ^ExpFreeHandle
+            END
+        END
+    END
+
+    // Encode the size, next link, etc in our freed chunk.
+
+    IF NOT next THEN
+        next = EXP_NEXT_HANDLE_MASK
+    ELSE
+        next = ((next - table) >> log) << EXP_NEXT_HANDLE_SHIFT
+    END
+
+    entryptr^.Next = next | EXP_FREE_HANDLE
+    entryptr^.Count = entrycount
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN ExCreateHandle (
+    IN handletable : ^ExHandleTable,
+    OUT handle : UWORD,
+    OUT entryptr : ^VOID,
+) : OsStatus
+
+    // Allocate a handle from the handle table.
+
+    handle = handletable^.FreeListHead
+    table := handletable^.Table
+    log := handletable^.EntrySizeLog
+
+    free : ^ExpFreeHandle
+
+    IF handle != -1 THEN
+        // Take a handle from the free list.
+
+        entryptr = table + (handle << log)
+
+        free = CAST entryptr TO ^ExpFreeHandle
+
+        IF free^.Count == 1 THEN
+            // Only a single handle. Destroy this free list entry.
+
+            IF free^.Next & EXP_NEXT_HANDLE_MASK == EXP_NEXT_HANDLE_MASK THEN
+                handletable^.FreeListHead = -1
+            ELSE
+                handletable^.FreeListHead = free^.Next >> EXP_NEXT_HANDLE_SHIFT
+            END
+
+        ELSE
+            // Push the free list entry forward by one handle.
+
+            push := free + (1 << log)
+
+            push^.Next = free^.Next
+            push^.Count = free^.Count - 1
+
+            handletable^.FreeListHead = handle + 1
+        END
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    // Grow the handle table.
+
+    oldsize := handletable^.Entries << log
+    newsize := oldsize + (EXP_EXTEND_BY << log)
+
+    // First charge quota for the new table.
+
+    status := MmChargePoolQuota (
+        handletable^.QuotaBlock, // quotablock
+        newsize, // charge
+        MM_PAGED_POOL, // poolindex
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Now allocate it.
+
+    newtable := MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
+        newsize, // bytes
+        'HnTb', // tag
+        TRUE, // wait
+    )
+
+    IF NOT newtable THEN
+        // Uncharge quota.
+
+        MmUnchargePoolQuota (
+            handletable^.QuotaBlock, // quotablock
+            newsize, // charge
+            MM_PAGED_POOL, // poolindex
+        )
+
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    IF table THEN
+        // Copy old table into new.
+
+        RtlCopyBytes (
+            newtable, // dest
+            table, // src
+            oldsize, // sz
+        )
+
+        // Free old table.
+
+        MmFreePool (
+            table, // ptr
+            'HnTb', // tag
+        )
+
+        // Uncharge old quota.
+
+        MmUnchargePoolQuota (
+            handletable^.QuotaBlock, // quotablock
+            oldsize, // charge
+            MM_PAGED_POOL, // poolindex
+        )
+    END
+
+    entryptr = newtable + oldsize
+    handle = handletable^.Entries
+
+    // Set new table.
+
+    handletable^.Table = newtable
+    handletable^.Entries = handle + EXP_EXTEND_BY
+
+    // Zero out the new space.
+
+    RtlFillMemoryWithUlong (
+        entryptr, // ptr
+        EXP_EXTEND_BY << log, // sz
+        0, // ulong
+    )
+
+    // Create a single free block out of the remainder.
+
+    free = entryptr + (1 << log)
+
+    free^.Next = EXP_NEXT_HANDLE_MASK | EXP_FREE_HANDLE
+    free^.Count = EXP_EXTEND_BY - 1
+
+    handletable^.FreeListHead = handle + 1
+
+    free += (1 << log)
+    i := EXP_EXTEND_BY - 2
+
+    WHILE i DO
+        free^.Next = EXP_FREE_HANDLE
+
+        i -= 1
+        free += (1 << log)
+    END
+
+    RETURN OS_STATUS_SUCCESS
 END

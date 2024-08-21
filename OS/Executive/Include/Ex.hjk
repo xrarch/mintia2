@@ -7,17 +7,11 @@
 
 STRUCT ExHandleTable
     Entries : UWORD,
-    FreeEntries : UWORD,
-
-    Context : UWORD,
 
     QuotaBlock : ^MiQuotaBlock,
 
     Table : ^^VOID,
 
-    Pushlock : KePushlock,
-
-    NextHandle : ULONG,
     FreeListHead : ULONG,
 
     EntrySizeLog : UBYTE,
@@ -27,4 +21,52 @@ FNPTR ExHandleTableEnumerationF (
     IN handletable : ^ExHandleTable,
     IN handle : UWORD,
     IN entryptr : ^VOID,
+    IN context : UWORD,
 )
+
+#MACRO ExAcquireHandleTableExclusive ( handletable ) [
+    KeAcquirePushlockExclusive ( &(handletable)^.Pushlock )
+]
+
+#MACRO ExAcquireHandleTableShared ( handletable ) [
+    KeAcquirePushlockShared ( &(handletable)^.Pushlock )
+]
+
+#MACRO ExReleaseHandleTable ( handletable ) [
+    KeReleasePushlock ( &(handletable)^.Pushlock )
+]
+
+EXTERN FN ExInitializeHandleTable (
+    IN handletable : ^ExHandleTable,
+    IN entrysizelog : UWORD,
+    IN quotablock : ^MiQuotaBlock,
+)
+
+EXTERN FN ExEnumerateHandleTable (
+    IN handletable : ^ExHandleTable,
+    IN func : ExHandleTableEnumerationF,
+    IN context : UWORD,
+)
+
+EXTERN FN ExLookupHandle (
+    IN handletable : ^ExHandleTable,
+    IN handle : UWORD,
+) : ^VOID
+
+EXTERN FN ExDeleteHandleTable (
+    IN handletable : ^ExHandleTable,
+    IN func : ExHandleTableEnumerationF,
+    IN context : UWORD,
+)
+
+EXTERN FN ExDeleteHandle (
+    IN handletable : ^ExHandleTable,
+    IN handle : UWORD,
+    IN entry : ^VOID,
+) : UWORD
+
+EXTERN FN ExCreateHandle (
+    IN handletable : ^ExHandleTable,
+    OUT handle : UWORD,
+    OUT entryptr : ^VOID,
+) : OsStatus

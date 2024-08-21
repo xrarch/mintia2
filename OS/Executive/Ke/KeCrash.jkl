@@ -298,9 +298,15 @@ EXPORT FN KeCrash (
         // We weren't the first. Complain and hang forever.
 
         RtlPrint (
-            "KeCrash(): Nested on %u: %s\n", // fmt
+            "KeCrash(): Nested on %u: \n", // fmt
             KiCurrentProcessor (),
-            fmt,
+        )
+
+        RtlPrintByVarTable (
+            NULLPTR, // handle
+            fmt, // fmt
+            argv, // argv
+            argc, // argc
         )
 
         WHILE TRUE DO

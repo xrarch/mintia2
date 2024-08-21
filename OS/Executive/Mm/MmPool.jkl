@@ -330,9 +330,11 @@ FN MiInitializePools ()
 
     MiInitializeNonpagedPool ( &MiPoolTable[MM_NONPAGED_POOL] )
 
-    MiInitializePagedPool ( &MiPoolTable[MM_PAGED_POOL] )
+    // TEMP
 
-    MiInitializePagedPool ( &MiPoolTable[MM_PAGE_TRACKING_POOL] )
+    MiInitializeNonpagedPool ( &MiPoolTable[MM_PAGED_POOL] )
+
+    MiInitializeNonpagedPool ( &MiPoolTable[MM_PAGE_TRACKING_POOL] )
 END
 
 MiEightBitLog : UBYTE[256] = {
@@ -1015,6 +1017,12 @@ FN MmAllocatePool (
     IN tag : ULONG,
     IN wait : UWORD,
 ) : ^VOID
+
+#IF BLD_CHK
+    IF bytes == 0 THEN
+        KeCrash ( "MmAllocatePool: 0 byte allocation\n" )
+    END
+#END
 
     // Allocate a block of memory from the specified pool.
 
