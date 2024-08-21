@@ -438,6 +438,8 @@ FN KiServiceIpi (
         )
 
         // OR this set of pending soft ints into our mask.
+        // We don't use an atomic OR because an IPI is at the highest IPL, so
+        // this R-M-W will work fine.
 
         prb^.PendingSoftwareInterrupts |= pendingset
     END

@@ -476,7 +476,13 @@ EXTERN FN KiDisassociateFromBalancedQueue (
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
 
 #MACRO KiSoftInterruptSelf ( prb, ipl ) [
-    NOTHING (prb)^.PendingSoftwareInterrupts |= KiPendingIpl ( ipl )
+    // This can be used at any IPL, so we must use an atomic OR in case an IPI
+    // comes in.
+
+    KeOrUlong (
+        &(prb)^.PendingSoftwareInterrupts, // ptr
+        KiPendingIpl ( ipl ), // bitset
+    )
 ]
 
 #IF BLD_MP

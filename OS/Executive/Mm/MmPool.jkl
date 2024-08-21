@@ -1066,3 +1066,56 @@ FN MmFreePool (
         tag, // tag
     )
 END
+
+#SECTION "PAGEtext"
+FN MmGetOverheadOfBlock (
+    IN ptr : ^VOID,
+) : UWORD
+
+    // Return the total bytes overhead consumed by a pool allocation.
+
+    IF ptr >= MI_POOL_SPACE AND ptr < MI_POOL_SPACE_END THEN
+        // This block is in small pool.
+
+        block := CAST ptr - SIZEOF MiBlock TO ^MiBlock
+
+        RETURN block^.Size << MI_BLOCK_SIZE_SHIFT
+    END
+
+    // Page-aligned.
+
+    node := MiFindDynamicSpaceNode ( ptr )
+
+#IF BLD_CHK
+    IF NOT node THEN
+        KeCrash ( "MmGetChargeFromBlock: no allocation\n" )
+    END
+
+    IF node^.StartVa != ptr THEN
+        KeCrash ( "MmGetChargeFromBlock: middle of allocation\n" )
+    END
+#END
+
+    RETURN node^.EndVa - node^.StartVa
+END
+
+#SECTION "PAGEtext"
+FN MmGetOverheadOfBytes (
+    IN bytes : UWORD,
+) : UWORD
+
+    // Calculate the total overhead in bytes that the pool allocation for the
+    // given number of bytes would consume. This *MUST* match what is returned
+    // by MmGetChargeFromBlock for a pool allocation that really was for this
+    // many bytes.
+
+    IF bytes >= (MI_BLOCK_MAX_REQUEST_UNITS << MI_BLOCK_SIZE_SHIFT) THEN
+        // Page-aligned charge.
+
+        RETURN (bytes + RTL_PAGE_OFFSET_MASK) & RTL_PAGE_NUMBER_MASK
+    END
+
+    // Small block charge.
+
+    RETURN (bytes + SIZEOF MiBlock + MI_BLOCK_SIZE_MASK) & ~MI_BLOCK_SIZE_MASK
+END

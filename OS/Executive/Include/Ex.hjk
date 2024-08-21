@@ -4,3 +4,27 @@
 //
 
 #INCLUDE "<inc>/Ke.hjk"
+
+STRUCT ExHandleTable
+    Entries : UWORD,
+    FreeEntries : UWORD,
+
+    Context : UWORD,
+
+    QuotaBlock : ^MiQuotaBlock,
+
+    Table : ^^VOID,
+
+    Pushlock : KePushlock,
+
+    NextHandle : ULONG,
+    FreeListHead : ULONG,
+
+    EntrySizeLog : UBYTE,
+END
+
+FNPTR ExHandleTableEnumerationF (
+    IN handletable : ^ExHandleTable,
+    IN handle : UWORD,
+    IN entryptr : ^VOID,
+)

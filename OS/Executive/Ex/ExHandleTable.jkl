@@ -1,0 +1,122 @@
+//
+// Implements a simple, general purpose handle table for the MINTIA Executive.
+//
+
+#INCLUDE "Exp.hjk"
+
+#MACRO ExAcquireHandleTableExclusive ( handletable ) [
+    KeAcquirePushlockExclusive ( &(handletable)^.Pushlock )
+]
+
+#MACRO ExAcquireHandleTableShared ( handletable ) [
+    KeAcquirePushlockShared ( &(handletable)^.Pushlock )
+]
+
+#MACRO ExReleaseHandleTable ( handletable ) [
+    KeReleasePushlock ( &(handletable)^.Pushlock )
+]
+
+#DEFINE EXP_FREE_HANDLE 1
+
+#SECTION "PAGE$text"
+FN ExInitializeHandleTable (
+    IN handletable : ^ExHandleTable,
+    IN entrysizelog : UWORD,
+    IN quotablock : ^MiQuotaBlock,
+    IN context : UWORD,
+)
+
+    // Initialize a handle table.
+    // Entry size log is given in units of pointers.
+
+    KeInitializePushlock ( &handletable^.Pushlock )
+
+    handletable^.EntrySizeLog = entrysizelog + RTL_MACHINE_WORD_LOG
+    handletable^.QuotaBlock = quotablock
+    handletable^.Entries = 0
+    handletable^.FreeEntries = 0
+    handletable^.NextHandle = 0
+    handletable^.Context = context
+    handletable^.FreeListHead = -1
+    handletable^.Table = NULLPTR
+
+    MmReferenceQuotaBlock ( quotablock )
+END
+
+#SECTION "PAGE$text"
+FN ExHandleLookup (
+    IN handletable : ^ExHandleTable,
+    IN handle : UWORD,
+) : ^VOID
+
+    // Look up a handle and return a pointer to the handle table entry.
+    // Assumes the handle table is locked.
+
+    IF handle >= handletable^.Entries THEN
+        RETURN NULLPTR
+    END
+
+    entry := handletable^.Table + (handle << handletable^.EntrySizeLog)
+
+    IF (CAST entry TO ^UWORD)[0] & EXP_FREE_HANDLE THEN
+        // This handle entry is free.
+
+        RETURN NULLPTR
+    END
+
+    RETURN entry
+END
+
+#SECTION "PAGE$text"
+FN ExDeleteHandleTable (
+    IN handletable : ^ExHandleTable,
+    IN func : ExHandleTableEnumerationF,
+)
+
+    // Prepare a handle table for deletion.
+
+    IF func THEN
+        // Call a function for each handle.
+
+        i := 0
+        entries := handletable^.Entries
+
+        WHILE i < entries DO
+            entryptr := ExHandleLookup (
+                handletable, // handletable
+                i, // handle
+            )
+
+            IF entryptr THEN
+                func (
+                    handletable, // handletable
+                    i, // index
+                    entryptr, // entryptr
+                )
+            END
+
+            i += 1
+        END
+    END
+
+    // Deallocate handle table structures.
+
+    table := handletable^.Table
+
+    IF table THEN
+        charge := MmGetOverheadOfBlock ( table )
+
+        MmFreePool (
+            table, // ptr
+            'HnTb', // tag
+        )
+
+        MmUnchargePoolQuota (
+            handletable^.QuotaBlock, // quotablock
+            charge, // charge
+            MM_PAGED_POOL, // poolindex
+        )
+    END
+
+    MmUnreferenceQuotaBlock ( handletable^.QuotaBlock )
+END

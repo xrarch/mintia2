@@ -21,6 +21,14 @@ EXTERN FN MmFreePool (
     IN tag : ULONG,
 )
 
+EXTERN FN MmGetOverheadOfBlock (
+    IN ptr : ^VOID,
+) : UWORD
+
+EXTERN FN MmGetOverheadOfBytes (
+    IN bytes : UWORD,
+) : UWORD
+
 STRUCT MmZoneHeader
     BlockSize : UWORD,
     FreeListHead : ^MiFreeZoneBlock,
@@ -67,6 +75,53 @@ EXTERN FN MmChargeCommit (
 EXTERN FN MmUnchargeCommit (
     IN partition : ^MiPartition,
     IN pages : UWORD,
+)
+
+EXTERN FN MmReferenceQuotaBlock (
+    IN quotablock : ^MiQuotaBlock,
+)
+
+EXTERN FN MmUnreferenceQuotaBlock (
+    IN quotablock : ^MiQuotaBlock,
+)
+
+EXTERN FN MmLookupQuotaBlock (
+    IN uid : UWORD,
+    IN copyquotablock : ^MiQuotaBlock,
+) : ^MiQuotaBlock
+
+EXTERN FN MmChargePoolQuota (
+    IN quotablock : ^MiQuotaBlock,
+    IN charge : UWORD,
+    IN poolindex : UWORD,
+) : OsStatus
+
+EXTERN FN MmUnchargePoolQuota (
+    IN quotablock : ^MiQuotaBlock,
+    IN charge : UWORD,
+    IN poolindex : UWORD,
+)
+
+EXTERN FN MmChargeVmQuota (
+    IN partition : ^MiPartition,
+    IN quotablock : ^MiQuotaBlock,
+    IN pages : UWORD,
+) : OsStatus
+
+EXTERN FN MmUnchargeVmQuota (
+    IN partition : ^MiPartition,
+    IN quotablock : ^MiQuotaBlock,
+    IN pages : UWORD,
+)
+
+EXTERN FN MmSetQuotaLimits (
+    IN quotablock : ^MiQuotaBlock,
+    IN query : ^OsQuotaQuery,
+)
+
+EXTERN FN MmQueryQuota (
+    IN quotablock : ^MiQuotaBlock,
+    IN query : ^OsQuotaQuery,
 )
 
 ENUM MmPoolIndices : UBYTE

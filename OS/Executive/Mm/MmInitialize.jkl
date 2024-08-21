@@ -72,7 +72,11 @@ FN MiIdentifyUnwireableSections (
             // up since it has no way to do that itself. We should also alert
             // the system operator to the driver load failure.
 
-            // TODO alert sysop
+            // We use this special region type because we have no idea how far
+            // the loader got, so we might run into invalid PTEs. That's always
+            // wrong for MI_FREE_REGION but not for this type.
+
+            // TODO alert sysop somehow
 
             type = MI_DEFERRED_FREE_REGION
 
@@ -376,7 +380,7 @@ FN MmInitializeStage1 ()
     sys^.CommitLimit = sys^.AvailablePageCount + 100
     sys^.TheoreticalCommitLimit = sys^.CommitLimit
 
-    // Give the idle process a quota block.
+    // Initialize quota management.
 
     MiInitializeQuota ()
 
@@ -387,8 +391,6 @@ FN MmInitializeStage1 ()
         -1, // vmlimit
         0, // uid
     )
-
-    KeIdleProcess.Paged^.QuotaBlock = &MiSystemQuota
 
     // Reclaim boot time memory. Nothing in "loader space" is safe to access
     // after this point.
