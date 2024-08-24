@@ -3,6 +3,7 @@
 //
 
 #INCLUDE "Mi.hjk"
+#INCLUDE "<ll>/System/OsProcess.hjk"
 
 FN (KeStartThreadF) MmZeroPageWorker (
     IN context1 : UWORD,
@@ -19,14 +20,75 @@ FN (KeStartThreadF) MmZeroPageWorker (
         partition = &MiSystemPartition
     END
 
-    // TEMP
-
     interval : RtlUquad
-    interval.High = 1
-    interval.Low = 0
+
+    RtlSetUquadToUlong (
+        &interval, // uquad
+        30, // ulong
+    )
+
+    // Set myself to the idle priority.
+
+    KeSetBasePriorityThread (
+        KeCurrentThread (), // thread
+        OS_PRIORITY_IDLE, // priority
+        TRUE, // setcurrentpriority
+    )
 
     WHILE TRUE DO
-        // TEMP
+        // Wait for there to be more than a threshold of free pages.
+
+        KeWaitForSingleObject (
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+            NULLPTR, // timeout
+            &partition^.ZeroPageEvent.Header, // object
+        )
+
+        // Zero at most the threshold of pages.
+
+        count := partition^.ZeroingThreshold
+
+        WHILE count DO
+            IF partition^.FreeList.Count == 0 THEN
+                BREAK
+            END
+
+            ipl := MiAcquireListExclusive ( partition )
+
+            IF partition^.FreeList.Count == 0 THEN
+                MiReleaseList ( partition, ipl )
+
+                BREAK
+            END
+
+            pfe := MiAllocatePageFromList (
+                &partition^.FreeList, // list
+                0, // color
+            )
+
+            MiReleaseList ( partition, ipl )
+
+            // Zero the page.
+
+            KeZeroPage ( MI_PFE_TO_PFN ( pfe ) )
+
+            // Place on zeroed list.
+
+            ipl = MiAcquireListExclusive ( partition )
+
+            MiInsertPageIntoList (
+                &partition^.ZeroList, // list
+                pfe, // pfe
+                TRUE, // head
+            )
+
+            MiReleaseList ( partition, ipl )
+
+            count -= 1
+        END
+
+        // Sleep for 30ms to avoid using too much memory bandwidth.
 
         KeSleep (
             &interval, // interval

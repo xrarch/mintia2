@@ -1034,6 +1034,12 @@ FN KiSetPriorityThread (
 
     thread^.Priority = priority
 
+    IF priority == OS_PRIORITY_IDLE THEN
+        // Make sure idle priority threads are never marked interactive.
+
+        thread^.Interactive = FALSE
+    END
+
     IF thread^.Status == KI_THREAD_READY THEN
         IF thread^.InSwapList THEN
             // It's in a stack swapper list, no need to do anything here.
@@ -1167,6 +1173,7 @@ END
 EXPORT FN KeSetBasePriorityThread (
     IN thread : ^KeThread,
     IN priority : UWORD,
+    IN setcurrentpriority : UWORD,
 )
 
     // Set a new base priority for the given thread. If the new base is higher
@@ -1176,12 +1183,29 @@ EXPORT FN KeSetBasePriorityThread (
 
     thread^.BasePriority = priority
 
-    IF thread^.Priority < priority THEN
+    IF setcurrentpriority OR thread^.Priority < priority THEN
         KiSetPriorityThread (
             thread, // thread
             priority, // priority
         )
     END
+
+    KiReleaseThread ( thread, ipl )
+END
+
+EXPORT FN KeSetPriorityThread (
+    IN thread : ^KeThread,
+    IN priority : UWORD,
+)
+
+    // Set a new priority for the thread.
+
+    ipl := KiAcquireThread ( thread )
+
+    KiSetPriorityThread (
+        thread, // thread
+        priority, // priority
+    )
 
     KiReleaseThread ( thread, ipl )
 END
