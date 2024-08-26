@@ -1,0 +1,99 @@
+//
+// Public header for object management for the MINTIA Executive.
+//
+
+#INCLUDE "<inc>/Ke.hjk"
+
+FNPTR ObTypeOpenF (
+    IN process : ^PsProcess,
+    IN object : ^VOID,
+    IN access : UWORD,
+) : OsStatus
+
+FNPTR ObTypeCloseF (
+    IN object : ^VOID,
+    IN access : UWORD,
+    IN lasthandlecount : UWORD,
+)
+
+FNPTR ObTypeDeleteF (
+    IN object : ^VOID,
+)
+
+FNPTR ObTypeSetSecurityF (
+    IN object : ^VOID,
+    IN permissions : UWORD,
+    IN uid : UWORD,
+    IN gid : UWORD,
+)
+
+#DEFINE OB_NAME_MAX 256
+
+STRUCT ObType
+    Name : ^UBYTE,
+
+    Open : ObTypeOpenF,
+    Close : ObTypeCloseF,
+    Delete : ObTypeDeleteF,
+    SetSecurity : ObTypeSetSecurityF,
+
+    WaitOffset : ULONG,
+    TypeIdentifier : ULONG,
+    BodySize : ULONG,
+    Tag : ULONG,
+
+    IsPaged : UBYTE,
+END
+
+STRUCT ObpHeaderReaper
+    Object : ^VOID,
+    Next : ^VOID,
+END
+
+STRUCT ObpHeaderUsed
+    HandleCount : UWORD,
+    PointerCount : UWORD,
+END
+
+UNION ObpHeaderUnion
+    Reaper : ObpHeaderReaper,
+    Used : ObpHeaderUsed,
+END
+
+STRUCT ObHeader
+    Type : ^ObType,
+
+    U : ObpHeaderUnion,
+
+    QuotaBlock : ^MiQuotaBlock,
+
+    Name : ^UBYTE,
+
+    Flags : ULONG,
+
+    Uid : ULONG,
+    Gid : ULONG,
+    Permissions : ULONG,
+
+    PagedQuotaCharge : ULONG,
+    NonpagedQuotaCharge : ULONG,
+END
+
+STRUCT ObCommonHeader
+    Header : ^ObHeader,
+END
+
+STRUCT ObParameters
+    Type : ^ObType,
+    Name : ^UBYTE,
+
+    Permissions : ULONG,
+    Flags : ULONG,
+    BodySize : ULONG,
+    NpQuotaBias : ULONG,
+    PgQuotaBias : ULONG,
+END
+
+#MACRO ObHeader ( object ) [
+    ((CAST object - SIZEOF ObpCommonHeader TO ^ObpCommonHeader)^.Header)
+]

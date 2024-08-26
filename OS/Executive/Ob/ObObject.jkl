@@ -1,0 +1,58 @@
+//
+// Manipulation of reference counted objects.
+//
+
+#INCLUDE "Obp.hjk"
+
+#SECTION "PAGEtext"
+FN ObpValidateObjectName (
+    IN name : ^UBYTE,
+) : UWORD
+
+    // Validate the name of an object.
+
+    IF name[0] == '.' THEN
+        // . and .. are not allowed.
+
+        IF name[1] == 0 THEN
+            RETURN FALSE
+        END
+
+        IF name[1] == '.' AND name[2] == 0 THEN
+            RETURN FALSE
+        END
+
+        RETURN TRUE
+    END
+
+    IF name[0] == 0 THEN
+        // Empty names not allowed.
+
+        RETURN FALSE
+    END
+
+    length := 0
+
+    WHILE name[length] DO
+        IF length >= OB_NAME_MAX THEN
+            RETURN FALSE
+        END
+
+        IF name[length] == '/' THEN
+            RETURN FALSE
+        END
+
+        length += 1
+    END
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN ObCreateObject (
+    IN obparams : ^ObParameters,
+    OUT object : ^VOID,
+) : OsStatus
+
+    // Create an object of the specified type.
+END
