@@ -9,43 +9,41 @@ FN ObpValidateObjectName (
     IN name : ^UBYTE,
 ) : UWORD
 
-    // Validate the name of an object.
+    // Validate the name of an object. Returns the length of the name.
+    // A length of zero indicates an invalid object.
 
     IF name[0] == '.' THEN
         // . and .. are not allowed.
 
         IF name[1] == 0 THEN
-            RETURN FALSE
+            RETURN 0
         END
 
         IF name[1] == '.' AND name[2] == 0 THEN
-            RETURN FALSE
+            RETURN 0
         END
 
-        RETURN TRUE
-    END
-
-    IF name[0] == 0 THEN
+    ELSEIF name[0] == 0 THEN
         // Empty names not allowed.
 
-        RETURN FALSE
+        RETURN 0
     END
 
     length := 0
 
     WHILE name[length] DO
         IF length >= OB_NAME_MAX THEN
-            RETURN FALSE
+            RETURN 0
         END
 
         IF name[length] == '/' THEN
-            RETURN FALSE
+            RETURN 0
         END
 
         length += 1
     END
 
-    RETURN TRUE
+    RETURN length
 END
 
 #SECTION "PAGEtext"
