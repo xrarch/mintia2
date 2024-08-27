@@ -392,6 +392,11 @@ FN MmInitializeStage1 ()
         0, // uid
     )
 
+    // Give the idle process a quota block. We stash this in the handle table.
+    // Idle process has no real handle table.
+
+    KeIdleProcess.Paged^.HandleTable.QuotaBlock = &MiSystemQuota
+
     // Reclaim boot time memory. Nothing in "loader space" is safe to access
     // after this point.
 

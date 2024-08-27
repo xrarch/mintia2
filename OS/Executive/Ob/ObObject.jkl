@@ -4,6 +4,8 @@
 
 #INCLUDE "Obp.hjk"
 
+PUBLIC ObFullyNonpagedObjects := TRUE
+
 #SECTION "PAGEtext"
 FN ObpValidateObjectName (
     IN name : ^UBYTE,
@@ -53,4 +55,261 @@ FN ObCreateObject (
 ) : OsStatus
 
     // Create an object of the specified type.
+
+    namelen := 0
+
+    IF obparams^.Name THEN
+        namelen = ObpValidateObjectName ( obparams^.Name )
+
+        IF namelen == 0 THEN
+            RETURN OS_STATUS_INVALID_NAME
+        END
+
+        // Round up to a pointer size.
+
+        namelen = (namelen + RTL_MACHINE_WORD_SIZE - 1) &
+            ~(RTL_MACHINE_WORD_SIZE - 1)
+    END
+
+    // Calculate the sizes of the paged and nonpaged part of the object.
+
+    psize : UWORD
+    npsize : UWORD
+
+    IF ObFullyNonpagedObjects THEN
+        psize = 0
+
+        npsize = SIZEOF ObpHeader +
+            SIZEOF ObpCommonHeader +
+            obparams^.BodySize +
+            namelen
+
+    ELSEIF obparams^.Type^.IsPaged THEN
+        npsize = 0
+
+        psize = SIZEOF ObpHeader +
+            SIZEOF ObpCommonHeader +
+            obparams^.BodySize +
+            namelen
+
+    ELSE
+        npsize = obparams^.BodySize + SIZEOF ObpCommonHeader
+
+        psize = SIZEOF ObpHeader + namelen
+    END
+
+    // Charge pool quota.
+
+    npquota := MmGetOverheadOfBytes ( npsize ) + obparams^.NpQuotaBias
+    pquota := MmGetOverheadOfBytes ( psize ) + obparams^.PgQuotaBias
+
+    process := PsCurrentProcess ()
+
+    quotablock := PsQuotaBlock ( process )
+
+    status := MmChargePoolQuota (
+        quotablock, // quotablock
+        npquota, // charge
+        MM_NONPAGED_POOL, // poolindex
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    status = MmChargePoolQuota (
+        quotablock, // quotablock
+        pquota, // charge
+        MM_PAGED_POOL, // poolindex
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Error1
+    END
+
+    nppart := NULLPTR
+
+    IF npsize THEN
+        nppart = MmAllocatePool (
+            MM_NONPAGED_POOL, // poolindex
+            npsize, // bytes
+            obparams^.Type^.Tag, // tag
+            TRUE, // wait
+        )
+
+        IF NOT nppart THEN
+            status = OS_STATUS_NO_MEMORY
+
+            GOTO Error2
+        END
+    END
+
+    pgpart := NULLPTR
+
+    IF psize THEN
+        pgpart = MmAllocatePool (
+            MM_PAGED_POOL, // poolindex
+            psize, // bytes
+            obparams^.Type^.Tag, // tag
+            TRUE, // wait
+        )
+
+        IF NOT pgpart THEN
+            status = OS_STATUS_NO_MEMORY
+
+            GOTO Error3
+        END
+    END
+
+    header : ^ObpHeader
+    commonheader : ^ObpCommonHeader
+
+    IF ObFullyNonpagedObjects THEN
+        header = nppart
+        header^.Name = nppart + SIZEOF ObpHeader
+        commonheader = nppart + SIZEOF ObpHeader + namelen
+
+    ELSEIF obparams^.Type^.IsPaged THEN
+        header = pgpart
+        header^.Name = pgpart + SIZEOF ObpHeader
+        commonheader = pgpart + SIZEOF ObpHeader + namelen
+
+    ELSE
+        header = pgpart
+        header^.Name = pgpart + SIZEOF ObpHeader
+
+        commonheader = nppart
+    END
+
+    commonheader^.Header = header
+
+    IF namelen THEN
+        RtlCopyString (
+            header^.Name, // dest
+            obparams^.Name, // src
+            -1, // bufsize
+        )
+
+    ELSE
+        header^.Name = NULLPTR
+    END
+
+    header^.PagedQuotaCharge = pquota
+    header^.NonpagedQuotaCharge = npquota
+
+    MmReferenceQuotaBlock ( quotablock )
+
+    header^.QuotaBlock = quotablock
+
+    header^.Flags = obparams^.Flags
+    header^.Permissions = obparams^.Permissions
+
+    header^.Uid = process^.Paged^.Uid
+    header^.Gid = process^.Paged^.Gid
+
+    header^.U.Used.PointerCount = 1
+    header^.U.Used.HandleCount = 0
+
+    object = commonheader + SIZEOF ObpCommonHeader
+
+    RETURN OS_STATUS_SUCCESS
+
+@Error3
+
+    IF nppart THEN
+        MmFreePool (
+            nppart, // ptr
+            obparams^.Type^.Tag, // tag
+        )
+    END
+
+@Error2
+
+    MmUnchargePoolQuota (
+        quotablock, // quotablock
+        pquota, // charge
+        MM_PAGED_POOL, // poolindex
+    )
+
+@Error1
+
+    MmUnchargePoolQuota (
+        quotablock, // quotablock
+        npquota, // charge
+        MM_NONPAGED_POOL, // poolindex
+    )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN ObFreeObject (
+    IN object : ^VOID,
+)
+
+    // Free an object. Don't call the deletion routine.
+
+    header := ObHeader ( object )
+
+    quotablock := header^.QuotaBlock
+
+    pquota := header^.PagedQuotaCharge
+    npquota := header^.NonpagedQuotaCharge
+    type := header^.Type
+
+    // Free the object parts.
+
+    IF type^.IsPaged THEN
+        // Only a single part.
+
+        MmFreePool (
+            header, // ptr
+            type^.Tag, // tag
+        )
+
+    ELSE
+        // Two parts.
+
+        MmFreePool (
+            header, // ptr
+            type^.Tag, // tag
+        )
+
+        MmFreePool (
+            object - SIZEOF ObpCommonHeader, // ptr
+            type^.Tag, // tag
+        )
+    END
+
+    // Uncharge quota.
+
+    MmUnchargePoolQuota (
+        quotablock, // quotablock
+        pquota, // charge
+        MM_PAGED_POOL, // poolindex
+    )
+
+    MmUnchargePoolQuota (
+        quotablock, // quotablock
+        npquota, // charge
+        MM_NONPAGED_POOL, // poolindex
+    )
+
+    MmUnreferenceQuotaBlock ( quotablock )
+END
+
+#SECTION "PAGEtext"
+FN ObDeleteObject (
+    IN object : ^VOID,
+)
+
+    // Delete an object. Call the deletion routine.
+
+    header := ObHeader ( object )
+
+    IF header^.Type^.Delete THEN
+        header^.Type^.Delete ( object )
+    END
+
+    ObFreeObject ( object )
 END

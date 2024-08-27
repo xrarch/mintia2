@@ -39,7 +39,6 @@ STRUCT ObType
 
     WaitOffset : ULONG,
     TypeIdentifier : ULONG,
-    BodySize : ULONG,
     Tag : ULONG,
 
     IsPaged : UBYTE,
@@ -60,7 +59,7 @@ UNION ObpHeaderUnion
     Used : ObpHeaderUsed,
 END
 
-STRUCT ObHeader
+STRUCT ObpHeader
     Type : ^ObType,
 
     U : ObpHeaderUnion,
@@ -79,8 +78,8 @@ STRUCT ObHeader
     NonpagedQuotaCharge : ULONG,
 END
 
-STRUCT ObCommonHeader
-    Header : ^ObHeader,
+STRUCT ObpCommonHeader
+    Header : ^ObpHeader,
 END
 
 STRUCT ObParameters
@@ -97,3 +96,16 @@ END
 #MACRO ObHeader ( object ) [
     ((CAST object - SIZEOF ObpCommonHeader TO ^ObpCommonHeader)^.Header)
 ]
+
+EXTERN FN ObCreateObject (
+    IN obparams : ^ObParameters,
+    OUT object : ^VOID,
+) : OsStatus
+
+EXTERN FN ObFreeObject (
+    IN object : ^VOID,
+)
+
+EXTERN FN ObDeleteObject (
+    IN object : ^VOID,
+)

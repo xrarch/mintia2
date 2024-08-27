@@ -9,6 +9,9 @@ STRUCT PsPagedProcess
     HandleTable : ExHandleTable,
 
     HandleTableLock : KePushlock,
+
+    Uid : ULONG,
+    Gid : ULONG,
 END
 
 STRUCT PsProcess
@@ -25,3 +28,11 @@ EXTERN PsUexecSignalDispatcher : ^VOID
 EXTERN FN PsExitThread ()
 
 EXTERN KeIdleProcess : PsProcess
+
+#MACRO PsCurrentProcess () [
+    (CONTAINEROF KeCurrentProcess () TO PsProcess.Pcb)
+]
+
+#MACRO PsQuotaBlock ( process ) [
+    (process^.Paged^.HandleTable.QuotaBlock)
+]
