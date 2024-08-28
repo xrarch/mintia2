@@ -660,8 +660,8 @@ FN KiSwitchAddressSpace (
     IN process : ^KeProcess,
 )
 
-    // On entry to this function we are holding the current thread's spinlock
-    // and interrupts are totally disabled (to block out ASID rollover IPIs).
+    // Switch address space to the given process. Interrupts are enabled, thread
+    // lock is held.
 
     IF process^.PageDirectoryPfn == KeLoaderBlock.SystemPageDirectoryPfn THEN
         // Just switch, don't bother dealing with ASIDs since ASID 0 is reserved
@@ -679,11 +679,11 @@ FN KiSwitchAddressSpace (
 
     asidentry := &process^.AsidTable[prb^.Id]
 
-    globalseq := &prb^.AsidSequenceNumber
+    cpuseq := &prb^.AsidSequenceNumber
 
     // Check for ASID roll-over.
 
-    IF RtlUquadNeqUquad ( &asidentry^.AsidSequenceNumber, globalseq ) THEN
+    IF RtlUquadNeqUquad ( &asidentry^.AsidSequenceNumber, cpuseq ) THEN
         // The ASIDs rolled over at some point, so we have to give this
         // process a new one.
 
@@ -703,7 +703,7 @@ FN KiSwitchAddressSpace (
             prb^.NextAsid = 2
 
             RtlAddUlongToUquad (
-                globalseq, // quad
+                cpuseq, // quad
                 1, // ulong
             )
 
@@ -717,11 +717,11 @@ FN KiSwitchAddressSpace (
 
         RtlMoveUquad (
             &asidentry^.AsidSequenceNumber, // destquad
-            globalseq, // srcquad
+            cpuseq, // srcquad
         )
     END
 
-    // Switch address spaces finally.
+    // Perform the low-level address space switch.
 
     KiSwitchMap (
         process^.PageDirectoryPfn << 12, // pgtb
