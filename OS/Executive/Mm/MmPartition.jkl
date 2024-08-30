@@ -29,9 +29,11 @@ FN MiInitializePartitionStage1 (
     // This is split in two so that we can use it while initializing the system
     // partition.
 
-    // Initialize the list lock.
+    // Initialize the locks.
 
     KeInitializePushlock ( &partition^.ListLock )
+
+    KeInitializePushlock ( &partition^.CommitLock )
 
     // Initialize the events.
 
@@ -642,11 +644,18 @@ FN MmChargeCommit (
     END
 #END
 
+    // Acquire the commit lock shared to block out pagefile contraction that
+    // might lower the commit limit and cause us to proceed erroneously.
+
+    ipl := KeAcquireApcSafePushlockShared ( &partition^.CommitLock )
+
     IF partition^.CommitUsage + pages > partition^.TheoreticalCommitLimit THEN
         // Don't even bother trying, there's no way to extend the pagefiles to
         // accommodate this because the theoretical commit limit represents what
-        // we can theoretically increase the commit limit to if we were to
+        // we could theoretically increase the commit limit to if we were to
         // extend all of the pagefiles to their maximum size.
+
+        KeReleaseApcSafePushlock ( &partition^.CommitLock, ipl )
 
         RETURN OS_STATUS_COMMIT_EXCEEDED
     END
@@ -655,12 +664,14 @@ FN MmChargeCommit (
     // If it goes over the limit, us and anyone else trying to charge commit
     // will spin below until a pagefile expansion succeeds.
 
-    old := KeIncrementPtr (
+    KeIncrementPtr (
         &partition^.CommitUsage, // ptr
         pages, // inc
     )
 
     WHILE partition^.CommitUsage > partition^.CommitLimit DO
+        KeReleaseApcSafePushlock ( &partition^.CommitLock, ipl )
+
         status := MiExpandPageFiles (
             partition, // partition
             wait, // wait
@@ -673,6 +684,8 @@ FN MmChargeCommit (
             RETURN status
         END
 
+        ipl = KeAcquireApcSafePushlockShared ( &partition^.CommitLock )
+
         IF OsError ( status ) THEN
             // Failed to increase commit limit.
             // Remove the commit charge.
@@ -682,9 +695,13 @@ FN MmChargeCommit (
                 -pages, // inc
             )
 
+            KeReleaseApcSafePushlock ( &partition^.CommitLock, ipl )
+
             RETURN status
         END
     END
+
+    KeReleaseApcSafePushlock ( &partition^.CommitLock, ipl )
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -695,6 +712,8 @@ FN MmUnchargeCommit (
 )
 
     // Remove the specified commit charge from the partition.
+    // If pagefiles can now be contracted, that will be noticed at the next tick
+    // of the responsible worker thread.
 
     old := KeIncrementPtr (
         &partition^.CommitUsage, // ptr

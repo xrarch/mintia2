@@ -186,33 +186,33 @@ FN MmChargePoolQuota (
     IN poolindex : UWORD,
 ) : OsStatus
 
-    // Apply the quota charge to the block.
+    // Apply the quota charge to the block. Use a CAS loop to atomically check
+    // and increment the quota usage.
 
     limit := &quotablock^.Pool[poolindex]
 
+    WHILE TRUE DO
+        old := limit^.Used
+
 #IF BLD_CHK
-    IF limit^.Used + charge < charge THEN
-        KeCrash ( "quota overflow\n" )
-    END
+        IF old + charge < charge THEN
+            KeCrash ( "quota overflow\n" )
+        END
 #END
 
-    old := KeIncrementPtr (
-        &limit^.Used, // ptr
-        charge, // inc
-    )
+        IF old + charge > limit^.Limit THEN
+            RETURN OS_STATUS_QUOTA_EXCEEDED
+        END
 
-    IF old + charge > limit^.Limit THEN
-        // Uncharge and return unsuccessful.
-
-        KeIncrementPtr (
+        IF KeCompareSwapPtr (
             &limit^.Used, // ptr
-            -charge, // inc
-        )
+            old + charge, // newvalue
+            old, // expectedvalue
+        ) == old THEN
 
-        RETURN OS_STATUS_QUOTA_EXCEEDED
+            RETURN OS_STATUS_SUCCESS
+        END
     END
-
-    RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
@@ -246,26 +246,27 @@ FN MmChargeVmQuota (
 
     // Apply the vm charge to the block.
 
+    WHILE TRUE DO
+        old := quotablock^.VmPages.Used
+
 #IF BLD_CHK
-    IF quotablock^.VmPages.Used + pages < pages THEN
-        KeCrash ( "vm quota overflow\n" )
-    END
+        IF old + pages < pages THEN
+            KeCrash ( "quota overflow\n" )
+        END
 #END
 
-    old := KeIncrementPtr (
-        &quotablock^.VmPages.Used, // ptr
-        pages, // inc
-    )
+        IF old + pages > quotablock^.VmPages.Limit THEN
+            RETURN OS_STATUS_QUOTA_EXCEEDED
+        END
 
-    IF old + pages > quotablock^.VmPages.Limit THEN
-        // Uncharge and return unsuccessful.
-
-        KeIncrementPtr (
+        IF KeCompareSwapPtr (
             &quotablock^.VmPages.Used, // ptr
-            -pages, // inc
-        )
+            old + pages, // newvalue
+            old, // expectedvalue
+        ) == old THEN
 
-        RETURN OS_STATUS_QUOTA_EXCEEDED
+            BREAK
+        END
     END
 
     // Charge commit.
@@ -283,11 +284,9 @@ FN MmChargeVmQuota (
             &quotablock^.VmPages.Used, // ptr
             -pages, // inc
         )
-
-        RETURN status
     END
 
-    RETURN OS_STATUS_SUCCESS
+    RETURN status
 END
 
 #SECTION "PAGEtext"
