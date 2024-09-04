@@ -1,9 +1,6 @@
 //
 // Implements a simple, general purpose handle table for the MINTIA Executive.
 //
-// In the interest of POSIX support, this table allocates handles from the
-// lowest available handle first, for easy mapping to UNIX file descriptors.
-//
 // Note that the handle table assumes that the first entry of a handle will have
 // a clear low bit when in use, such as being an aligned pointer. If the low bit
 // is set, it is considered free.
@@ -20,7 +17,6 @@
 
 STRUCT ExpFreeHandle
     Next : UWORD,
-    Count : UWORD,
 END
 
 #SECTION "PAGEtext"
@@ -165,98 +161,17 @@ FN ExDeleteHandle (
         )
     END
 
-    // Insertion sort the free handle into the list.
+    // Insert the free handle into the list.
 
     IF handletable^.FreeListHead == -1 THEN
-        // Empty list. Create a single free block of size one.
-
         entryptr^.Next = EXP_NEXT_HANDLE_MASK | EXP_FREE_HANDLE
-        entryptr^.Count = 1
-
-        handletable^.FreeListHead = handle
-
-        RETURN TRUE
-    END
-
-    table := handletable^.Table
-
-    // Seek to the first chunk of handles that is after us.
-
-    prev : ^ExpFreeHandle = NULLPTR
-    next := CAST table + (handletable^.FreeListHead << log) TO ^ExpFreeHandle
-
-    WHILE next < entryptr DO
-        prev = next
-
-        IF next^.Next & EXP_NEXT_HANDLE_MASK == EXP_NEXT_HANDLE_MASK THEN
-            next = NULLPTR
-
-            BREAK
-        END
-
-        next = CAST table + ((next^.Next >>
-            EXP_NEXT_HANDLE_SHIFT) << log) TO ^ExpFreeHandle
-    END
-
-    entrycount := 1
-    count : UWORD
-
-    IF NOT prev THEN
-        // No prev means we are the head.
-
-        handletable^.FreeListHead = handle
 
     ELSE
-        // Try to merge left.
-
-        count = prev^.Count
-
-        IF prev + (count << log) == entryptr THEN
-            // Merge left.
-
-            // First, set this entry free.
-
-            entryptr^.Next = EXP_FREE_HANDLE
-
-            entryptr = prev
-            entrycount += count
-
-        ELSE
-            // Make prev point to our new chunk.
-
-            prev^.Next = (prev^.Next & ~EXP_NEXT_HANDLE_MASK) |
-                (handle << EXP_NEXT_HANDLE_SHIFT)
-        END
+        entryptr^.Next = (handletable^.FreeListHead << EXP_NEXT_HANDLE_SHIFT) |
+            EXP_FREE_HANDLE
     END
 
-    IF next THEN
-        // Try to merge right.
-
-        IF entryptr + (entrycount << log) == next THEN
-            // We can merge right.
-
-            entrycount += next^.Count
-
-            IF next^.Next & EXP_NEXT_HANDLE_MASK == EXP_NEXT_HANDLE_MASK THEN
-                next = NULLPTR
-            
-            ELSE
-                next = CAST table + ((next^.Next >>
-                    EXP_NEXT_HANDLE_SHIFT) << log) TO ^ExpFreeHandle
-            END
-        END
-    END
-
-    // Encode the size, next link, etc in our freed chunk.
-
-    IF NOT next THEN
-        next = EXP_NEXT_HANDLE_MASK
-    ELSE
-        next = ((next - table) >> log) << EXP_NEXT_HANDLE_SHIFT
-    END
-
-    entryptr^.Next = next | EXP_FREE_HANDLE
-    entryptr^.Count = entrycount
+    handletable^.FreeListHead = handle
 
     RETURN TRUE
 END
@@ -283,24 +198,10 @@ FN ExCreateHandle (
 
         free = CAST entryptr TO ^ExpFreeHandle
 
-        IF free^.Count == 1 THEN
-            // Only a single handle. Destroy this free list entry.
-
-            IF free^.Next & EXP_NEXT_HANDLE_MASK == EXP_NEXT_HANDLE_MASK THEN
-                handletable^.FreeListHead = -1
-            ELSE
-                handletable^.FreeListHead = free^.Next >> EXP_NEXT_HANDLE_SHIFT
-            END
-
+        IF free^.Next == EXP_NEXT_HANDLE_MASK | EXP_FREE_HANDLE THEN
+            handletable^.FreeListHead = -1
         ELSE
-            // Push the free list entry forward by one handle.
-
-            push := free + (1 << log)
-
-            push^.Next = free^.Next
-            push^.Count = free^.Count - 1
-
-            handletable^.FreeListHead = handle + 1
+            handletable^.FreeListHead = free^.Next >> EXP_NEXT_HANDLE_SHIFT
         END
 
         RETURN OS_STATUS_SUCCESS
@@ -385,23 +286,31 @@ FN ExCreateHandle (
         0, // ulong
     )
 
-    // Create a single free block out of the remainder.
+    // Insert the new space into the free list.
+    // First set the free list head to this handle plus one.
 
-    free = entryptr + (1 << log)
+    handle += 1
+
+    handletable^.FreeListHead = handle
+
+    // Now set the last handle to be the tail of the list.
+
+    free = newtable + newsize - (1 << log)
 
     free^.Next = EXP_NEXT_HANDLE_MASK | EXP_FREE_HANDLE
-    free^.Count = EXP_EXTEND_BY - 1
 
-    handletable^.FreeListHead = handle + 1
+    // Now initialize the list items.
 
-    free += (1 << log)
+    free = newtable + oldsize
+
     i := EXP_EXTEND_BY - 2
 
     WHILE i DO
-        free^.Next = EXP_FREE_HANDLE
-
         i -= 1
         free += (1 << log)
+        handle += 1
+
+        free^.Next = (handle << EXP_NEXT_HANDLE_SHIFT) | EXP_FREE_HANDLE
     END
 
     RETURN OS_STATUS_SUCCESS
