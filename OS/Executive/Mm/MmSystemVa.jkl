@@ -507,30 +507,40 @@ END
 FN MiReleaseDynamicPages (
     IN ptr : ^VOID,
     IN pages : UWORD,
+    IN flush : UWORD,
 )
 
     // Release a portion of dynamic space by pointer and page count.
 
     ipl := KeAcquireApcSafePushlockExclusive ( &MiDynamicSpacePushlock )
 
-    IF MiDeferredFlushPages + pages > MI_DEFERRED_FLUSH_PAGES OR
-        MiDeferredFlushIndex >= MI_DEFERRED_FLUSH_PAIRS THEN
+    IF flush THEN
+        IF MiDeferredFlushPages + pages > MI_DEFERRED_FLUSH_PAGES OR
+            MiDeferredFlushIndex >= MI_DEFERRED_FLUSH_PAIRS THEN
 
-        // This exceeds the maximum number of pages pending flush, or the
-        // maximum number of regions pending flush.
+            // This exceeds the maximum number of pages pending flush, or the
+            // maximum number of regions pending flush.
 
-        MiFlushDynamicSpace ()
+            MiFlushDynamicSpace ()
+        END
+
+        // Add this region to the list of pairs pending flush.
+
+        entry := &MiDeferredFlushTable[MiDeferredFlushIndex]
+
+        entry^.Ptr = ptr
+        entry^.Pages = pages
+
+        MiDeferredFlushIndex += 1
+        MiDeferredFlushPages += pages
+
+    ELSE
+        RtlClearBitsBitmap (
+            &MiDynamicSpaceBitmap, // header
+            (ptr - MI_DYNAMIC_SPACE) >> RTL_PAGE_SHIFT, // index
+            pages, // runlength
+        )
     END
-
-    // Add this region to the list of pairs pending flush.
-
-    flush := &MiDeferredFlushTable[MiDeferredFlushIndex]
-
-    flush^.Ptr = ptr
-    flush^.Pages = pages
-
-    MiDeferredFlushIndex += 1
-    MiDeferredFlushPages += pages
 
     KeReleaseApcSafePushlock ( &MiDynamicSpacePushlock, ipl )
 END
@@ -564,6 +574,7 @@ FN MiAllocateDynamicSpace (
             MiReleaseDynamicPages (
                 ptr, // ptr
                 pages, // pages
+                FALSE, // flush
             )
 
             RETURN NULLPTR
@@ -599,6 +610,7 @@ END
 
 FN MiReleaseDynamicSpace (
     IN node : ^MiDynamicSpaceNode,
+    IN flush : UWORD,
 )
 
     // Release a region of dynamic space by node.
@@ -626,5 +638,6 @@ FN MiReleaseDynamicSpace (
     MiReleaseDynamicPages (
         ptr, // ptr
         pages, // pages
+        flush, // flush
     )
 END

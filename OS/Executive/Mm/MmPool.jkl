@@ -958,7 +958,10 @@ FN MiAllocatePageAligned (
         wait == FALSE, // low
     ) THEN
         IF NOT wait THEN
-            MiReleaseDynamicSpace ( node )
+            MiReleaseDynamicSpace (
+                node, // node
+                FALSE, // flush
+            )
 
             RETURN NULLPTR
         END
@@ -1008,7 +1011,10 @@ FN MiFreePageAligned (
 
     // Free the dynamic space.
 
-    MiReleaseDynamicSpace ( node )
+    MiReleaseDynamicSpace (
+        node, // node
+        TRUE, // flush
+    )
 END
 
 FN MmAllocatePool (
