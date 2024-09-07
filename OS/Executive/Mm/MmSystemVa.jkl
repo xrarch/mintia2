@@ -515,11 +515,9 @@ FN MiReleaseDynamicPages (
     ipl := KeAcquireApcSafePushlockExclusive ( &MiDynamicSpacePushlock )
 
     IF flush THEN
-        IF MiDeferredFlushPages + pages > MI_DEFERRED_FLUSH_PAGES OR
-            MiDeferredFlushIndex >= MI_DEFERRED_FLUSH_PAIRS THEN
 
-            // This exceeds the maximum number of pages pending flush, or the
-            // maximum number of regions pending flush.
+        IF MiDeferredFlushIndex == MI_DEFERRED_FLUSH_PAIRS THEN
+            // This exceeds the maximum number of regions pending flush.
 
             MiFlushDynamicSpace ()
         END
@@ -533,6 +531,12 @@ FN MiReleaseDynamicPages (
 
         MiDeferredFlushIndex += 1
         MiDeferredFlushPages += pages
+
+        IF MiDeferredFlushPages >= MI_DEFERRED_FLUSH_PAGES THEN
+            // Too many pages pending flush.
+
+            MiFlushDynamicSpace ()
+        END
 
     ELSE
         RtlClearBitsBitmap (

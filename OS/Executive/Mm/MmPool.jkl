@@ -170,6 +170,14 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
             MI_PFN_TO_PFE ( MI_PFN_FROM_PTE ( ptecontents ) ), // pfe
         )
 
+        pte[i] = MI_INVALID_KERNEL_PTE
+
+#IF BLD_CHK
+        KeFlushMyTbAddress ( ptr )
+
+        ptr += RTL_PAGE_SIZE
+#END
+
         i += 1
     END
 
