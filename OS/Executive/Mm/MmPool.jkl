@@ -1012,6 +1012,14 @@ FN MiFreePageAligned (
 
     // Uninitialize the allocation.
 
+#IF BLD_CHK
+    RtlFillMemoryWithUlong (
+        ptr, // ptr
+        node^.EndVa - node^.StartVa, // sz
+        0xFAAAAAAA, // ulong
+    )
+#END
+
     node^.U.Pool.Pool^.ReturnMemory (
         ptr, // ptr
         (node^.EndVa - node^.StartVa) >> RTL_PAGE_SHIFT, // pages
@@ -1073,7 +1081,7 @@ FN MmAllocatePool (
     RtlFillMemoryWithUlong (
         ptr, // ptr
         bytes, // sz
-        0xABCDEFAF, // ulong
+        0xFBCDEFAF, // ulong
     )
 #END
 

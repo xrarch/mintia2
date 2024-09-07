@@ -271,6 +271,9 @@ FN KeUninitializeThread (
     // Returns TRUE if the process was marked terminated due to the thread count
     // dropping to zero, FALSE otherwise.
 
+    // NOTE: This is not part of KeExitThread because it returns whether the
+    //       process should be terminated, and only Ps knows what to do then.
+
 #IF BLD_CHK
     IF NOT thread^.KernelStackResident THEN
         KeCrash ( "KeUninitializeThread: stack not resident\n" )
