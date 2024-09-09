@@ -30,6 +30,22 @@ PUBLIC KeStackSwapperEvent : KeEvent
     KiReleaseSpinlockLower ( &(prb)^.StackSwapListLock, ipl )
 ]
 
+#ELSE
+
+#MACRO KiAcquireCandidateListElevated ( prb ) []
+
+#MACRO KiReleaseCandidateListElevated ( prb ) []
+
+#MACRO KiAcquireCandidateList ( prb ) [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseCandidateList ( prb, ipl ) [
+    KiLowerIpl ( ipl )
+]
+
+#END
+
 #MACRO KiInsertInSwapList ( headptr, item ) [
     WHILE TRUE DO
         head := (headptr)^
@@ -47,27 +63,6 @@ PUBLIC KeStackSwapperEvent : KeEvent
         END
     END
 ]
-
-#ELSE
-
-#MACRO KiAcquireCandidateListElevated ( prb ) []
-
-#MACRO KiReleaseCandidateListElevated ( prb ) []
-
-#MACRO KiAcquireCandidateList ( prb ) [
-    KiRaiseIpl ( KI_IPL_DPC )
-]
-
-#MACRO KiReleaseCandidateList ( prb, ipl ) [
-    KiLowerIpl ( ipl )
-]
-
-#MACRO KiInsertInSwapList ( headptr, item ) [
-    NOTHING (item)^.SwapNext = (headptr)^
-    NOTHING (headptr)^ = item
-]
-
-#END
 
 FN KeReadyInswappedThread (
     IN thread : ^KeThread,
@@ -408,7 +403,8 @@ FN KiReadyThreadOutswappedProcess (
 
     KiReleaseSwapStateElevated ( process )
 
-    // Set READY and in the swap list.
+    // Set READY and in the swap list. This is synchronized by the thread lock,
+    // which is taken by the swapper before it manipulates us.
 
     thread^.Status = KI_THREAD_READY
     thread^.InSwapList = TRUE
@@ -462,6 +458,12 @@ FN KiReadyOutswappedThread (
 
     KiReleaseSwapStateElevated ( process )
 
+    // Set READY and in the swap list. This is synchronized by the thread lock,
+    // which is taken by the swapper before it manipulates us.
+
+    thread^.Status = KI_THREAD_READY
+    thread^.InSwapList = TRUE
+
     // The process was still resident, so we're going to enqueue the thread
     // in the global thread in-swap list.
 
@@ -469,11 +471,6 @@ FN KiReadyOutswappedThread (
         &KiStackSwapListHead, // headptr
         thread, // item
     )
-
-    // Set READY and in the swap list.
-
-    thread^.Status = KI_THREAD_READY
-    thread^.InSwapList = TRUE
 
     // Wake the swapper to bring in this thread's stack.
 
