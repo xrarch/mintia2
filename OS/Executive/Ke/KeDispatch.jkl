@@ -593,7 +593,9 @@ FN KiReadyThread (
     IF thread^.Process^.MemoryState != KI_PROCESS_RESIDENT THEN
         // The thread's process is outswapped.
 
-        KiReadyThreadOutswappedProcess ( thread )
+        IF KiReadyThreadOutswappedProcess ( thread ) THEN
+            GOTO Retry
+        END
 
         LEAVE
 

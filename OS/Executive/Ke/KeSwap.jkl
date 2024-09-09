@@ -358,7 +358,7 @@ END
 
 FN KiReadyThreadOutswappedProcess (
     IN thread : ^KeThread,
-)
+) : UWORD
 
     // The thread was readied while its process was outswapped, so we have to
     // enqueue it to the process's deferred ready list. Thread lock is held.
@@ -379,11 +379,14 @@ FN KiReadyThreadOutswappedProcess (
 
     memorystate := process^.MemoryState
 
-#IF BLD_CHK
     IF memorystate == KI_PROCESS_RESIDENT THEN
-        KeCrash ( "KiReadyThreadOutswappedProcess: resident process\n" )
+        // Process was in-swapped since we last checked.
+        // Tell caller to re-check.
+
+        KiReleaseSwapStateElevated ( process )
+
+        RETURN TRUE
     END
-#END
 
     // The process isn't resident, so we need to enqueue the thread in its
     // swap-in list.
@@ -413,6 +416,11 @@ FN KiReadyThreadOutswappedProcess (
     // Wake the swapper to bring in this process's page directory.
 
     KiWakeSwapper ()
+
+    // Return an indication that we successfully enqueued the thread to the
+    // process's deferred ready list.
+
+    RETURN FALSE
 END
 
 FN KiReadyOutswappedThread (
@@ -471,7 +479,8 @@ FN KiReadyOutswappedThread (
 
     KiWakeSwapper ()
 
-    // Return an indication that we successfully enqueued ourselves.
+    // Return an indication that we successfully enqueued ourselves to the
+    // in-swap list.
 
     RETURN FALSE
 END
