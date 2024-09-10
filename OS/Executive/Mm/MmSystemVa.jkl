@@ -416,13 +416,13 @@ FN MiAllocateDynamicSpaceNode () : ^MiDynamicSpaceNode
     // free list from the second node.
 
     linknode := node + SIZEOF MiDynamicSpaceNode
-    i := 1
+    i := MI_FREE_NODE_CHUNK_SIZE - 1
 
-    WHILE i < MI_FREE_NODE_CHUNK_SIZE DO
+    WHILE i DO
         linknode^.Next = MiDynamicSpaceFreeNodeListHead
         MiDynamicSpaceFreeNodeListHead = linknode
 
-        i += 1
+        i -= 1
         linknode += SIZEOF MiDynamicSpaceNode
     END
 
