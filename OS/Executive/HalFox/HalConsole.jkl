@@ -7,7 +7,7 @@
 HalpUseFramebuffer := FALSE
 HalpDebugConsole := FALSE
 HalpFramebufferBytes := 0
-HalpFont : ^HalConsoleFont
+PUBLIC HalpFont : ^HalConsoleFont
 HalpCursorX := 0
 HalpCursorY := 0
 HalpWidth := 0
@@ -20,6 +20,10 @@ FN HalpDrawCharacter (
     IN c : UWORD,
     IN x : UWORD,
     IN y : UWORD,
+    IN base : ^ULONG,
+    IN width : UWORD,
+    IN fg : UWORD,
+    IN bg : UWORD,
 )
 
     font := HalpFont
@@ -30,10 +34,9 @@ FN HalpDrawCharacter (
     byte : UWORD
     left : UWORD
 
-    dest : ^ULONG =
-        KeLoaderBlock.BootFbBase + (x + (y * KeLoaderBlock.BootFbWidth)) * 4
+    dest : ^ULONG = base + (x + (y * width)) * 4
 
-    mod := (KeLoaderBlock.BootFbWidth - w) * 4
+    mod := (width - w) * 4
 
     bmp := CAST font + SIZEOF HalConsoleFont TO ^UBYTE
     bmp += ((w + 7) >> 3) * h * c
@@ -46,51 +49,51 @@ FN HalpDrawCharacter (
                 byte = bmp^
 
                 IF byte & 128 THEN
-                    dest[0] = HAL_CONSOLE_FG
+                    dest[0] = fg
                 ELSE
-                    dest[0] = HAL_CONSOLE_BG
+                    dest[0] = bg
                 END
 
                 IF byte & 64 THEN
-                    dest[1] = HAL_CONSOLE_FG
+                    dest[1] = fg
                 ELSE
-                    dest[1] = HAL_CONSOLE_BG
+                    dest[1] = bg
                 END
 
                 IF byte & 32 THEN
-                    dest[2] = HAL_CONSOLE_FG
+                    dest[2] = fg
                 ELSE
-                    dest[2] = HAL_CONSOLE_BG
+                    dest[2] = bg
                 END
 
                 IF byte & 16 THEN
-                    dest[3] = HAL_CONSOLE_FG
+                    dest[3] = fg
                 ELSE
-                    dest[3] = HAL_CONSOLE_BG
+                    dest[3] = bg
                 END
 
                 IF byte & 8 THEN
-                    dest[4] = HAL_CONSOLE_FG
+                    dest[4] = fg
                 ELSE
-                    dest[4] = HAL_CONSOLE_BG
+                    dest[4] = bg
                 END
 
                 IF byte & 4 THEN
-                    dest[5] = HAL_CONSOLE_FG
+                    dest[5] = fg
                 ELSE
-                    dest[5] = HAL_CONSOLE_BG
+                    dest[5] = bg
                 END
 
                 IF byte & 2 THEN
-                    dest[6] = HAL_CONSOLE_FG
+                    dest[6] = fg
                 ELSE
-                    dest[6] = HAL_CONSOLE_BG
+                    dest[6] = bg
                 END
 
                 IF byte & 1 THEN
-                    dest[7] = HAL_CONSOLE_FG
+                    dest[7] = fg
                 ELSE
-                    dest[7] = HAL_CONSOLE_BG
+                    dest[7] = bg
                 END
 
                 dest += 8 * 4
@@ -113,9 +116,9 @@ FN HalpDrawCharacter (
 
                 WHILE left DO
                     IF byte & j THEN
-                        dest^ = HAL_CONSOLE_FG
+                        dest^ = fg
                     ELSE
-                        dest^ = HAL_CONSOLE_BG
+                        dest^ = bg
                     END
 
                     dest += 4
@@ -136,51 +139,51 @@ FN HalpDrawCharacter (
                 byte = bmp^
 
                 IF byte & 128 THEN
-                    dest[7] = HAL_CONSOLE_FG
+                    dest[7] = fg
                 ELSE
-                    dest[7] = HAL_CONSOLE_BG
+                    dest[7] = bg
                 END
 
                 IF byte & 64 THEN
-                    dest[6] = HAL_CONSOLE_FG
+                    dest[6] = fg
                 ELSE
-                    dest[6] = HAL_CONSOLE_BG
+                    dest[6] = bg
                 END
 
                 IF byte & 32 THEN
-                    dest[5] = HAL_CONSOLE_FG
+                    dest[5] = fg
                 ELSE
-                    dest[5] = HAL_CONSOLE_BG
+                    dest[5] = bg
                 END
 
                 IF byte & 16 THEN
-                    dest[4] = HAL_CONSOLE_FG
+                    dest[4] = fg
                 ELSE
-                    dest[4] = HAL_CONSOLE_BG
+                    dest[4] = bg
                 END
 
                 IF byte & 8 THEN
-                    dest[3] = HAL_CONSOLE_FG
+                    dest[3] = fg
                 ELSE
-                    dest[3] = HAL_CONSOLE_BG
+                    dest[3] = bg
                 END
 
                 IF byte & 4 THEN
-                    dest[2] = HAL_CONSOLE_FG
+                    dest[2] = fg
                 ELSE
-                    dest[2] = HAL_CONSOLE_BG
+                    dest[2] = bg
                 END
 
                 IF byte & 2 THEN
-                    dest[1] = HAL_CONSOLE_FG
+                    dest[1] = fg
                 ELSE
-                    dest[1] = HAL_CONSOLE_BG
+                    dest[1] = bg
                 END
 
                 IF byte & 1 THEN
-                    dest[0] = HAL_CONSOLE_FG
+                    dest[0] = fg
                 ELSE
-                    dest[0] = HAL_CONSOLE_BG
+                    dest[0] = bg
                 END
 
                 dest += 8 * 4
@@ -197,9 +200,9 @@ FN HalpDrawCharacter (
 
                 WHILE left DO
                     IF byte & j THEN
-                        dest^ = HAL_CONSOLE_FG
+                        dest^ = fg
                     ELSE
-                        dest^ = HAL_CONSOLE_BG
+                        dest^ = bg
                     END
 
                     dest += 4
@@ -283,12 +286,17 @@ FN HalPutCharacter (
                 byte, // c
                 HalpCursorX * HalpFont^.Width, // x
                 HalpCursorY * HalpFont^.Height, // y
+                KeLoaderBlock.BootFbBase, // base
+                KeLoaderBlock.BootFbWidth, // width
+                HAL_CONSOLE_FG, // fg
+                HAL_CONSOLE_BG, // bg
             )
 
             HalpCursorX += 1
         END
+
     ELSE
-        // Write to serial port.
+        // Write to debugger window.
 
         HalDebugWrite ( byte )
     END
@@ -415,8 +423,19 @@ EXPORT FN HalSetDebugConsole (
     IN new : UWORD,
 ) : UWORD
 
-    RETURN KeFetchAndSetUlong (
-        &HalpDebugConsole, // ptr
-        new, // newvalue
-    )
+    oldstate := KiDisableInterrupts ()
+
+    old := HalpDebugConsole
+
+    IF new != old THEN
+        // Enable the debugger overlay.
+
+        HalpDebugConsole = new
+
+        HalpSetDbgOverlay ( new )
+    END
+
+    KiRestoreInterrupts ( oldstate )
+
+    RETURN old
 END

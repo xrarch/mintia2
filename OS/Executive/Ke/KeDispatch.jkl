@@ -986,6 +986,11 @@ FN KiPreemptThread (
         )
 
         KiReleaseReadyQueueElevated ( prb )
+
+    ELSE
+        // Make sure to set the idle thread ready, though it's not in a queue.
+
+        current^.Status = KI_THREAD_READY
     END
 
     // Switch into the thread.
@@ -1025,6 +1030,17 @@ FN KiSetPriorityThread (
 #ELSE
     prb := KI_CURRENT_PRB
     other := FALSE
+#END
+
+#IF BLD_CHK
+    IF thread == &prb^.IdleThread THEN
+        // The idle thread is often READY without being in a queue.
+        // Rather than special casing this, we just forbid setting its priority.
+        // This operation cannot be initiated by a user anyway since there's no
+        // way to get a handle to an idle thread.
+
+        KeCrash ( "KiSetPriorityThread: can't set priority of idle thread\n" )
+    END
 #END
 
     curpri := thread^.Priority

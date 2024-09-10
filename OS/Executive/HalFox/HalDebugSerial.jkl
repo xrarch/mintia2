@@ -1,33 +1,241 @@
 //
-// Implementation of a polled serial driver for the debugger.
+// Implementation of a debugger window for fox32.
 //
 
 #INCLUDE "Halp.hjk"
 
-FN HalpSerialWrite (
-    IN byte : UWORD,
-)
+#DEFINE HAL_DBG_FG 0xFF000000
+#DEFINE HAL_DBG_BG 0xFFFFFFFF
 
-    // Write a character to the serial port.
+HalpDbgCursorX := 0
+HalpDbgCursorY := 0
+HalpDbgWidth := 0
+HalpDbgHeight := 0
 
-    LEAVE
+FN HalpDbgClearScreen ()
+
+    // Fill the framebuffer with blue pixels.
+
+    RtlFillMemoryWithUlong (
+        KeLoaderBlock.U.Fox.DbgOverlayBase, // ptr
+        BL_FOX_DBG_WIDTH * BL_FOX_DBG_HEIGHT * 4, // sz
+        HAL_DBG_BG, // ulong
+    )
+
+    HalpDbgCursorX = 0
+    HalpDbgCursorY = 0
+END
+
+FN HalpDbgScrollScreen ()
+
+    // Scroll the framebuffer up by 1 line. This is REALLY slow but the HAL
+    // console isn't a performance concern (if it shows up in runtime, the
+    // system is either being debugged, or something broke) so simplicity beats
+    // speed here. The primary system console used during runtime is *not* this
+    // one.
+
+    font := HalpFont
+
+    RtlCopyBytes (
+        KeLoaderBlock.U.Fox.DbgOverlayBase, // dest
+        KeLoaderBlock.U.Fox.DbgOverlayBase +
+        BL_FOX_DBG_WIDTH * font^.Height * 4, // src
+        BL_FOX_DBG_WIDTH *
+        (BL_FOX_DBG_HEIGHT - font^.Height) * 4, // sz
+    )
+
+    // Clear the last line.
+
+    RtlFillMemoryWithUlong (
+        KeLoaderBlock.U.Fox.DbgOverlayBase +
+        BL_FOX_DBG_WIDTH *
+        (HalpDbgHeight - 1) * font^.Height * 4, // ptr
+        BL_FOX_DBG_WIDTH * font^.Height * 4, // sz
+        HAL_DBG_BG, // ulong
+    )
 END
 
 EXPORT FN HalDebugWrite (
     IN byte : UWORD,
 )
 
-    IF byte == '\n' THEN
-        HalpSerialWrite ( '\r' )
+    IF byte == '\b' THEN
+        IF HalpDbgCursorX == 0 THEN
+            IF HalpDbgCursorY THEN
+                HalpDbgCursorY -= 1
+                HalpDbgCursorX = HalpDbgWidth - 1
+            END
+        ELSE
+            HalpDbgCursorX -= 1
+        END
+
+        LEAVE
     END
 
-    HalpSerialWrite ( byte )
+    IF byte == '\n' OR HalpDbgCursorX >= HalpDbgWidth THEN
+        HalpDbgCursorX = 0
+        HalpDbgCursorY += 1
+    END
+
+    IF HalpDbgCursorY >= HalpDbgHeight THEN
+        HalpDbgCursorX = 0
+        HalpDbgCursorY = HalpDbgHeight - 1
+
+        HalpDbgScrollScreen ()
+    END
+
+    IF byte != '\n' THEN
+        HalpDrawCharacter (
+            byte, // c
+            HalpDbgCursorX * HalpFont^.Width, // x
+            HalpDbgCursorY * HalpFont^.Height, // y
+            KeLoaderBlock.U.Fox.DbgOverlayBase, // base
+            BL_FOX_DBG_WIDTH, // width
+            HAL_DBG_FG, // fg
+            HAL_DBG_BG, // bg
+        )
+
+        HalpDbgCursorX += 1
+    END
 END
+
+EXTERN HalpFoxKeyboardLayout : UBYTE[84]
+EXTERN HalpFoxKeyboardShift : UBYTE[84]
+EXTERN HalpFoxKeyboardCaps : UBYTE[84]
+
+HalpShift := 0
+HalpCaps := 0
 
 EXPORT FN HalDebugRead () : UWORD
 
-    // Read a character from the serial port.
+    // Read a character from the keyboard.
     // Non-blocking. Return -1 if none available.
 
-    RETURN -1
+    scan := HalFox32In ( 0x80000500 )
+
+    IF scan == 0 THEN
+        RETURN -1
+    END
+
+    char : UWORD
+
+    IF scan == 0x2A OR scan == 0x36 THEN
+        HalpShift = TRUE
+        char = 255
+
+    ELSEIF scan == 0xAA OR scan == 0xB6 THEN
+        HalpShift = FALSE
+        char = 255
+
+    ELSEIF scan == 0xBA THEN
+        HalpCaps $= TRUE
+        char = 255
+
+    ELSEIF scan >= 84 THEN
+        RETURN -1
+
+    ELSEIF HalpShift THEN
+        char = HalpFoxKeyboardShift[scan]
+
+    ELSEIF HalpCaps THEN
+        char = HalpFoxKeyboardCaps[scan]
+
+    ELSE
+        char = HalpFoxKeyboardLayout[scan]
+    END
+
+    IF char == 255 THEN
+        RETURN -1
+    END
+
+    RETURN char
 END
+
+FN HalpSetDbgOverlay (
+    IN state : UWORD,
+)
+
+    IF NOT state THEN
+        // Disable debug overlay.
+
+        HalFox32Out (
+            0x8000031F, // port
+            0, // value
+        )
+
+    ELSE
+        HalpDbgWidth = BL_FOX_DBG_WIDTH / HalpFont^.Width
+        HalpDbgHeight = BL_FOX_DBG_HEIGHT / HalpFont^.Height
+
+        // Enable debug overlay.
+        // Set upper left corner to 80,96 so that the 480x288 box is centered.
+
+        HalFox32Out (
+            0x8000001F, // port
+            0x00600050, // value
+        )
+
+        // Set to 480x288.
+
+        HalFox32Out (
+            0x8000011F, // port
+            0x012001E0, // value
+        )
+
+        // Set pointer.
+
+        HalFox32Out (
+            0x8000021F, // port
+            KeLoaderBlock.U.Fox.DbgOverlayBasePhys, // value
+        )
+
+        // Enable.
+
+        HalFox32Out (
+            0x8000031F, // port
+            1, // value
+        )
+    END
+END
+
+HalpFoxKeyboardLayout : UBYTE[84] = {
+    -1,
+    -1,
+    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+    '-', '=', '\b',' ', 'q', 'w', 'e', 'r', 't', 'y',
+    'u', 'i', 'o', 'p', '[', ']', '\r',-1,  'a', 's',
+    'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
+    -1, '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',',
+    '.', '/', -1,  '*', -1,  ' ', -1,  -1,  -1,  -1,    // <- F3
+    -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  '7',
+    '8', '9', '-', '4', '5', '6', '+', '1', '2', '3',
+    '0', '.',
+}
+
+HalpFoxKeyboardShift : UBYTE[84] = {
+    -1,
+    -1,
+    '!', '@', '#', '$', '%', '^', '&', '*', '(', ')',
+    '_', '+', '\b',' ', 'Q', 'W', 'E', 'R', 'T', 'Y',
+    'U', 'I', 'O', 'P', '{', '}', '\r',-1,  'A', 'S',
+    'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '\"', '~',
+    -1,  '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<',
+    '>', '?', -1,  '*', -1,  ' ', -1,  -1,  -1,  -1,    // <- F3
+    -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  '7',
+    '8', '9', '-', '4', '5', '6', '+', '1', '2', '3',
+    '0', '.',
+}
+
+HalpFoxKeyboardCaps : UBYTE[84] = {
+    -1,
+    -1,
+    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+    '-', '=', '\b',' ', 'Q', 'W', 'E', 'R', 'T', 'Y',
+    'U', 'I', 'O', 'P', '[', ']', '\r',-1,  'A', 'S',
+    'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', '\'', '`',
+    -1, '\\', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', ',',
+    '.', '/', -1,  '*', -1,  ' ', -1,  -1,  -1,  -1,    // <- F3
+    -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  '7',
+    '8', '9', '-', '4', '5', '6', '+', '1', '2', '3',
+    '0', '.',
+}
