@@ -206,7 +206,8 @@ FN KiBoostPriority (
         // its current owner by the Owner field. Therefore we can find all
         // threads that are indirectly depended upon by this thread to make
         // progress; all owners of locks being waited for, by owners of locks
-        // [...] being waited for, by this thread.
+        // being waited for, by owners of locks being waited for, etc, by this
+        // thread.
         //
         // Because the lock ordering issues here are crazy, the way we do this
         // is a little dance that is non-broken but kind of racy. It's possible
@@ -249,7 +250,8 @@ FN KiBoostPriority (
             turnstile^.Key != key THEN
 
             // If these things changed while the locks were dropped, we've lost
-            // any sense of sanity and need to leave now.
+            // any sense of sanity and need to leave now. The 'nextowner' thread
+            // may no longer even exist at all.
 
             KiReleaseChain ( chain, ipl )
 
