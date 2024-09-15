@@ -72,8 +72,18 @@ KiTurnstileListLock : KiSpinlock = KI_INITIAL_SPINLOCK
 
 #DEFINE KI_TURNSTILE_CHAINS 128
 
+#IF ( == BLD_BITS 32 )
+
+#DEFINE KI_TURNSTILE_HASH_SHIFT 2
+
+#ELSE
+
+#DEFINE KI_TURNSTILE_HASH_SHIFT 3
+
+#END
+
 #MACRO KiTurnstileHash ( address ) [
-    ((address) & (KI_TURNSTILE_CHAINS - 1))
+    ((address >> KI_TURNSTILE_HASH_SHIFT) & (KI_TURNSTILE_CHAINS - 1))
 ]
 
 STRUCT KiTurnstileChain
