@@ -591,12 +591,21 @@ EXTERN KiOrUlongEnd : UBYTE
 EXTERN KiMaskUlongEnd : UBYTE
 EXTERN KiFetchAndSetUlongEnd : UBYTE
 EXTERN KiCompareSwapUlongEnd : UBYTE
-EXTERN KiAcquirePushlockSharedEnd : UBYTE
-EXTERN KiAcquirePushlockExclusiveEnd : UBYTE
-EXTERN KiReleasePushlockStart : UBYTE
-EXTERN KiReleasePushlockEnd : UBYTE
-EXTERN KiReleaseApcSafePushlockStart : UBYTE
-EXTERN KiReleaseApcSafePushlockEnd : UBYTE
+
+EXTERN KiAcquireLockSharedEnd : UBYTE
+EXTERN KiAcquireLockExclusiveStart : UBYTE
+EXTERN KiAcquireLockExclusiveEnd : UBYTE
+
+EXTERN KiAcquireApcLockSharedStart : UBYTE
+EXTERN KiAcquireApcLockSharedEnd : UBYTE
+EXTERN KiAcquireApcLockExclusiveStart : UBYTE
+EXTERN KiAcquireApcLockExclusiveEnd : UBYTE
+
+EXTERN KiReleaseLockStart : UBYTE
+EXTERN KiReleaseLockEnd : UBYTE
+
+EXTERN KiReleaseApcLockStart : UBYTE
+EXTERN KiReleaseApcLockEnd : UBYTE
 
 FN KiResetPc (
     IN context : ^OsContext,
@@ -642,39 +651,69 @@ FN KiResetPc (
     IF epc >= &KeCompareSwapUlong AND
         epc < &KiCompareSwapUlongEnd THEN
 
+        RtlPrint ( "CAS " )
+
         context^.Epc = &KeCompareSwapUlong
 
         LEAVE
     END
 
-    IF epc >= &KeAcquirePushlockShared AND
-        epc < &KiAcquirePushlockSharedEnd THEN
+    IF epc >= &KiAcquireApcLockSharedStart AND
+        epc < &KiAcquireApcLockSharedEnd THEN
 
-        context^.Epc = &KeAcquirePushlockShared
+        RtlPrint ( "AAS " )
 
-        LEAVE
-    END
-
-    IF epc >= &KeAcquirePushlockExclusive AND
-        epc < &KiAcquirePushlockExclusiveEnd THEN
-
-        context^.Epc = &KeAcquirePushlockExclusive
+        context^.Epc = &KiAcquireApcLockSharedStart
 
         LEAVE
     END
 
-    IF epc >= &KiReleasePushlockStart AND
-        epc < &KiReleasePushlockEnd THEN
+    IF epc >= &KiAcquireApcLockExclusiveStart AND
+        epc < &KiAcquireApcLockExclusiveEnd THEN
 
-        context^.Epc = &KiReleasePushlockStart
+        RtlPrint ( "AAX " )
+
+        context^.Epc = &KiAcquireApcLockExclusiveStart
 
         LEAVE
     END
 
-    IF epc >= &KiReleaseApcSafePushlockStart AND
-        epc < &KiReleaseApcSafePushlockEnd THEN
+    IF epc >= &KeAcquireLockShared AND
+        epc < &KiAcquireLockSharedEnd THEN
 
-        context^.Epc = &KiReleaseApcSafePushlockStart
+        RtlPrint ( "AS " )
+
+        context^.Epc = &KeAcquireLockShared
+
+        LEAVE
+    END
+
+    IF epc >= &KiAcquireLockExclusiveStart AND
+        epc < &KiAcquireLockExclusiveEnd THEN
+
+        RtlPrint ( "AX " )
+
+        context^.Epc = &KiAcquireLockExclusiveStart
+
+        LEAVE
+    END
+
+    IF epc >= &KiReleaseLockStart AND
+        epc < &KiReleaseLockEnd THEN
+
+        RtlPrint ( "R " )
+
+        context^.Epc = &KiReleaseLockStart
+
+        LEAVE
+    END
+
+    IF epc >= &KiReleaseApcLockStart AND
+        epc < &KiReleaseApcLockEnd THEN
+
+        RtlPrint ( "RA " )
+
+        context^.Epc = &KiReleaseApcLockStart
 
         LEAVE
     END

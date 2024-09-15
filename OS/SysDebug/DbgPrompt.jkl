@@ -437,16 +437,17 @@ FN (DbgCommandF) DbgCommandReady ()
     RtlPrint ( "Current=%p Next=%p\n", prb^.CurrentThread, prb^.NextThread )
 
     RtlPrint (
-        "RT=%08x TS=%08x Idle=%d TSR=%d TSE=%d", // fmt
+        "RT=%08x TS=%08x Idle=%d TSR=%d TSE=%d PEND=%02x", // fmt
         prb^.RealTimeReady,
         prb^.CalendarReady,
         idleempty,
         prb^.CalendarRunIndex,
         prb^.CalendarEnqueueIndex,
+        prb^.PendingSoftwareInterrupts,
     )
 
 #IF BLD_MP
-    RtlPrint ( " LOAD=%d", prb^.Load )
+    RtlPrint ( " LOAD=%d PENDSET=%02x", prb^.Load, prb^.SetIplPending )
 #END
 
     RtlPrint ( "\n" )

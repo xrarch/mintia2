@@ -84,7 +84,7 @@ KeCompareSwapUlong:
     
     mov  a3, [a0]
     cmp  a3, a2
-    ifnz jmp KiCompareSwapUlongEnd
+    ifnz rjmp KiCompareSwapUlongEnd
     mov  [a0], a1
 
 KiCompareSwapUlongEnd:
@@ -92,105 +92,140 @@ KiCompareSwapUlongEnd:
 
     ret
 
-#MACRO ApcSafe ( x ) [
-    // The pushlock is APC-safe, so raise to KI_IPL_APC.
+#MACRO KiAcquireLockSharedLoop ( slow ) [
+    mov  t0, [a0]
+    and  t0, KI_LOCK_C_BITS
+    ifnz rjmp slow
+    add  [a0], KI_LOCK_SHARE_INC
+]
+
+// a0 - lock
+// outputs:
+// a3 - oldipl
+KeAcquireApcLockShared:
+.export KeAcquireApcLockShared
 
     movz.8 a3, [(0xFFFFF000 + KiPrb_Ipl)]
     mov.8 [(0xFFFFF000 + KiPrb_Ipl)], KI_IPL_APC
-    mov   a1, a3
+
+KiAcquireApcLockSharedStart:
+.global KiAcquireApcLockSharedStart
+
+    KiAcquireLockSharedLoop ( KiAcquireApcLockSharedSlow )
+
+KiAcquireApcLockSharedEnd:
+.global KiAcquireApcLockSharedEnd
+
+    ret
+
+KiAcquireApcLockSharedSlow:
+    mov  a1, a3
+    jmp  KiAcquireLockShared
+
+// a0 - lock
+KeAcquireLockShared:
+.export KeAcquireLockShared
+
+    KiAcquireLockSharedLoop ( KiAcquireLockSharedSlow )
+
+KiAcquireLockSharedEnd:
+.global KiAcquireLockSharedEnd
+
+    ret
+
+KiAcquireLockSharedSlow:
+    movz.8 a1, [(0xFFFFF000 + KiPrb_Ipl)]
+    jmp  KiAcquireLockShared
+
+#MACRO KiAcquireLockExclusiveLoop ( slow ) [
+    cmp  [a0], 0
+    ifnz rjmp slow
+    mov  [a0], t1
 ]
 
-// a0 - pushlock
+// a0 - lock
 // outputs:
 // a3 - oldipl
-KeAcquireApcSafePushlockShared:
-.export KeAcquireApcSafePushlockShared
+KeAcquireApcLockExclusive:
+.export KeAcquireApcLockExclusive
 
-    ApcSafe ( x )
+    movz.8 a3, [(0xFFFFF000 + KiPrb_Ipl)]
+    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], KI_IPL_APC
 
-    // Fall through.
+    mov  t1, [(0xFFFFF000 + KiPrb_CurrentThread)]
+    or   t1, KI_LOCK_WRITE_LOCKED
 
-// a0 - pushlock
-KeAcquirePushlockShared:
-.export KeAcquirePushlockShared
+KiAcquireApcLockExclusiveStart:
+.global KiAcquireApcLockExclusiveStart
 
-    // Fast path: Load the pushlock word. If it's zero, set it to LOCKED with a
-    // single shared holder and return.
-    
-    cmp  [a0], 0
-    ifnz jmp KiAcquirePushlockShared
-    mov  [a0], (KI_PUSHLOCK_LOCKED | KI_PUSHLOCK_SHARE_INC)
+    KiAcquireLockExclusiveLoop ( KiAcquireApcLockExclusiveSlow )
 
-KiAcquirePushlockSharedEnd:
-.global KiAcquirePushlockSharedEnd
+KiAcquireApcLockExclusiveEnd:
+.global KiAcquireApcLockExclusiveEnd
 
     ret
 
-// a0 - pushlock
-// outputs:
-// a3 - oldipl
-KeAcquireApcSafePushlockExclusive:
-.export KeAcquireApcSafePushlockExclusive
+KiAcquireApcLockExclusiveSlow:
+    mov  a1, a3
+    jmp  KiAcquireLockExclusive
 
-    ApcSafe ( x )
+// a0 - lock
+KeAcquireLockExclusive:
+.export KeAcquireLockExclusive
 
-    // Fall through.
+    mov  t1, [(0xFFFFF000 + KiPrb_CurrentThread)]
+    or   t1, KI_LOCK_WRITE_LOCKED
 
-// a0 - pushlock
-KeAcquirePushlockExclusive:
-.export KeAcquirePushlockExclusive
+KiAcquireLockExclusiveStart:
+.global KiAcquireLockExclusiveStart
 
-    // Fast path: Load the pushlock word. If the LOCKED bit is clear, set it and
-    // return.
+    KiAcquireLockExclusiveLoop ( KiAcquireLockExclusiveSlow )
 
-    mov  t0, [a0]
-    and  t0, KI_PUSHLOCK_LOCKED
-    ifnz jmp KiAcquirePushlockExclusive
-    or   [a0], KI_PUSHLOCK_LOCKED
-
-KiAcquirePushlockExclusiveEnd:
-.global KiAcquirePushlockExclusiveEnd
+KiAcquireLockExclusiveEnd:
+.global KiAcquireLockExclusiveEnd
 
     ret
 
-#MACRO ReleasePushlock ( startlabel, endlabel, slow ) [
+KiAcquireLockExclusiveSlow:
+    movz.8 a1, [(0xFFFFF000 + KiPrb_Ipl)]
+    jmp  KiAcquireLockExclusive
+
+// Release
+
+#MACRO ReleaseLock ( startlabel, endlabel, slow ) [
 
 #IF BLD_CHK
-    mov  t0, [a0]
-    and  t0, KI_PUSHLOCK_LOCKED
-    ifz  call KiNotLocked
+    cmp  [a0], 0
+    ifz  rjmp KiNotLocked
 #END
 
 startlabel:
 .global startlabel
 
-    // Load the pushlock word.
+    // Load the lock word.
 
     mov  t0, [a0]
 
-    // Isolate the WAITING bit. If it's set, take the slow path.
+    // Isolate the waiters bit.
 
     mov  t1, t0
-    and  t1, KI_PUSHLOCK_WAITING
+    and  t1, KI_LOCK_WAITERS
     ifnz jmp slow
-
-    // Isolate the share count.
-
-    mov  t1, t0
-    srl  t1, KI_PUSHLOCK_SHARE_SHIFT
-
-    // Load the value to store.
 
     movz.8 t2, 0
 
-    // Compare share count <= 1.
-    // If > 1, we are a shared holder and must subtract from the shared count.
+    mov  t1, t0
+    and  t1, KI_LOCK_WRITE_LOCKED
+    ifnz rjmp .notshared
 
-    cmp  t1, 1
-    ifgt mov t2, t0
-    ifgt sub t2, KI_PUSHLOCK_SHARE_INC
+    // We're a shared holder, so decrement the share count.
 
-    // Store the new pushlock word.
+    mov  t2, t0
+    sub  t2, KI_LOCK_SHARE_INC
+
+.notshared:
+
+    // Store the new lock word.
 
     mov  [a0], t2
 
@@ -199,20 +234,20 @@ endlabel:
 
 ]
 
-// a0 - pushlock
-KeReleasePushlock:
-.export KeReleasePushlock
+// a0 - lock
+KeReleaseLock:
+.export KeReleaseLock
 
-    ReleasePushlock ( KiReleasePushlockStart, KiReleasePushlockEnd, KiReleasePushlock )
+    ReleaseLock ( KiReleaseLockStart, KiReleaseLockEnd, KiReleaseLock )
 
     ret
 
-// a0 - pushlock
+// a0 - lock
 // a1 - oldipl
-KeReleaseApcSafePushlock:
-.export KeReleaseApcSafePushlock
+KeReleaseApcLock:
+.export KeReleaseApcLock
 
-    ReleasePushlock ( KiReleaseApcSafePushlockStart, KiReleaseApcSafePushlockEnd, KiReleaseSlow )
+    ReleaseLock ( KiReleaseApcLockStart, KiReleaseApcLockEnd, KiReleaseSlow )
 
     rjmp KiReleaseApcSafe
 
@@ -222,7 +257,7 @@ KiReleaseSlow:
     mov  fp, sp
     push a1
     
-    call KiReleasePushlock
+    call KiReleaseLock
 
     pop  a1
     pop  fp
@@ -231,7 +266,7 @@ KiReleaseSlow:
 
 KiReleaseApcSafe:
 
-    // The pushlock is APC-safe, so lower IPL.
+    // The lock is APC-safe, so lower IPL.
 
     mov.8 [(0xFFFFF000 + KiPrb_Ipl)], a1
 

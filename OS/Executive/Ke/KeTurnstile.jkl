@@ -1,0 +1,847 @@
+//
+// Implementation of "turnstiles" (invented by Solaris) for the MINTIA Kernel.
+//
+// Turnstiles are a locking mechanism whereby a single pointer-sized datum can
+// be used as a mutex or rwlock, by storing a block in a hash table keyed by
+// the address of the lock upon contention.
+//
+// NT "pushlocks" accomplish similar goals but have a thread-local block stored
+// on the stack of each contending thread. This decentralization makes it easier
+// on cache (each thread can do adaptive spinning in its own stack), but makes
+// it harder to accomplish priority inheritance. Since priority inheritance has
+// been deemed of utmost importance to the robustness of the MINTIA Executive
+// (which is almost completely preemptible aside from the scheduler), the
+// original usage of pushlocks in MINTIA was quickly replaced with turnstiles.
+//
+
+#INCLUDE "Ki.hjk"
+
+KiTurnstileListHead : ^KiTurnstile = NULLPTR
+
+#IF BLD_MP
+
+#MACRO KiAcquireChain ( chain ) [
+    KiAcquireSpinlockRaise ( &(chain)^.Spinlock )
+]
+
+#MACRO KiReleaseChain ( chain, ipl ) [
+    KiReleaseSpinlockLower ( &(chain)^.Spinlock, ipl )
+]
+
+#MACRO KiAcquireChainElevated ( chain ) [
+    KiAcquireSpinlock ( &(chain)^.Spinlock )
+]
+
+#MACRO KiReleaseChainElevated ( chain ) [
+    KiReleaseSpinlock ( &(chain)^.Spinlock )
+]
+
+KiTurnstileListLock : KiSpinlock = KI_INITIAL_SPINLOCK
+
+#MACRO KiAcquireTurnstileList () [
+    KiAcquireSpinlockRaise ( &KiTurnstileListLock )
+]
+
+#MACRO KiReleaseTurnstileList ( ipl ) [
+    KiReleaseSpinlockLower ( &KiTurnstileListLock, ipl )
+]
+
+#ELSE
+
+#MACRO KiAcquireChain ( chain ) [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseChain ( chain, ipl ) [
+    KiLowerIpl ( ipl )
+]
+
+#MACRO KiAcquireChainElevated ( chain ) []
+
+#MACRO KiReleaseChainElevated ( chain ) []
+
+#MACRO KiAcquireTurnstileList () [
+    KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiReleaseTurnstileList ( ipl ) [
+    KiLowerIpl ( ipl )
+]
+
+#END
+
+#DEFINE KI_TURNSTILE_CHAINS 128
+
+#MACRO KiTurnstileHash ( address ) [
+    ((address) & (KI_TURNSTILE_CHAINS - 1))
+]
+
+STRUCT KiTurnstileChain
+    Head : RtlListEntry,
+#IF BLD_MP
+    Spinlock : KiSpinlock,
+#END
+END
+
+KiTurnstileChains : KiTurnstileChain[KI_TURNSTILE_CHAINS]
+
+#DEFINE KI_INITIAL_TURNSTILES 128
+
+#DEFINE KI_SPIN_CYCLES 400
+
+KiInitialTurnstiles : KiTurnstile[KI_INITIAL_TURNSTILES]
+
+FN KeAllocateTurnstile () : ^KiTurnstile
+
+    // Allocate a turnstile from the lookaside list.
+    // We never fail this because Ps has magically ensured that there are enough
+    // turnstiles for us to allocate some; there have to always be two times the
+    // number of threads in the system and it has expanded the list for us if
+    // there weren't enough.
+
+    ipl := KiAcquireTurnstileList ()
+
+    turnstile := KiTurnstileListHead
+
+#IF BLD_CHK
+    IF NOT turnstile THEN
+        KeCrash ( "KeAllocateTurnstile: no more turnstiles\n" )
+    END
+#END
+    
+    KiTurnstileListHead = turnstile^.Free
+
+    KiReleaseTurnstileList ( ipl )
+
+    RETURN turnstile
+END
+
+FN KeFreeTurnstile (
+    IN turnstile : ^KiTurnstile,
+)
+
+    // Release a turnstile to the lookaside list.
+
+    ipl := KiAcquireTurnstileList ()
+
+    turnstile^.Free = KiTurnstileListHead
+    KiTurnstileListHead = turnstile
+
+    KiReleaseTurnstileList ( ipl )
+END
+
+FN KiInitializeTurnstiles ()
+
+    // Initialize the turnstile package.
+
+    // Initialize the chains.
+
+    i := 0
+
+    WHILE i < KI_TURNSTILE_CHAINS DO
+        RtlInitializeList ( &KiTurnstileChains[i].Head )
+
+        i += 1
+    END
+
+    // Initialize the initial turnstiles.
+
+    i = 0
+
+    WHILE i < KI_INITIAL_TURNSTILES DO
+        KeFreeTurnstile ( &KiInitialTurnstiles[i] )
+
+        i += 1
+    END
+END
+
+FN KiBlockOnLock (
+    IN lock : ^KeLock,
+    IN current : UWORD,
+    IN oldipl : UWORD,
+)
+
+    // Block on the lock. First acquire a pointer to the current thread.
+
+    thread := KeCurrentThread ()
+
+    // Lock the turnstile chain.
+
+    chain := &KiTurnstileChains[KiTurnstileHash(lock)]
+
+    turnstile : ^KiTurnstile
+    otherturnstile : ^KiTurnstile
+
+    head := &chain^.Head
+
+    ipl := KiAcquireChain ( chain )
+
+    // Scan the chain for the relevant turnstile.
+
+    listentry := head^.Next
+
+    WHILE TRUE DO
+        IF listentry == head THEN
+            // Reached the end of the chain and didn't find the right turnstile.
+            // We'll use our thread's turnstile for the IPL at which the lock
+            // acquisition has been attempted.
+
+            turnstile = thread^.Turnstiles[oldipl]
+
+#IF BLD_CHK
+            IF NOT turnstile THEN
+                KeCrash ( "KiBlockOnLock: no turnstile for %u\n", oldipl )
+            END
+
+            thread^.Turnstiles[oldipl] = NULLPTR
+#END
+
+            // Initialize it.
+
+            turnstile^.Key = lock
+            turnstile^.Free = NULLPTR
+            turnstile^.BoostingThread = NULLPTR
+            turnstile^.Owner = NULLPTR
+            turnstile^.Awoken = FALSE
+
+            RtlInsertAtHeadList (
+                head, // head
+                &turnstile^.Entry, // entry
+            )
+
+            KeInitializeEvent (
+                &turnstile^.Event, // event
+                "Turnstile", // name
+                TRUE, // notification
+                FALSE, // signalstate
+            )
+
+            BREAK
+        END
+
+        turnstile = CONTAINEROF listentry TO KiTurnstile.Entry
+
+        IF turnstile^.Key == lock THEN
+            // Found a turnstile. Stash ours on the free list for this
+            // turnstile. We "donate" it like this so that anybody who wakes
+            // up can quickly grab one to replace theirs.
+
+            otherturnstile = thread^.Turnstiles[oldipl]
+
+            otherturnstile^.Free = turnstile^.Free
+            turnstile^.Free = otherturnstile
+
+#IF BLD_CHK
+            thread^.Turnstiles[oldipl] = NULLPTR
+#END
+
+            BREAK
+        END
+
+        listentry = listentry^.Next
+    END
+
+    KiReleaseChain ( chain, ipl )
+
+    // Set that there are waiters now. This will cause releasing threads to
+    // signal the turnstile event.
+
+    // We do this CAS unconditionally because we want to also make sure that, in
+    // the event it is held exclusively, the owner did not change before we were
+    // able to set the WAITERS bit. This is because we need to be absolutely
+    // sure that whatever owner we see in our "current" variable (which captures
+    // the lock word during a certain timeframe) will be the exact thread to
+    // awaken this turnstile at some point *after* this CAS is performed.
+
+    new := KeCompareSwapPtr (
+        &lock^.Ptr, // ptr
+        current | KI_LOCK_WAITERS, // newvalue
+        current, // expectedvalue
+    )
+
+    IF new != current THEN
+        // Something changed.
+
+        GOTO UnreferenceAndLeave
+    END
+
+    IF current & KI_LOCK_WRITE_LOCKED THEN
+        ipl = KiAcquireChain ( chain )
+
+        IF turnstile^.Awoken THEN
+            // Owner no longer valid.
+
+            KiReleaseChain ( chain, ipl )
+
+            GOTO UnreferenceAndLeave
+        END
+
+        // At this point we know exactly who owns this lock and we know they
+        // haven't fully left the lock yet, which means its safe to apply
+        // priority inheritance to them.
+
+        owner := turnstile^.Owner
+
+        IF NOT owner THEN
+            owner = CAST current & KI_LOCK_BITS TO ^KeThread
+            turnstile^.Owner = owner
+        END
+
+#IF BLD_MP
+        IF owner^.Status == KI_THREAD_RUNNING THEN
+            // The owner exists and is currently running on another processor.
+            // Spin for a while to see if we can get the lock without blocking.
+
+            KiReleaseChain ( chain, ipl )
+
+            i := KI_SPIN_CYCLES
+
+            WHILE i DO
+                IF turnstile^.Awoken THEN
+                    // It was freed!
+
+                    GOTO UnreferenceAndLeave
+                END
+
+                // Stop the compiler from optimizing this loop out.
+
+                BARRIER
+
+                i -= 1
+            END
+
+            ipl = KiAcquireChain ( chain )
+
+            IF turnstile^.Awoken THEN
+                // Owner no longer valid.
+
+                KiReleaseChain ( chain, ipl )
+
+                GOTO UnreferenceAndLeave
+            END
+        END
+#END
+
+        // We're really going to wait, so do priority boosting.
+
+        KiAcquireThreadElevated ( owner )
+
+        IF owner^.PriorityFloor < thread^.Priority THEN
+            // Raise the priority floor.
+
+            IF NOT turnstile^.BoostingThread THEN
+                // We aren't on a list of boosters for this thread, so add
+                // the turnstile.
+
+                RtlInsertAtHeadList (
+                    &owner^.PiTurnstileListHead, // head
+                    &turnstile^.PiEntry, // entry
+                )
+            END
+
+            turnstile^.BoostingThread = thread
+
+            owner^.PriorityFloor = thread^.Priority
+
+            IF owner^.Priority < owner^.PriorityFloor THEN
+                // Raise the priority.
+
+                KiSetPriorityThread (
+                    owner, // thread
+                    owner^.PriorityFloor, // priority
+                )
+            END
+        END
+
+        KiReleaseThreadElevated ( owner )
+
+        KiReleaseChain ( chain, ipl )
+    END
+
+    // Wait on the turnstile event.
+
+    KeWaitForSingleObject (
+        KE_KERNEL_MODE, // waitmode
+        FALSE, // alertable
+        NULLPTR, // timeout
+        &turnstile^.Event.Header, // object
+    )
+
+@UnreferenceAndLeave
+
+    ipl = KiAcquireChain ( chain )
+
+#IF BLD_CHK
+    IF thread^.Turnstiles[oldipl] != NULLPTR THEN
+        KeCrash ( "KiBlockOnLock: magically got a turnstile back\n" )
+    END
+#END
+
+    IF turnstile^.Free THEN
+        // Take a turnstile from the free list.
+
+        otherturnstile = turnstile^.Free
+        turnstile^.Free = otherturnstile^.Free
+
+        thread^.Turnstiles[oldipl] = otherturnstile
+
+    ELSE
+        // Steal the turnstile itself.
+
+        thread^.Turnstiles[oldipl] = turnstile
+
+        IF NOT turnstile^.Awoken THEN
+            // It wasn't signaled, which means its still on the chain.
+            // This happens in the case where we set up a turnstile, but then
+            // decided to back out. Since the free list is empty, we're the only
+            // thread with a pointer to this turnstile; nobody can be waiting
+            // and no priority inheritance has been applied. Therefore we can
+            // just remove the turnstile from the chain here.
+
+            RtlRemoveEntryList ( &turnstile^.Entry )
+        END
+    END
+
+    KiReleaseChain ( chain, ipl )
+
+    // Return to retry the lock.
+END
+
+FN KiComputeFloor (
+    IN turnstile : ^KiTurnstile,
+    IN thread : ^KeThread,
+)
+
+    // Compute a new priority floor for the thread.
+
+    head := &thread^.PiTurnstileListHead
+
+    KiAcquireThreadElevated ( thread )
+
+    // Remove the old turnstile from the list.
+
+    RtlRemoveEntryList ( &turnstile^.PiEntry )
+
+#IF BLD_CHK
+    turnstile^.PiEntry.Next = 0xABABABAB
+    turnstile^.PiEntry.Prev = 0xCDCDCDCD
+#END
+
+    // Scan the list to find the highest priority.
+
+    listentry := head^.Next
+    floor := 0
+
+    WHILE listentry != head DO
+        turnstile = CONTAINEROF listentry TO KiTurnstile.PiEntry
+
+        IF turnstile^.BoostingThread^.Priority > floor THEN
+            floor = turnstile^.BoostingThread^.Priority
+        END
+
+        listentry = listentry^.Next
+    END
+
+    // Apply the new floor.
+
+    thread^.PriorityFloor = floor
+
+    IF floor < thread^.BasePriority THEN
+        floor = thread^.BasePriority
+    END
+
+    IF floor < thread^.Priority THEN
+        // Set new priority.
+
+        KiSetPriorityThread (
+            thread, // thread
+            floor, // priority
+        )
+    END
+
+    KiReleaseThreadElevated ( thread )
+END
+
+FN KiWakeLock (
+    IN lock : ^KeLock,
+)
+
+    // Wake all waiters on the lock.
+
+    // Lock the turnstile chain.
+
+    chain := &KiTurnstileChains[KiTurnstileHash(lock)]
+
+    turnstile : ^KiTurnstile
+    otherturnstile : ^KiTurnstile
+
+    thread := KeCurrentThread ()
+
+    head := &chain^.Head
+
+    ipl := KiAcquireChain ( chain )
+
+    listentry := head^.Next
+
+    WHILE listentry != head DO
+        turnstile = CONTAINEROF listentry TO KiTurnstile.Entry
+
+        IF turnstile^.Key == lock THEN
+            // Found the turnstile.
+
+            IF turnstile^.Owner AND turnstile^.Owner != thread THEN
+                // Not my responsibility to wake this turnstile.
+
+                BREAK
+            END
+
+            // Signal its event and remove it from the chain.
+
+            KeSignalEvent (
+                &turnstile^.Event, // event
+                0, // priorityboost
+            )
+
+            RtlRemoveEntryList ( &turnstile^.Entry )
+
+            IF turnstile^.BoostingThread THEN
+                // We received a priority boost from this turnstile.
+                // Remove the turnstile and compute what our new priority
+                // floor should be.
+
+                KiComputeFloor (
+                    turnstile, // turnstile
+                    thread, // thread
+                )
+            END
+
+            turnstile^.Owner = NULLPTR
+            turnstile^.BoostingThread = NULLPTR
+            turnstile^.Awoken = TRUE
+
+            BREAK
+        END
+
+        listentry = listentry^.Next
+    END
+
+    KiReleaseChain ( chain, ipl )
+END
+
+// The following routines deal with the slow path of KeLocks, if the fast path
+// routines (which are prefixed with Ke- and are written in assembly) failed.
+
+FN KiAcquireLockShared (
+    IN lock : ^KeLock,
+    IN oldipl : UWORD,
+) : UWORD
+
+    // Acquire a lock shared.
+    // This is structured as a CAS loop.
+
+    current := lock^.Ptr
+    new : UWORD
+
+    WHILE TRUE DO
+        IF current & KI_LOCK_C_BITS == 0 THEN
+            // The lock is free and has no exclusive waiters.
+            // Try incrementing the share count.
+
+            new = KeCompareSwapPtr (
+                &lock^.Ptr, // ptr
+                current + KI_LOCK_SHARE_INC, // newvalue
+                current, // expectedvalue
+            )
+
+            IF new == current THEN
+                RETURN oldipl
+            END
+
+            // Failed to CAS.
+
+            current = new
+
+            CONTINUE
+        END
+
+#IF BLD_CHK
+        IF current & KI_LOCK_WRITE_LOCKED AND
+            current & KI_LOCK_BITS == KeCurrentThread () THEN
+
+            KeCrash ( "KiAcquireLockShared: recursive lock\n" )
+        END
+#END
+
+        // If any of the control bits are set, one of the following is true:
+        //
+        // - The lock is held exclusively.
+        // - There are exclusive waiters.
+        //
+        // In either case we need to sleep on the turnstile and then retry.
+
+        KiBlockOnLock (
+            lock, // lock
+            current, // current
+            oldipl, // oldipl
+        )
+
+        current = lock^.Ptr
+    END
+END
+
+FN KiAcquireLockExclusive (
+    IN lock : ^KeLock,
+    IN oldipl : UWORD,
+) : UWORD
+
+    // Acquire a lock exclusively.
+    // This is structured as a CAS loop.
+
+    current := lock^.Ptr
+    new : UWORD
+
+    thread := KeCurrentThread ()
+
+    WHILE TRUE DO
+        IF current == 0 THEN
+            // The lock is free. Try setting it owned with our thread pointer.
+
+            new = KeCompareSwapPtr (
+                &lock^.Ptr, // ptr
+                thread | KI_LOCK_WRITE_LOCKED, // newvalue
+                current, // expectedvalue
+            )
+
+            IF new == current THEN
+                RETURN oldipl
+            END
+
+            // Failed to CAS.
+
+            current = new
+
+            CONTINUE
+        END
+
+#IF BLD_CHK
+        IF current & KI_LOCK_WRITE_LOCKED AND
+            current & KI_LOCK_BITS == thread THEN
+
+            KeCrash ( "KiAcquireLockExclusive: recursive lock\n" )
+        END
+#END
+
+        // If the lock is nonzero, one of the following is true:
+        //
+        // - The lock is held exclusively.
+        // - The lock is held shared.
+        //
+        // In either case we need to sleep on the turnstile and then retry.
+
+        KiBlockOnLock (
+            lock, // lock
+            current, // current
+            oldipl, // oldipl
+        )
+
+        current = lock^.Ptr
+    END
+END
+
+FN KiReleaseLock (
+    IN lock : ^KeLock,
+)
+
+    // Release a lock.
+    // This is structured as a CAS loop.
+
+    current := lock^.Ptr
+    new : UWORD
+
+    WHILE TRUE DO
+        IF current & KI_LOCK_WRITE_LOCKED THEN
+            // Locked exclusively.
+
+#IF BLD_CHK
+            IF current & KI_LOCK_BITS != KeCurrentThread () THEN
+                KeCrash ( "KiReleaseLock: not held by me\n" )
+            END
+#END
+            
+            // Try to zero out the lock.
+
+            new = KeCompareSwapPtr (
+                &lock^.Ptr, // ptr
+                0, // newvalue
+                current, // expectedvalue
+            )
+
+            IF new != current THEN
+                // Failed to CAS.
+
+                current = new
+
+                CONTINUE
+            END
+
+            IF current & KI_LOCK_WAITERS THEN
+                // Wake the waiters.
+
+                KiWakeLock ( lock )
+            END
+
+            LEAVE
+        END
+
+        // Locked shared.
+
+#IF BLD_CHK
+        IF current & KI_LOCK_BITS == 0 THEN
+            KeCrash ( "KiReleaseLock: not held\n" )
+        END
+#END
+
+        IF current & KI_LOCK_BITS == KI_LOCK_SHARE_INC THEN
+            // Only I have it locked shared. Try to zero out the lock.
+
+            new = KeCompareSwapPtr (
+                &lock^.Ptr, // ptr
+                0, // newvalue
+                current, // expectedvalue
+            )
+
+            IF new != current THEN
+                // Failed to CAS.
+
+                current = new
+
+                CONTINUE
+            END
+
+            IF current & KI_LOCK_WAITERS THEN
+                // Wake the waiters.
+
+                KiWakeLock ( lock )
+            END
+
+            LEAVE
+        END
+
+        // Try to decrement the shared count.
+
+        new = KeCompareSwapPtr (
+            &lock^.Ptr, // ptr
+            current - KI_LOCK_SHARE_INC, // newvalue
+            current, // expectedvalue
+        )
+
+        IF new == current THEN
+            // Got it.
+
+            LEAVE
+        END
+
+        current = new
+    END
+END
+
+EXPORT FN KeConvertLockToShared (
+    IN lock : ^KeLock,
+)
+
+    // Convert a lock from exclusive to shared.
+
+    current := lock^.Ptr
+    new : UWORD
+
+    WHILE TRUE DO
+#IF BLD_CHK
+        IF current & KI_LOCK_WRITE_LOCKED == 0 THEN
+            KeCrash ( "KeConvertLockToShared: not held\n" )
+        END
+
+        IF current & KI_LOCK_BITS != KeCurrentThread () THEN
+            KeCrash ( "KeConvertLockToShared: not held by me\n" )
+        END
+#END
+
+        IF current & KI_LOCK_WAITERS THEN
+            // If there are waiters, don't bother, too hard to deal with this
+            // case.
+
+            LEAVE
+        END
+
+        // Try to set held shared with a single owner.
+
+        new = KeCompareSwapPtr (
+            &lock^.Ptr, // ptr
+            KI_LOCK_SHARE_INC, // newvalue
+            current, // expectedvalue
+        )
+
+        IF new == current THEN
+            // Got it.
+
+            LEAVE
+        END
+
+        current = new
+    END
+END
+
+EXPORT FN KeTryConvertLockToExclusive (
+    IN lock : ^KeLock,
+) : UWORD
+
+    // Try to convert a lock from shared to exclusive. Return TRUE if upgraded,
+    // FALSE if still shared.
+
+    current := lock^.Ptr
+    new : UWORD
+
+    thread := KeCurrentThread ()
+
+    WHILE TRUE DO
+        IF current & KI_LOCK_WRITE_LOCKED THEN
+            // Already exclusive.
+
+#IF BLD_CHK
+            IF current & KI_LOCK_BITS != thread THEN
+                KeCrash ( "KeTryConvertLockToExclusive: not held by me\n" )
+            END
+#END
+
+            RETURN TRUE
+        END
+
+        IF current & KI_LOCK_WAITERS THEN
+            // If there are waiters, don't bother, we will deadlock.
+
+            RETURN FALSE
+        END
+
+        IF current & KI_LOCK_BITS != KI_LOCK_SHARE_INC THEN
+            // If there are other shared holders, we can't kick them out of the
+            // lock, so return failure.
+
+            RETURN FALSE
+        END
+
+        // Try to set exclusive, owned by me.
+
+        new = KeCompareSwapPtr (
+            &lock^.Ptr, // ptr
+            KI_LOCK_WRITE_LOCKED | thread, // newvalue
+            current, // expectedvalue
+        )
+
+        IF new == current THEN
+            // Got it.
+
+            RETURN TRUE
+        END
+
+        current = new
+    END
+END

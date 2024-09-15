@@ -123,6 +123,7 @@ FN KeInitializeThread (
 
     thread^.BasePriority = OS_PRIORITY_DEFAULT
     thread^.Priority = OS_PRIORITY_DEFAULT
+    thread^.PriorityFloor = 0
 
     thread^.SleepMs = 0
     thread^.RunMs = 0
@@ -179,6 +180,13 @@ FN KeInitializeThread (
     RtlSetUquadToUlong ( &thread^.DpcTimeMs, 0 )
     RtlSetUquadToUlong ( &thread^.SystemTimeMs, 0 )
 
+    // Initialize turnstiles.
+
+    thread^.Turnstiles[KI_IPL_LOW] = KeAllocateTurnstile ()
+    thread^.Turnstiles[KI_IPL_APC] = KeAllocateTurnstile ()
+
+    RtlInitializeList ( &thread^.PiTurnstileListHead )
+
     // Initialize the timer.
 
     KeInitializeTimer (
@@ -230,12 +238,12 @@ FN KeInitializeThread (
 
     // Add to the process's thread list.
 
-    KeAcquirePushlockExclusive ( &process^.Pushlock )
+    KeAcquireLockExclusive ( &process^.Lock )
 
     IF process^.Terminated THEN
         // The process is terminated, we can't add new threads to it.
 
-        KeReleasePushlock ( &process^.Pushlock )
+        KeReleaseLock ( &process^.Lock )
 
         RETURN FALSE
     END
@@ -251,7 +259,7 @@ FN KeInitializeThread (
 
     process^.ThreadCount += 1
 
-    KeReleasePushlock ( &process^.Pushlock )
+    KeReleaseLock ( &process^.Lock )
 
     // Call nonpaged helper routine to increment the resident stack count.
 
@@ -284,7 +292,7 @@ FN KeUninitializeThread (
 
     process := thread^.Process
 
-    KeAcquirePushlockExclusive ( &process^.Pushlock )
+    KeAcquireLockExclusive ( &process^.Lock )
 
     // Remove from the process's list of threads.
 
@@ -331,7 +339,7 @@ FN KeUninitializeThread (
             KeThread.ProcessListEntry
     END
 
-    KeReleasePushlock ( &process^.Pushlock )
+    KeReleaseLock ( &process^.Lock )
 
     // Remove the thread's resident stack from the process's counter.
     // Note that we have to do this *after* decrementing the thread count, or

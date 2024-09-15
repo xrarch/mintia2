@@ -16,16 +16,16 @@ EXTERN FN KeMemoryBarrier ()
 
 #END
 
-STRUCT KePushlock
+STRUCT KeLock
     Ptr : UWORD,
 END
 
-#DEFINE KE_INITIAL_PUSHLOCK [{
+#DEFINE KE_INITIAL_LOCK [{
     [Ptr] = 0,
 }]
 
-#MACRO KeInitializePushlock ( pushlock ) [
-    NOTHING (pushlock)^.Ptr = 0
+#MACRO KeInitializeLock ( lock ) [
+    NOTHING (lock)^.Ptr = 0
 ]
 
 #DEFINE KE_STACK_PAGES 1
@@ -390,6 +390,12 @@ STRUCT KeSemaphore
     Header : KiDispatchHeader,
 END
 
+EXTERN FN KeFreeTurnstile (
+    IN turnstile : ^KiTurnstile,
+)
+
+EXTERN FN KeAllocateTurnstile () : ^KiTurnstile
+
 EXTERN FN KeInitializeProcess (
     IN process : ^KeProcess,
     IN name : ^UBYTE,
@@ -417,8 +423,6 @@ EXTERN FN KeUninitializeThread (
 
 #DEFINE KE_DEBUG_NAME_LENGTH 32
 
-#DEFINE KE_PROCESS_THREAD_MAX 65536
-
 #DEFINE KI_PROCESS_RESIDENT 1
 #DEFINE KI_PROCESS_OUTSWAPPED 2
 #DEFINE KI_PROCESS_TRANSITION 3
@@ -433,7 +437,7 @@ STRUCT KeProcess
     SwapNext : ^KeProcess,
     SwapListHead : ^KeThread,
 
-    Pushlock : KePushlock,
+    Lock : KeLock,
 
     PageDirectoryPfn : UWORD,
 
@@ -524,6 +528,7 @@ STRUCT KeThread
     IgnoreEventCount : UBYTE,
     KernelStackSwappable : UBYTE,
     AttachIpl : UBYTE,
+    PriorityFloor : UBYTE,
 
 #IF BLD_MP
     WaitAttempt : UBYTE,
@@ -543,6 +548,10 @@ STRUCT KeThread
     KapcListHead : RtlListEntry,
     LapcListHead : RtlListEntry,
     UapcListHead : RtlListEntry,
+
+    Turnstiles : ^KiTurnstile[2],
+
+    PiTurnstileListHead : RtlListEntry,
 
     UserTimeMs : RtlUquad,
     DpcTimeMs : RtlUquad,
@@ -609,33 +618,37 @@ EXTERN FN KeReleaseSemaphore (
     IN count : UWORD,
 ) : UWORD
 
-EXTERN FN KeAcquirePushlockShared (
-    IN pushlock : ^KePushlock,
+EXTERN FN KeAcquireLockShared (
+    IN lock : ^KeLock,
 )
-EXTERN FN KeAcquirePushlockExclusive (
-    IN pushlock : ^KePushlock,
-)
-
-EXTERN FN KeReleasePushlock (
-    IN pushlock : ^KePushlock,
+EXTERN FN KeAcquireLockExclusive (
+    IN lock : ^KeLock,
 )
 
-EXTERN FN KeAcquireApcSafePushlockShared (
-    IN pushlock : ^KePushlock,
+EXTERN FN KeReleaseLock (
+    IN lock : ^KeLock,
+)
+
+EXTERN FN KeAcquireApcLockShared (
+    IN lock : ^KeLock,
 ) : UWORD
 
-EXTERN FN KeAcquireApcSafePushlockExclusive (
-    IN pushlock : ^KePushlock,
+EXTERN FN KeAcquireApcLockExclusive (
+    IN lock : ^KeLock,
 ) : UWORD
 
-EXTERN FN KeReleaseApcSafePushlock (
-    IN pushlock : ^KePushlock,
+EXTERN FN KeReleaseApcLock (
+    IN lock : ^KeLock,
     IN oldipl : UWORD,
 )
 
-EXTERN FN KeConvertPushlockToShared (
-    IN pushlock : ^KePushlock,
+EXTERN FN KeConvertLockToShared (
+    IN lock : ^KeLock,
 )
+
+EXTERN FN KeTryConvertLockToExclusive (
+    IN lock : ^KeLock,
+) : UWORD
 
 EXTERN FN KeWaitForObjects (
     IN waitmode : UWORD,

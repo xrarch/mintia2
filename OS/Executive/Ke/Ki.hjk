@@ -358,6 +358,46 @@ EXTERN FN KiInterruptUsermode (
     IN context : UWORD,
 )
 
+EXTERN FN KiInitializeTurnstiles ()
+
+STRUCT KiTurnstile
+    Entry : RtlListEntry,
+
+    PiEntry : RtlListEntry,
+
+    Free : ^KiTurnstile,
+
+    Key : ^VOID,
+
+    Event : KeEvent,
+
+    Owner : ^KeThread,
+    BoostingThread : ^KeThread,
+
+    Awoken : UBYTE,
+END
+
+#DEFINE KI_LOCK_WAITERS 0x1
+#DEFINE KI_LOCK_WRITE_LOCKED 0x2
+#DEFINE KI_LOCK_SHARE_INC 0x4
+#DEFINE KI_LOCK_SHARE_SHIFT 2
+#DEFINE KI_LOCK_BITS ( - 0 KI_LOCK_SHARE_INC )
+#DEFINE KI_LOCK_C_BITS ( ~ KI_LOCK_BITS )
+
+EXTERN FN KiAcquireLockShared (
+    IN lock : ^KeLock,
+    IN oldipl : UWORD,
+) : UWORD
+
+EXTERN FN KiAcquireLockExclusive (
+    IN lock : ^KeLock,
+    IN oldipl : UWORD,
+) : UWORD
+
+EXTERN FN KiReleaseLock (
+    IN lock : ^KeLock,
+)
+
 #DEFINE KI_PUSHLOCK_LOCKED 0x1
 #DEFINE KI_PUSHLOCK_WAITING 0x2
 #DEFINE KI_PUSHLOCK_WAKING 0x4
@@ -452,6 +492,11 @@ EXTERN FN KiUnwaitThread (
     IN thread : ^KeThread,
     IN status : OsStatus,
     IN priorityboost : UWORD,
+)
+
+EXTERN FN KiSetPriorityThread (
+    IN thread : ^KeThread,
+    IN priority : UWORD,
 )
 
 EXTERN FN KiYield (

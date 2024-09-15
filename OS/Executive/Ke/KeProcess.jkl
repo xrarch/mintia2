@@ -37,7 +37,7 @@ FN KeInitializeProcess (
     process^.ResidentThreadCount = 0
     process^.SwapListHead = NULLPTR
 
-    KeInitializePushlock ( &process^.Pushlock )
+    KeInitializeLock ( &process^.Lock )
 
 #IF BLD_MP
     KiInitializeSpinlock ( &process^.SwapStateSpinlock )
@@ -91,12 +91,12 @@ FN KeSignalProcess (
     END
 #END
 
-    KeAcquirePushlockShared ( &process^.Pushlock )
+    KeAcquireLockShared ( &process^.Lock )
 
     IF NOT process^.SignalThread THEN
         // This process has no threads.
 
-        KeReleasePushlock ( &process^.Pushlock )
+        KeReleaseLock ( &process^.Lock )
 
         LEAVE
     END
@@ -130,5 +130,5 @@ FN KeSignalProcess (
         )
     END
 
-    KeReleasePushlock ( &process^.Pushlock )
+    KeReleaseLock ( &process^.Lock )
 END

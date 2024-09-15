@@ -7,7 +7,7 @@
 
 MiQuotaBlockListHead : RtlListEntry
 
-MiQuotaListLock : KePushlock = KE_INITIAL_PUSHLOCK
+MiQuotaListLock : KeLock = KE_INITIAL_LOCK
 
 #SECTION "INITtext"
 FN MiInitializeQuota ()
@@ -39,8 +39,6 @@ FN MiInitializeQuotaBlock (
 
     quotablock^.VmPages.Used = 0
     quotablock^.VmPages.Limit = vmlimit
-
-    KeInitializePushlock ( &quotablock^.Pushlock )
 
     // Insert in the quota block list.
 
@@ -85,7 +83,7 @@ FN MmUnreferenceQuotaBlock (
 
     // Decrement the refcount of the quota block.
 
-    KeAcquirePushlockExclusive ( &MiQuotaListLock )
+    KeAcquireLockExclusive ( &MiQuotaListLock )
 
     oldcount := KeIncrementUlong (
         &quotablock^.References, // ptr
@@ -98,7 +96,7 @@ FN MmUnreferenceQuotaBlock (
         RtlRemoveEntryList ( &quotablock^.Entry )
     END
 
-    KeReleasePushlock ( &MiQuotaListLock )
+    KeReleaseLock ( &MiQuotaListLock )
 
     IF oldcount == 1 THEN
         // Free.
@@ -122,7 +120,7 @@ FN MmLookupQuotaBlock (
 
     listhead := &MiQuotaBlockListHead
 
-    KeAcquirePushlockExclusive ( &MiQuotaListLock )
+    KeAcquireLockExclusive ( &MiQuotaListLock )
 
     quotablock : ^MiQuotaBlock
     listentry := listhead^.Next
@@ -133,7 +131,7 @@ FN MmLookupQuotaBlock (
         IF quotablock^.Uid == uid THEN
             MmReferenceQuotaBlock ( quotablock )
 
-            KeReleasePushlock ( &MiQuotaListLock )
+            KeReleaseLock ( &MiQuotaListLock )
 
             RETURN quotablock
         END
@@ -144,7 +142,7 @@ FN MmLookupQuotaBlock (
     IF NOT copyquotablock THEN
         // Just return failure.
 
-        KeReleasePushlock ( &MiQuotaListLock )
+        KeReleaseLock ( &MiQuotaListLock )
 
         RETURN NULLPTR
     END
@@ -161,7 +159,7 @@ FN MmLookupQuotaBlock (
     IF NOT quotablock THEN
         // Just return failure.
 
-        KeReleasePushlock ( &MiQuotaListLock )
+        KeReleaseLock ( &MiQuotaListLock )
 
         RETURN NULLPTR
     END
@@ -174,7 +172,7 @@ FN MmLookupQuotaBlock (
         uid, // uid
     )
 
-    KeReleasePushlock ( &MiQuotaListLock )
+    KeReleaseLock ( &MiQuotaListLock )
 
     RETURN quotablock
 END

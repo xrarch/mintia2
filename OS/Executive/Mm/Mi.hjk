@@ -88,7 +88,7 @@ STRUCT MiPartition
     ModifiedPageMaximum : UWORD,
     ZeroingThreshold : UWORD,
 
-    ListLock : KePushlock,
+    ListLock : KeLock,
 
     LowMemoryEvent : KeEvent,
     PageAvailableEvent : KeEvent,
@@ -96,7 +96,7 @@ STRUCT MiPartition
     ModifiedPageEvent : KeEvent,
     ZeroPageEvent : KeEvent,
 
-    CommitLock : KePushlock,
+    CommitLock : KeLock,
 
     SizeLevel : UBYTE,
 END
@@ -147,7 +147,7 @@ STRUCT MiChunkSpace
     EntryShift : UWORD,
     EntryCount : UWORD,
     FreeListHead : ^MiChunkEntry,
-    Pushlock : KePushlock,
+    Lock : KeLock,
 
     PendingFlush : ^VOID[MI_MAXIMUM_CHUNKS_PENDING_FLUSH],
     PendingFlushCount : UBYTE,
@@ -248,27 +248,23 @@ EXTERN FN MiInsertPageIntoList (
 )
 
 #MACRO MiAcquireListExclusive ( partition ) [
-    KeAcquireApcSafePushlockExclusive ( &(partition)^.ListLock )
-]
-
-#MACRO MiAcquireListShared ( partition ) [
-    KeAcquireApcSafePushlockShared ( &(partition)^.ListLock )
+    KeAcquireApcLockExclusive ( &(partition)^.ListLock )
 ]
 
 #MACRO MiReleaseList ( partition, ipl ) [
-    KeReleaseApcSafePushlock ( &(partition)^.ListLock, ipl )
+    KeReleaseApcLock ( &(partition)^.ListLock, ipl )
 ]
 
 #MACRO MiAcquireObjectExclusive ( object ) [
-    KeAcquireApcSafePushlockExclusive ( &(object)^.Pushlock )
+    KeAcquireApcLockExclusive ( &(object)^.Pushlock )
 ]
 
 #MACRO MiAcquireObjectShared ( object ) [
-    KeAcquireApcSafePushlockShared ( &(object)^.Pushlock )
+    KeAcquireApcLockShared ( &(object)^.Pushlock )
 ]
 
 #MACRO MiReleaseObject ( object, ipl ) [
-    KeReleaseApcSafePushlock ( &(object)^.Pushlock, ipl )
+    KeReleaseApcLock ( &(object)^.Pushlock, ipl )
 ]
 
 STRUCT MiQuotaLimit
@@ -281,8 +277,6 @@ STRUCT MiQuotaBlock
 
     Pool : MiQuotaLimit[MM_MAXIMUM_POOL],
     VmPages : MiQuotaLimit,
-
-    Pushlock : KePushlock,
 
     References : ULONG,
     Uid : ULONG,

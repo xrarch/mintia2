@@ -68,7 +68,7 @@ FNPTR MiPoolReturnMemoryF (
 )
 
 STRUCT MiPool
-    Pushlock : KePushlock,
+    Lock : KeLock,
 
     GetMemory : MiPoolGetMemoryF,
     ReturnMemory : MiPoolReturnMemoryF,
@@ -282,7 +282,7 @@ FN MiInitializePool (
 
     // Initialize a pool.
 
-    KeInitializePushlock ( &pool^.Pushlock )
+    KeInitializeLock ( &pool^.Lock )
 
     pool^.BytesUsedInternally = 0
     pool^.BytesUsedExternally = 0
@@ -365,11 +365,11 @@ MiEightBitLog : UBYTE[256] = {
 }
 
 #MACRO MiAcquirePool ( pool ) [
-    KeAcquireApcSafePushlockExclusive ( &pool^.Pushlock )
+    KeAcquireApcLockExclusive ( &pool^.Lock )
 ]
 
 #MACRO MiReleasePool ( pool, ipl ) [
-    KeReleaseApcSafePushlock ( &pool^.Pushlock, ipl )
+    KeReleaseApcLock ( &pool^.Lock, ipl )
 ]
 
 FN MiAllocateFromPool (

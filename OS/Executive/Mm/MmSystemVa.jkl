@@ -18,8 +18,8 @@ PUBLIC MiCacheSpaceChunkPages : UWORD
 #DEFINE MI_DEFERRED_FLUSH_PAGES 128
 
 MiDynamicSpaceRoot : RtlAvlNode
-MiDynamicSpacePushlock : KePushlock
-MiDynamicSpaceTreePushlock : KePushlock
+MiDynamicSpaceLock : KeLock
+MiDynamicSpaceTreeLock : KeLock
 MiDynamicSpaceFreeNodeListHead : ^MiDynamicSpaceFreeNode
 MiDynamicSpaceBitmap : RtlBitmapHeader
 MiDynamicSpaceHint : UWORD
@@ -59,7 +59,7 @@ FN MiInitializeChunkSpace (
 
     chunkspace^.PendingFlushCount = 0
 
-    KeInitializePushlock ( &chunkspace^.Pushlock )
+    KeInitializeLock ( &chunkspace^.Lock )
 
     // Link the chunks through the PTEs.
 
@@ -129,13 +129,13 @@ FN MiAllocateChunkSpace (
     // returned virtual address - this is the caller's responsibility.
     // Returns NULLPTR if no chunks remaining.
 
-    ipl := KeAcquireApcSafePushlockExclusive ( &chunkspace^.Pushlock )
+    ipl := KeAcquireApcLockExclusive ( &chunkspace^.Lock )
 
     chunk := chunkspace^.FreeListHead
 
     IF NOT chunk THEN
         IF NOT chunkspace^.PendingFlushCount THEN
-            KeReleaseApcSafePushlock ( &chunkspace^.Pushlock, ipl )
+            KeReleaseApcLock ( &chunkspace^.Lock, ipl )
 
             RETURN NULLPTR
         END
@@ -150,7 +150,7 @@ FN MiAllocateChunkSpace (
 
     chunkspace^.FreeListHead = chunk^.Next
 
-    KeReleaseApcSafePushlock ( &chunkspace^.Pushlock, ipl )
+    KeReleaseApcLock ( &chunkspace^.Lock, ipl )
 
     RETURN MI_VIRTUAL_ADDRESS ( chunk )
 END
@@ -163,7 +163,7 @@ FN MiFreeChunkSpace (
 
     // Return a chunk to the given chunk space.
 
-    ipl := KeAcquireApcSafePushlockExclusive ( &chunkspace^.Pushlock )
+    ipl := KeAcquireApcLockExclusive ( &chunkspace^.Lock )
 
     IF flush THEN
         // Insert on the delayed flush table.
@@ -190,7 +190,7 @@ FN MiFreeChunkSpace (
         chunkspace^.FreeListHead = chunk
     END
 
-    KeReleaseApcSafePushlock ( &chunkspace^.Pushlock, ipl )
+    KeReleaseApcLock ( &chunkspace^.Lock, ipl )
 END
 
 #SECTION "INITtext"
@@ -281,9 +281,9 @@ FN MiInitializeSystemVa ()
 
     RtlInitializeAvl ( &MiDynamicSpaceRoot )
 
-    KeInitializePushlock ( &MiDynamicSpacePushlock )
+    KeInitializeLock ( &MiDynamicSpaceLock )
 
-    KeInitializePushlock ( &MiDynamicSpaceTreePushlock )
+    KeInitializeLock ( &MiDynamicSpaceTreeLock )
 
     // Trim enough pages off the end of dynamic space to allow each CPU to have
     // its own page for 'quick' mappings.
@@ -351,7 +351,7 @@ FN MiFindDynamicSpaceNode (
 
     node : ^MiDynamicSpaceNode
 
-    ipl := KeAcquireApcSafePushlockShared ( &MiDynamicSpaceTreePushlock )
+    ipl := KeAcquireApcLockShared ( &MiDynamicSpaceTreeLock )
 
     avlnode := MiDynamicSpaceRoot.Right
 
@@ -375,7 +375,7 @@ FN MiFindDynamicSpaceNode (
         END
     END
 
-    KeReleaseApcSafePushlock ( &MiDynamicSpaceTreePushlock, ipl )
+    KeReleaseApcLock ( &MiDynamicSpaceTreeLock, ipl )
 
     RETURN node
 END
@@ -461,7 +461,7 @@ FN MiAllocateDynamicPages (
     // Allocate a page aligned region of dynamic space.
     // Returns NULLPTR if none available.
 
-    ipl := KeAcquireApcSafePushlockExclusive ( &MiDynamicSpacePushlock )
+    ipl := KeAcquireApcLockExclusive ( &MiDynamicSpaceLock )
 
 @Retry
 
@@ -484,7 +484,7 @@ FN MiAllocateDynamicPages (
 
         // No room left. Return NULLPTR.
 
-        KeReleaseApcSafePushlock ( &MiDynamicSpacePushlock, ipl )
+        KeReleaseApcLock ( &MiDynamicSpaceLock, ipl )
 
         RETURN NULLPTR
     END
@@ -499,7 +499,7 @@ FN MiAllocateDynamicPages (
 
     MiDynamicSpaceHint = index
 
-    KeReleaseApcSafePushlock ( &MiDynamicSpacePushlock, ipl )
+    KeReleaseApcLock ( &MiDynamicSpaceLock, ipl )
 
     RETURN CAST MI_DYNAMIC_SPACE + (index << RTL_PAGE_SHIFT) TO ^VOID
 END
@@ -512,7 +512,7 @@ FN MiReleaseDynamicPages (
 
     // Release a portion of dynamic space by pointer and page count.
 
-    ipl := KeAcquireApcSafePushlockExclusive ( &MiDynamicSpacePushlock )
+    ipl := KeAcquireApcLockExclusive ( &MiDynamicSpaceLock )
 
     IF flush THEN
 
@@ -546,7 +546,7 @@ FN MiReleaseDynamicPages (
         )
     END
 
-    KeReleaseApcSafePushlock ( &MiDynamicSpacePushlock, ipl )
+    KeReleaseApcLock ( &MiDynamicSpaceLock, ipl )
 END
 
 FN MiAllocateDynamicSpace (
@@ -564,12 +564,12 @@ FN MiAllocateDynamicSpace (
 
 @Retry
 
-    ipl := KeAcquireApcSafePushlockExclusive ( &MiDynamicSpaceTreePushlock )
+    ipl := KeAcquireApcLockExclusive ( &MiDynamicSpaceTreeLock )
 
     node := MiAllocateDynamicSpaceNode ()
 
     IF NOT node THEN
-        KeReleaseApcSafePushlock ( &MiDynamicSpaceTreePushlock, ipl )
+        KeReleaseApcLock ( &MiDynamicSpaceTreeLock, ipl )
 
         IF NOT wait THEN
             // Failed to allocate a node instantly and caller told us not to
@@ -607,7 +607,7 @@ FN MiAllocateDynamicSpace (
 
     // Unlock the tree and return the node.
 
-    KeReleaseApcSafePushlock ( &MiDynamicSpaceTreePushlock, ipl )
+    KeReleaseApcLock ( &MiDynamicSpaceTreeLock, ipl )
 
     RETURN node
 END
@@ -622,7 +622,7 @@ FN MiReleaseDynamicSpace (
     ptr := node^.StartVa
     pages := (node^.EndVa - ptr) >> RTL_PAGE_SHIFT
 
-    ipl := KeAcquireApcSafePushlockExclusive ( &MiDynamicSpaceTreePushlock )
+    ipl := KeAcquireApcLockExclusive ( &MiDynamicSpaceTreeLock )
 
     // Remove the AVL node from the tree.
 
@@ -635,7 +635,7 @@ FN MiReleaseDynamicSpace (
 
     MiFreeDynamicSpaceNode ( node )
 
-    KeReleaseApcSafePushlock ( &MiDynamicSpaceTreePushlock, ipl )
+    KeReleaseApcLock ( &MiDynamicSpaceTreeLock, ipl )
 
     // Free the space.
 

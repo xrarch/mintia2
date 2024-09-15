@@ -1,0 +1,220 @@
+//
+// Architecture-specific code for locks.
+// Contains lock fast paths handwritten in assembly for the target
+// architecture, to ensure that they are efficient.
+//
+
+#INCLUDE "../Ki.hjk"
+
+#ASM [
+
+// a0 - lock
+KeAcquireLockShared:
+.export KeAcquireLockShared
+
+    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    mov  a3, byte [t0 + KiPrb_Ipl]  // Load old IPL.
+
+.acquire:
+
+    // Load the value we'll store into the lock on success.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+.retry:
+
+    ll   t0, a0                     // Load-locked the lock word.
+    andi t1, t0, KI_LOCK_C_BITS     // Isolate the control bits.
+    bne  t1, .slow                  // If not equal to zero, take slow path.
+    addi t0, t0, KI_LOCK_SHARE_INC  // Increment share count.
+    sc   t2, a0, t0                 // Conditionally store the new word.
+    beq  t2, .retry                 // If failed, retry.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+    ret
+
+.slow:
+    mov  a1, a3
+    j    KiAcquireLockShared
+
+// a0 - lock
+// outputs:
+// a3 - oldipl
+KeAcquireApcLockShared:
+.export KeAcquireApcLockShared
+
+    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    mov  a3, byte [t0 + KiPrb_Ipl]  // Load old IPL.
+    mov  byte [t0 + KiPrb_Ipl], KI_IPL_APC
+
+    b    KeAcquireLockShared.acquire
+
+// a0 - lock
+KeAcquireLockExclusive:
+.export KeAcquireLockExclusive
+
+    subi t0, zero, 4096
+    mov  a3, byte [t0 + KiPrb_Ipl]
+
+.acquire:
+
+    mov  t1, long [t0 + KiPrb_CurrentThread]
+    ori  t1, t1, KI_LOCK_WRITE_LOCKED
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+.retry:
+
+    ll   t0, a0                     // Load-locked the lock word.
+    bne  t0, .slow                  // If not zero, take slow path.
+    sc   t2, a0, t1                 // Conditionally store the new word.
+    beq  t2, .retry                 // If failed, retry.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+    ret
+
+.slow:
+    mov  a1, a3
+    j    KiAcquireLockExclusive
+
+// a0 - lock
+// outputs:
+// a3 - oldipl
+KeAcquireApcLockExclusive:
+.export KeAcquireApcLockExclusive
+
+    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    mov  a3, byte [t0 + KiPrb_Ipl]  // Load old IPL.
+    mov  byte [t0 + KiPrb_Ipl], KI_IPL_APC
+
+    b    KeAcquireLockExclusive.acquire
+
+// Release
+
+#MACRO ReleaseLock ( x ) [
+
+#IF BLD_CHK
+    mov  t0, long [a0]
+    beq  t0, KiNotLocked
+#END
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+.retry:
+
+    ll   t0, a0                     // Load-locked the lock word.
+
+    // Isolate the waiters bit.
+
+    andi t1, t0, KI_LOCK_WAITERS
+    bne  t1, .slow                  // If not zero, take slow path.
+
+    li   t2, 0
+
+    andi t1, t0, KI_LOCK_WRITE_LOCKED
+    bne  t1, .notshared
+
+    // We're a shared holder, so decrement the share count.
+
+    subi t2, t0, KI_LOCK_SHARE_INC
+
+.notshared:
+
+    sc   t4, a0, t2                 // Conditionally store the new word.
+    beq  t4, .retry                 // If failed, retry.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+]
+
+// a0 - lock
+KeReleaseLock:
+.export KeReleaseLock
+
+    ReleaseLock ( x )
+
+    ret
+
+.slow:
+
+    j    KiReleaseLock
+
+// a0 - lock
+// a1 - oldipl
+KeReleaseApcLock:
+.export KeReleaseApcLock
+
+    ReleaseLock ( x )
+
+    // Branch around the slow path.
+
+    b    .apcsafe
+
+.slow:
+
+    subi sp, sp, 8
+    mov  long [sp], a1
+    mov  long [sp + 4], lr
+
+    jal  KiReleaseLock
+
+    mov  a1, long [sp]
+    mov  lr, long [sp + 4]
+    addi sp, sp, 8
+
+    // Fall through.
+
+.apcsafe:
+
+    // The lock is APC-safe, so restore the old IPL.
+    // This is KiLowerIpl inlined.
+
+    subi t0, zero, 4096
+    mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.
+    mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
+    rsh  t2, t1, a1                 // Right shift pending by new IPL.
+    bne  t2, .dispatch              // If zero, none pending at new IPL.
+
+    ret
+
+.dispatch:
+    mov  a0, a1
+    j    KiDispatchSoftwareInterrupts
+
+
+#IF BLD_CHK
+
+KiNotLocked:
+    // Create stack frame for debugger traces.
+
+    subi sp, sp, 4
+    mov  long [sp], lr
+
+    la   a0, KiNotLockedMessage
+    li   a1, 0
+    li   a2, 0
+    jal  KeCrash
+
+KiNotLockedMessage:
+    .ds "KeReleasePushlock: pushlock not locked\n"
+    .db 0
+
+.align 4
+
+#END
+
+]
