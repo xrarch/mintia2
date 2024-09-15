@@ -1324,11 +1324,9 @@ FN KiMoveToInteractiveQueueThread (
     prb := thread^.CurrentPrb
     other := prb != KI_CURRENT_PRB
 
-#IF BLD_CHK
     IF NOT prb THEN
-        KeCrash ( "KiMoveToIntQuThread: %p READY but no prb?\n", thread )
+        LEAVE
     END
-#END
 
 #ELSE
     prb := KI_CURRENT_PRB
@@ -1336,6 +1334,12 @@ FN KiMoveToInteractiveQueueThread (
 #END
 
     KiAcquireReadyQueueElevated ( prb )
+
+    IF thread^.Status != KI_THREAD_READY THEN
+        KiReleaseReadyQueueElevated ( prb )
+
+        LEAVE
+    END
 
     KiReinsertThread (
         thread, // thread
