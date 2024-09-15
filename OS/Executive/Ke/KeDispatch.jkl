@@ -177,10 +177,11 @@ FN KiUpdateInteractivity (
     ELSE
         // Not interactive.
 
-        IF thread^.Interactive THEN
+        IF thread^.Interactive AND NOT thread^.InteractivityFloor THEN
             lostinteractivity = TRUE
-            thread^.Interactive = FALSE
         END
+
+        thread^.Interactive = FALSE
     END
 
     RETURN lostinteractivity
@@ -310,14 +311,15 @@ FN KiInsertThread (
     END
 
     IF thread^.Priority >= OS_PRIORITY_LOW_REALTIME OR
-        thread^.Interactive THEN
+        thread^.Interactive | thread^.InteractivityFloor THEN
 
         // It's either one of the forced real time priorities or we've deemed it
         // interactive. Either way it goes in the real time queue or preempts
         // the current thread.
 
         IF (compare^.Priority >= OS_PRIORITY_LOW_REALTIME OR
-            compare^.Interactive) AND thread^.Priority <= compare^.Priority THEN
+            compare^.Interactive | compare^.InteractivityFloor) AND
+            thread^.Priority <= compare^.Priority THEN
 
             thread^.CurrentQueue = KI_REAL_TIME_QUEUE
 
@@ -453,8 +455,8 @@ FN KiWouldPreempt (
     pri1 := thread1^.Priority
     pri2 := thread2^.Priority
 
-    IF thread1^.Interactive THEN
-        IF NOT thread2^.Interactive THEN
+    IF (thread1^.Interactive | thread1^.InteractivityFloor) THEN
+        IF NOT (thread2^.Interactive | thread2^.InteractivityFloor) THEN
             // Interactive threads always preempt non-interactive threads.
 
             RETURN TRUE
@@ -849,7 +851,7 @@ FN KiSelectThread (
 
     IF current THEN
         minimumpriority = current^.Priority
-        interactive = current^.Interactive
+        interactive = current^.Interactive | current^.InteractivityFloor
 
         IF exclusive THEN
             // Only pick threads that can preempt the given one.
@@ -1016,6 +1018,56 @@ FN KiPreemptThread (
     // KiSwitchThread returns with the thread lock released.
 END
 
+FN KiReinsertThread (
+    IN thread : ^KeThread,
+    IN prb : ^KiPrb,
+    IN other : UWORD,
+    IN curpri : UWORD,
+)
+
+    // Remove and re-insert the thread into a ready queue.
+    // Thread and ready queue lock are held.
+
+#IF BLD_CHK
+    IF thread^.Status != KI_THREAD_READY THEN
+        KeCrash ( "KiReinsertThread: not READY\n" )
+    END
+#END
+
+    IF thread^.InSwapList THEN
+        // It's in a stack swapper list, no need to do anything here.
+
+        LEAVE
+    END
+
+    // We changed the priority level, so the thread is now on the wrong
+    // ready queue. Manually unlink it from the queue, and then re-ready
+    // it to place it on the correct one.
+
+    KiDecrementLoad ( prb )
+
+    RtlRemoveEntryList ( &thread^.ReadyEntry )
+
+    IF thread^.ReadyEntry.Prev == thread^.ReadyEntry.Next THEN
+        // We just emptied the list. We have to clear a bit.
+
+        IF thread^.CurrentQueue == KI_REAL_TIME_QUEUE THEN
+            prb^.RealTimeReady &= ~(1 << curpri)
+
+        ELSEIF thread^.CurrentQueue == KI_TIMESHARED_QUEUE THEN
+            // The timeshared queue index was stashed in Alertable.
+
+            prb^.CalendarReady &= ~(1 << thread^.Alertable)
+        END
+    END
+
+    KiInsertThread (
+        prb, // prb
+        thread, // thread
+        other, // other
+    )
+END
+
 FN KiSetPriorityThread (
     IN thread : ^KeThread,
     IN priority : UWORD,
@@ -1031,7 +1083,7 @@ FN KiSetPriorityThread (
 
     IF priority < thread^.PriorityFloor THEN
         // This thread is a subject of priority inheritance. Ensure its priority
-        // never falls below the current inheritancefloor.
+        // never falls below the current inheritance floor.
 
         priority = thread^.PriorityFloor
     END
@@ -1080,37 +1132,13 @@ FN KiSetPriorityThread (
     END
 
     IF thread^.Status == KI_THREAD_READY THEN
-        IF thread^.InSwapList THEN
-            // It's in a stack swapper list, no need to do anything here.
+        // Remove and re-insert the thread into the ready queues.
 
-            GOTO Exit
-        END
-
-        // We changed the priority level, so the thread is now on the wrong
-        // ready queue. Manually unlink it from the queue, and then re-ready
-        // it to place it on the correct one.
-
-        KiDecrementLoad ( prb )
-
-        RtlRemoveEntryList ( &thread^.ReadyEntry )
-
-        IF thread^.ReadyEntry.Prev == thread^.ReadyEntry.Next THEN
-            // We just emptied the list. We have to clear a bit.
-
-            IF thread^.CurrentQueue == KI_REAL_TIME_QUEUE THEN
-                prb^.RealTimeReady &= ~(1 << curpri)
-
-            ELSEIF thread^.CurrentQueue == KI_TIMESHARED_QUEUE THEN
-                // The timeshared queue index was stashed in Alertable.
-
-                prb^.CalendarReady &= ~(1 << thread^.Alertable)
-            END
-        END
-
-        KiInsertThread (
-            prb, // prb
+        KiReinsertThread (
             thread, // thread
+            prb, // prb
             other, // other
+            curpri, // curpri
         )
 
         GOTO Exit
@@ -1281,6 +1309,40 @@ FN KiCheckInteractivity (
             prb^.NextThread = next
         END
     END
+
+    KiReleaseReadyQueueElevated ( prb )
+END
+
+FN KiMoveToInteractiveQueueThread (
+    IN thread : ^KeThread,
+)
+
+    // The given thread is ready and was not interactive. It's now interactive
+    // so we want to move it to the right queue. Thread lock is held.
+
+#IF BLD_MP
+    prb := thread^.CurrentPrb
+    other := prb != KI_CURRENT_PRB
+
+#IF BLD_CHK
+    IF NOT prb THEN
+        KeCrash ( "KiMoveToIntQuThread: %p READY but no prb?\n", thread )
+    END
+#END
+
+#ELSE
+    prb := KI_CURRENT_PRB
+    other := FALSE
+#END
+
+    KiAcquireReadyQueueElevated ( prb )
+
+    KiReinsertThread (
+        thread, // thread
+        prb, // prb
+        other, // other
+        thread^.Priority, // curpri
+    )
 
     KiReleaseReadyQueueElevated ( prb )
 END

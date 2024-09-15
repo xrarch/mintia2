@@ -471,6 +471,14 @@ FN (DbgCommandF) DbgCommandReady ()
         WHILE listentry != head DO
             thread = CONTAINEROF listentry TO KeThread.ReadyEntry
 
+            IF NOT MmIsVirtualValid ( thread ) OR
+                NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+
+                RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
+
+                LEAVE
+            END
+
             RtlPrint ( "%p ", thread )
 
             listentry = listentry^.Next
@@ -499,6 +507,14 @@ FN (DbgCommandF) DbgCommandReady ()
         WHILE listentry != head DO
             thread = CONTAINEROF listentry TO KeThread.ReadyEntry
 
+            IF NOT MmIsVirtualValid ( thread ) OR
+                NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+
+                RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
+
+                LEAVE
+            END
+
             RtlPrint ( "%p ", thread )
 
             listentry = listentry^.Next
@@ -518,6 +534,14 @@ FN (DbgCommandF) DbgCommandReady ()
 
     WHILE listentry != head DO
         thread = CONTAINEROF listentry TO KeThread.ReadyEntry
+
+        IF NOT MmIsVirtualValid ( thread ) OR
+            NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+
+            RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
+
+            LEAVE
+        END
 
         RtlPrint ( "%p ", thread )
 

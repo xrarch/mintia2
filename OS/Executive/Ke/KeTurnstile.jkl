@@ -155,6 +155,119 @@ FN KiInitializeTurnstiles ()
     END
 END
 
+FN KiBoostPriority (
+    IN owner : ^KeThread,
+    IN thread : ^KeThread,
+    IN chain : ^KiTurnstileChain,
+    IN ipl : UWORD,
+)
+
+    original := owner
+
+    WHILE TRUE DO
+        // Boost the owner. His lock is held on entry, and so is a turnstile chain
+        // lock. Neither of these locks should be held on exit.
+
+        IF (thread^.Interactive | thread^.InteractivityFloor) AND
+            NOT owner^.InteractivityFloor THEN
+
+            // Raise the interactivity floor.
+
+            owner^.InteractivityFloor = TRUE
+
+            IF NOT owner^.Interactive AND
+                owner^.Status == KI_THREAD_READY THEN
+
+                // It wasn't interactive and we just raised the floor, so it's
+                // probably in the wrong queue now.
+
+                KiMoveToInteractiveQueueThread ( owner )
+            END
+        END
+
+        IF owner^.PriorityFloor < thread^.Priority THEN
+            // Raise the priority floor.
+
+            owner^.PriorityFloor = thread^.Priority
+
+            IF owner^.Priority < owner^.PriorityFloor THEN
+                // Raise the priority.
+
+                KiSetPriorityThread (
+                    owner, // thread
+                    owner^.PriorityFloor, // priority
+                )
+            END
+        END
+
+        // We have to follow the chain of lock owners and boost them all.
+        // Each blocked thread is linked to its turnstile by BlockedOnTurnstile
+        // which is guarded with its thread lock. Each turnstile is linked to
+        // its current owner by the Owner field. Therefore we can find all
+        // threads that are indirectly depended upon by this thread to make
+        // progress; all owners of locks being waited for, by owners of locks
+        // [...] being waited for, by this thread.
+        //
+        // Because the lock ordering issues here are crazy, the way we do this
+        // is a little dance that is non-broken but kind of racy. It's possible
+        // for inversion cases to slip through the cracks here, but they should
+        // be uncommon and will be resolved by the much more coarse-grained
+        // starvation avoidance measures (like the timeshared queues and random
+        // boosting of interactive threads).
+
+        turnstile := owner^.BlockedOnTurnstile
+        nextowner : ^KeThread = NULLPTR
+        key := 0
+
+        IF turnstile THEN
+            nextowner = turnstile^.Owner
+            key = turnstile^.Key
+        END
+
+        KiReleaseThreadElevated ( owner )
+
+        IF NOT nextowner THEN
+            // No next owner, done boosting.
+
+            KiReleaseChain ( chain, ipl )
+
+            LEAVE
+        END
+
+        KiReleaseChainElevated ( chain )
+
+        // All locks are dropped. We're going to reacquire them and then make
+        // sure this is the same turnstile with the same owner. This only works
+        // because turnstiles are "type stable memory"; once a piece of memory
+        // has been initialized as a turnstile, it will be a turnstile forever.
+
+        chain = &KiTurnstileChains[KiTurnstileHash(key)]
+
+        KiAcquireChainElevated ( chain )
+
+        IF turnstile^.Owner != nextowner OR
+            turnstile^.Key != key THEN
+
+            // If these things changed while the locks were dropped, we've lost
+            // any sense of sanity and need to leave now.
+
+            KiReleaseChain ( chain, ipl )
+
+            LEAVE
+        END
+
+        KiAcquireThreadElevated ( nextowner )
+
+        owner = nextowner
+
+#IF BLD_CHK
+        IF owner == original THEN
+            KeCrash ( "KiBoostPriority: deadlock\n" )
+        END
+#END
+    END
+END
+
 FN KiBlockOnLock (
     IN lock : ^KeLock,
     IN current : UWORD,
@@ -241,6 +354,12 @@ FN KiBlockOnLock (
         listentry = listentry^.Next
     END
 
+    KiAcquireThreadElevated ( thread )
+
+    thread^.BlockedOnTurnstile = turnstile
+
+    KiReleaseThreadElevated ( thread )
+
     KiReleaseChain ( chain, ipl )
 
     // Set that there are waiters now. This will cause releasing threads to
@@ -326,7 +445,10 @@ FN KiBlockOnLock (
 
         KiAcquireThreadElevated ( owner )
 
-        IF owner^.PriorityFloor < thread^.Priority THEN
+        IF owner^.PriorityFloor < thread^.Priority OR
+            ((thread^.Interactive | thread^.InteractivityFloor) AND
+            NOT owner^.InteractivityFloor) THEN
+
             // Raise the priority floor.
 
             IF NOT turnstile^.BoostingThread THEN
@@ -341,21 +463,18 @@ FN KiBlockOnLock (
 
             turnstile^.BoostingThread = thread
 
-            owner^.PriorityFloor = thread^.Priority
+            KiBoostPriority (
+                owner, // owner
+                thread, // thread
+                chain, // chain
+                ipl, // ipl
+            )
 
-            IF owner^.Priority < owner^.PriorityFloor THEN
-                // Raise the priority.
+        ELSE
+            KiReleaseThreadElevated ( owner )
 
-                KiSetPriorityThread (
-                    owner, // thread
-                    owner^.PriorityFloor, // priority
-                )
-            END
+            KiReleaseChain ( chain, ipl )
         END
-
-        KiReleaseThreadElevated ( owner )
-
-        KiReleaseChain ( chain, ipl )
     END
 
     // Wait on the turnstile event.
@@ -370,6 +489,12 @@ FN KiBlockOnLock (
 @UnreferenceAndLeave
 
     ipl = KiAcquireChain ( chain )
+
+    KiAcquireThreadElevated ( thread )
+
+    thread^.BlockedOnTurnstile = NULLPTR
+
+    KiReleaseThreadElevated ( thread )
 
 #IF BLD_CHK
     IF thread^.Turnstiles[oldipl] != NULLPTR THEN
@@ -431,18 +556,23 @@ FN KiComputeFloor (
 
     listentry := head^.Next
     floor := 0
+    interactivityfloor := FALSE
 
     WHILE listentry != head DO
         turnstile = CONTAINEROF listentry TO KiTurnstile.PiEntry
 
-        IF turnstile^.BoostingThread^.Priority > floor THEN
-            floor = turnstile^.BoostingThread^.Priority
+        booster := turnstile^.BoostingThread
+
+        IF booster^.Priority > floor THEN
+            floor = booster^.Priority
         END
+
+        interactivityfloor |= (booster^.Interactive | booster^.InteractivityFloor)
 
         listentry = listentry^.Next
     END
 
-    // Apply the new floor.
+    // Apply the new priority floor.
 
     thread^.PriorityFloor = floor
 
@@ -457,6 +587,23 @@ FN KiComputeFloor (
             thread, // thread
             floor, // priority
         )
+    END
+
+    // Apply the new interactivity floor.
+
+    IF thread^.InteractivityFloor AND NOT interactivityfloor THEN
+        // No longer interactive.
+
+        thread^.InteractivityFloor = FALSE
+
+        IF NOT thread^.Interactive THEN
+            // We weren't interactive in our own right either, which means we
+            // may need to be preempted by someone who is.
+
+            // Remember "thread" is the current thread, on this processor.
+
+            KiCheckInteractivity ( KI_CURRENT_PRB )
+        END
     END
 
     KiReleaseThreadElevated ( thread )

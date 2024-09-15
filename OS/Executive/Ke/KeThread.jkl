@@ -146,6 +146,7 @@ FN KeInitializeThread (
     thread^.RemainingQuantum = KI_DEFAULT_QUANTUM
 
     thread^.Interactive = FALSE
+    thread^.InteractivityFloor = FALSE
 
     thread^.InSwapList = FALSE
     thread^.KernelStackResident = TRUE
@@ -186,6 +187,8 @@ FN KeInitializeThread (
     thread^.Turnstiles[KI_IPL_APC] = KeAllocateTurnstile ()
 
     RtlInitializeList ( &thread^.PiTurnstileListHead )
+
+    thread^.BlockedOnTurnstile = NULLPTR
 
     // Initialize the timer.
 
