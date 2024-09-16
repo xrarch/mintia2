@@ -398,8 +398,9 @@ END
             NOT RtlEmptyList ( &thread^.KapcListHead ) THEN
 
             // This wait is cancelled when kernel APCs are pending.
-            // This allows consumers to use custom wait cleanup logic (in
-            // particular, the turnstile package).
+            // This allows consumers to use custom wait cleanup logic prior to
+            // the execution of pending KAPCs (in particular, the turnstile
+            // package).
 
             KiReleaseThread ( thread, KI_IPL_APC )
 
@@ -415,6 +416,18 @@ END
 
         GOTO Retry
 #END
+
+    ELSEIF waitmode == KE_USER_MODE AND
+        NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
+
+        // There are pending lazy APCs and this is a usermode wait,
+        // so dispatch them and retry.
+
+        KiReleaseThread ( thread, KI_IPL_LOW )
+
+        KiDispatchLazyApcQueue ( thread )
+
+        GOTO Retry
 
     ELSEIF alertable == KE_UNALERTABLE THEN
         // Wait was unalertable.
@@ -441,16 +454,6 @@ END
 
             RETURN OS_STATUS_KILLED
         END
-
-    ELSEIF NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
-        // There are pending lazy APCs and this is a usermode wait,
-        // so dispatch them and retry.
-
-        KiReleaseThread ( thread, KI_IPL_LOW )
-
-        KiDispatchLazyApcQueue ( thread )
-
-        GOTO Retry
 
     ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
         // There are pending usermode APCs and this is a usermode

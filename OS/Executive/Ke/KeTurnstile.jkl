@@ -217,11 +217,9 @@ FN KiBoostPriority (
         // thread.
         //
         // Because the lock ordering issues here are crazy, the way we do this
-        // is a little dance that is non-broken but kind of racy. It's possible
-        // for inversion cases to slip through the cracks here, but they should
-        // be uncommon and will be resolved by the much more coarse-grained
-        // starvation avoidance measures (like the timeshared queues and random
-        // boosting of interactive threads).
+        // is a little dance where we drop locks and re-check the turnstile.
+        // This can miss boosting people sometimes but only in cases where
+        // they're going to come back around and get boosted again.
 
         turnstile := owner^.BlockedOnTurnstile
         nextowner : ^KeThread = NULLPTR
