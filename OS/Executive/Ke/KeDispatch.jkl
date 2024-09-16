@@ -2046,84 +2046,6 @@ FN KiSatisfyObject (
     RETURN NULLPTR
 END
 
-#MACRO KiCheckWaitInterruptingEvents ( thread, ipl, alertable, waitmode ) [
-    // IPL >= KI_IPL_APC masks out all events.
-
-    IF ipl == KI_IPL_LOW THEN
-        IF NOT alertable THEN
-            IF waitmode == KE_USER_MODE AND
-                thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
-
-                // Unalertable usermode waits are only interrupted by
-                // termination.
-
-                KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
-
-                KiReleaseThread ( thread, ipl )
-
-                RETURN OS_STATUS_KILLED
-            END
-
-        ELSEIF waitmode == KE_KERNEL_MODE THEN
-            IF NOT thread^.IgnoreEventCount AND
-                thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
-
-                // Alertable kernel mode waits are only interrupted by
-                // termination.
-
-                KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
-
-                KiReleaseThread ( thread, ipl )
-
-                RETURN OS_STATUS_KILLED
-            END
-
-        ELSEIF NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
-            // There are pending lazy APCs and this is a usermode wait,
-            // so dispatch them and retry.
-
-            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
-
-            KiReleaseThread ( thread, ipl )
-
-            KiDispatchLazyApcQueue ( thread )
-
-            GOTO Retry
-
-        ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
-            // There are pending usermode APCs and this is a usermode
-            // wait, so interrupt the wait and cause them to be
-            // dispatched upon return to userspace.
-
-            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
-
-            thread^.UserApcTriggered = TRUE
-            thread^.UserInterrupt = TRUE
-
-            KiReleaseThread ( thread, ipl )
-
-            RETURN OS_STATUS_USER_APC
-
-        ELSEIF thread^.SignalMask &
-            thread^.SignalAcceptMask &
-            thread^.SignalDeliverOnWaitMask THEN
-
-            // There are pending signals and this is a usermode wait, so
-            // interrupt the wait and cause them to be dispatched upon return
-            // to usermode.
-
-            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
-
-            thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
-            thread^.UserInterrupt = TRUE
-
-            KiReleaseThread ( thread, ipl )
-
-            RETURN OS_STATUS_SIGNALED
-        END
-    END
-]
-
 #MACRO KiWaitHead ( thread, ipl, alertable, waitmode, waitblocktable, waitcount, starttime, timeout ) [
 
 #IF BLD_CHK
@@ -2162,6 +2084,98 @@ END
 
     KiAcquireThreadElevated ( thread )
 
+    // Before we start, check for events that would interrupt the wait.
+
+    IF ipl == KI_IPL_APC THEN
+        // IPL >= KI_IPL_APC masks out all events, but the caller can request
+        // cancellation upon KAPC reception.
+
+        IF alertable == KE_CANCEL_ON_KAPC AND
+            NOT RtlEmptyList ( &thread^.KapcListHead ) THEN
+
+            // This wait is cancelled when kernel APCs are pending.
+            // This allows consumers to use custom wait cleanup logic (in
+            // particular, the turnstile package).
+
+            KiReleaseThread ( thread, KI_IPL_APC )
+
+            RETURN OS_STATUS_KERNEL_APC
+        END
+
+#IF BLD_MP
+    ELSEIF NOT RtlEmptyList ( &thread^.KapcListHead ) THEN
+        // A KAPC was enqueued between raising IPL and locking our thread, so
+        // dispatch it and retry.
+
+        KiReleaseThread ( thread, KI_IPL_LOW )
+
+        GOTO Retry
+#END
+
+    ELSEIF alertable == KE_UNALERTABLE THEN
+        // Wait was unalertable.
+
+        IF waitmode == KE_USER_MODE AND
+            thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+
+            // Unalertable usermode waits are only interrupted by
+            // termination.
+
+            KiReleaseThread ( thread, KI_IPL_LOW )
+
+            RETURN OS_STATUS_KILLED
+        END
+
+    ELSEIF waitmode == KE_KERNEL_MODE THEN
+        IF NOT thread^.IgnoreEventCount AND
+            thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+
+            // Alertable kernel mode waits are only interrupted by
+            // termination.
+
+            KiReleaseThread ( thread, KI_IPL_LOW )
+
+            RETURN OS_STATUS_KILLED
+        END
+
+    ELSEIF NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
+        // There are pending lazy APCs and this is a usermode wait,
+        // so dispatch them and retry.
+
+        KiReleaseThread ( thread, KI_IPL_LOW )
+
+        KiDispatchLazyApcQueue ( thread )
+
+        GOTO Retry
+
+    ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
+        // There are pending usermode APCs and this is a usermode
+        // wait, so interrupt the wait and cause them to be
+        // dispatched upon return to userspace.
+
+        thread^.UserApcTriggered = TRUE
+        thread^.UserInterrupt = TRUE
+
+        KiReleaseThread ( thread, KI_IPL_LOW )
+
+        RETURN OS_STATUS_USER_APC
+
+    ELSEIF thread^.SignalMask &
+        thread^.SignalAcceptMask &
+        thread^.SignalDeliverOnWaitMask THEN
+
+        // There are pending signals and this is a usermode wait, so
+        // interrupt the wait and cause them to be dispatched upon return
+        // to usermode.
+
+        thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
+        thread^.UserInterrupt = TRUE
+
+        KiReleaseThread ( thread, KI_IPL_LOW )
+
+        RETURN OS_STATUS_SIGNALED
+    END
+
     // Set the thread to wait-try.
     //
     // Note that this wait-try tactic was derived from an explanation given
@@ -2169,17 +2183,6 @@ END
     // broke up the dispatcher spinlock.
 
     KiSetWaitAttempt ( thread, KI_THREAD_WAIT_TRY )
-
-    // Before we start, check for events that would interrupt the wait.
-    // This is a macro that can return from the function for us (after
-    // dropping the thread lock).
-
-    KiCheckWaitInterruptingEvents (
-        thread, // thread
-        ipl, // ipl
-        alertable, // alertable
-        waitmode, // waitmode
-    )
 
     KiReleaseThreadElevated ( thread )
 ]
@@ -2497,6 +2500,10 @@ EXPORT FN KeWaitForObjects (
 
 @KernelApcReceived
 
+    IF alertable == KE_CANCEL_ON_KAPC THEN
+        RETURN status
+    END
+
     IF timeout THEN
         KiKernelApcReceived ( &capturedtimeout, &starttime )
     END
@@ -2657,6 +2664,10 @@ EXPORT FN KeSleep (
     END
 
 @KernelApcReceived
+
+    IF alertable == KE_CANCEL_ON_KAPC THEN
+        RETURN status
+    END
 
     KiKernelApcReceived ( &capturedinterval, &starttime )
 
@@ -2925,6 +2936,10 @@ EXPORT FN KeWaitForSingleObject (
     END
 
 @KernelApcReceived
+
+    IF alertable == KE_CANCEL_ON_KAPC THEN
+        RETURN status
+    END
 
     IF timeout THEN
         KiKernelApcReceived ( &capturedtimeout, &starttime )

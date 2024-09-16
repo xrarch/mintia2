@@ -136,7 +136,8 @@ EXPORT FN KeEnqueueKapc (
 
 #IF BLD_MP
         IF thread^.WaitAttempt == KI_THREAD_WAIT_TRY AND
-            thread^.WaitIpl == KI_IPL_LOW THEN
+            (thread^.WaitIpl == KI_IPL_LOW OR
+            thread^.Alertable == KE_CANCEL_ON_KAPC) THEN
 
             // Abort the wait attempt.
 
@@ -168,7 +169,8 @@ EXPORT FN KeEnqueueKapc (
 #END
 
     ELSEIF thread^.Status == KI_THREAD_WAITING AND
-        thread^.WaitIpl == KI_IPL_LOW THEN
+        (thread^.WaitIpl == KI_IPL_LOW OR
+        thread^.Alertable == KE_CANCEL_ON_KAPC) THEN
 
         // Wake the thread.
 
@@ -243,7 +245,7 @@ EXPORT FN KeEnqueueUapc (
 #END
         ) AND thread^.WaitIpl == KI_IPL_LOW AND
         thread^.WaitMode == KE_USER_MODE AND
-        thread^.Alertable THEN
+        thread^.Alertable == KE_ALERTABLE THEN
 
         // The thread was in a usermode alertable wait, so trigger user APC
         // delivery.

@@ -95,7 +95,7 @@ END
 
 KiTurnstileChains : KiTurnstileChain[KI_TURNSTILE_CHAINS]
 
-#DEFINE KI_INITIAL_TURNSTILES 128
+#DEFINE KI_INITIAL_TURNSTILES 64
 
 #DEFINE KI_SPIN_CYCLES 400
 
@@ -105,9 +105,9 @@ FN KeAllocateTurnstile () : ^KiTurnstile
 
     // Allocate a turnstile from the lookaside list.
     // We never fail this because Ps has magically ensured that there are enough
-    // turnstiles for us to allocate some; there have to always be two times the
-    // number of threads in the system and it has expanded the list for us if
-    // there weren't enough.
+    // turnstiles for us to allocate some; there have to always be the same as
+    // the number of threads in the system and Ps has expanded the list to
+    // maintain that invariant.
 
     ipl := KiAcquireTurnstileList ()
 
@@ -169,7 +169,6 @@ FN KiBoostPriority (
     IN owner : ^KeThread,
     IN thread : ^KeThread,
     IN chain : ^KiTurnstileChain,
-    IN ipl : UWORD,
 )
 
     original := owner
@@ -238,7 +237,7 @@ FN KiBoostPriority (
         IF NOT nextowner THEN
             // No next owner, done boosting.
 
-            KiReleaseChain ( chain, ipl )
+            KiReleaseChain ( chain, KI_IPL_APC )
 
             LEAVE
         END
@@ -261,7 +260,7 @@ FN KiBoostPriority (
             // any sense of sanity and need to leave now. The 'nextowner' thread
             // may no longer even exist at all.
 
-            KiReleaseChain ( chain, ipl )
+            KiReleaseChain ( chain, KI_IPL_APC )
 
             LEAVE
         END
@@ -309,14 +308,14 @@ FN KiBlockOnLock (
             // We'll use our thread's turnstile for the IPL at which the lock
             // acquisition has been attempted.
 
-            turnstile = thread^.Turnstiles[oldipl]
+            turnstile = thread^.Turnstile
 
 #IF BLD_CHK
             IF NOT turnstile THEN
-                KeCrash ( "KiBlockOnLock: no turnstile for %u\n", oldipl )
+                KeCrash ( "KiBlockOnLock: no turnstile\n" )
             END
 
-            thread^.Turnstiles[oldipl] = NULLPTR
+            thread^.Turnstile = NULLPTR
 #END
 
             // Initialize it.
@@ -349,13 +348,13 @@ FN KiBlockOnLock (
             // turnstile. We "donate" it like this so that anybody who wakes
             // up can quickly grab one to replace theirs.
 
-            otherturnstile = thread^.Turnstiles[oldipl]
+            otherturnstile = thread^.Turnstile
 
             otherturnstile^.Free = turnstile^.Free
             turnstile^.Free = otherturnstile
 
 #IF BLD_CHK
-            thread^.Turnstiles[oldipl] = NULLPTR
+            thread^.Turnstile = NULLPTR
 #END
 
             BREAK
@@ -370,7 +369,7 @@ FN KiBlockOnLock (
 
     KiReleaseThreadElevated ( thread )
 
-    KiReleaseChain ( chain, ipl )
+    KiReleaseChain ( chain, KI_IPL_APC )
 
     // Set that there are waiters now. This will cause releasing threads to
     // signal the turnstile event.
@@ -394,22 +393,22 @@ FN KiBlockOnLock (
         GOTO UnreferenceAndLeave
     END
 
+    owner : ^KeThread
+
     IF current & KI_LOCK_WRITE_LOCKED THEN
-        ipl = KiAcquireChain ( chain )
+        KiAcquireChain ( chain )
 
         IF turnstile^.Awoken THEN
             // Owner no longer valid.
 
-            KiReleaseChain ( chain, ipl )
-
-            GOTO UnreferenceAndLeave
+            GOTO UnreferenceAndLeaveChainHeld
         END
 
         // At this point we know exactly who owns this lock and we know they
         // haven't fully left the lock yet, which means its safe to apply
         // priority inheritance to them.
 
-        owner := turnstile^.Owner
+        owner = turnstile^.Owner
 
         IF NOT owner THEN
             owner = CAST current & KI_LOCK_BITS TO ^KeThread
@@ -421,7 +420,7 @@ FN KiBlockOnLock (
             // The owner exists and is currently running on another processor.
             // Spin for a while to see if we can get the lock without blocking.
 
-            KiReleaseChain ( chain, ipl )
+            KiReleaseChain ( chain, KI_IPL_APC )
 
             i := KI_SPIN_CYCLES
 
@@ -439,14 +438,12 @@ FN KiBlockOnLock (
                 i -= 1
             END
 
-            ipl = KiAcquireChain ( chain )
+            KiAcquireChain ( chain )
 
             IF turnstile^.Awoken THEN
                 // Owner no longer valid.
 
-                KiReleaseChain ( chain, ipl )
-
-                GOTO UnreferenceAndLeave
+                GOTO UnreferenceAndLeaveChainHeld
             END
         END
 #END
@@ -477,28 +474,42 @@ FN KiBlockOnLock (
                 owner, // owner
                 thread, // thread
                 chain, // chain
-                ipl, // ipl
             )
 
         ELSE
             KiReleaseThreadElevated ( owner )
 
-            KiReleaseChain ( chain, ipl )
+            KiReleaseChain ( chain, KI_IPL_APC )
         END
     END
 
     // Wait on the turnstile event.
+    // This wait can be cancelled if a kernel APC arrives, but the kernel APC
+    // will not be delivered since we're at KI_IPL_APC. This allows us to
+    // clean up our usage of our turnstile, which lets the APC grab turnstile-
+    // -backed locks once it is actually delivered when we lower IPL.
+
+    alertable := KE_CANCEL_ON_KAPC
+
+    IF oldipl == KI_IPL_APC THEN
+        // The lock was acquired at KI_IPL_APC so we shouldn't cancel upon
+        // receiving a kernel APC.
+
+        alertable = KE_UNALERTABLE
+    END
 
     KeWaitForSingleObject (
         KE_KERNEL_MODE, // waitmode
-        FALSE, // alertable
+        alertable, // alertable
         NULLPTR, // timeout
         &turnstile^.Event.Header, // object
     )
 
 @UnreferenceAndLeave
 
-    ipl = KiAcquireChain ( chain )
+    KiAcquireChain ( chain )
+
+@UnreferenceAndLeaveChainHeld
 
     KiAcquireThreadElevated ( thread )
 
@@ -507,10 +518,33 @@ FN KiBlockOnLock (
     KiReleaseThreadElevated ( thread )
 
 #IF BLD_CHK
-    IF thread^.Turnstiles[oldipl] != NULLPTR THEN
+    IF thread^.Turnstile != NULLPTR THEN
         KeCrash ( "KiBlockOnLock: magically got a turnstile back\n" )
     END
 #END
+
+    IF turnstile^.BoostingThread == thread THEN
+        // We're boosting the turnstile, so unboost it.
+        // This can happen if the wait was cancelled by the arrival of a kernel
+        // APC. We will retry the lock and re-apply our boost after the APC is
+        // delivered.
+
+        owner = turnstile^.Owner
+
+#IF BLD_CHK
+        IF NOT owner THEN
+            KeCrash ( "KiBlockOnLock: boosted but not owned\n" )
+        END
+#END
+
+        KiAcquireThreadElevated ( owner )
+
+        turnstile^.BoostingThread = NULLPTR
+
+        RtlRemoveEntryList ( &turnstile^.PiEntry )
+
+        KiReleaseThreadElevated ( owner )
+    END
 
     IF turnstile^.Free THEN
         // Take a turnstile from the free list.
@@ -518,12 +552,12 @@ FN KiBlockOnLock (
         otherturnstile = turnstile^.Free
         turnstile^.Free = otherturnstile^.Free
 
-        thread^.Turnstiles[oldipl] = otherturnstile
+        thread^.Turnstile = otherturnstile
 
     ELSE
         // Steal the turnstile itself.
 
-        thread^.Turnstiles[oldipl] = turnstile
+        thread^.Turnstile = turnstile
 
         IF NOT turnstile^.Awoken THEN
             // It wasn't signaled, which means its still on the chain.

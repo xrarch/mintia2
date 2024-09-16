@@ -550,10 +550,10 @@ STRUCT KeThread
     LapcListHead : RtlListEntry,
     UapcListHead : RtlListEntry,
 
-    Turnstiles : ^KiTurnstile[2],
+    Turnstile : ^KiTurnstile,
+    BlockedOnTurnstile : ^KiTurnstile,
 
     PiTurnstileListHead : RtlListEntry,
-    BlockedOnTurnstile : ^KiTurnstile,
 
     UserTimeMs : RtlUquad,
     DpcTimeMs : RtlUquad,
@@ -651,6 +651,10 @@ EXTERN FN KeConvertLockToShared (
 EXTERN FN KeTryConvertLockToExclusive (
     IN lock : ^KeLock,
 ) : UWORD
+
+#DEFINE KE_UNALERTABLE 0
+#DEFINE KE_ALERTABLE 1
+#DEFINE KE_CANCEL_ON_KAPC 2
 
 EXTERN FN KeWaitForObjects (
     IN waitmode : UWORD,

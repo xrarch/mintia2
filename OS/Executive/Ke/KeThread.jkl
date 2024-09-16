@@ -61,7 +61,7 @@ FN (KeApcF) KiSuspendThreadApc (
 
     KeWaitForSingleObject (
         KE_KERNEL_MODE, // waitmode
-        FALSE, // alertable
+        KE_UNALERTABLE, // alertable
         NULLPTR, // timeout
         &thread^.SuspendHeader, // object
     )
@@ -183,12 +183,11 @@ FN KeInitializeThread (
 
     // Initialize turnstiles.
 
-    thread^.Turnstiles[KI_IPL_LOW] = KeAllocateTurnstile ()
-    thread^.Turnstiles[KI_IPL_APC] = KeAllocateTurnstile ()
-
-    RtlInitializeList ( &thread^.PiTurnstileListHead )
+    thread^.Turnstile = KeAllocateTurnstile ()
 
     thread^.BlockedOnTurnstile = NULLPTR
+
+    RtlInitializeList ( &thread^.PiTurnstileListHead )
 
     // Initialize the timer.
 
@@ -481,7 +480,7 @@ FN KiWakeThreadForSignal (
 
                 status = OS_STATUS_KILLED
 
-            ELSEIF thread^.Alertable AND
+            ELSEIF thread^.Alertable == KE_ALERTABLE AND
                 thread^.SignalMask & thread^.SignalAcceptMask THEN
 
                 // This is a usermode alertable wait and there are pending
@@ -494,7 +493,7 @@ FN KiWakeThreadForSignal (
                 thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
             END
         
-        ELSEIF thread^.Alertable AND
+        ELSEIF thread^.Alertable == KE_ALERTABLE AND
             thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
 
             // Alertable kernel mode waits are (only) interrupted by
