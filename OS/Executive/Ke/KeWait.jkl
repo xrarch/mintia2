@@ -1,0 +1,1253 @@
+//
+// Implements waiting for threads for the MINTIA Kernel.
+//
+
+#INCLUDE "Ki.hjk"
+
+#INCLUDE "<ll>/System/OsStatus.hjk"
+#INCLUDE "<ll>/System/OsSignal.hjk"
+
+#IF BLD_MP
+
+#MACRO KiSetWaitAttempt ( thread, state ) [
+    NOTHING (thread)^.WaitAttempt = (state)
+]
+
+#ELSE
+
+#MACRO KiSetWaitAttempt ( thread, state ) []
+
+#END
+
+#MACRO KiDequeueWaitBlock ( waitblock ) [
+    object := (waitblock)^.Object
+
+    // Acquire the object lock.
+
+    KiAcquireObjectElevated ( object )
+
+    IF (waitblock)^.Flags & KI_WB_DEQUEUED == 0 THEN
+        // Remove the wait block.
+
+        RtlRemoveEntryList ( &(waitblock)^.Entry )
+
+        // Decrement waiter count, since this wait block wasn't
+        // satisfied yet.
+
+#IF BLD_CHK
+        IF object^.WaiterCount == 0 THEN
+            KeCrash ( "Waiter count underflow\n" )
+        END
+#END
+
+        object^.WaiterCount -= 1
+    END
+
+    // Release the object lock.
+
+    KiReleaseObjectElevated ( object )
+]
+
+#MACRO KiIndicateActive ( thread, queue ) [
+    // If we're associated with a balanced queue, we have to indicate that we've
+    // awoken.
+
+    IF queue THEN
+        // Indicate that we're active again.
+
+        KiAcquireQueueRemovalElevated ( queue )
+
+#IF BLD_MP
+        IF (thread)^.BalancedQueue THEN
+#END
+            KiAcquireObjectElevated ( &queue^.Header )
+
+            queue^.ActiveThreadCount += 1
+
+            KiReleaseObjectElevated ( &queue^.Header )
+#IF BLD_MP
+        END
+#END
+
+        KiReleaseQueueRemovalElevated ( queue )
+    END
+]
+
+#MACRO KiIndicateDeactivated ( thread, queue ) [
+    // If we're associated with a balanced queue, we have to indicate that we're
+    // blocking.
+
+    IF queue THEN
+        // Indicate that we're active again.
+
+        KiAcquireQueueRemovalElevated ( queue )
+
+#IF BLD_MP
+        IF (thread)^.BalancedQueue THEN
+#END
+            KiAcquireObjectElevated ( &queue^.Header )
+
+            KiWakeBalancedQueue ( queue )
+
+            KiReleaseObjectElevated ( &queue^.Header )
+#IF BLD_MP
+        END
+#END
+
+        KiReleaseQueueRemovalElevated ( queue )
+    END
+]
+
+FN KiWaitThread (
+    IN thread : ^KeThread,
+    IN hastimeout : UWORD,
+) : OsStatus
+
+    // This function is entered with the thread lock held (IPLDPC).
+
+    prb := KI_CURRENT_PRB
+
+#IF BLD_CHK
+    IF thread == &prb^.IdleThread THEN
+        KeCrash ( "KiWaitThread: idle wait\n" )
+    END
+#END
+
+    // Set the thread status to WAITING.
+
+    thread^.Status = KI_THREAD_WAITING
+
+    // Store tick we slept on.
+
+    thread^.StateMs = KiLowTick ()
+
+    // Yield.
+
+    KiYield (
+        thread, // current
+        prb, // prb
+    )
+
+    // We're back! Thread lock is dropped, but we're still at KI_IPL_DPC.
+
+    // All of our wait blocks have been marked UNWAITED, but may not have been
+    // dequeued, so we have to do that now.
+
+    waitblock := thread^.WaitBlockTable
+    count := thread^.WaitCount
+
+    WHILE count DO
+        KiDequeueWaitBlock ( waitblock )
+
+        count -= 1
+        waitblock += SIZEOF KiWaitBlock
+    END
+
+    IF hastimeout THEN
+        waitblock = &thread^.TimeoutWaitBlock
+
+        // Remove the timer wait block.
+
+        KiDequeueWaitBlock ( waitblock )
+
+        // Cancel the timer.
+
+        KeDequeueTimer ( &thread^.Timeout )
+    END
+
+    queue := thread^.BalancedQueue
+
+    // If we're associated with a balanced queue, we have to indicate that we're
+    // awake now.
+
+    KiIndicateActive ( thread, queue )
+
+    // If we were placed on a list of kernel stack outswap candidates, remove
+    // ourselves.
+
+    KiRemoveSwapCandidateList ( thread )
+
+    // Return the status.
+
+    RETURN thread^.WaitStatus
+END
+
+FN KiUnwaitThread (
+    IN thread : ^KeThread,
+    IN status : OsStatus,
+    IN priorityboost : UWORD,
+)
+
+    // Unwait the thread with the given status.
+    // An object lock may be held. The thread lock is held.
+    // If we're here, the thread was definitely waiting - it was either in
+    // KI_THREAD_WAITING state, or KI_THREAD_RUNNING and WAIT_TRY. This means
+    // that its wait block table is valid and full of initialized wait blocks.
+
+#IF BLD_CHK
+    IF thread^.Status != KI_THREAD_WAITING
+#IF BLD_MP
+        AND (thread^.Status != KI_THREAD_RUNNING OR
+        thread^.WaitAttempt != KI_THREAD_WAIT_TRY)
+#END
+        THEN
+
+        KeCrash ( "KiUnwaitThread: thread wasn't waiting %x %x\n",
+            thread^.Status, thread )        
+    END
+#END
+
+#IF BLD_MP
+    IF thread^.Status == KI_THREAD_RUNNING THEN
+        // Must be in WAIT_TRY. Abort the wait.
+
+        thread^.WaitAttempt = KI_THREAD_WAIT_ABORTED
+    END
+#END
+
+    // Store the wake status in the thread object.
+
+    thread^.WaitStatus = status
+
+    // Set all the thread's wait blocks to UNWAITED.
+    // They'll be dequeued under the lock of each object as they stumble across
+    // them, and will be finally removed by the thread when it wakes up.
+
+    waitblock := thread^.WaitBlockTable
+    count := thread^.WaitCount
+
+    WHILE count DO
+        waitblock^.Flags |= KI_WB_UNWAITED
+
+        count -= 1
+        waitblock += SIZEOF KiWaitBlock
+    END
+
+    // Set the timeout wait block unwaited too. If the timer was enqueued, it'll
+    // be dequeued by the thread when he wakes up or notices he was aborted.
+
+    thread^.TimeoutWaitBlock.Flags |= KI_WB_UNWAITED
+
+    IF thread^.Status == KI_THREAD_WAITING THEN
+        // Replenish the quantum of the thread.
+
+        thread^.RemainingQuantum = KI_DEFAULT_QUANTUM
+
+        IF priorityboost AND thread^.Priority < OS_PRIORITY_LOW_REALTIME THEN
+            // Apply the priority boost to the thread.
+
+            newpri := thread^.BasePriority + priorityboost
+
+            // Don't cross into the real time priority class.
+
+            IF newpri > OS_PRIORITY_HIGH_USER THEN
+                newpri = OS_PRIORITY_HIGH_USER
+            END
+
+            // Only apply the boost if it raises the thread's priority.
+
+            IF newpri > thread^.Priority THEN
+                thread^.Priority = newpri
+            END
+        END
+
+        // Update the ticks the thread has spent sleeping.
+
+        waitedms := thread^.StateMs
+        currentms := KiLowTick ()
+
+        IF waitedms < currentms THEN
+            thread^.SleepMs += (currentms - waitedms) << KI_TICK_SHIFT
+
+            // Update interactivity score.
+
+            KiUpdateInteractivity ( thread )
+        END
+
+        // Ready the thread.
+
+        KiReadyThread ( thread )
+    END
+END
+
+FN KiSatisfyObject (
+    IN object : ^KiDispatchHeader,
+    IN priorityboost : UWORD,
+    IN all : UWORD,
+    IN status : OsStatus,
+) : ^KeThread
+
+    // Satisfy a wait on the object. The object lock is held.
+    // Return a pointer to a satisfied thread object, NULLPTR if none satisfied.
+
+    listhead := &object^.WaitListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        waitblock := CONTAINEROF listentry TO KiWaitBlock.Entry
+
+        thread := waitblock^.Thread
+
+        // Acquire the thread's lock.
+
+        KiAcquireThreadElevated ( thread )
+
+        // Set the wait block dequeued and remove it from our queue.
+
+        waitblock^.Flags |= KI_WB_DEQUEUED
+
+        RtlRemoveEntryList ( &waitblock^.Entry )
+
+        // Decrement our waiter count.
+
+        object^.WaiterCount -= 1
+
+        IF waitblock^.Flags & KI_WB_UNWAITED THEN
+            // This wait block was already unwaited and left on our queue by
+            // someone else. Get the next one and continue.
+
+            KiReleaseThreadElevated ( thread )
+
+            listentry = listentry^.Next
+
+            CONTINUE
+        END
+
+        // Still active. Unwait the thread.
+
+        IF NOT status THEN
+            // Unwait with the status stored in the wait block.
+
+            KiUnwaitThread (
+                waitblock^.Thread, // thread
+                waitblock^.WakeStatus, // status
+                priorityboost, // priorityboost
+            )
+
+        ELSE
+            // Unwait with the specified status.
+
+            KiUnwaitThread (
+                waitblock^.Thread, // thread
+                status, // status
+                priorityboost, // priorityboost
+            )
+        END
+
+        IF NOT all THEN
+            // We got one, so exit.
+
+            KiReleaseThreadElevated ( thread )
+
+            RETURN thread
+        END
+
+        KiReleaseThreadElevated ( thread )
+
+        listentry = listentry^.Next
+    END
+
+    RETURN NULLPTR
+END
+
+#MACRO KiWaitHead ( thread, ipl, alertable, waitmode, waitblocktable, waitcount, starttime, timeout ) [
+
+#IF BLD_CHK
+    IF KiCurrentIpl () >= KI_IPL_DPC THEN
+        KeCrash ( "Attempt to wait at IPL >= KI_IPL_DPC\n" )
+    END
+#END
+
+    // Raise IPL to stop APCs from corrupting our wait state if they come in
+    // and try to wait in our context.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+    // Capture the start time.
+
+    IF timeout THEN
+        KiCaptureCurrentTicks ( starttime )
+    END
+
+    // Clear timeout wait block flags field.
+
+    thread^.TimeoutWaitBlock.Flags = 0
+
+    // Set the wait values in the thread.
+
+    thread^.Alertable = alertable
+    thread^.WaitMode = waitmode
+    thread^.WaitIpl = ipl
+
+    // Store the wait block table in the thread.
+
+    thread^.WaitBlockTable = waitblocktable
+    thread^.WaitCount = waitcount
+
+    // Acquire the thread lock to check for interrupting events.
+
+    KiAcquireThreadElevated ( thread )
+
+    // Before we start, check for events that would interrupt the wait.
+
+    IF ipl == KI_IPL_APC THEN
+        // IPL >= KI_IPL_APC masks out all events, but the caller can request
+        // cancellation upon KAPC reception.
+
+        IF alertable == KE_CANCEL_ON_KAPC AND
+            NOT RtlEmptyList ( &thread^.KapcListHead ) THEN
+
+            // This wait is cancelled when kernel APCs are pending.
+            // This allows consumers to use custom wait cleanup logic (in
+            // particular, the turnstile package).
+
+            KiReleaseThread ( thread, KI_IPL_APC )
+
+            RETURN OS_STATUS_KERNEL_APC
+        END
+
+#IF BLD_MP
+    ELSEIF NOT RtlEmptyList ( &thread^.KapcListHead ) THEN
+        // A KAPC was enqueued between raising IPL and locking our thread, so
+        // dispatch it and retry.
+
+        KiReleaseThread ( thread, KI_IPL_LOW )
+
+        GOTO Retry
+#END
+
+    ELSEIF alertable == KE_UNALERTABLE THEN
+        // Wait was unalertable.
+
+        IF waitmode == KE_USER_MODE AND
+            thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+
+            // Unalertable usermode waits are only interrupted by
+            // termination.
+
+            KiReleaseThread ( thread, KI_IPL_LOW )
+
+            RETURN OS_STATUS_KILLED
+        END
+
+    ELSEIF waitmode == KE_KERNEL_MODE THEN
+        IF NOT thread^.IgnoreEventCount AND
+            thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+
+            // Alertable kernel mode waits are only interrupted by
+            // termination.
+
+            KiReleaseThread ( thread, KI_IPL_LOW )
+
+            RETURN OS_STATUS_KILLED
+        END
+
+    ELSEIF NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
+        // There are pending lazy APCs and this is a usermode wait,
+        // so dispatch them and retry.
+
+        KiReleaseThread ( thread, KI_IPL_LOW )
+
+        KiDispatchLazyApcQueue ( thread )
+
+        GOTO Retry
+
+    ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
+        // There are pending usermode APCs and this is a usermode
+        // wait, so interrupt the wait and cause them to be
+        // dispatched upon return to userspace.
+
+        thread^.UserApcTriggered = TRUE
+        thread^.UserInterrupt = TRUE
+
+        KiReleaseThread ( thread, KI_IPL_LOW )
+
+        RETURN OS_STATUS_USER_APC
+
+    ELSEIF thread^.SignalMask &
+        thread^.SignalAcceptMask &
+        thread^.SignalDeliverOnWaitMask THEN
+
+        // There are pending signals and this is a usermode wait, so
+        // interrupt the wait and cause them to be dispatched upon return
+        // to usermode.
+
+        thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
+        thread^.UserInterrupt = TRUE
+
+        KiReleaseThread ( thread, KI_IPL_LOW )
+
+        RETURN OS_STATUS_SIGNALED
+    END
+
+    // Set the thread to wait-try.
+    //
+    // Note that this wait-try tactic was derived from an explanation given
+    // by Arun Kishan in an interview about how the Windows kernel team
+    // broke up the dispatcher spinlock.
+
+    KiSetWaitAttempt ( thread, KI_THREAD_WAIT_TRY )
+
+    KiReleaseThreadElevated ( thread )
+]
+
+#MACRO KiKernelApcReceived ( timeout, starttime ) [
+    // A kernel APC interrupted the wait, so decrement the timeout based on how
+    // many milliseconds have transpired since the wait began.
+
+    currenttime : RtlUquad
+
+    KiCaptureCurrentTicks ( &currenttime )
+
+    RtlSubUquadFromUquad ( &currenttime, starttime )
+
+    IF RtlUquadLtUquad ( &currenttime, timeout ) THEN
+        RtlSubUquadFromUquad ( timeout, &currenttime )
+
+    ELSE
+        // Timeout already expired.
+
+        RETURN OS_STATUS_WAIT_TIMEOUT
+    END
+]
+
+EXPORT FN KeWaitForObjects (
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+    IN timeout : ^RtlUquad,
+    IN objectcount : UWORD,
+    IN objecttable : ^^KiDispatchHeader,
+    IN waitblocktable : ^KiWaitBlock,
+) : OsStatus
+
+    // Wait for any of multiple objects to enter a signaled state. A timeout
+    // interval in milliseconds can be supplied. If it is NULLPTR, the timeout
+    // is infinite.
+
+#IF BLD_CHK
+    // The following parameters should never be given by executive callers and
+    // should have been rejected by the object manager.
+
+    IF objectcount == 0 THEN
+        KeCrash ( "KeWaitForObjects: objectcount == 0\n" )
+    END
+
+    IF objectcount > 0xFF THEN
+        KeCrash ( "KeWaitForObjects: objectcount > UBYTE size\n" )
+    END
+#END
+
+    thread := KeCurrentThread ()
+
+    IF NOT waitblocktable THEN
+#IF BLD_CHK
+        IF objectcount > KI_THREAD_WAIT_BLOCKS THEN
+            KeCrash ( "objectcount > KI_THREAD_WAIT_BLOCKS\n" )
+        END
+#END
+
+        // Use the integral wait blocks of the thread.
+        // This mechanism exists to remove dependency on allocation.
+
+        waitblocktable = &thread^.WaitBlocks[0]
+    END
+
+    capturedtimeout : RtlUquad
+
+    IF timeout THEN
+        RtlMoveUquad (
+            &capturedtimeout, // dest
+            timeout, // src
+        )
+    END
+
+    // Initialize all of the wait blocks now.
+    // This isn't just to reduce time at KI_IPL_DPC - if we initialize them
+    // while enqueuing wait blocks to the objects, clearing the Flags field
+    // is racey with other processors satisfying object waits.
+
+    i := 0
+    waitblock := &waitblocktable[0]
+
+    WHILE i < objectcount DO
+        waitblock^.Thread = thread
+        waitblock^.Object = objecttable[i]
+        waitblock^.WakeStatus = i
+        waitblock^.Flags = 0
+
+        i += 1
+        waitblock += SIZEOF KiWaitBlock
+    END
+
+@Retry
+
+    // The following function is a macro that can perform an early return.
+    // It puts us in a WAIT_TRY state and raises IPL to KI_IPL_DPC.
+
+    starttime : RtlUquad
+
+    KiWaitHead (
+        thread, // thread
+        ipl, // ipl
+        alertable, // alertable
+        waitmode, // waitmode
+        waitblocktable, // waitblocktable
+        objectcount, // waitcount
+        &starttime, // starttime
+        timeout, // timeout
+    )
+
+    timer : ^KeTimer
+    status : OsStatus
+    object : ^KiDispatchHeader
+
+    waitblock = &waitblocktable[0]
+    i = 0
+
+    WHILE i < objectcount DO
+        object = objecttable[i]
+
+        KiAcquireObjectElevated ( object )
+
+        // Capture the current signal count.
+
+        signal := object^.SignalCount
+
+        IF signal THEN
+            // Already signaled. Our wait has been satisfied before it began.
+            // If this isn't a notification event, consume the count.
+
+            IF object^.Type != KI_DISPATCH_EVENT_NOTIF THEN
+                object^.SignalCount = signal - 1
+            END
+
+            KiReleaseObjectElevated ( object )
+
+            status = i
+
+@Abort
+
+            // Back out of the wait by simply removing our wait blocks from all
+            // of the objects that we enqueued them to.
+            //
+            // Note the label above - on MP we GOTO here if another processor
+            // rudely aborted our wait.
+            //
+            // At this point "i" is equivalent to the maximum object index we
+            // reached before we aborted, and "status" is equivalent to whatever
+            // we should return when we leave.
+            //
+            // Remove our wait blocks from every object we enqueued them to.
+
+            j := 0
+            waitblock = &waitblocktable[0]
+
+            WHILE j < i DO
+                KiDequeueWaitBlock ( waitblock )
+
+                j += 1
+                waitblock += SIZEOF KiWaitBlock
+            END
+
+            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+            KiLowerIpl ( ipl )
+
+            IF status != OS_STATUS_KERNEL_APC THEN
+                RETURN status
+            END
+
+            GOTO KernelApcReceived
+        END
+
+        // Enqueue our wait block to the object.
+
+        RtlInsertAtTailList (
+            &object^.WaitListHead, // head
+            &waitblock^.Entry, // entry
+        )
+
+        // Increment waiter count.
+
+#IF BLD_CHK
+        IF object^.WaiterCount == 0xFFFFFFFF THEN
+            // This shouldn't be possible as it would require 4 billion
+            // concurrently active threads.
+
+            KeCrash ( "Waiter count overflow\n" )
+        END
+#END
+
+        object^.WaiterCount += 1
+
+        // Release the object lock.
+
+        KiReleaseObjectElevated ( object )
+
+        waitblock += SIZEOF KiWaitBlock
+        i += 1
+    END
+
+    IF timeout THEN
+        // Start the timeout.
+        // NOTE: The timer object and the timeout wait block have been
+        //       initialized by KeInitializeThread already.
+
+        waitblock = &thread^.TimeoutWaitBlock
+        timer = &thread^.Timeout
+
+        // Insert the wait block in the timer's list.
+        // This is safe to do without a lock because only we ever mess with
+        // this timer in the context of this thread.
+
+        RtlInsertAtTailList (
+            &timer^.Header.WaitListHead, // head
+            &waitblock^.Entry, // entry
+        )
+
+        timer^.Header.WaiterCount = 1
+
+        // Enqueue the timer.
+
+        KeEnqueueTimer (
+            timer, // timer
+            &capturedtimeout, // interval
+            0, // context1
+            0, // context2
+        )
+    END
+
+    queue := thread^.BalancedQueue
+
+    // If we're associated with a balanced queue, we have to indicate that we
+    // are blocking so that someone else can be awoken. We have to do this
+    // before acquiring the thread lock because of lock ordering.
+
+    KiIndicateDeactivated ( thread, queue )
+
+    // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
+    // insert ourselves on the current processor's outswap candidate list.
+
+    KiInsertSwapCandidateList ( thread, waitmode )
+
+    // Lock our thread.
+
+    KiAcquireThreadElevated ( thread )
+
+#IF BLD_MP
+    // Check if an interrupting event (such as the object being signaled, a user
+    // APC, etc) from another processor aborted our wait while we were enqueuing
+    // wait blocks.
+
+    IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED THEN
+        // It was aborted. We have to dequeue all our wait blocks and return.
+        //
+        // Release the thread lock so we don't violate the object->thread
+        // lock ordering.
+
+        KiReleaseThreadElevated ( thread )
+
+        IF timeout THEN
+            // We need to get rid of the timer.
+
+            waitblock = &thread^.TimeoutWaitBlock
+            timer = &thread^.Timeout
+
+            // Dequeue it.
+
+            KeDequeueTimer ( timer )
+
+            // Remove the wait block.
+            // We don't need the timer's object lock because we've been
+            // nonpreemptible and blocking out the expiration DPC for this
+            // processor since we enqueued it. Therefore it is still in our
+            // custody.
+
+            RtlRemoveEntryList ( &waitblock^.Entry )
+        END
+
+        // If we're associated with a balanced queue, we indicated that we were
+        // deactivated. We have to undo that now.
+
+        KiIndicateActive ( thread, queue )
+
+        // If we were placed on a list of kernel stack outswap candidates, we
+        // have to remove ourselves.
+
+        KiRemoveSwapCandidateList ( thread )
+
+        // The guy who aborted the wait left our status in our thread struct.
+
+        status = thread^.WaitStatus
+
+        GOTO Abort
+    END
+
+    thread^.WaitAttempt = KI_THREAD_WAIT_COMMITTED
+#END
+
+    // The wait shall proceed.
+
+    status = KiWaitThread (
+        thread, // thread
+        timeout, // hastimeout
+    )
+
+    KiLowerIpl ( ipl )
+
+    // KiWaitThread returns with the thread lock released.
+    // All of our wait blocks have been dequeued, timer dequeued, etc.
+
+    IF status != OS_STATUS_KERNEL_APC THEN
+        RETURN status
+    END
+
+@KernelApcReceived
+
+    IF alertable == KE_CANCEL_ON_KAPC THEN
+        RETURN status
+    END
+
+    IF timeout THEN
+        KiKernelApcReceived ( &capturedtimeout, &starttime )
+    END
+
+    GOTO Retry
+END
+
+EXPORT FN KeSleep (
+    IN interval : ^RtlUquad,
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+) : OsStatus
+
+    thread := KeCurrentThread ()
+
+    capturedinterval : RtlUquad
+
+    RtlMoveUquad (
+        &capturedinterval, // destquad
+        interval, // srcquad
+    )
+
+@Retry
+
+    // The following function is a macro that can perform an early return.
+    // It puts us in a WAIT_TRY state and raises IPL to KI_IPL_DPC.
+
+    starttime : RtlUquad
+
+    KiWaitHead (
+        thread, // thread
+        ipl, // ipl
+        alertable, // alertable
+        waitmode, // waitmode
+        NULLPTR, // waitblocktable
+        0, // waitcount
+        &starttime, // starttime
+        interval, // timeout
+    )
+
+    status : OsStatus
+
+    // Start the timeout.
+    // NOTE: The timer object and the timeout wait block have been
+    //       initialized by KeInitializeThread already.
+
+    waitblock := &thread^.TimeoutWaitBlock
+    timer := &thread^.Timeout
+
+    // Insert the wait block in the timer's list.
+    // This is safe to do without a lock because only we ever mess with
+    // this timer in the context of this thread.
+
+    RtlInsertAtTailList (
+        &timer^.Header.WaitListHead, // head
+        &waitblock^.Entry, // entry
+    )
+
+    timer^.Header.WaiterCount = 1
+
+    // Enqueue the timer.
+
+    KeEnqueueTimer (
+        timer, // timer
+        &capturedinterval, // interval
+        0, // context1
+        0, // context2
+    )
+
+    queue := thread^.BalancedQueue
+
+    // If we're associated with a balanced queue, we have to indicate that we
+    // are blocking so that someone else can be awoken. We have to do this
+    // before acquiring the thread lock because of lock ordering.
+
+    KiIndicateDeactivated ( thread, queue )
+
+    // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
+    // insert ourselves on the current processor's outswap candidate list.
+
+    KiInsertSwapCandidateList ( thread, waitmode )
+
+    // Lock our thread.
+
+    KiAcquireThreadElevated ( thread )
+
+#IF BLD_MP
+    // Check if an interrupting event (such as the object being signaled, a user
+    // APC, etc) from another processor aborted our wait while we were enqueuing
+    // wait blocks.
+
+    IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED THEN
+        // It was aborted. We have to dequeue all our wait blocks and return.
+        //
+        // Release the thread lock so we don't violate the object->thread
+        // lock ordering.
+
+        KiReleaseThreadElevated ( thread )
+
+        // We need to get rid of the timer.
+
+        // Dequeue it.
+
+        KeDequeueTimer ( timer )
+
+        // Remove the wait block.
+        // We don't need the timer's object lock because we've been
+        // nonpreemptible and blocking out the expiration DPC for this
+        // processor since we enqueued it. Therefore it is still in our
+        // custody.
+
+        RtlRemoveEntryList ( &waitblock^.Entry )
+
+        // The guy who aborted the wait left our status in our thread struct.
+
+        status = thread^.WaitStatus
+
+        // Set to not waiting.
+
+        KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+        // If we're associated with a balanced queue, we indicated that we were
+        // deactivated. We have to undo that now.
+
+        KiIndicateActive ( thread, queue )
+
+        // If we were placed on a list of kernel stack outswap candidates, we
+        // have to remove ourselves.
+
+        KiRemoveSwapCandidateList ( thread )
+
+        KiLowerIpl ( ipl )
+
+        IF status != OS_STATUS_KERNEL_APC THEN
+            RETURN status
+        END
+
+        GOTO KernelApcReceived
+    END
+
+    thread^.WaitAttempt = KI_THREAD_WAIT_COMMITTED
+#END
+
+    // The wait shall proceed.
+
+    status = KiWaitThread (
+        thread, // thread
+        TRUE, // hastimeout
+    )
+
+    KiLowerIpl ( ipl )
+
+    // KiWaitThread returns with the thread lock released.
+    // All of our wait blocks have been dequeued, timer dequeued, etc.
+
+    IF status != OS_STATUS_KERNEL_APC THEN
+        RETURN status
+    END
+
+@KernelApcReceived
+
+    IF alertable == KE_CANCEL_ON_KAPC THEN
+        RETURN status
+    END
+
+    KiKernelApcReceived ( &capturedinterval, &starttime )
+
+    GOTO Retry
+END
+
+EXPORT FN KeWaitForSingleObject (
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+    IN timeout : ^RtlUquad,
+    IN object : ^KiDispatchHeader,
+) : OsStatus
+
+    // Wait for a single object to enter a signaled state. A timeout
+    // interval in milliseconds can be supplied. If it is NULLPTR, the timeout
+    // is infinite.
+
+    thread := KeCurrentThread ()
+
+    singlewaitblock : KiWaitBlock
+
+    capturedtimeout : RtlUquad
+
+    IF timeout THEN
+        RtlMoveUquad (
+            &capturedtimeout, // dest
+            timeout, // src
+        )
+    END
+
+    // Initialize all of the wait blocks now.
+    // This isn't just to reduce time at KI_IPL_DPC - if we initialize them
+    // while enqueuing wait blocks to the objects, clearing the Flags field
+    // is racey with other processors satisfying object waits.
+
+    singlewaitblock.Thread = thread
+    singlewaitblock.Object = object
+    singlewaitblock.WakeStatus = 0
+    singlewaitblock.Flags = 0
+
+@Retry
+
+    // The following function is a macro that can perform an early return.
+    // It puts us in a WAIT_TRY state and raises IPL to KI_IPL_DPC.
+
+    starttime : RtlUquad
+
+    KiWaitHead (
+        thread, // thread
+        ipl, // ipl
+        alertable, // alertable
+        waitmode, // waitmode
+        &singlewaitblock, // waitblocktable
+        1, // waitcount
+        &starttime, // starttime
+        timeout, // timeout
+    )
+
+    timer : ^KeTimer
+    status : OsStatus
+
+    KiAcquireObjectElevated ( object )
+
+    IF object^.Type != KI_DISPATCH_BALANCED_QUEUE THEN
+        IF object^.SignalCount THEN
+            // Already signaled. Our wait has been satisfied before it began.
+            // If this isn't a notification event, consume the count.
+
+            IF object^.Type != KI_DISPATCH_EVENT_NOTIF THEN
+                object^.SignalCount -= 1
+            END
+
+            KiReleaseObjectElevated ( object )
+
+            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+            KiLowerIpl ( ipl )
+
+            RETURN 0
+        END
+
+    ELSE
+        // This is a balanced queue. If there's a pending item, grab it.
+
+        queue := CONTAINEROF object TO KeBalancedQueue.Header
+
+        IF NOT RtlEmptyList ( &queue^.ItemListHead ) AND
+            queue^.ActiveThreadCount <= queue^.MaximumThreadCount THEN
+
+            // Grab the item.
+
+            item := queue^.ItemListHead.Next
+
+            // Stash it in the thread object.
+
+            thread^.QueueItem = item
+
+            // Remove it from the list.
+
+            RtlRemoveEntryList ( item )
+
+            // Back out and return.
+
+            KiReleaseObjectElevated ( object )
+
+            KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+            KiLowerIpl ( ipl )
+
+            RETURN 0
+        END
+    END
+
+    // Enqueue our wait block to the object.
+
+    RtlInsertAtTailList (
+        &object^.WaitListHead, // head
+        &singlewaitblock.Entry, // entry
+    )
+
+    // Increment waiter count.
+
+#IF BLD_CHK
+    IF object^.WaiterCount == 0xFFFFFFFF THEN
+        // This shouldn't be possible as it would require 4 billion concurrently
+        // active threads.
+
+        KeCrash ( "Waiter count overflow\n" )
+    END
+#END
+
+    object^.WaiterCount += 1
+
+    // Release the object lock.
+
+    KiReleaseObjectElevated ( object )
+
+    waitblock : ^KiWaitBlock
+
+    IF timeout THEN
+        // Start the timeout.
+        // NOTE: The timer object and the timeout wait block have been
+        //       initialized by KeInitializeThread already.
+
+        waitblock = &thread^.TimeoutWaitBlock
+        timer = &thread^.Timeout
+
+        // Insert the wait block in the timer's list.
+        // This is safe to do without a lock because only we ever mess with
+        // this timer in the context of this thread.
+
+        RtlInsertAtTailList (
+            &timer^.Header.WaitListHead, // head
+            &waitblock^.Entry, // entry
+        )
+
+        timer^.Header.WaiterCount = 1
+
+        // Enqueue the timer.
+
+        KeEnqueueTimer (
+            timer, // timer
+            &capturedtimeout, // interval
+            0, // context1
+            0, // context2
+        )
+    END
+
+    queue := thread^.BalancedQueue
+
+    // If we're associated with a balanced queue, we have to indicate that we
+    // are blocking so that someone else can be awoken. We have to do this
+    // before acquiring the thread lock because of lock ordering.
+
+    KiIndicateDeactivated ( thread, queue )
+
+    // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
+    // insert ourselves on the current processor's outswap candidate list.
+
+    KiInsertSwapCandidateList ( thread, waitmode )
+
+    // Lock our thread.
+
+    KiAcquireThreadElevated ( thread )
+
+#IF BLD_MP
+    // Check if an interrupting event (such as the object being signaled, a user
+    // APC, etc) from another processor aborted our wait while we were enqueuing
+    // wait blocks.
+
+    IF thread^.WaitAttempt == KI_THREAD_WAIT_ABORTED THEN
+        // It was aborted. We have to dequeue all our wait blocks and return.
+        //
+        // Release the thread lock so we don't violate the object->thread
+        // lock ordering.
+
+        KiReleaseThreadElevated ( thread )
+
+        IF timeout THEN
+            // We need to get rid of the timer.
+
+            waitblock = &thread^.TimeoutWaitBlock
+            timer = &thread^.Timeout
+
+            // Dequeue it.
+
+            KeDequeueTimer ( timer )
+
+            // Remove the wait block.
+            // We don't need the timer's object lock because we've been
+            // nonpreemptible and blocking out the expiration DPC for this
+            // processor since we enqueued it. Therefore it is still in our
+            // custody.
+
+            RtlRemoveEntryList ( &waitblock^.Entry )
+        END
+
+        // The guy who aborted the wait left our status in our thread struct.
+
+        status = thread^.WaitStatus
+
+        // Dequeue the single wait block.
+
+        KiDequeueWaitBlock ( &singlewaitblock )
+
+        // Set to not waiting.
+
+        KiSetWaitAttempt ( thread, KI_THREAD_WAIT_NONE )
+
+        // If we're associated with a balanced queue, we indicated that we were
+        // deactivated. We have to undo that now.
+
+        KiIndicateActive ( thread, queue )
+
+        // If we were placed on a list of kernel stack outswap candidates, we
+        // have to remove ourselves.
+
+        KiRemoveSwapCandidateList ( thread )
+
+        KiLowerIpl ( ipl )
+
+        IF status != OS_STATUS_KERNEL_APC THEN
+            RETURN status
+        END
+
+        GOTO KernelApcReceived
+    END
+
+    thread^.WaitAttempt = KI_THREAD_WAIT_COMMITTED
+#END
+
+    // The wait shall proceed.
+
+    status = KiWaitThread (
+        thread, // thread
+        timeout, // hastimeout
+    )
+
+    KiLowerIpl ( ipl )
+
+    // KiWaitThread returns with the thread lock released.
+    // All of our wait blocks have been dequeued, timer dequeued, etc.
+
+    IF status != OS_STATUS_KERNEL_APC THEN
+        RETURN status
+    END
+
+@KernelApcReceived
+
+    IF alertable == KE_CANCEL_ON_KAPC THEN
+        RETURN status
+    END
+
+    IF timeout THEN
+        KiKernelApcReceived ( &capturedtimeout, &starttime )
+    END
+
+    GOTO Retry
+END
