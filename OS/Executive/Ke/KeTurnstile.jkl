@@ -489,9 +489,8 @@ FN KiBlockOnLock (
 
     alertable := KE_CANCEL_ON_KAPC
 
-    IF oldipl == KI_IPL_APC THEN
-        // The lock was acquired at KI_IPL_APC so we shouldn't cancel upon
-        // receiving a kernel APC.
+    IF ipl == KI_IPL_APC THEN
+        // The lock is APC-safe so we shouldn't cancel upon receiving a KAPC.
 
         alertable = KE_UNALERTABLE
     END
