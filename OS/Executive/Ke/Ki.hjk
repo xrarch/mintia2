@@ -530,14 +530,13 @@ EXTERN FN KiDisassociateFromBalancedQueue (
 
 EXTERN KiUnexpectedInterruptObject : KeInterrupt
 
-#MACRO KiSoftInterruptSelf ( prb, ipl ) [
-    // This can be used at any IPL, so we must use an atomic OR in case an IPI
-    // comes in.
+EXTERN FN KiSoftInterruptSelfSet (
+    IN prb : ^KiPrb,
+    IN set : UWORD,
+)
 
-    KeOrUlong (
-        &(prb)^.PendingSoftwareInterrupts, // ptr
-        KiPendingIpl ( ipl ), // bitset
-    )
+#MACRO KiSoftInterruptSelf ( prb, ipl ) [
+    KiSoftInterruptSelfSet ( prb, KiPendingIpl ( ipl ) )
 ]
 
 #IF BLD_MP
@@ -850,7 +849,7 @@ EXTERN KiWorkBalanceDpc : KeDpc
 ]
 
 EXTERN FN KiInitializeContext (
-    IN process : ^KeProcess,
+    IN thread : ^KeThread,
     IN kstack : ^VOID,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,

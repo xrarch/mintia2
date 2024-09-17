@@ -257,16 +257,6 @@ FN KiSwitchThread (
     // We're back in the context of the "current" thread. This is always where
     // the hole that the gopher pops back out of is, except in the case of a
     // newly created thread being dispatched for the first time.
-    //
-    // Check for pending Kernel APCs that need to be dispatched. Note that we
-    // don't need to acquire our thread lock for that since the act of checking
-    // (RtlEmptyList) does not touch any pointers.
-
-    IF NOT RtlEmptyList ( &current^.KapcListHead ) THEN
-        prb = KI_CURRENT_PRB
-
-        KiSoftInterruptSelf ( prb, KI_IPL_APC )
-    END
 END
 
 FN KiInsertThread (

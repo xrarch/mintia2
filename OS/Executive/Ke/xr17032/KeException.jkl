@@ -485,6 +485,22 @@ LoadContext:
 
     mov  byte [a0 + KeThread_Status], KI_THREAD_RUNNING
 
+    // If there are any KAPCs pending in the new thread, set int at KI_IPL_APC
+    // pending.
+
+    addi t1, a0, KeThread_KapcListHead
+    mov  t0, long [a0 + (KeThread_KapcListHead + RtlListEntry_Next)]
+    sub  t0, t0, t1
+    beq  t0, .none
+
+    // Trigger.
+
+    subi a0, zero, 4096
+    li   a1, (1 << ((KI_IPL_APC) - 1))
+    jal  KiSoftInterruptSelfSet
+
+.none:
+
     mov  lr, long [sp + OsContext_Lr]
     mov  s0, long [sp + OsContext_S0]
     mov  s1, long [sp + OsContext_S1]
@@ -550,6 +566,34 @@ KiSwitchMapCode:
     ret
 
 KiSwitchMapCodeEnd:
+
+// a0 - prb
+// a1 - set
+KiSoftInterruptSelfSet:
+.global KiSoftInterruptSelfSet
+
+    // Soft interrupt the current processor.
+
+    // Disable interrupts to block out IPIs and other modifying events.
+
+    mfcr a3, rs                     // Load current value of RS.
+    subi t0, zero, 3                // t0 = 0xFFFFFFFD
+    and  t0, a3, t0                 // Mask out the INT bit.
+    mtcr rs, t0                     // Write new RS.
+
+    // OR the set into the pending ints.
+
+    mov  t0, long [a0 + KiPrb_PendingSoftwareInterrupts]
+    or   t0, t0, a1
+    mov  long [a0 + KiPrb_PendingSoftwareInterrupts], t0
+
+    // Restore interrupts.
+
+    mtcr rs, a3
+    
+    // Return.
+
+    ret
 
 KiThreadTrampoline:
 
@@ -730,7 +774,7 @@ FN KiSwitchAddressSpace (
 END
 
 FN KiInitializeContext (
-    IN process : ^KeProcess,
+    IN thread : ^KeThread,
     IN kstack : ^VOID,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,

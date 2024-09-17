@@ -552,6 +552,20 @@ KiJumpIntoThread:
 
     mov.8 [a0 + KeThread_Status], KI_THREAD_RUNNING
 
+    // If there are any KAPCs pending in the new thread, set int at KI_IPL_APC
+    // pending.
+
+    mov  t0, a0
+    add  t0, KeThread_KapcListHead
+    mov  t1, [a0 + (KeThread_KapcListHead + RtlListEntry_Next)]
+    sub  t0, t1
+    ifz  rjmp .none
+
+    mov  a1, (1 << ((KI_IPL_APC) - 1))
+    call KiSoftInterruptSelfSet
+
+.none:
+
     add  sp, 48 // Skip volatile fields
     pop  s0
     pop  s1
@@ -576,6 +590,21 @@ KiJumpIntoThread:
     pop  r31
     pop  fp
     add  sp, 17 // Skip Eflags, BadAddr, Epc, Sp, fp
+
+    ret
+
+// a0 - prb
+// a1 - set
+KiSoftInterruptSelfSet:
+.global KiSoftInterruptSelfSet
+
+    // Soft interrupt the current processor.
+
+    // This is real easy on fox32:
+
+    or   [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)], a1
+    
+    // Return.
 
     ret
 
@@ -856,7 +885,7 @@ FN KiInitializeArchitecture (
 END
 
 FN KiInitializeContext (
-    IN process : ^KeProcess,
+    IN thread : ^KeThread,
     IN kstack : ^VOID,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
