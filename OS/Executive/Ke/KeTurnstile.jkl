@@ -107,7 +107,7 @@ END
 
 KiTurnstileChains : KiTurnstileChain[KI_TURNSTILE_CHAINS]
 
-#DEFINE KI_INITIAL_TURNSTILES 64
+#DEFINE KI_INITIAL_TURNSTILES 128
 
 #DEFINE KI_SPIN_CYCLES 400
 
@@ -211,7 +211,7 @@ FN KiBoostPriority (
     IN owner : ^KeThread,
     IN thread : ^KeThread,
     IN chain : ^KiTurnstileChain,
-) : UWORD
+)
 
     // As required, boost the priority of the thread and all of the threads upon
     // which it depends to make progress. Return TRUE if a retry is needed.
@@ -273,8 +273,14 @@ FN KiBoostPriority (
         //
         // Because the lock ordering issues here are crazy, the way we do this
         // is a little dance where we drop locks and re-check the turnstile.
-        // This can miss boosting people sometimes but only in cases where
-        // they're going to come back around and get boosted again.
+        // This can miss boosting people sometimes but that's fine. Why? Well,
+        // the owner of this lock has clearly woken up if the turnstile vanished
+        // after we released its lock, since turnstile lifetimes only end from
+        // the context of a thread that was blocked on the turnstile. But, we
+        // already boosted it, and it will pass on that boost to any other lock
+        // it blocks on until it releases the lock that we want. So, if the
+        // turnstile vanished, we know our job is done and its safe to just
+        // carry on.
 
         turnstile := owner^.BlockedOnTurnstile
 
@@ -344,7 +350,7 @@ FN KiBoostPriority (
 
             KiReleaseChain ( chain, KI_IPL_APC )
 
-            RETURN TRUE
+            LEAVE
         END
 
         KiAcquireThreadElevated ( nextowner )
@@ -353,6 +359,8 @@ FN KiBoostPriority (
 
 #IF BLD_CHK
         IF owner == original THEN
+            // A cycle in the lock dependency chain indicates deadlock.
+
             KeCrash ( "KiBoostPriority: deadlock\n" )
         END
 #END
@@ -361,8 +369,6 @@ FN KiBoostPriority (
     KiReleaseThreadElevated ( owner )
 
     KiReleaseChain ( chain, KI_IPL_APC )
-
-    RETURN FALSE
 END
 
 FN KiBlockOnLock (
@@ -572,23 +578,17 @@ FN KiBlockOnLock (
         KiAcquireThreadElevated ( owner )
 
         IF owner^.PriorityFloor < thread^.BestowedPriority OR
-            (thread^.BestowedInteractivity AND NOT owner^.InteractivityFloor) THEN
+            (thread^.BestowedInteractivity AND
+            NOT owner^.InteractivityFloor) THEN
 
-            // Raise the priority floor.
+            // Raise the priority floor. Returns with the chain lock and thread
+            // lock released.
 
-            IF KiBoostPriority (
+            KiBoostPriority (
                 owner, // owner
                 thread, // thread
                 chain, // chain
-            ) THEN
-
-                // We lost the plot and went totally insane and off into the
-                // weeds and we got a few screws loose and got off our rocker
-                // while raising priority, so try everything again and hope that
-                // doesn't happen more. Chain and thread lock are not held.
-
-                GOTO UnreferenceAndLeave
-            END
+            )
 
         ELSE
             KiReleaseThreadElevated ( owner )
