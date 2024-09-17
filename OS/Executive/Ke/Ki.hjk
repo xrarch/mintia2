@@ -19,55 +19,10 @@
 #DEFINE KI_IPL_MAX 32
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
-
-// The Prb is mapped in the same location on all processors on XR/17032 via
-// a wired entry in each DTB. This location is -4096 in order to allow the
-// address to be loaded with a single SUBI instruction.
-
-#DEFINE KI_CURRENT_PRB_LOCAL [(CAST 0xFFFFF000 TO ^KiPrb)]
-
-#DEFINE KI_CACHE_ALIGN 16
-
-#DEFINE KI_INITIAL_SPINLOCK 0
-
-#MACRO KiInitializeSpinlock ( spinlock ) [
-    NOTHING (spinlock)^ = 0
-]
-
-#IF BLD_MP
-
-#DEFINE KI_CURRENT_PRB [((CAST 0xFFFFF000 TO ^KiPrb)^.RealVirtual)]
-#DEFINE KI_VIRTUAL_PRB 1
-
-#ELSE
-
-#DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
-#DEFINE KI_VIRTUAL_PRB 0
-
-#END
-
-// This is the per-processor entry in the ASID table attached to each KeProcess
-// object.
-
-STRUCT KiAsidInfoEntry
-    AsidSequenceNumber : RtlUquad,
-    Asid : UWORD,
-END
-
-// The only thing this restricts is the size of some bitmaps, so it can be
-// freely set to the maximum number of processors supported by any platform with
-// this processor.
-
-#DEFINE KI_MAXIMUM_PROCESSORS 8
+    #INCLUDE "xr17032/Ki.hjk"
 
 #ELSEIF ( STRCMP ARCHITECTURE "fox32" )
-
-// Fox32 is always uniprocessor, so the Prb is mapped in a convenient and
-// constant spot with a real page table entry.
-
-#DEFINE KI_CURRENT_PRB_LOCAL [(CAST 0xFFFFF000 TO ^KiPrb)]
-#DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
-#DEFINE KI_VIRTUAL_PRB 0
+    #INCLUDE "fox32/Ki.hjk"
 
 #ELSE
     #ERROR "Unknown architecture\n"
