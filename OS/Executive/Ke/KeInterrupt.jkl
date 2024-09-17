@@ -128,18 +128,6 @@ FN KiClockTick (
 
     RtlAddUlongToUquad ( &prb^.IplTimes[previpl], intervalms )
 
-    // Check if the earliest timer has expired.
-
-    IF RtlUquadGteqUquad ( &prb^.ClockTicks, &prb^.EarliestTimerMs ) THEN
-        // Enqueue the timer expiration DPC.
-
-        KeEnqueueDpc (
-            &prb^.TimerExpirationDpc, // dpc
-            0, // context1
-            0, // context2
-        )
-    END
-
     IF prb^.DpcActive THEN
         // Update time spent executing DPCs on this processor.
 
@@ -176,10 +164,17 @@ FN KiClockTick (
         END
     END
 
+    currentticks : RtlUquad
+
     IF prb^.Id == 0 THEN
         // If we're processor zero, then update the time.
 
         KiUpdateTime ( prb )
+
+        RtlMoveUquad (
+            &currentticks, // dest
+            &prb^.ClockTicks, // src
+        )
 
 #IF BLD_MP
         KiNextWorkBalanceMs -= intervalms
@@ -196,6 +191,21 @@ FN KiClockTick (
             )
         END
 #END
+
+    ELSE
+        KiCaptureCurrentTicks ( &currentticks )
+    END
+
+    // Check if the earliest timer has expired.
+
+    IF RtlUquadGteqUquad ( &currentticks, &prb^.EarliestTimerMs ) THEN
+        // Enqueue the timer expiration DPC.
+
+        KeEnqueueDpc (
+            &prb^.TimerExpirationDpc, // dpc
+            0, // context1
+            0, // context2
+        )
     END
 
     IF thread == &prb^.IdleThread THEN
