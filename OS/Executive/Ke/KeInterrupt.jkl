@@ -166,7 +166,10 @@ FN KiClockTick (
 
     currentticks : RtlUquad
 
+#IF BLD_MP
     IF prb^.Id == 0 THEN
+#END
+
         // If we're processor zero, then update the time.
 
         KiUpdateTime ( prb )
@@ -190,11 +193,11 @@ FN KiClockTick (
                 0, // context2
             )
         END
-#END
 
     ELSE
         KiCaptureCurrentTicks ( &currentticks )
     END
+#END
 
     // Check if the earliest timer has expired.
 
