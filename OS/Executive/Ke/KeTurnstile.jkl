@@ -322,6 +322,13 @@ FN KiBoostPriority (
 
         KiReleaseTurnstileElevated ( turnstile )
 
+#IF BLD_MP
+        // Set Boosted flag so that if he's in the middle of boosting stuff
+        // himself, he knows to retry since his bestowed priority just changed.
+
+        owner^.Boosted = TRUE
+#END
+
         // Capture the turnstile key for comparison.
 
         key := turnstile^.Key
@@ -500,6 +507,7 @@ FN KiBlockOnLock (
     // Capture current priority as the BestowedPriority.
 
     thread^.BestowedPriority = thread^.Priority
+
     thread^.BestowedInteractivity = (thread^.Interactive |
         thread^.InteractivityFloor)
 
@@ -516,6 +524,10 @@ FN KiBlockOnLock (
     )
 
     KiReleaseTurnstileElevated ( turnstile )
+
+#IF BLD_MP
+    thread^.Boosted = FALSE
+#END
 
     KiReleaseThreadElevated ( thread )
 
@@ -620,6 +632,15 @@ FN KiBlockOnLock (
                 thread, // thread
                 chain, // chain
             )
+
+#IF BLD_MP
+            IF thread^.Boosted THEN
+                // At some point, I was boosted, while boosting. Frick! Retry
+                // everything.
+
+                GOTO UnreferenceAndLeave
+            END
+#END
 
         ELSE
             KiReleaseThread ( owner, KI_IPL_APC )
