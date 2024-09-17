@@ -218,6 +218,8 @@ FN KiBoostPriority (
     IN owner : ^KeThread,
     IN thread : ^KeThread,
     IN chain : ^KiTurnstileChain,
+    IN interactive : UWORD,
+    IN priority : UWORD,
 )
 
     // As required, boost the priority of the thread and all of the threads upon
@@ -228,41 +230,61 @@ FN KiBoostPriority (
     WHILE TRUE DO
         // Boost the owner. His lock is held on entry, released on exit.
 
-        boosted := FALSE
+        boost := FALSE
 
-        IF thread^.BestowedInteractivity AND NOT owner^.InteractivityFloor THEN
-            // Raise the interactivity floor.
+        IF owner^.InteractivityFloor OR
+            owner^.PriorityFloor >= OS_PRIORITY_LOW_REALTIME THEN
 
-            owner^.InteractivityFloor = TRUE
+            // This owner goes on the real time queues.
+            // I should only boost him if I do too.
 
-            IF NOT owner^.Interactive THEN
-                // It wasn't interactive and we just raised the floor, so it's
-                // probably in the wrong queue now.
-
-                KiMoveToInteractiveQueueThread ( owner )
+            IF interactive OR priority >= OS_PRIORITY_LOW_REALTIME THEN
+                boost = TRUE
             END
 
-            boosted = TRUE
+        ELSE
+            // This owner goes on the timeshared queues.
+
+            boost = TRUE
         END
 
-        IF owner^.PriorityFloor < thread^.BestowedPriority THEN
-            // Raise the priority floor.
+        IF boost THEN
+            boost = FALSE
 
-            owner^.PriorityFloor = thread^.BestowedPriority
+            IF interactive AND NOT owner^.InteractivityFloor THEN
+                // Raise the interactivity floor.
 
-            IF owner^.Priority < owner^.PriorityFloor THEN
-                // Raise the priority.
+                owner^.InteractivityFloor = TRUE
 
-                KiSetPriorityThread (
-                    owner, // thread
-                    owner^.PriorityFloor, // priority
-                )
+                IF NOT owner^.Interactive THEN
+                    // It wasn't interactive and we just raised the floor, so
+                    // it's probably in the wrong queue now.
+
+                    KiMoveToInteractiveQueueThread ( owner )
+                END
+
+                boost = TRUE
             END
 
-            boosted = TRUE
+            IF owner^.PriorityFloor < priority THEN
+                // Raise the priority floor.
+
+                owner^.PriorityFloor = priority
+
+                IF owner^.Priority < owner^.PriorityFloor THEN
+                    // Raise the priority.
+
+                    KiSetPriorityThread (
+                        owner, // thread
+                        owner^.PriorityFloor, // priority
+                    )
+                END
+
+                boost = TRUE
+            END
         END
 
-        IF NOT boosted THEN
+        IF NOT boost THEN
             // Didn't boost, we're done.
 
             BREAK
@@ -419,8 +441,6 @@ FN KiBlockOnLock (
     turnstile : ^KiTurnstile
     otherturnstile : ^KiTurnstile
 
-    head := &chain^.Head
-
     owner : ^KeThread = NULLPTR
 
     IF current & KI_LOCK_WRITE_LOCKED THEN
@@ -431,10 +451,10 @@ FN KiBlockOnLock (
 
     // Scan the chain for the relevant turnstile.
 
-    listentry := head^.Next
+    listentry := chain^.Head.Next
 
     WHILE TRUE DO
-        IF listentry == head THEN
+        IF listentry == &chain^.Head THEN
             // Reached the end of the chain and didn't find the right turnstile.
             // We'll use our thread's turnstile for the IPL at which the lock
             // acquisition has been attempted.
@@ -462,7 +482,7 @@ FN KiBlockOnLock (
 #END
 
             RtlInsertAtHeadList (
-                head, // head
+                &chain^.Head, // head
                 &turnstile^.ChainEntry, // entry
             )
 
@@ -506,10 +526,15 @@ FN KiBlockOnLock (
 
     // Capture current priority as the BestowedPriority.
 
-    thread^.BestowedPriority = thread^.Priority
+    priority := thread^.Priority
+    thread^.BestowedPriority = priority
 
-    thread^.BestowedInteractivity = (thread^.Interactive |
-        thread^.InteractivityFloor)
+    interactive := (thread^.Interactive | thread^.InteractivityFloor)
+    thread^.BestowedInteractivity = interactive
+
+#IF BLD_MP
+    thread^.Boosted = FALSE
+#END
 
     thread^.BlockedOnTurnstile = turnstile
 
@@ -524,10 +549,6 @@ FN KiBlockOnLock (
     )
 
     KiReleaseTurnstileElevated ( turnstile )
-
-#IF BLD_MP
-    thread^.Boosted = FALSE
-#END
 
     KiReleaseThreadElevated ( thread )
 
@@ -621,9 +642,8 @@ FN KiBlockOnLock (
 
         KiReleaseChainElevated ( chain )
 
-        IF owner^.PriorityFloor < thread^.BestowedPriority OR
-            (thread^.BestowedInteractivity AND
-            NOT owner^.InteractivityFloor) THEN
+        IF owner^.PriorityFloor < priority OR
+            (interactive AND NOT owner^.InteractivityFloor) THEN
 
             // Raise the priority floor. Returns with the thread lock released.
 
@@ -631,6 +651,8 @@ FN KiBlockOnLock (
                 owner, // owner
                 thread, // thread
                 chain, // chain
+                interactive, // interactive
+                priority, // priority
             )
 
 #IF BLD_MP
@@ -653,20 +675,24 @@ FN KiBlockOnLock (
     // clean up our usage of our turnstile, which lets the APC grab turnstile-
     // -backed locks once it is actually delivered when we lower IPL.
 
-    alertable := KE_CANCEL_ON_KAPC
-
     IF ipl == KI_IPL_APC THEN
         // The lock is APC-safe so we shouldn't cancel upon receiving a KAPC.
 
-        alertable = KE_UNALERTABLE
-    END
+        KeWaitForSingleObject (
+            KE_KERNEL_MODE, // waitmode
+            KE_UNALERTABLE, // alertable
+            NULLPTR, // timeout
+            &turnstile^.Event.Header, // object
+        )
 
-    KeWaitForSingleObject (
-        KE_KERNEL_MODE, // waitmode
-        alertable, // alertable
-        NULLPTR, // timeout
-        &turnstile^.Event.Header, // object
-    )
+    ELSE
+        KeWaitForSingleObject (
+            KE_KERNEL_MODE, // waitmode
+            KE_CANCEL_ON_KAPC, // alertable
+            NULLPTR, // timeout
+            &turnstile^.Event.Header, // object
+        )
+    END
 
 @UnreferenceAndLeave
 
