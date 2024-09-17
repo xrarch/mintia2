@@ -36,6 +36,14 @@ KiTurnstileListHead : ^KiTurnstile = NULLPTR
     KiReleaseSpinlock ( &(chain)^.Spinlock )
 ]
 
+#MACRO KiAcquireTurnstileElevated ( turnstile ) [
+    KiAcquireSpinlock ( &(turnstile)^.Spinlock )
+]
+
+#MACRO KiReleaseTurnstileElevated ( turnstile ) [
+    KiReleaseSpinlock ( &(turnstile)^.Spinlock )
+]
+
 KiTurnstileListLock : KiSpinlock = KI_INITIAL_SPINLOCK
 
 #MACRO KiAcquireTurnstileList () [
@@ -59,6 +67,10 @@ KiTurnstileListLock : KiSpinlock = KI_INITIAL_SPINLOCK
 #MACRO KiAcquireChainElevated ( chain ) []
 
 #MACRO KiReleaseChainElevated ( chain ) []
+
+#MACRO KiAcquireTurnstileElevated ( turnstile ) []
+
+#MACRO KiReleaseTurnstileElevated ( turnstile ) []
 
 #MACRO KiAcquireTurnstileList () [
     KiRaiseIpl ( KI_IPL_DPC )
@@ -169,13 +181,16 @@ FN KiBoostPriority (
     IN owner : ^KeThread,
     IN thread : ^KeThread,
     IN chain : ^KiTurnstileChain,
-)
+) : UWORD
+
+    // As required, boost the priority of the thread and all of the threads upon
+    // which it depends to make progress. Return TRUE if a retry is needed.
 
     original := owner
 
     WHILE TRUE DO
-        // Boost the owner. His lock is held on entry, and so is a turnstile chain
-        // lock. Neither of these locks should be held on exit.
+        // Boost the owner. His lock is held on entry, and so is a turnstile
+        // chain lock. Neither of these locks should be held on exit.
 
         IF (thread^.Interactive | thread^.InteractivityFloor) AND
             NOT owner^.InteractivityFloor THEN
@@ -237,7 +252,7 @@ FN KiBoostPriority (
 
             KiReleaseChain ( chain, KI_IPL_APC )
 
-            LEAVE
+            RETURN FALSE
         END
 
         KiReleaseChainElevated ( chain )
@@ -260,7 +275,7 @@ FN KiBoostPriority (
 
             KiReleaseChain ( chain, KI_IPL_APC )
 
-            LEAVE
+            RETURN TRUE
         END
 
         KiAcquireThreadElevated ( nextowner )
@@ -320,14 +335,17 @@ FN KiBlockOnLock (
 
             turnstile^.Key = lock
             turnstile^.Free = NULLPTR
-            turnstile^.BoostingThread = NULLPTR
             turnstile^.Owner = NULLPTR
             turnstile^.Awoken = FALSE
 
+            KiInitializeSpinlock ( &turnstile^.Spinlock )
+
             RtlInsertAtHeadList (
                 head, // head
-                &turnstile^.Entry, // entry
+                &turnstile^.ChainEntry, // entry
             )
+
+            RtlInitializeList ( &turnstile^.WaiterListHead )
 
             KeInitializeEvent (
                 &turnstile^.Event, // event
@@ -339,7 +357,7 @@ FN KiBlockOnLock (
             BREAK
         END
 
-        turnstile = CONTAINEROF listentry TO KiTurnstile.Entry
+        turnstile = CONTAINEROF listentry TO KiTurnstile.ChainEntry
 
         IF turnstile^.Key == lock THEN
             // Found a turnstile. Stash ours on the free list for this
@@ -362,9 +380,16 @@ FN KiBlockOnLock (
     END
 
     KiAcquireThreadElevated ( thread )
+    KiAcquireTurnstileElevated ( turnstile )
 
     thread^.BlockedOnTurnstile = turnstile
 
+    RtlInsertAtHeadList (
+        &turnstile^.WaiterListHead, // head
+        &thread^.TurnstileEntry, // entry
+    )
+
+    KiReleaseTurnstileElevated ( turnstile )
     KiReleaseThreadElevated ( thread )
 
     KiReleaseChain ( chain, KI_IPL_APC )
@@ -410,7 +435,17 @@ FN KiBlockOnLock (
 
         IF NOT owner THEN
             owner = CAST current & KI_LOCK_BITS TO ^KeThread
+
+            KiAcquireThreadElevated ( owner )
+
             turnstile^.Owner = owner
+
+            RtlInsertAtHeadList (
+                &owner^.PiTurnstileListHead, // head
+                &turnstile^.PiEntry, // entry
+            )
+
+            KiReleaseThreadElevated ( owner )
         END
 
 #IF BLD_MP
@@ -456,23 +491,19 @@ FN KiBlockOnLock (
 
             // Raise the priority floor.
 
-            IF NOT turnstile^.BoostingThread THEN
-                // We aren't on a list of boosters for this thread, so add
-                // the turnstile.
-
-                RtlInsertAtHeadList (
-                    &owner^.PiTurnstileListHead, // head
-                    &turnstile^.PiEntry, // entry
-                )
-            END
-
-            turnstile^.BoostingThread = thread
-
-            KiBoostPriority (
+            IF KiBoostPriority (
                 owner, // owner
                 thread, // thread
                 chain, // chain
-            )
+            ) THEN
+
+                // We lost the plot and went totally insane and off into the
+                // weeds and we got a few screws loose and got off our rocker
+                // while raising priority, so try everything again and hope that
+                // doesn't happen more. Chain and thread lock are not held.
+
+                GOTO UnreferenceAndLeave
+            END
 
         ELSE
             KiReleaseThreadElevated ( owner )
@@ -509,9 +540,13 @@ FN KiBlockOnLock (
 @UnreferenceAndLeaveChainHeld
 
     KiAcquireThreadElevated ( thread )
+    KiAcquireTurnstileElevated ( turnstile )
 
     thread^.BlockedOnTurnstile = NULLPTR
 
+    RtlRemoveEntryList ( &thread^.TurnstileEntry )
+
+    KiReleaseTurnstileElevated ( turnstile )
     KiReleaseThreadElevated ( thread )
 
 #IF BLD_CHK
@@ -519,29 +554,6 @@ FN KiBlockOnLock (
         KeCrash ( "KiBlockOnLock: magically got a turnstile back\n" )
     END
 #END
-
-    IF turnstile^.BoostingThread == thread THEN
-        // We're boosting the turnstile, so unboost it.
-        // This can happen if the wait was cancelled by the arrival of a kernel
-        // APC. We will retry the lock and re-apply our boost after the APC is
-        // delivered.
-
-        owner = turnstile^.Owner
-
-#IF BLD_CHK
-        IF NOT owner THEN
-            KeCrash ( "KiBlockOnLock: boosted but not owned\n" )
-        END
-#END
-
-        KiAcquireThreadElevated ( owner )
-
-        turnstile^.BoostingThread = NULLPTR
-
-        RtlRemoveEntryList ( &turnstile^.PiEntry )
-
-        KiReleaseThreadElevated ( owner )
-    END
 
     IF turnstile^.Free THEN
         // Take a turnstile from the free list.
@@ -564,7 +576,17 @@ FN KiBlockOnLock (
             // and no priority inheritance has been applied. Therefore we can
             // just remove the turnstile from the chain here.
 
-            RtlRemoveEntryList ( &turnstile^.Entry )
+            RtlRemoveEntryList ( &turnstile^.ChainEntry )
+
+            owner = turnstile^.Owner
+
+            IF owner THEN
+                KiAcquireThreadElevated ( owner )
+
+                RtlRemoveEntryList ( &turnstile^.PiEntry )
+
+                KiReleaseThreadElevated ( owner )
+            END
         END
     END
 
@@ -574,7 +596,6 @@ FN KiBlockOnLock (
 END
 
 FN KiComputeFloor (
-    IN turnstile : ^KiTurnstile,
     IN thread : ^KeThread,
 )
 
@@ -582,33 +603,38 @@ FN KiComputeFloor (
 
     head := &thread^.PiTurnstileListHead
 
-    KiAcquireThreadElevated ( thread )
+    ipl := KiAcquireThread ( thread )
 
-    // Remove the old turnstile from the list.
-
-    RtlRemoveEntryList ( &turnstile^.PiEntry )
-
-#IF BLD_CHK
-    turnstile^.PiEntry.Next = 0xABABABAB
-    turnstile^.PiEntry.Prev = 0xCDCDCDCD
-#END
-
-    // Scan the list to find the highest priority.
+    // Scan the turnstile list to find the highest priority.
 
     listentry := head^.Next
     floor := 0
     interactivityfloor := FALSE
 
     WHILE listentry != head DO
-        turnstile = CONTAINEROF listentry TO KiTurnstile.PiEntry
+        turnstile := CONTAINEROF listentry TO KiTurnstile.PiEntry
 
-        booster := turnstile^.BoostingThread
+        // Scan the waiter list of the turnstile.
 
-        IF booster^.Priority > floor THEN
-            floor = booster^.Priority
+        thead := &turnstile^.WaiterListHead
+
+        KiAcquireTurnstileElevated ( turnstile )
+
+        tentry := thead^.Next
+
+        WHILE tentry != thead DO
+            booster := CONTAINEROF tentry TO KeThread.TurnstileEntry
+
+            IF booster^.Priority > floor THEN
+                floor = booster^.Priority
+            END
+
+            interactivityfloor |= (booster^.Interactive | booster^.InteractivityFloor)
+
+            tentry = tentry^.Next
         END
 
-        interactivityfloor |= (booster^.Interactive | booster^.InteractivityFloor)
+        KiReleaseTurnstileElevated ( turnstile )
 
         listentry = listentry^.Next
     END
@@ -647,7 +673,7 @@ FN KiComputeFloor (
         END
     END
 
-    KiReleaseThreadElevated ( thread )
+    KiReleaseThread ( thread, ipl )
 END
 
 FN KiWakeLock (
@@ -672,7 +698,7 @@ FN KiWakeLock (
     listentry := head^.Next
 
     WHILE listentry != head DO
-        turnstile = CONTAINEROF listentry TO KiTurnstile.Entry
+        turnstile = CONTAINEROF listentry TO KiTurnstile.ChainEntry
 
         IF turnstile^.Key == lock THEN
             // Found the turnstile.
@@ -690,21 +716,19 @@ FN KiWakeLock (
                 0, // priorityboost
             )
 
-            RtlRemoveEntryList ( &turnstile^.Entry )
+            RtlRemoveEntryList ( &turnstile^.ChainEntry )
 
-            IF turnstile^.BoostingThread THEN
-                // We received a priority boost from this turnstile.
-                // Remove the turnstile and compute what our new priority
-                // floor should be.
+            IF turnstile^.Owner THEN
+                // The turnstile is on our PI list. Remove it.
 
-                KiComputeFloor (
-                    turnstile, // turnstile
-                    thread, // thread
-                )
+                KiAcquireThreadElevated ( thread )
+
+                RtlRemoveEntryList ( &turnstile^.PiEntry )
+
+                KiReleaseThreadElevated ( thread )
             END
 
             turnstile^.Owner = NULLPTR
-            turnstile^.BoostingThread = NULLPTR
             turnstile^.Awoken = TRUE
 
             BREAK
@@ -714,6 +738,13 @@ FN KiWakeLock (
     END
 
     KiReleaseChain ( chain, ipl )
+
+    // Compute the new priority inheritance floor.
+    // We do this unconditionally even if we didn't find a turnstile, or the
+    // turnstile didn't specify an owner, because there are cases where we still
+    // may have received a priority boost from it.
+
+    KiComputeFloor ( thread )
 END
 
 // The following routines deal with the slow path of KeLocks, if the fast path

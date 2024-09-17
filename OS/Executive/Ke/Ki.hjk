@@ -361,9 +361,11 @@ EXTERN FN KiInterruptUsermode (
 EXTERN FN KiInitializeTurnstiles ()
 
 STRUCT KiTurnstile
-    Entry : RtlListEntry,
+    ChainEntry : RtlListEntry,
 
     PiEntry : RtlListEntry,
+
+    WaiterListHead : RtlListEntry,
 
     Free : ^KiTurnstile,
 
@@ -372,7 +374,10 @@ STRUCT KiTurnstile
     Event : KeEvent,
 
     Owner : ^KeThread,
-    BoostingThread : ^KeThread,
+
+#IF BLD_MP
+    Spinlock : KiSpinlock,
+#END
 
     Awoken : UBYTE,
 END
