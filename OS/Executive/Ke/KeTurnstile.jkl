@@ -192,14 +192,21 @@ FN (RtlLessThanF) KiCompareThreads (
     thread1 := CONTAINEROF a TO KeThread.TurnstileEntry
     thread2 := CONTAINEROF b TO KeThread.TurnstileEntry
 
-    IF thread1^.BestowedInteractivity THEN
-        IF thread2^.BestowedInteractivity THEN
+    IF thread1^.BestowedInteractivity OR
+        thread1^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME THEN
+
+        IF thread2^.BestowedInteractivity OR
+            thread2^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME THEN
+
             RETURN thread1^.BestowedPriority > thread2^.BestowedPriority
+
         ELSE
             RETURN TRUE
         END
 
-    ELSEIF thread2^.BestowedInteractivity THEN
+    ELSEIF thread2^.BestowedInteractivity OR
+        thread2^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME THEN
+
         RETURN FALSE
 
     ELSE
@@ -419,7 +426,9 @@ FN KiBlockOnLock (
             turnstile^.Owner = NULLPTR
             turnstile^.Awoken = FALSE
 
+#IF BLD_MP
             KiInitializeSpinlock ( &turnstile^.Spinlock )
+#END
 
             RtlInsertAtHeadList (
                 head, // head
