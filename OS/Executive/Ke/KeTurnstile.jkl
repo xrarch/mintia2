@@ -322,19 +322,13 @@ FN KiBoostPriority (
 
         KiReleaseTurnstileElevated ( turnstile )
 
-        IF NOT turnstile^.Committed THEN
-            // Not yet committed, return.
-
-            BREAK
-        END
-
-        // Capture the owner of the turnstile.
-
-        nextowner := turnstile^.Owner
-
         // Capture the turnstile key for comparison.
 
         key := turnstile^.Key
+
+        // Capture the next owner for comparison.
+
+        nextowner := turnstile^.Owner
 
         KiReleaseThreadElevated ( owner )
 
@@ -352,11 +346,13 @@ FN KiBoostPriority (
         // may no longer even exist at all.
         //
         // Note also, if the keys don't match, this is a lockless access
-        // since the chain lock held is for the incorrect hash chain.
+        // since the chain lock held is for the incorrect hash chain. It's
+        // therefore important to check the key before anything else.
 
         IF turnstile^.Key != key OR
             turnstile^.Owner != nextowner OR
-            turnstile^.Awoken THEN
+            turnstile^.Awoken OR
+            NOT turnstile^.Committed THEN
 
             KiReleaseChain ( chain, KI_IPL_APC )
 
@@ -378,11 +374,11 @@ FN KiBoostPriority (
         // wake a turnstile, to ensure it won't match the above conditional if
         // there's no valid owner thread.
 
-        KiAcquireThreadElevated ( nextowner )
+        owner = nextowner
+
+        KiAcquireThreadElevated ( owner )
 
         KiReleaseChainElevated ( chain )
-
-        owner = nextowner
 
         IF owner == original THEN
             // A cycle in the lock dependency chain could indicate deadlock, but
@@ -557,12 +553,14 @@ FN KiBlockOnLock (
 
         // At this point we know exactly who owns this lock and we know they
         // haven't fully left the lock yet, which means its safe to apply
-        // priority inheritance to them.
+        // priority inheritance to them since they definitely exist and will
+        // continue to do so until we release the chain lock and their thread
+        // lock.
 
         IF NOT turnstile^.Committed THEN
-            KiAcquireThreadElevated ( owner )
-
             turnstile^.Committed = TRUE
+
+            KiAcquireThreadElevated ( owner )
 
             RtlInsertAtHeadList (
                 &owner^.PiTurnstileListHead, // head
