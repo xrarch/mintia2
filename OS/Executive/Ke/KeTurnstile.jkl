@@ -177,6 +177,36 @@ FN KiInitializeTurnstiles ()
     END
 END
 
+FN (RtlLessThanF) KiCompareThreads (
+    IN a : ^RtlHeapEntry,
+    IN b : ^RtlHeapEntry,
+) : UWORD
+
+    // Compare the bestowed priority of two threads for insertion into the
+    // turnstile's maxheap. Since it's a maxheap, we will return whether a>b so
+    // that higher priority threads end up at the root.
+
+    // Interactive threads are always greater than noninteractive threads.
+    // If interactivity is the same, it's determined by the priority.
+
+    thread1 := CONTAINEROF a TO KeThread.TurnstileEntry
+    thread2 := CONTAINEROF b TO KeThread.TurnstileEntry
+
+    IF thread1^.BestowedInteractivity THEN
+        IF thread2^.BestowedInteractivity THEN
+            RETURN thread1^.BestowedPriority > thread2^.BestowedPriority
+        ELSE
+            RETURN TRUE
+        END
+
+    ELSEIF thread2^.BestowedInteractivity THEN
+        RETURN FALSE
+
+    ELSE
+        RETURN thread1^.BestowedPriority > thread2^.BestowedPriority
+    END
+END
+
 FN KiBoostPriority (
     IN owner : ^KeThread,
     IN thread : ^KeThread,
@@ -192,9 +222,9 @@ FN KiBoostPriority (
         // Boost the owner. His lock is held on entry, and so is a turnstile
         // chain lock. Neither of these locks should be held on exit.
 
-        IF (thread^.Interactive | thread^.InteractivityFloor) AND
-            NOT owner^.InteractivityFloor THEN
+        boosted := FALSE
 
+        IF thread^.BestowedInteractivity AND NOT owner^.InteractivityFloor THEN
             // Raise the interactivity floor.
 
             owner^.InteractivityFloor = TRUE
@@ -205,12 +235,14 @@ FN KiBoostPriority (
 
                 KiMoveToInteractiveQueueThread ( owner )
             END
+
+            boosted = TRUE
         END
 
-        IF owner^.PriorityFloor < thread^.Priority THEN
+        IF owner^.PriorityFloor < thread^.BestowedPriority THEN
             // Raise the priority floor.
 
-            owner^.PriorityFloor = thread^.Priority
+            owner^.PriorityFloor = thread^.BestowedPriority
 
             IF owner^.Priority < owner^.PriorityFloor THEN
                 // Raise the priority.
@@ -220,6 +252,14 @@ FN KiBoostPriority (
                     owner^.PriorityFloor, // priority
                 )
             END
+
+            boosted = TRUE
+        END
+
+        IF NOT boosted THEN
+            // Didn't boost, we're done.
+
+            BREAK
         END
 
         // We have to follow the chain of lock owners and boost them all.
@@ -237,23 +277,52 @@ FN KiBoostPriority (
         // they're going to come back around and get boosted again.
 
         turnstile := owner^.BlockedOnTurnstile
-        nextowner : ^KeThread = NULLPTR
-        key := 0
 
-        IF turnstile THEN
-            nextowner = turnstile^.Owner
-            key = turnstile^.Key
+        IF NOT turnstile THEN
+            // Not blocked on a turnstile, return.
+
+            BREAK
+        END
+
+        // Move the waiter in the turnstile's maxheap to reflect a new
+        // bestowed priority.
+
+        KiAcquireTurnstileElevated ( turnstile )
+
+        RtlRemoveFromHeap (
+            &KiCompareThreads, // comparisonfunc
+            &turnstile^.WaiterHeapRoot, // rootptr
+            &owner^.TurnstileEntry, // entry
+        )
+
+        // Set new bestowed.
+
+        owner^.BestowedPriority = owner^.Priority
+        owner^.BestowedInteractivity = owner^.Interactive
+
+        // Re-insert.
+
+        RtlInsertIntoHeap (
+            &KiCompareThreads, // comparisonfunc
+            &turnstile^.WaiterHeapRoot, // rootptr
+            &owner^.TurnstileEntry, // entry
+        )
+
+        KiReleaseTurnstileElevated ( turnstile )
+
+        nextowner := turnstile^.Owner
+
+        IF NOT nextowner THEN
+            // Turnstile has no recorded owner, return.
+
+            BREAK
         END
 
         KiReleaseThreadElevated ( owner )
 
-        IF NOT nextowner THEN
-            // No next owner, done boosting.
+        // Capture the turnstile key for comparison.
 
-            KiReleaseChain ( chain, KI_IPL_APC )
-
-            RETURN FALSE
-        END
+        key := turnstile^.Key
 
         KiReleaseChainElevated ( chain )
 
@@ -288,6 +357,12 @@ FN KiBoostPriority (
         END
 #END
     END
+
+    KiReleaseThreadElevated ( owner )
+
+    KiReleaseChain ( chain, KI_IPL_APC )
+
+    RETURN FALSE
 END
 
 FN KiBlockOnLock (
@@ -345,7 +420,7 @@ FN KiBlockOnLock (
                 &turnstile^.ChainEntry, // entry
             )
 
-            RtlInitializeList ( &turnstile^.WaiterListHead )
+            turnstile^.WaiterHeapRoot = NULLPTR
 
             KeInitializeEvent (
                 &turnstile^.Event, // event
@@ -380,16 +455,27 @@ FN KiBlockOnLock (
     END
 
     KiAcquireThreadElevated ( thread )
-    KiAcquireTurnstileElevated ( turnstile )
+
+    // Capture current priority as the BestowedPriority.
+
+    thread^.BestowedPriority = thread^.Priority
+    thread^.BestowedInteractivity = (thread^.Interactive |
+        thread^.InteractivityFloor)
 
     thread^.BlockedOnTurnstile = turnstile
 
-    RtlInsertAtHeadList (
-        &turnstile^.WaiterListHead, // head
+    // Insert the thread into the turnstile's max heap.
+
+    KiAcquireTurnstileElevated ( turnstile )
+
+    RtlInsertIntoHeap (
+        &KiCompareThreads, // comparisonfunc
+        &turnstile^.WaiterHeapRoot, // rootptr
         &thread^.TurnstileEntry, // entry
     )
 
     KiReleaseTurnstileElevated ( turnstile )
+
     KiReleaseThreadElevated ( thread )
 
     KiReleaseChain ( chain, KI_IPL_APC )
@@ -485,9 +571,8 @@ FN KiBlockOnLock (
 
         KiAcquireThreadElevated ( owner )
 
-        IF owner^.PriorityFloor < thread^.Priority OR
-            ((thread^.Interactive | thread^.InteractivityFloor) AND
-            NOT owner^.InteractivityFloor) THEN
+        IF owner^.PriorityFloor < thread^.BestowedPriority OR
+            (thread^.BestowedInteractivity AND NOT owner^.InteractivityFloor) THEN
 
             // Raise the priority floor.
 
@@ -540,13 +625,21 @@ FN KiBlockOnLock (
 @UnreferenceAndLeaveChainHeld
 
     KiAcquireThreadElevated ( thread )
-    KiAcquireTurnstileElevated ( turnstile )
+
+    // Remove the thread from the turnstile's maxheap.
 
     thread^.BlockedOnTurnstile = NULLPTR
 
-    RtlRemoveEntryList ( &thread^.TurnstileEntry )
+    KiAcquireTurnstileElevated ( turnstile )
+
+    RtlRemoveFromHeap (
+        &KiCompareThreads, // comparisonfunc
+        &turnstile^.WaiterHeapRoot, // rootptr
+        &thread^.TurnstileEntry, // entry
+    )
 
     KiReleaseTurnstileElevated ( turnstile )
+
     KiReleaseThreadElevated ( thread )
 
 #IF BLD_CHK
@@ -614,24 +707,17 @@ FN KiComputeFloor (
     WHILE listentry != head DO
         turnstile := CONTAINEROF listentry TO KiTurnstile.PiEntry
 
-        // Scan the waiter list of the turnstile.
-
-        thead := &turnstile^.WaiterListHead
-
         KiAcquireTurnstileElevated ( turnstile )
 
-        tentry := thead^.Next
+        IF turnstile^.WaiterHeapRoot THEN
+            booster :=
+                CONTAINEROF turnstile^.WaiterHeapRoot TO KeThread.TurnstileEntry
 
-        WHILE tentry != thead DO
-            booster := CONTAINEROF tentry TO KeThread.TurnstileEntry
-
-            IF booster^.Priority > floor THEN
-                floor = booster^.Priority
+            IF booster^.BestowedPriority > floor THEN
+                floor = booster^.BestowedPriority
             END
 
-            interactivityfloor |= (booster^.Interactive | booster^.InteractivityFloor)
-
-            tentry = tentry^.Next
+            interactivityfloor |= booster^.BestowedInteractivity
         END
 
         KiReleaseTurnstileElevated ( turnstile )
