@@ -217,7 +217,6 @@ END
 FN KiBoostPriority (
     IN owner : ^KeThread,
     IN thread : ^KeThread,
-    IN chain : ^KiTurnstileChain,
     IN interactive : UWORD,
     IN priority : UWORD,
 )
@@ -355,6 +354,14 @@ FN KiBoostPriority (
 
         key := turnstile^.Key
 
+        IF NOT key THEN
+            // If the turnstile was already awoken, don't try doing anything
+            // else with it. If we try to match with this key we will match
+            // invalidated turnstiles, which is not correct.
+
+            BREAK
+        END
+
         // Capture the next owner for comparison.
 
         nextowner := turnstile^.Owner
@@ -366,7 +373,7 @@ FN KiBoostPriority (
         // because turnstiles are "type stable memory"; once a piece of memory
         // has been initialized as a turnstile, it will be a turnstile forever.
 
-        chain = &KiTurnstileChains[KiTurnstileHash(key)]
+        chain := &KiTurnstileChains[KiTurnstileHash(key)]
 
         KiAcquireChainElevated ( chain )
 
@@ -380,7 +387,6 @@ FN KiBoostPriority (
 
         IF turnstile^.Key != key OR
             turnstile^.Owner != nextowner OR
-            turnstile^.Awoken OR
             NOT turnstile^.Committed THEN
 
             KiReleaseChain ( chain, KI_IPL_APC )
@@ -400,8 +406,9 @@ FN KiBoostPriority (
         //
         // The important thing is that this turnstile is a valid, in-use
         // turnstile with an owner, which is why we clear the key when we
-        // wake a turnstile, to ensure it won't match the above conditional if
-        // there's no valid owner thread.
+        // remove a turnstile from the hash chain (such as when waking it or
+        // when backing out of waiting on one), to ensure it won't match the
+        // above conditional if there's no valid owner thread.
 
         owner = nextowner
 
@@ -650,7 +657,6 @@ FN KiBlockOnLock (
             KiBoostPriority (
                 owner, // owner
                 thread, // thread
-                chain, // chain
                 interactive, // interactive
                 priority, // priority
             )
@@ -746,6 +752,11 @@ FN KiBlockOnLock (
             // just remove the turnstile from the chain here.
 
             RtlRemoveEntryList ( &turnstile^.ChainEntry )
+
+            // Invalidate the key so that boosters don't think the owner is
+            // still valid here.
+
+            turnstile^.Key = NULLPTR
 
             IF turnstile^.Committed THEN
                 KiAcquireThreadElevated ( owner )
