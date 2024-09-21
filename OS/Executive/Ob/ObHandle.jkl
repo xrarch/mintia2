@@ -1,0 +1,296 @@
+//
+// Implements handle management for the Object Manager.
+//
+
+#INCLUDE "Obp.hjk"
+
+#SECTION "PAGEtext"
+FN ObInitializeProcess (
+    IN process : ^PsProcess,
+    IN quotablock : ^MiQuotaBlock,
+)
+
+    // Initialize a process such that the object manager will play nice with it.
+
+    handletable := &process^.Paged^.HandleTable
+
+    // Note that entrysizelog = 0 means the size of a handle table entry will be
+    // two pointers, which fits our ObpHandleEntry structure, since the size of
+    // an entry is calculated by (SIZEOF ^VOID * 2) << entrysizelog.
+
+    ExInitializeHandleTable (
+        handletable, // handletable
+        0, // entrysizelog
+        quotablock, // quotablock
+    )
+
+    // Initialize the handle table lock.
+
+    KeInitializeLock ( &process^.Paged^.HandleTableLock )
+END
+
+#SECTION "PAGEtext"
+FN ObInsertObject (
+    IN process : ^PsProcess,
+    IN object : ^VOID,
+    IN access : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+    // Insert an object into the process's handle table.
+    //
+    // A single reference on the object's pointer count should be considered
+    // consumed by this operation, since it will be decremented upon a close,
+    // which can be performed by the user as soon as we release the handle table
+    // lock.
+    //
+    // Any relevant access checks should have already been performed.
+
+    paged := process^.Paged
+
+    handletable := &paged^.HandleTable
+
+    // Acquire the process's handle table lock.
+
+    KeAcquireLockExclusive ( &paged^.HandleTableLock )
+
+    // Create the handle.
+
+    entry : ^ObpHandleEntry
+
+    status := ExCreateHandle (
+        handletable, // handletable
+        OUT handle, // handle
+        OUT entry, // entryptr
+    )
+
+    IF OsError ( status ) THEN
+        KeReleaseLock ( &paged^.HandleTableLock )
+
+        RETURN status
+    END
+
+    // Initialize the handle table entry with the object and the access bits.
+
+    entry^.Object = object
+    entry^.Access = access
+
+    header := ObFindHeader ( object )
+
+    IF header^.Type^.Open THEN
+        // Call the open method of the type.
+
+        status = header^.Type^.Open (
+            process, // process
+            object, // object
+            access, // access
+        )
+
+        IF OsError ( status ) THEN
+            // The type decided not to let us open this object, so back out.
+
+            ExDeleteHandle (
+                handletable, // handletable
+                handle, // handle
+                NULLPTR, // entry
+            )
+
+            KeReleaseLock ( &paged^.HandleTableLock )
+
+            RETURN status
+        END
+    END
+
+    // Increment the handle count of the object.
+
+    KeAcquireLockExclusive ( &header^.Lock )
+
+    header^.U.Used.HandleCount += 1
+
+    KeReleaseLock ( &header^.Lock )
+
+    // Unlock the handle table and return.
+
+    KeReleaseLock ( &paged^.HandleTableLock )
+
+    // Shift the handle value by three bits (multiply by eight) because we want
+    // to be able to stash three bits here.
+
+    handle <<= OS_HANDLE_SHIFT
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN ObCloseObject (
+    IN process : ^PsProcess,
+    IN handle : UWORD,
+) : OsStatus
+
+    // Close a handle in the specified process.
+
+    handle >>= OS_HANDLE_SHIFT
+
+    paged := process^.Paged
+
+    handletable := &paged^.HandleTable
+
+    entry : ObpHandleEntry
+
+    // Lock the handle table.
+
+    KeAcquireLockExclusive ( &paged^.HandleTableLock )
+
+    // Delete the handle.
+
+    IF NOT ExDeleteHandle (
+        handletable, // handletable
+        handle, // handle
+        &entry, // entry
+    ) THEN
+        // No such handle.
+
+        KeReleaseLock ( &paged^.HandleTableLock )
+
+        RETURN OS_STATUS_INVALID_HANDLE
+    END
+
+    // Unlock the handle table.
+
+    KeReleaseLock ( &paged^.HandleTableLock )
+
+    object := entry.Object
+
+    header := ObFindHeader ( object )
+
+    // Decrement the handle count.
+
+    KeAcquireLockExclusive ( &header^.Lock )
+
+    oldcount := header^.U.Used.HandleCount
+    header^.U.Used.HandleCount = oldcount - 1
+
+    IF oldcount == 1 AND
+        header^.Flags & OB_FLAG_PERMANENT == 0 AND
+        header^.NamespaceEntry THEN
+
+        // This was the last handle to a non-permanent object that has a name in
+        // the namespace. Remove the name.
+
+        NsUnlinkObject ( header )
+    END
+
+    KeReleaseLock ( &header^.Lock )
+
+    // Unreference the object.
+
+    ObUnreferenceObject ( object )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN ObReferenceByHandleObject (
+    IN process : ^PsProcess,
+    IN handle : UWORD,
+    IN type : ^ObType,
+    OUT object : ^VOID,
+    OUT access : UWORD,
+) : OsStatus
+
+    // Look up the handle in the process's handle table. Return the
+    // corresponding object.
+
+    handle >>= OS_HANDLE_SHIFT
+
+    paged := process^.Paged
+
+    handletable := &paged^.HandleTable
+
+    // Lock the handle table.
+
+    KeAcquireLockShared ( &paged^.HandleTableLock )
+
+    // Look up the handle.
+
+    entry : ^ObpHandleEntry = ExLookupHandle (
+        handletable, // handletable
+        handle, // handle
+    )
+
+    IF NOT entry THEN
+        // Failed to look up.
+
+        KeReleaseLock ( &paged^.HandleTableLock )
+
+        RETURN OS_STATUS_INVALID_HANDLE
+    END
+
+    object = entry^.Object
+    access = entry^.Access
+
+    IF type AND ObFindHeader ( object )^.Type != type THEN
+        // Wrong type.
+
+        KeReleaseLock ( &paged^.HandleTableLock )
+
+        RETURN OS_STATUS_INVALID_OBJECT_TYPE
+    END
+
+    // Reference the object.
+
+    ObReferenceObject ( object )
+
+    // Release the lock and return the object.
+
+    KeReleaseLock ( &paged^.HandleTableLock )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN ObReferenceByHandle (
+    IN handle : UWORD,
+    IN type : ^ObType,
+    OUT object : ^VOID,
+    OUT access : UWORD,
+) : OsStatus
+
+    // Look up the handle in the current process's handle table. Return the
+    // corresponding object.
+
+    IF handle == OS_CURRENT_PROCESS THEN
+        IF type AND type != &PsProcessType THEN
+            RETURN OS_STATUS_INVALID_OBJECT_TYPE
+        END
+
+        object = PsCurrentProcess ()
+
+        access = OS_ACCESS_ALL
+
+        ObReferenceObject ( object )
+
+        RETURN OS_STATUS_SUCCESS
+
+    ELSEIF handle == OS_CURRENT_THREAD THEN
+        IF type AND type != &PsThreadType THEN
+            RETURN OS_STATUS_INVALID_OBJECT_TYPE
+        END
+
+        object = PsCurrentThread ()
+
+        access = OS_ACCESS_ALL
+
+        ObReferenceObject ( object )
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    RETURN ObReferenceByHandleObject (
+        PsCurrentProcess (), // process
+        handle, // handle
+        type, // type
+        OUT object, // object
+        OUT access, // access
+    )
+END

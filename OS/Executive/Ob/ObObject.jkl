@@ -79,7 +79,7 @@ FN ObCreateObject (
     IF ObFullyNonpagedObjects THEN
         psize = 0
 
-        npsize = SIZEOF ObpHeader +
+        npsize = SIZEOF ObHeader +
             SIZEOF ObpCommonHeader +
             obparams^.BodySize +
             namelen
@@ -87,7 +87,7 @@ FN ObCreateObject (
     ELSEIF obparams^.Type^.IsPaged THEN
         npsize = 0
 
-        psize = SIZEOF ObpHeader +
+        psize = SIZEOF ObHeader +
             SIZEOF ObpCommonHeader +
             obparams^.BodySize +
             namelen
@@ -95,7 +95,7 @@ FN ObCreateObject (
     ELSE
         npsize = obparams^.BodySize + SIZEOF ObpCommonHeader
 
-        psize = SIZEOF ObpHeader + namelen
+        psize = SIZEOF ObHeader + namelen
     END
 
     // Charge pool quota.
@@ -161,22 +161,22 @@ FN ObCreateObject (
         END
     END
 
-    header : ^ObpHeader
+    header : ^ObHeader
     commonheader : ^ObpCommonHeader
 
     IF ObFullyNonpagedObjects THEN
         header = nppart
-        header^.Name = nppart + SIZEOF ObpHeader
-        commonheader = nppart + SIZEOF ObpHeader + namelen
+        header^.Name = nppart + SIZEOF ObHeader
+        commonheader = nppart + SIZEOF ObHeader + namelen
 
     ELSEIF obparams^.Type^.IsPaged THEN
         header = pgpart
-        header^.Name = pgpart + SIZEOF ObpHeader
-        commonheader = pgpart + SIZEOF ObpHeader + namelen
+        header^.Name = pgpart + SIZEOF ObHeader
+        commonheader = pgpart + SIZEOF ObHeader + namelen
 
     ELSE
         header = pgpart
-        header^.Name = pgpart + SIZEOF ObpHeader
+        header^.Name = pgpart + SIZEOF ObHeader
 
         commonheader = nppart
     END
@@ -209,6 +209,10 @@ FN ObCreateObject (
 
     header^.U.Used.PointerCount = 1
     header^.U.Used.HandleCount = 0
+
+    header^.NamespaceEntry = NULLPTR
+
+    KeInitializeLock ( &header^.Lock )
 
     object = commonheader + SIZEOF ObpCommonHeader
 
@@ -249,7 +253,7 @@ FN ObFreeObject (
 
     // Free an object. Don't call the deletion routine.
 
-    header := ObHeader ( object )
+    header := ObFindHeader ( object )
 
     quotablock := header^.QuotaBlock
 
@@ -305,11 +309,117 @@ FN ObDeleteObject (
 
     // Delete an object. Call the deletion routine.
 
-    header := ObHeader ( object )
+    header := ObFindHeader ( object )
 
     IF header^.Type^.Delete THEN
         header^.Type^.Delete ( object )
     END
 
     ObFreeObject ( object )
+END
+
+#SECTION "PAGEtext"
+FN ObReferenceObject (
+    IN object : ^VOID,
+)
+
+    // Reference an object by pointer.
+
+    header := ObFindHeader ( object )
+
+    oldcount := KeIncrementPtr (
+        &header^.U.Used.PointerCount, // ulong
+        1, // inc
+    )
+
+#IF BLD_CHK
+    IF oldcount == 0 THEN
+        KeCrash ( "ObReferenceObject: zero refcount\n" )
+    END
+#END
+
+END
+
+#SECTION "PAGEtext"
+FN ObUnreferenceObject (
+    IN object : ^VOID,
+)
+
+    // Unreference an object by pointer.
+
+    header := ObFindHeader ( object )
+
+    oldcount := KeIncrementPtr (
+        &header^.U.Used.PointerCount, // ulong
+        -1, // inc
+    )
+
+#IF BLD_CHK
+    IF oldcount == 0 THEN
+        KeCrash ( "ObUnreferenceObject: underflow\n" )
+    END
+#END
+
+    IF oldcount == 1 THEN
+        // Delete it.
+
+        IF KeAreApcsDeliverable () THEN
+            // If APCs are deliverable then we aren't in an APC and are not
+            // holding a lock depended upon by APCs, so we can delete this
+            // object inline.
+
+            KeIgnoreEvents ()
+
+            ObDeleteObject ( object )
+
+            KeAcceptEvents ()
+
+            LEAVE
+        END
+
+        // APCs are not deliverable so we're gonna defer this deletion to worker
+        // thread context.
+
+        KeCrash ( "TODO ObUnreferenceObject worker item enqueue\n" )
+    END
+END
+
+#SECTION "PAGEtext"
+FN ObConditionallyReferenceObject (
+    IN object : ^VOID,
+) : UWORD
+
+    // Reference an object only if the pointer count would not increase from
+    // zero. Only the caller can know whether this is safe, for instance, by
+    // holding a lock that the object's deletion routine must take before it
+    // finally frees the object. Returns TRUE if referenced successfully, FALSE
+    // otherwise.
+
+    header := ObFindHeader ( object )
+
+    oldcount := header^.U.Used.PointerCount
+
+    WHILE TRUE DO
+        IF oldcount == 0 THEN
+            // Count is already zero, so it may be undergoing deletion. Not safe
+            // to reference this object.
+
+            RETURN FALSE
+        END
+
+        new := KeCompareSwapPtr (
+            &header^.U.Used.PointerCount, // ptr
+            oldcount + 1, // newvalue
+            oldcount, // expectedvalue
+        )
+
+        IF new == oldcount THEN
+            // Got it. The previous count was nonzero so we know the object is
+            // safe.
+
+            RETURN TRUE
+        END
+
+        oldcount = new
+    END
 END

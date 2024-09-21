@@ -4,6 +4,11 @@
 
 #INCLUDE "<inc>/Ke.hjk"
 #INCLUDE "<inc>/Ex.hjk"
+#INCLUDE "<inc>/Ob.hjk"
+
+EXTERN PsProcessType : ObType
+
+EXTERN PsThreadType : ObType
 
 STRUCT PsPagedProcess
     HandleTable : ExHandleTable,
@@ -20,6 +25,10 @@ STRUCT PsProcess
     Paged : ^PsPagedProcess,
 END
 
+STRUCT PsThread
+    Tcb : KeThread,
+END
+
 EXTERN PsSystemProcess : ^PsProcess
 
 EXTERN PsUexecApcDispatcher : ^VOID
@@ -31,6 +40,10 @@ EXTERN KeIdleProcess : PsProcess
 
 #MACRO PsCurrentProcess () [
     (CONTAINEROF KeCurrentProcess () TO PsProcess.Pcb)
+]
+
+#MACRO PsCurrentThread () [
+    (CONTAINEROF KeCurrentThread () TO PsThread.Tcb )
 ]
 
 #MACRO PsQuotaBlock ( process ) [

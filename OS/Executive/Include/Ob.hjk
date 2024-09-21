@@ -29,6 +29,8 @@ FNPTR ObTypeSetSecurityF (
 
 #DEFINE OB_NAME_MAX 256
 
+#DEFINE OB_FLAG_PERMANENT 1
+
 STRUCT ObType
     Name : ^UBYTE,
 
@@ -59,7 +61,7 @@ UNION ObpHeaderUnion
     Used : ObpHeaderUsed,
 END
 
-STRUCT ObpHeader
+STRUCT ObHeader
     Type : ^ObType,
 
     U : ObpHeaderUnion,
@@ -67,6 +69,10 @@ STRUCT ObpHeader
     QuotaBlock : ^MiQuotaBlock,
 
     Name : ^UBYTE,
+
+    Lock : KeLock,
+
+    NamespaceEntry : ^NsEntry,
 
     Flags : ULONG,
 
@@ -79,7 +85,7 @@ STRUCT ObpHeader
 END
 
 STRUCT ObpCommonHeader
-    Header : ^ObpHeader,
+    Header : ^ObHeader,
 END
 
 STRUCT ObParameters
@@ -93,9 +99,11 @@ STRUCT ObParameters
     PgQuotaBias : ULONG,
 END
 
-#MACRO ObHeader ( object ) [
+#MACRO ObFindHeader ( object ) [
     ((CAST object - SIZEOF ObpCommonHeader TO ^ObpCommonHeader)^.Header)
 ]
+
+EXTERN FN ObInitialize ()
 
 EXTERN FN ObCreateObject (
     IN obparams : ^ObParameters,
@@ -109,3 +117,47 @@ EXTERN FN ObFreeObject (
 EXTERN FN ObDeleteObject (
     IN object : ^VOID,
 )
+
+EXTERN FN ObConditionallyReferenceObject (
+    IN object : ^VOID,
+) : UWORD
+
+EXTERN FN ObUnreferenceObject (
+    IN object : ^VOID,
+)
+
+EXTERN FN ObReferenceObject (
+    IN object : ^VOID,
+)
+
+EXTERN FN ObInitializeProcess (
+    IN process : ^PsProcess,
+    IN quotablock : ^MiQuotaBlock,
+)
+
+EXTERN FN ObInsertObject (
+    IN process : ^PsProcess,
+    IN object : ^VOID,
+    IN access : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+EXTERN FN ObCloseObject (
+    IN process : ^PsProcess,
+    IN handle : UWORD,
+) : OsStatus
+
+EXTERN FN ObReferenceByHandleObject (
+    IN process : ^PsProcess,
+    IN handle : UWORD,
+    IN type : ^ObType,
+    OUT object : ^VOID,
+    OUT access : UWORD,
+) : OsStatus
+
+EXTERN FN ObReferenceByHandle (
+    IN handle : UWORD,
+    IN type : ^ObType,
+    OUT object : ^VOID,
+    OUT access : UWORD,
+) : OsStatus
