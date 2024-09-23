@@ -255,6 +255,17 @@ FN ObFreeObject (
 
     header := ObFindHeader ( object )
 
+#IF BLD_CHK
+    IF header^.NamespaceEntry THEN
+        // Shouldn't be possible because temporary objects are removed from the
+        // namespace when their handle count reaches zero, which happened before
+        // now. Permanent objects have their refcount biased when inserted into
+        // the namespace.
+
+        KeCrash ( "ObFreeObject: has namespace entry\n" )
+    END
+#END
+
     quotablock := header^.QuotaBlock
 
     pquota := header^.PagedQuotaCharge
