@@ -1085,7 +1085,7 @@ FN KiReleaseLock (
 
                 KiWakeLock (
                     lock, // lock
-                    KeCurrentThread (), // owner
+                    CAST current & KI_LOCK_BITS TO ^KeThread, // owner
                 )
             END
 
@@ -1167,13 +1167,6 @@ EXPORT FN KeConvertLockToShared (
         END
 #END
 
-        IF current & KI_LOCK_WAITERS THEN
-            // If there are waiters, don't bother, too hard to deal with this
-            // case.
-
-            LEAVE
-        END
-
         // Try to set held shared with a single owner.
 
         new = KeCompareSwapPtr (
@@ -1184,6 +1177,15 @@ EXPORT FN KeConvertLockToShared (
 
         IF new == current THEN
             // Got it.
+
+            IF current & KI_LOCK_WAITERS THEN
+                // Wake the waiters.
+
+                KiWakeLock (
+                    lock, // lock
+                    CAST current & KI_LOCK_BITS TO ^KeThread, // owner
+                )
+            END
 
             LEAVE
         END
@@ -1217,12 +1219,6 @@ EXPORT FN KeTryConvertLockToExclusive (
             RETURN TRUE
         END
 
-        IF current & KI_LOCK_WAITERS THEN
-            // If there are waiters, don't bother, we will deadlock.
-
-            RETURN FALSE
-        END
-
         IF current & KI_LOCK_BITS != KI_LOCK_SHARE_INC THEN
             // If there are other shared holders, we can't kick them out of the
             // lock, so return failure.
@@ -1240,6 +1236,16 @@ EXPORT FN KeTryConvertLockToExclusive (
 
         IF new == current THEN
             // Got it.
+
+            IF current & KI_LOCK_WAITERS THEN
+                // Wake the waiters, since they're now operating under the
+                // incorrect assumption that the lock is held shared.
+
+                KiWakeLock (
+                    lock, // lock
+                    NULLPTR, // owner
+                )
+            END
 
             RETURN TRUE
         END

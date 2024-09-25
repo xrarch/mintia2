@@ -4,6 +4,37 @@
 
 #INCLUDE "<inc>/Ob.hjk"
 
+#DEFINE NSP_ENTRY_LEAF 1
+#DEFINE NSP_ENTRY_PERMANENT 2
+
+STRUCT NspEntryLeaf
+    LookupEntry : RtlAvlNode,
+
+    ReclaimEntry : RtlListEntry,
+
+    PermanentChildEntry : RtlListEntry,
+
+    Name : ^NspName,
+
+    Object : ^VOID,
+
+    Parent : ^NsEntry,
+
+    Lock : KeLock,
+
+    References : ULONG,
+
+    Flags : UBYTE,
+END
+
+STRUCT NsEntry
+    L : NspEntryLeaf,
+
+    Root : RtlAvlNode,
+
+    PermanentChildListHead : RtlListEntry,
+END
+
 EXTERN FN NsUnlinkObject (
     IN header : ^ObHeader,
 )
