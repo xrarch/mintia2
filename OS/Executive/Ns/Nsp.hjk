@@ -3,4 +3,29 @@
 //
 
 #INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "<inc>/Ke.hjk"
+#INCLUDE "<inc>/Ex.hjk"
+#INCLUDE "<inc>/Mm.hjk"
 #INCLUDE "<inc>/Ns.hjk"
+
+EXTERN FN NspInitializeNames ()
+
+STRUCT NspName
+    Entry : RtlAvlNode,
+
+    References : ULONG,
+
+    BucketIndex : UBYTE,
+END
+
+#MACRO NspNameToString ( name ) [
+    (CAST (name + SIZEOF NspName) TO ^UBYTE)
+]
+
+EXTERN FN NspFindName (
+    IN name : ^UBYTE,
+) : ^NspName
+
+EXTERN FN NspUnreferenceName (
+    IN name : ^NspName,
+)
