@@ -63,7 +63,7 @@ FN MiInitializeChunkSpace (
 
     // Link the chunks through the PTEs.
 
-    pte := MI_PTE_ADDRESS ( base )
+    pte := MiPteAddress ( base )
 
     WHILE entrycount DO
         entry := CAST pte TO ^MiChunkEntry
@@ -88,7 +88,7 @@ FN MiFlushChunkSpace (
     max := chunkspace^.PendingFlushCount
 
     WHILE i < max DO
-        chunk := CAST MI_PTE_ADDRESS ( chunkspace^.PendingFlush[i] )
+        chunk := CAST MiPteAddress ( chunkspace^.PendingFlush[i] )
             TO ^MiChunkEntry
 
         chunk^.Next = chunkspace^.FreeListHead
@@ -152,7 +152,7 @@ FN MiAllocateChunkSpace (
 
     KeReleaseApcLock ( &chunkspace^.Lock, ipl )
 
-    RETURN MI_VIRTUAL_ADDRESS ( chunk )
+    RETURN MiVirtualAddress ( chunk )
 END
 
 FN MiFreeChunkSpace (
@@ -184,7 +184,7 @@ FN MiFreeChunkSpace (
     ELSE
         // Insert directly into the free chunk list.
 
-        chunk := CAST MI_PTE_ADDRESS ( ptr ) TO ^MiChunkEntry
+        chunk := CAST MiPteAddress ( ptr ) TO ^MiChunkEntry
 
         chunk^.Next = chunkspace^.FreeListHead
         chunkspace^.FreeListHead = chunk
@@ -304,7 +304,7 @@ FN MiInitializeSystemVa ()
 
     // Set each processor's quick PTE.
 
-    basepte := MI_PTE_ADDRESS ( MI_DYNAMIC_SPACE + (dsize << RTL_PAGE_SHIFT) )
+    basepte := MiPteAddress ( MI_DYNAMIC_SPACE + (dsize << RTL_PAGE_SHIFT) )
 
     KeSetQuickPtes (
         basepte, // basepte

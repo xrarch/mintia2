@@ -20,8 +20,6 @@ STRUCT NspEntryLeaf
 
     Parent : ^NsEntry,
 
-    Lock : KeLock,
-
     References : ULONG,
 
     Flags : UBYTE,
@@ -30,9 +28,19 @@ END
 STRUCT NsEntry
     L : NspEntryLeaf,
 
-    Root : RtlAvlNode,
+    LookupRoot : RtlAvlNode,
 
     PermanentChildListHead : RtlListEntry,
+END
+
+STRUCT NsHandle
+    Entry : ^NsEntry,
+    Subspace : ^NsSubspace,
+END
+
+STRUCT NsSubspace
+    Root : ^NsEntry,
+    MountedUpon : NsHandle,
 END
 
 EXTERN FN NsUnlinkObject (

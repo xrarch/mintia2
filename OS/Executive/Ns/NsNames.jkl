@@ -8,7 +8,6 @@
 
 STRUCT NspNameBucket
     TreeRoot : RtlAvlNode,
-    Lock : KeLock,
 END
 
 NspNameBuckets : NspNameBucket[NSP_NAME_BUCKETS]
@@ -22,8 +21,6 @@ FN NspInitializeNames ()
 
     WHILE i < NSP_NAME_BUCKETS DO
         RtlInitializeAvl ( &NspNameBuckets[i].TreeRoot )
-
-        KeInitializeLock ( &NspNameBuckets[i].Lock )
 
         i += 1
     END
@@ -76,6 +73,7 @@ FN NspFindName (
 ) : ^NspName
 
     // Find a name in the string internment buckets.
+    // Tree lock should be held exclusively.
 
     node : ^NspName
 
@@ -91,10 +89,6 @@ FN NspFindName (
     // Get the hash bucket.
 
     bucket := &NspNameBuckets[hash & (NSP_NAME_BUCKETS - 1)]
-
-    // Lock the bucket.
-
-    KeAcquireLockExclusive ( &bucket^.Lock )
 
     // Look up the name in the bucket, which is an AVL tree keyed by string and
     // ordered lexicographically.
@@ -119,8 +113,6 @@ FN NspFindName (
             // Found it! Unlock the bucket and return the node.
 
             node^.References += 1
-
-            KeReleaseLock ( &bucket^.Lock )
 
             RETURN node
         END
@@ -152,8 +144,6 @@ FN NspFindName (
     IF NOT node THEN
         // Failed to allocate the name.
 
-        KeReleaseLock ( &bucket^.Lock )
-
         RETURN NULLPTR
     END
 
@@ -178,8 +168,6 @@ FN NspFindName (
 
     // Unlock bucket and return node.
 
-    KeReleaseLock ( &bucket^.Lock )
-
     RETURN node
 END
 
@@ -189,12 +177,9 @@ FN NspUnreferenceName (
 )
 
     // Unreference the name node.
+    // Tree lock should be held exclusively.
 
     bucket := &NspNameBuckets[name^.BucketIndex]
-
-    // Lock the bucket.
-
-    KeAcquireLockExclusive ( &bucket^.Lock )
 
     // Decrement the reference count.
 
@@ -216,8 +201,4 @@ FN NspUnreferenceName (
             'Name', // tag
         )
     END
-
-    // Unlock the bucket.
-
-    KeReleaseLock ( &bucket^.Lock )
 END

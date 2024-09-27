@@ -129,7 +129,7 @@ FN MiFreeExtensionSpace (
 
     // Free the virtual space for the pool extension.
 
-    pte := MI_PTE_ADDRESS ( ext )
+    pte := MiPteAddress ( ext )
 
     // Clear the PTE, makes it more likely we'll see it if a bad pointer within
     // this chunk is used later. Due to the TB it's not 100% though.
@@ -158,7 +158,7 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
     // Free the page frames within this extension and return it to nonpaged
     // space. The space allocator will deal with flushing the TB.
 
-    pte := MI_PTE_ADDRESS ( ptr )
+    pte := MiPteAddress ( ptr )
 
     i := 0
 
@@ -167,7 +167,7 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
 
         MiFreePage (
             &MiSystemPartition, // partition
-            MI_PFN_TO_PFE ( MI_PFN_FROM_PTE ( ptecontents ) ), // pfe
+            MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
         )
 
         pte[i] = MI_INVALID_KERNEL_PTE
@@ -208,7 +208,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
     )
 
     i := 0
-    pte := MI_PTE_ADDRESS ( ptr )
+    pte := MiPteAddress ( ptr )
 
     WHILE i < pages DO
         color := KeIncrementUlong (
@@ -242,7 +242,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
         // Note that no TB entry exists for this page in any CPU if we've been
         // given it by the pool space allocator.
 
-        pte[i] = MI_BUILD_POOL_PTE ( MI_PFE_TO_PFN ( pfe ) )
+        pte[i] = MiBuildPoolPte ( MiPfeToPfn ( pfe ) )
 
         i += 1
     END

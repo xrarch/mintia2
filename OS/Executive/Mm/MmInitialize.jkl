@@ -255,13 +255,13 @@ FN MiReclaimMemory ()
             sys^.FluidPageCount += pages
 
             pfn := desc^.StartPfn
-            pfe := MI_PFN_TO_PFE ( pfn )
+            pfe := MiPfnToPfe ( pfn )
 
             WHILE pages DO
                 pfe^.Type = MI_FREE_PFE_TYPE
 
                 RtlInsertAtTailList (
-                    &sys^.FreeList.Heads[MI_PFN_COLOR(pfn)], // head
+                    &sys^.FreeList.Heads[MiPfnColor(pfn)], // head
                     &pfe^.Entry, // entry
                 )
 
@@ -336,13 +336,13 @@ FN MmInitializeStage1 ()
             sys^.FreeList.Count += pages
 
             pfn := desc^.StartPfn
-            pfe := MI_PFN_TO_PFE ( pfn )
+            pfe := MiPfnToPfe ( pfn )
 
             WHILE pages DO
                 pfe^.Type = MI_FREE_PFE_TYPE
 
                 RtlInsertAtTailList (
-                    &sys^.FreeList.Heads[MI_PFN_COLOR(pfn)], // head
+                    &sys^.FreeList.Heads[MiPfnColor(pfn)], // head
                     &pfe^.Entry, // entry
                 )
 

@@ -44,29 +44,29 @@
 
 TYPE MiPte : ULONG
 
-#MACRO MI_PTE_ADDRESS ( vaddr ) [
+#MACRO MiPteAddress ( vaddr ) [
     (CAST (MI_TABLE_BASE + ((vaddr >> 12) << 2)) TO ^MiPte)
 ]
 
-#MACRO MI_VIRTUAL_ADDRESS ( pteaddr ) [
+#MACRO MiVirtualAddress ( pteaddr ) [
     (CAST ((((pteaddr) - MI_TABLE_BASE) >> 2) << 12) TO ^VOID)
 ]
 
-#MACRO MI_PFN_FROM_PTE ( pte ) [
+#MACRO MiPfnFromPte ( pte ) [
     ((pte) >> 5)
 ]
 
-#MACRO MI_BUILD_POOL_PTE ( pfn ) [
+#MACRO MiBuildPoolPte ( pfn ) [
     (((pfn) << 5) | (MI_PTE_V | MI_PTE_W | MI_PTE_K | MI_PTE_G))
 ]
 
 // We use a fixed TB entry to map the PRB at this address on all processors.
 
-#MACRO MI_IS_ARCHITECTURALLY_VALID ( vaddr ) [
+#MACRO MiIsArchitecturallyValid ( vaddr ) [
     ((vaddr) & 0xFFFFF000 == 0xFFFFF000)
 ]
 
-#MACRO MI_IS_PTE_VALID ( pte ) [
+#MACRO MiIsPteValid ( pte ) [
     ((pte) & MI_PTE_V == 1)
 ]
 
@@ -74,6 +74,6 @@ TYPE MiPte : ULONG
 
 #DEFINE MI_COLOR_COUNT 8
 
-#MACRO MI_PFN_COLOR ( pfn ) [
+#MACRO MiPfnColor ( pfn ) [
     ((pfn) & 7)
 ]

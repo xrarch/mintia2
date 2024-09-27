@@ -8,10 +8,12 @@
 // NT "pushlocks" accomplish similar goals but have a thread-local block stored
 // on the stack of each contending thread. This decentralization makes it easier
 // on cache (each thread can do adaptive spinning in its own stack), but makes
-// it harder to accomplish priority inheritance. Since priority inheritance has
-// been deemed of utmost importance to the robustness of the MINTIA Executive
+// it a little harder to accomplish priority inheritance. Since priority
+// inheritance is of great importance to the robustness of the MINTIA Executive
 // (which is almost completely preemptible aside from the scheduler), the
 // original usage of pushlocks in MINTIA was quickly replaced with turnstiles.
+// An "autoboost"-like mechanism could have been implemented for pushlocks but
+// this would have taken more time than I was willing to spend.
 //
 
 #INCLUDE "Ki.hjk"
@@ -222,7 +224,7 @@ FN KiBoostPriority (
 )
 
     // As required, boost the priority of the thread and all of the threads upon
-    // which it depends to make progress. Return TRUE if a retry is needed.
+    // which it depends to make progress.
 
     original := owner
 
@@ -463,8 +465,7 @@ FN KiBlockOnLock (
     WHILE TRUE DO
         IF listentry == &chain^.Head THEN
             // Reached the end of the chain and didn't find the right turnstile.
-            // We'll use our thread's turnstile for the IPL at which the lock
-            // acquisition has been attempted.
+            // We'll use our thread's turnstile.
 
             turnstile = thread^.Turnstile
 
@@ -681,24 +682,21 @@ FN KiBlockOnLock (
     // clean up our usage of our turnstile, which lets the APC grab turnstile-
     // -backed locks once it is actually delivered when we lower IPL.
 
-    IF ipl == KI_IPL_APC THEN
-        // The lock is APC-safe so we shouldn't cancel upon receiving a KAPC.
+    alertable := KE_UNALERTABLE
 
-        KeWaitForSingleObject (
-            KE_KERNEL_MODE, // waitmode
-            KE_UNALERTABLE, // alertable
-            NULLPTR, // timeout
-            &turnstile^.Event.Header, // object
-        )
+    IF ipl == KI_IPL_LOW THEN
+        // The lock was acquired at LOW IPL, so we should cancel the wait and
+        // clean up if KAPCs arrive.
 
-    ELSE
-        KeWaitForSingleObject (
-            KE_KERNEL_MODE, // waitmode
-            KE_CANCEL_ON_KAPC, // alertable
-            NULLPTR, // timeout
-            &turnstile^.Event.Header, // object
-        )
+        alertable = KE_CANCEL_ON_KAPC
     END
+
+    KeWaitForSingleObject (
+        KE_KERNEL_MODE, // waitmode
+        alertable, // alertable
+        NULLPTR, // timeout
+        &turnstile^.Event.Header, // object
+    )
 
 @UnreferenceAndLeave
 

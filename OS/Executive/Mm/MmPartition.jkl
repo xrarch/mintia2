@@ -208,19 +208,19 @@ FN MiInsertPageIntoList (
 
     // Insert the page into the specified list, into the correct color bucket.
 
-    pfn := MI_PFE_TO_PFN ( pfe )
+    pfn := MiPfeToPfn ( pfe )
 
     list^.Count += 1
 
     IF head THEN
         RtlInsertAtHeadList (
-            &list^.Heads[MI_PFN_COLOR ( pfn )], // head
+            &list^.Heads[MiPfnColor ( pfn )], // head
             &pfe^.Entry, // entry
         )
 
     ELSE
         RtlInsertAtTailList (
-            &list^.Heads[MI_PFN_COLOR ( pfn )], // head
+            &list^.Heads[MiPfnColor ( pfn )], // head
             &pfe^.Entry, // entry
         )
     END
@@ -350,9 +350,9 @@ FN MiAllocatePageFromStandbyList (
         // code.
 
         IF pfe^.Flags & MI_PAGED_POOL_PFE_FLAG == 0 THEN
-            poolpfe := MI_PFN_TO_PFE (
-                MI_PFN_FROM_PTE (
-                    (MI_PTE_ADDRESS ( entry ))^
+            poolpfe := MiPfnToPfe (
+                MiPfnFromPte (
+                    (MiPteAddress ( entry ))^
                 )
             )
 
@@ -479,7 +479,7 @@ FN MiAllocatePage (
     MiReleaseList ( partition, ipl )
 
     IF mustzero THEN
-        KeZeroPage ( MI_PFE_TO_PFN ( pfe ) )
+        KeZeroPage ( MiPfeToPfn ( pfe ) )
     END
 
     RETURN pfe

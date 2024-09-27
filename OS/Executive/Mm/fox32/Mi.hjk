@@ -41,23 +41,23 @@
 
 TYPE MiPte : ULONG
 
-#MACRO MI_PTE_ADDRESS ( vaddr ) [
+#MACRO MiPteAddress ( vaddr ) [
     (CAST (MI_TABLE_BASE + ((vaddr >> 12) << 2)) TO ^MiPte)
 ]
 
-#MACRO MI_VIRTUAL_ADDRESS ( pteaddr ) [
+#MACRO MiVirtualAddress ( pteaddr ) [
     (CAST ((((pteaddr) - MI_TABLE_BASE) >> 2) << 12) TO ^VOID)
 ]
 
-#MACRO MI_IS_PTE_VALID ( pte ) [
+#MACRO MiIsPteValid ( pte ) [
     ((pte) & MI_PTE_V == 1)
 ]
 
-#MACRO MI_PFN_FROM_PTE ( pte ) [
+#MACRO MiPfnFromPte ( pte ) [
     ((pte) >> 12)
 ]
 
-#MACRO MI_BUILD_POOL_PTE ( pfn ) [
+#MACRO MiBuildPoolPte ( pfn ) [
     (((pfn) << 12) | (MI_PTE_V | MI_PTE_W))
 ]
 
@@ -65,4 +65,4 @@ TYPE MiPte : ULONG
 
 #DEFINE MI_COLOR_COUNT 1
 
-#MACRO MI_PFN_COLOR ( pfn ) [ 0 ]
+#MACRO MiPfnColor ( pfn ) [ 0 ]

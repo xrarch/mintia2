@@ -11,7 +11,7 @@ EXPORT FN MmIsVirtualValid (
 #IF ( NOT MI_COMPLETE_TABLE )
     // Some architectures have valid addresses not described by the page table.
 
-    IF MI_IS_ARCHITECTURALLY_VALID ( vaddr ) THEN
+    IF MiIsArchitecturallyValid ( vaddr ) THEN
         RETURN TRUE
     END
 #END
@@ -24,30 +24,30 @@ EXPORT FN MmIsVirtualValid (
     END
 #END
 
-    l1 := MI_PTE_ADDRESS ( vaddr )
-    l2 := MI_PTE_ADDRESS ( l1 )
+    l1 := MiPteAddress ( vaddr )
+    l2 := MiPteAddress ( l1 )
 
 #IF ( >= MI_TABLE_LEVELS 3 )
-    l3 := MI_PTE_ADDRESS ( l2 )
+    l3 := MiPteAddress ( l2 )
 #END
 
 #IF ( >= MI_TABLE_LEVELS 4 )
-    l4 := MI_PTE_ADDRESS ( l3 )
+    l4 := MiPteAddress ( l3 )
 
-    IF NOT ( MI_IS_PTE_VALID ( l4^ ) ) THEN
+    IF NOT ( MiIsPteValid ( l4^ ) ) THEN
         RETURN FALSE
     END
 #END
 
 #IF ( >= MI_TABLE_LEVELS 3 )
-    IF NOT ( MI_IS_PTE_VALID ( l3^ ) ) THEN
+    IF NOT ( MiIsPteValid ( l3^ ) ) THEN
         RETURN FALSE
     END
 #END
 
-    IF NOT ( MI_IS_PTE_VALID ( l2^ ) ) THEN
+    IF NOT ( MiIsPteValid ( l2^ ) ) THEN
         RETURN FALSE
     END
 
-    RETURN MI_IS_PTE_VALID ( l1^ )
+    RETURN MiIsPteValid ( l1^ )
 END

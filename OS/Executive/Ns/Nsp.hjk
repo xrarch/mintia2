@@ -8,6 +8,8 @@
 #INCLUDE "<inc>/Mm.hjk"
 #INCLUDE "<inc>/Ns.hjk"
 
+EXTERN NspTreeLock : KeLock
+
 EXTERN FN NspInitializeNames ()
 
 STRUCT NspName
@@ -29,3 +31,19 @@ EXTERN FN NspFindName (
 EXTERN FN NspUnreferenceName (
     IN name : ^NspName,
 )
+
+#MACRO NspLockTreeExclusive () [
+    KeAcquireLockExclusive ( &NspTreeLock )
+]
+
+#MACRO NspLockTreeShared () [
+    KeAcquireLockShared ( &NspTreeLock )
+]
+
+#MACRO NspTryUpgradeTreeLock () [
+    KeTryConvertLockToExclusive ( &NspTreeLock )
+]
+
+#MACRO NspDowngradeTreeLock () [
+    KeConvertLockToShared ( &NspTreeLock )
+]
