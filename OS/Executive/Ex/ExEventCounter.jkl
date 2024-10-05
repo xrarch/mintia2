@@ -1,0 +1,143 @@
+//
+// Implements event counters, which are little refcounted memory blocks
+// containing event objects.
+//
+
+#INCLUDE "Exp.hjk"
+
+ExpEventCounterList : RtlListEntry
+ExpEventCounterCount := 0
+ExpEventCounterLock : KeLock = KE_INITIAL_LOCK
+
+#DEFINE EXP_EVENT_COUNTER_MAX 32
+
+FN ExpInitializeEventCounters ()
+
+    // Initialize the event counter list.
+
+    RtlInitializeList ( &ExpEventCounterList )
+END
+
+FN ExAllocateEventCounter (
+    IN wait : UWORD,
+) : ^ExEventCounter
+
+    // Allocate an event counter.
+
+    counter : ^ExEventCounter
+
+    // First try to get one off the list.
+
+    ipl := KeAcquireApcLockExclusive ( &ExpEventCounterLock )
+
+    IF NOT RtlEmptyList ( &ExpEventCounterList ) THEN
+        counter = CONTAINEROF ExpEventCounterList.Next TO ExEventCounter.Free
+
+#IF BLD_CHK
+        IF counter^.Used.References != 0 THEN
+            KeCrash ( "ExAllocateEventCounter\n" )
+        END
+#END
+
+        RtlRemoveEntryList ( &counter^.Free )
+
+        ExpEventCounterCount -= 1
+
+        KeReleaseApcLock ( &ExpEventCounterLock, ipl )
+
+        counter^.Used.References = 1
+
+        RETURN counter
+    END
+
+    KeReleaseApcLock ( &ExpEventCounterLock, ipl )
+
+    // Allocate and initialize a new event counter.
+
+    counter = MmAllocatePool (
+        MM_NONPAGED_POOL, // poolindex
+        SIZEOF ExEventCounter, // bytes
+        'EvCn', // tag
+        wait, // wait
+    )
+
+    IF NOT counter THEN
+        RETURN NULLPTR
+    END
+
+    KeInitializeEvent (
+        &counter^.Used.Event, // event
+        "Collision Counter", // name
+        TRUE, // notification
+        FALSE, // signalstate
+    )
+
+    counter^.Used.References = 1
+
+    RETURN counter
+END
+
+FN ExReferenceEventCounter (
+    IN counter : ^ExEventCounter,
+)
+
+    // Increment the refcount of the counter.
+
+    oldcount := KeIncrementUlong (
+        &counter^.Used.References, // ptr
+        1, // inc
+    )
+
+#IF BLD_CHK
+    IF oldcount == 0 THEN
+        KeCrash ( "ExReferenceEventCounter\n" )
+    END
+#END
+
+END
+
+FN ExUnreferenceEventCounter (
+    IN counter : ^ExEventCounter,
+)
+
+    // Decrement the refcount of the counter.
+
+    oldcount := KeIncrementUlong (
+        &counter^.Used.References, // ptr
+        0xFFFFFFFF, // inc
+    )
+
+#IF BLD_CHK
+    IF oldcount == 0 THEN
+        KeCrash ( "ExUnreferenceEventCounter\n" )
+    END
+#END
+
+    IF oldcount == 1 THEN
+        // This was the last user of this event counter. Put it on the list.
+
+        ipl := KeAcquireApcLockExclusive ( &ExpEventCounterLock )
+
+        IF ExpEventCounterCount >= EXP_EVENT_COUNTER_MAX THEN
+            // Nevermind, we have plenty. Just free it now.
+
+            KeReleaseApcLock ( &ExpEventCounterLock, ipl )
+
+            MmFreePool (
+                counter, // ptr
+                'EvCn', // tag
+            )
+
+            LEAVE
+        END
+
+        RtlInsertAtHeadList (
+            &ExpEventCounterList, // head
+            &counter^.Free, // entry
+        )
+
+        ExpEventCounterCount += 1
+
+        KeReleaseApcLock ( &ExpEventCounterLock, ipl )
+    END
+END

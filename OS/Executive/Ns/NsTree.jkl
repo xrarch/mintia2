@@ -6,6 +6,414 @@
 
 PUBLIC NspTreeLock : KeLock
 
+PUBLIC NspRootEntry : NsEntry
+PUBLIC NspRootSubspace : NsSubspace
+
+PUBLIC NspReclaimListHead : RtlListEntry
+PUBLIC NspReclaimCount := 0
+
+PUBLIC NspNegativeListHead : RtlListEntry
+PUBLIC NspNegativeCount := 0
+
+PUBLIC NspReclaimLock : KeLock = KE_INITIAL_LOCK
+
+PUBLIC NspMaximumNegativeEntries := 0
+PUBLIC NspMaximumReclaimableEntries := 0
+
+NspMountList : RtlListEntry
+
+#SECTION "PAGEtext"
+FN NspInitializeEntry (
+    IN entry : ^NsEntry,
+    IN flags : UWORD,
+    IN name : ^UBYTE,
+) : UWORD
+
+    // Initialize an entry. Returns FALSE on failure.
+
+    RtlInitializeAvl ( &entry^.LookupRoot )
+
+    RtlInitializeList ( &entry^.VirtualChildListHead )
+
+    entry^.Name = NspFindName ( name )
+
+    IF NOT entry^.Name THEN
+        RETURN FALSE
+    END
+
+    entry^.Object = NULLPTR
+
+    entry^.References = 1
+
+    entry^.VirtualChildCount = 0
+
+    entry^.Flags = flags
+
+    entry^.Parent = NULLPTR
+
+    entry^.MountedOnCount = 0
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN (RtlAvlLessThanF) NspCompareEntries (
+    IN a : ^RtlAvlNode,
+    IN b : ^RtlAvlNode,
+) : UWORD
+
+    // Return whether A < B, lexicographically.
+
+    str1 := NspNameToString ( (CONTAINEROF a TO NsEntry.LookupEntry)^.Name )
+    str2 := NspNameToString ( (CONTAINEROF b TO NsEntry.LookupEntry)^.Name )
+
+    RETURN CAST RtlCompareString (
+        str1, // str1
+        str2, // str2
+    ) TO WORD < 0
+END
+
+#SECTION "PAGEtext"
+FN NspDeleteEntry (
+    IN entry : ^NsEntry,
+)
+
+    // Delete the entry.
+
+#IF BLD_CHK
+    IF entry^.References == 0 THEN
+        // If it has zero references, it's on one of the reclaimable node lists.
+        // We don't remove it from those here, so that's a bug.
+
+        KeCrash ( "NspDeleteEntry: zero refs\n" )
+    END
+#END
+
+    // First unreference the interned name.
+
+    NspUnreferenceName ( entry^.Name )
+
+    // Unreference the object.
+
+    IF entry^.Object THEN
+        ObUnreferenceObject ( entry^.Object )
+    END
+
+    // Now delete the entry itself.
+
+    MmFreePool (
+        entry, // ptr
+        'NsEn', // tag
+    )
+END
+
+#SECTION "PAGEtext"
+FN NspReferenceEntry (
+    IN entry : ^NsEntry,
+)
+
+    // Reference the supplied entry. Tree lock must be held at least shared.
+
+    KeAcquireLockExclusive ( &NspReclaimLock )
+
+    oldcount := entry^.References
+    entry^.References = oldcount + 1
+
+    IF oldcount == 0 THEN
+        // Refcount incremented from zero.
+        // Remove from the reclaim list. Note that this could be either the
+        // negative list or the normal reclaim list depending if this is a
+        // negative entry or not.
+
+        RtlRemoveEntryList ( &entry^.ReclaimEntry )
+
+        IF entry^.Flags & NS_ENTRY_NEGATIVE THEN
+            NspNegativeCount -= 1
+        ELSE
+            NspReclaimCount -= 1
+        END
+    END
+
+    KeReleaseLock ( &NspReclaimLock )
+END
+
+#SECTION "PAGEtext"
+FN NspUnreferenceEntry (
+    IN entry : ^NsEntry,
+)
+
+    // Unreference the supplied entry. Tree lock must be held at least shared.
+
+    KeAcquireLockExclusive ( &NspReclaimLock )
+
+    oldcount := entry^.References
+    entry^.References = oldcount - 1
+
+    IF oldcount == 1 THEN
+        // Refcount decremented to zero.
+        // Insert into the reclaim list. Note that this could be either the
+        // negative list or the normal reclaim list depending if this is a
+        // negative entry or not.
+
+        IF NOT entry^.Parent THEN
+            // If the entry has no parent, it has been unlinked and this was
+            // the last reference. It should be deleted now.
+
+            KeReleaseLock ( &NspReclaimLock )
+
+            NspDeleteEntry ( entry )
+
+            LEAVE
+        END
+
+        IF entry^.Flags & NS_ENTRY_NEGATIVE THEN
+            NspNegativeCount += 1
+
+            RtlInsertAtTailList (
+                &NspNegativeListHead, // head
+                &entry^.ReclaimEntry, // entry
+            )
+
+            IF NspNegativeCount >= NspMaximumNegativeEntries THEN
+                // Enqueue the work item for trimming the negative entry list.
+
+                KeCrash ( "TODO NspUnreferenceEntry\n" )
+            END
+
+        ELSE
+            NspReclaimCount += 1
+
+            RtlInsertAtTailList (
+                &NspReclaimListHead, // head
+                &entry^.ReclaimEntry, // entry
+            )
+
+            IF NspReclaimCount >= NspMaximumReclaimableEntries THEN
+                // Enqueue the work item for trimming the reclaimable entry
+                // list.
+
+                KeCrash ( "TODO NspUnreferenceEntry\n" )
+            END
+        END
+    END
+
+    KeReleaseLock ( &NspReclaimLock )
+END
+
+#SECTION "PAGEtext"
+FN NspReferenceSubspace (
+    IN subspace : ^NsSubspace,
+)
+
+    // Increment the reference count of the subspace.
+
+    KeIncrementUlong (
+        &subspace^.References, // ptr
+        1, // inc
+    )
+END
+
+#SECTION "PAGEtext"
+FN NspUnreferenceSubspace (
+    IN subspace : ^NsSubspace,
+)
+
+    // Decrement the reference count of the subspace.
+
+    KeIncrementUlong (
+        &subspace^.References, // ptr
+        0xFFFFFFFF, // inc
+    )
+END
+
+#SECTION "PAGEtext"
+FN NspCreateEntry (
+    IN name : ^UBYTE,
+    IN parent : ^NsEntry,
+    IN flags : UWORD,
+) : ^NsEntry
+
+    // Create a new namespace entry and link it as a child of the parent.
+    // Tree lock must be held exclusive.
+
+    entry := CAST MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
+        SIZEOF NsEntry, // bytes
+        'NsEn', // tag
+        TRUE, // wait
+    ) TO ^NsEntry
+
+    IF NOT entry THEN
+        RETURN NULLPTR
+    END
+
+    // Initialize the entry.
+
+    IF NOT NspInitializeEntry (
+        entry, // entry
+        flags, // flags
+        name, // name
+    ) THEN
+
+        // Failed to initialize the entry.
+
+        MmFreePool (
+            entry, // ptr
+            'NsEn', // tag
+        )
+
+        RETURN NULLPTR
+    END
+
+    // Reference the parent node.
+
+    NspReferenceEntry ( parent )
+
+    entry^.Parent = parent
+
+    // Link the child into the parent's lookup tree.
+
+    RtlInsertAvl (
+        &parent^.LookupRoot, // root
+        &entry^.LookupEntry, // node
+        &NspCompareEntries, // comparisonfunc
+    )
+
+    IF flags & NS_ENTRY_VIRTUAL THEN
+        // Link the child into the list of virtual entries.
+
+        parent^.VirtualChildCount += 1
+
+        RtlInsertAtTailList (
+            &parent^.VirtualChildListHead, // head
+            &entry^.VirtualChildEntry, // entry
+        )
+    END
+
+    RETURN entry
+END
+
+#SECTION "PAGEtext"
+FN NspUnlinkEntry (
+    IN entry : ^NsEntry,
+)
+
+    // Unlink the entry from its parent. Assumes tree lock is held exclusive.
+
+    parent := entry^.Parent
+
+    // Clear the parent pointer. Next time this entry reaches a refcount of 0,
+    // it will be deleted.
+
+    entry^.Parent = NULLPTR
+
+    // Remove from the lookup tree.
+
+    RtlRemoveAvl (
+        &parent^.LookupRoot, // root
+        &entry^.LookupEntry, // entry
+    )
+
+    IF entry^.Flags & NS_ENTRY_VIRTUAL THEN
+        // Remove from the virtual node list.
+
+        RtlRemoveEntryList ( &entry^.VirtualChildEntry )
+    END
+
+    // Unreference the parent.
+
+    NspUnreferenceEntry ( parent )
+END
+
+#SECTION "INITtext"
+FN NspInitializeTree ()
+
+    // Initialize the namespace tree.
+
+    RtlInitializeList ( &NspReclaimListHead )
+
+    RtlInitializeList ( &NspNegativeListHead )
+
+    RtlInitializeList ( &NspMountList )
+
+    // Set the size of the reclaimable and negative entry lists. Note that
+    // caching of FCBs and (IMPORTANTLY!) the preservation of their page caches
+    // is done by holding a dangling reference to the FCB object from name cache
+    // entries. Therefore the FCB cache is also trimmed when these entries are
+    // trimmed, so these values can have a large impact on system performance.
+
+    size := MmGetSystemSize ()
+
+    IF size <= MM_TINY_SYSTEM THEN
+        NspMaximumReclaimableEntries = 200
+        NspMaximumNegativeEntries = 100
+
+    ELSEIF size <= MM_SMALL_SYSTEM THEN
+        NspMaximumReclaimableEntries = 1000
+        NspMaximumNegativeEntries = 200
+
+    ELSEIF size <= MM_LARGE_SYSTEM THEN
+        NspMaximumReclaimableEntries = 6000
+        NspMaximumNegativeEntries = 500
+
+    ELSE
+        NspMaximumReclaimableEntries = 15000
+        NspMaximumNegativeEntries = 2000
+    END
+
+    // Initialize the namespace root.
+
+    // The root entry will not yet be associated with an object, making it a
+    // pure container for now, so that we can insert /dev. We will associate it
+    // with an FCB object for the boot volume's root directory later in the boot
+    // process. This is the only pure container that later becomes fs-backed.
+
+    subspace := &NspRootSubspace
+
+    RtlInsertAtTailList (
+        &NspMountList, // head
+        &subspace^.MountListEntry, // entry
+    )
+
+    subspace^.Root = &NspRootEntry
+    subspace^.MountedUpon.Entry = NULLPTR
+    subspace^.MountedUpon.Subspace = NULLPTR
+    subspace^.References = 0
+
+    NspInitializeEntry (
+        &NspRootEntry, // entry
+        0, // flags
+        "[ROOT]", // name
+    )
+END
+
+#SECTION "PAGEtext"
+FN NspFindSubspaceByRoot (
+    IN subspace : ^NsSubspace,
+    IN entry : ^NsEntry,
+) : ^NsSubspace
+
+    // Find the subspace mounted upon the given subspace/entry pair, if any.
+    // Tree lock is held at least shared.
+
+    listhead := &NspMountList
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        checkspace := CONTAINEROF listentry TO NsSubspace.MountListEntry
+
+        IF checkspace^.MountedUpon.Subspace == subspace AND
+            checkspace^.MountedUpon.Entry == entry THEN
+
+            RETURN checkspace
+        END
+
+        listentry = listentry^.Next
+    END
+
+    RETURN NULLPTR
+END
+
 #SECTION "PAGEtext"
 FN NsUnlinkObject (
     IN header : ^ObHeader,
@@ -17,4 +425,524 @@ FN NsUnlinkObject (
     // exclusively.
 
     KeCrash ( "TODO NsUnlinkObject\n" )
+END
+
+#SECTION "PAGEtext"
+FN NspNextPathComponent (
+    IN component : ^UBYTE,
+    IN path : ^UBYTE,
+    OUT nextpath : ^UBYTE,
+) : OsStatus
+
+    // Crunch the next path component into the buffer pointed to by 'component'.
+    // A pointer to the component after that one is returned in 'nextpath'. The
+    // primary return value is an indicator of the component's sanity.
+
+    // Skip initial slashes.
+
+    WHILE path[0] == '/' DO
+        path += 1
+    END
+
+    IF path[0] == 0 THEN
+        // Empty path.
+
+        nextpath = NULLPTR
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    i := 0
+
+    WHILE path[i] != 0 AND path[i] != '/' DO
+        IF i == OS_NAME_MAX THEN
+            // Too long.
+
+            RETURN OS_STATUS_NAME_TOO_LONG
+        END
+
+        component[i] = path[i]
+
+        i += 1
+    END
+
+    // Insert null terminator.
+
+    component[i] = 0
+
+    nextpath = path
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN NspLookupChild (
+    IN entry : ^NsEntry,
+    IN name : ^UBYTE,
+) : ^NsEntry
+
+    // Look up a child of this entry by name. Return the entry or NULLPTR if not
+    // found.
+
+    child : ^NsEntry
+
+    avlnode := entry^.LookupRoot.Right
+
+    WHILE TRUE DO
+        IF NOT avlnode THEN
+            // Didn't find it.
+
+            RETURN NULLPTR
+        END
+
+        child = CONTAINEROF avlnode TO NsEntry.LookupEntry
+
+        res := CAST RtlCompareString (
+            name, // str1
+            NspNameToString ( child^.Name ), // str2
+        ) TO WORD
+
+        IF res == 0 THEN
+            // Found it! Return the child.
+
+            RETURN child
+        END
+
+        IF res < 0 THEN
+            avlnode = avlnode^.Left
+        ELSE
+            avlnode = avlnode^.Right
+        END
+    END
+END
+
+#SECTION "PAGEtext"
+FN NsReferenceEntryByPath (
+    IN path : ^UBYTE,
+    IN handle : ^NsHandle,
+    IN initialhandle : ^NsHandle,
+    IN flags : UWORD,
+) : OsStatus
+
+    // Parse the specified path and initialize the 'handle' with a referenced
+    // subspace and namespace entry.
+
+    component : UBYTE[OS_NAME_MAX + 1]
+
+    currententry : ^NsEntry
+    currentspace : ^NsSubspace
+
+    event : ^ExEventCounter
+
+    status : OsStatus
+
+    exclusive := FALSE
+
+    // Acquire the tree lock.
+
+    NspLockTreeShared ()
+
+@Retry
+
+    currentpath := path
+
+    IF initialhandle THEN
+        currententry = initialhandle^.Entry
+        currentspace = initialhandle^.Subspace
+    
+    ELSE
+        // No initial handle was supplied, start from the root.
+
+        currententry = &NspRootEntry
+        currentspace = &NspRootSubspace
+    END
+
+    WHILE TRUE DO
+        IF currententry^.Flags & NS_ENTRY_TRANSITION THEN
+            // We've stumbled on a transition entry. We need to wait and retry.
+
+            // The event was stashed in the object pointer.
+
+            event = currententry^.Object
+
+            ExReferenceEventCounter ( event )
+
+            // Drop the lock.
+
+            NspUnlockTree ()
+
+            // Wait on the event counter.
+
+            KeWaitForSingleObject (
+                KE_KERNEL_MODE, // waitmode
+                FALSE, // alertable
+                NULLPTR, // timeout
+                &event^.Used.Event.Header, // object
+            )
+
+            // Unreference the event counter.
+
+            ExUnreferenceEventCounter ( event )
+
+            // Re-take the lock.
+
+            IF exclusive THEN
+                NspLockTreeExclusive ()
+            ELSE
+                NspLockTreeShared ()
+            END
+
+            // Retry everything.
+
+            GOTO Retry
+        END
+
+        IF currentpath[0] == '/' AND
+            currententry^.Flags & NS_ENTRY_LEAF THEN
+
+            // This is a leaf entry (i.e., a file or object). It can have no
+            // children, so just return an error status.
+
+            NspUnlockTree ()
+
+            RETURN OS_STATUS_NOT_DIRECTORY
+        END
+
+        // Collect the next path component.
+
+        status = NspNextPathComponent (
+            &component[0], // component
+            currentpath, // path
+            OUT currentpath, // path
+        )
+
+        IF OsError ( status ) THEN
+            // Got an error status while collecting the path component. Early
+            // return.
+
+            NspUnlockTree ()
+
+            RETURN status
+        END
+
+        IF NOT currentpath THEN
+            // No more components.
+
+            BREAK
+        END
+
+        IF component[0] == '.' THEN
+            IF component[1] == 0 THEN
+                // The path component was dot.
+                // Nothing to do.
+
+                CONTINUE
+            END
+
+            IF component[1] == '.' AND component[2] == 0 THEN
+                // The path component was dotdot.
+                // Go to the parent.
+
+                IF currententry != currentspace^.Root THEN
+#IF BLD_CHK
+                    IF NOT currententry^.Parent THEN
+                        KeCrash ( "NsReferenceEntryByPath: stacked 1\n" )
+                    END
+#END
+
+                    currententry = currententry^.Parent
+
+                ELSE
+                    // This is the root of this subspace tree.
+                    // We have to back out to the last one.
+
+                    IF NOT currentspace^.MountedUpon.Subspace THEN
+                        // This is the global root. Nothing to do.
+
+                        CONTINUE
+                    END
+
+                    currententry = currentspace^.MountedUpon.Entry^.Parent
+                    currentspace = currentspace^.MountedUpon.Subspace
+
+#IF BLD_CHK
+                    IF NOT currententry THEN
+                        // The subspace was mounted on a root directory.
+                        // We don't allow directly stacking mountpoints like
+                        // this because it's annoying, so this is a bug.
+
+                        KeCrash ( "NsReferenceEntryByPath: stacked 2\n" )
+                    END
+#END
+                END
+
+                CONTINUE
+            END
+        END
+
+        // Look up the component as a child of the current entry.
+
+        child := NspLookupChild (
+            currententry, // entry
+            &component[0], // name
+        )
+
+        IF child THEN
+            IF child^.Flags & NS_ENTRY_NEGATIVE THEN
+                // The child was a negative entry.
+
+                IF flags & OS_OPEN_CREATE THEN
+                    // But that's okay, we want to create.
+
+                    GOTO Create
+                END
+
+                NspUnlockTree ()
+
+                RETURN OS_STATUS_NOT_FOUND
+            END
+
+            IF flags & OS_OPEN_MUST_CREATE THEN
+                // Flags specify must-create, but it already exists.
+
+                NspUnlockTree ()
+
+                RETURN OS_STATUS_EXISTS
+            END
+
+            IF child^.MountedOnCount THEN
+                // This entry has been a mountpoint in one or more subspaces.
+                // Look up the hash table to see if we should jump to a
+                // new subspace.
+
+                newspace := NspFindSubspaceByRoot (
+                    currentspace, // subspace
+                    child, // entry
+                )
+
+                IF newspace THEN
+                    currentspace = newspace
+                    child = newspace^.Root
+                END
+            END
+
+            currententry = child
+
+            CONTINUE
+        END
+
+@Create
+
+        // No child. Grab the object for this entry.
+
+        IF NOT currententry^.Object THEN
+            // No object, so this is a pure container. If there's no child
+            // with this name then there's no child with this name.
+
+            NspUnlockTree ()
+
+            RETURN OS_STATUS_NOT_FOUND
+        END
+
+        lookupfunc :=
+            (ObFindHeader(currententry^.Object))^.Type^.NamespaceLookup
+
+        IF NOT lookupfunc THEN
+            // The object's type doesn't support namespace child lookups.
+
+            NspUnlockTree ()
+
+            RETURN OS_STATUS_NOT_FOUND
+        END
+
+        IF NOT exclusive THEN
+            // We hold the lock shared, but we're about to add a child to
+            // this node so we need to upgrade it to exclusive.
+
+            exclusive = TRUE
+
+            IF NOT NspTryUpgradeTreeLock () THEN
+                // Failed to upgrade atomically. We need to drop the lock,
+                // grab it exclusive, and retry this entire process.
+
+                NspUnlockTree ()
+
+                NspLockTreeExclusive ()
+
+                GOTO Retry
+            END
+        END
+
+        // We need to set up a transition name cache entry. We will then
+        // unlock the namespace tree while we do the potentially very
+        // lengthy operation of calling the object type to perform a name
+        // lookup. Anybody else who tries to look up this same name will
+        // wait on an event pointed to by the transition name cache entry.
+        //
+        // The importance of unlocking the big tree lock across this call is
+        // underscored by imagining a filesystem mounted over a slow network
+        // which runs into some pathological situation where it takes 5
+        // seconds to look up this name. Obviously, it's unacceptable to
+        // hold a lock that blocks out all pathname lookups during that
+        // time.
+        //
+        // When that call is complete, we will re-lock the tree and turn the
+        // transition entry into the real name cache entry.
+        //
+        // We (will) use this same trick in other places - for instance,
+        // file rename. The tree lock will be taken exclusive, the old name
+        // will be converted into a transition entry, and the new name will
+        // be created as a new transition entry. The lock will then be
+        // released across the FS call to perform the rename on disk or over
+        // the network or whatever, and then reacquired to release the
+        // waiters on the old name (which is deleted) and turn the new name
+        // into a fully initialized entry.
+        //
+        // Also, file deletion. The old name will become a transition entry
+        // and the FS deletion routine will be called with the tree lock
+        // dropped. Anyone who tries to look up the old name will block
+        // until the transition entry is awoken and will then repeat their
+        // lookup from the beginning.
+        //
+        // Multiple uses of this "transition entry" concept are why it has
+        // its own family of subroutines.
+
+        event = ExAllocateEventCounter ( TRUE )
+
+        IF NOT event THEN
+            NspUnlockTree ()
+
+            RETURN OS_STATUS_NO_MEMORY
+        END
+
+        IF NOT child THEN
+            // Create a new entry.
+
+            child = NspCreateEntry (
+                &component[0], // name
+                currententry, // parent
+                NS_ENTRY_TRANSITION, // flags
+            )
+
+            IF NOT child THEN
+                NspUnlockTree ()
+
+                ExUnreferenceEventCounter ( event )
+
+                RETURN OS_STATUS_NO_MEMORY
+            END
+
+        ELSE
+            // We already have an entry, and we came here because it was a
+            // negative entry and we're trying to create a new file.
+
+#IF BLD_CHK
+            IF child^.Flags & NS_ENTRY_NEGATIVE == 0 THEN
+                KeCrash ( "NsReferenceEntryByPath: not negative\n" )
+            END
+#END
+
+            // Reference it to make sure it's no longer on the negative entry
+            // list.
+
+            NspReferenceEntry ( child )
+
+            // Convert it to transition.
+
+            child^.Flags = NS_ENTRY_TRANSITION
+        END
+
+        // Stash the event counter.
+
+        child^.Object = event
+
+        // Unlock the namespace tree.
+
+        NspUnlockTree ()
+
+        // Call the lookup function to acquire a referenced pointer to the
+        // object that should back this new entry.
+
+        object : ^VOID
+        entryflags : UWORD
+
+        status = lookupfunc (
+            currententry^.Object, // object
+            &component[0], // name
+            flags, // flags
+            OUT object, // newobject
+            OUT entryflags, // entryflags
+        )
+
+        // Re-take the lock.
+        // Note that we dropped the tree lock, but we don't have to retry
+        // the lookup, because the transition entry took out a reference on
+        // the parent entry, which is preserving the tree above this point,
+        // and we know the state of the tree below this point (empty).
+
+        NspLockTreeExclusive ()
+
+        // Wake any collided threads.
+
+        KeSignalEvent (
+            &event^.Used.Event, // event
+            0, // priorityboost
+        )
+
+        ExUnreferenceEventCounter ( event )
+
+        IF OsError ( status ) THEN
+            IF status == OS_STATUS_NOT_FOUND THEN
+                // This can only happen if our flags didn't specify to
+                // create.
+                // Set this entry up as a negative entry so that we don't call
+                // the FS again upon later attempts to open the same path.
+
+                child^.Flags = NS_ENTRY_NEGATIVE
+
+                // Unreference and put on the negative entry list.
+
+                NspUnreferenceEntry ( child )
+
+            ELSE
+                // The lookup function returned an error status, so we need
+                // to nuke the transition entry.
+
+                NspUnlinkEntry ( child )
+
+                NspDeleteEntry ( child )
+            END
+
+            NspUnlockTree ()
+
+            RETURN status
+        END
+
+        // Turn into a full entry.
+
+        child^.Flags = entryflags
+
+        child^.Object = object
+
+        // Unreference and proceed to the next path component.
+
+        NspUnreferenceEntry ( child )
+
+        currententry = child
+    END
+
+    // We reached the final component of the path.
+    // currententry and currentspace contain an unreferenced entry and subspace.
+    // Reference them.
+
+    NspReferenceEntry ( currententry )
+
+    NspReferenceSubspace ( currentspace )
+
+    NspUnlockTree ()
+
+    handle^.Entry = currententry
+    handle^.Subspace = currentspace
+
+    RETURN OS_STATUS_SUCCESS
 END

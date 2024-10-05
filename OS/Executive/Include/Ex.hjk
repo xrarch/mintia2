@@ -58,3 +58,25 @@ EXTERN FN ExCreateHandle (
     OUT handle : UWORD,
     OUT entryptr : ^VOID,
 ) : OsStatus
+
+STRUCT ExpEventCounterUsed
+    Event : KeEvent,
+    References : ULONG,
+END
+
+UNION ExEventCounter
+    Used : ExpEventCounterUsed,
+    Free : RtlListEntry,
+END
+
+EXTERN FN ExAllocateEventCounter (
+    IN wait : UWORD,
+) : ^ExEventCounter
+
+EXTERN FN ExReferenceEventCounter (
+    IN counter : ^ExEventCounter,
+)
+
+EXTERN FN ExUnreferenceEventCounter (
+    IN counter : ^ExEventCounter,
+)

@@ -97,7 +97,7 @@ FN MiInitializePartitionStage1 (
     partition^.ModifiedPageMaximum = 0
     partition^.ZeroingThreshold = 0
 
-    partition^.SizeLevel = MI_UNINITIALIZED_SYSTEM
+    partition^.SizeLevel = MM_UNINITIALIZED_SYSTEM
 END
 
 FN MiSetPartitionSize (
@@ -112,37 +112,37 @@ FN MiSetPartitionSize (
     IF membytes <= 3 * 1024 * 1024 THEN
         // Tiny, 0-3MB.
 
-        size = MI_TINY_SYSTEM
+        size = MM_TINY_SYSTEM
 
     ELSEIF membytes <= 5 * 1024 * 1024 THEN
         // Small, 3-5MB.
 
-        size = MI_SMALL_SYSTEM
+        size = MM_SMALL_SYSTEM
 
     ELSEIF membytes <= 9 * 1024 * 1024 THEN
         // Medium, 5-9MB.
 
-        size = MI_MEDIUM_SYSTEM
+        size = MM_MEDIUM_SYSTEM
 
     ELSEIF membytes <= 33 * 1024 * 1024 THEN
         // Large, 9-33MB.
 
-        size = MI_LARGE_SYSTEM
+        size = MM_LARGE_SYSTEM
 
     ELSE
         // Massive, >33MB.
 
-        size = MI_MASSIVE_SYSTEM
+        size = MM_MASSIVE_SYSTEM
     END
 
     partition^.SizeLevel = size
 
     // Set the modified page maximum.
 
-    IF size <= MI_TINY_SYSTEM THEN
+    IF size <= MM_TINY_SYSTEM THEN
         partition^.ModifiedPageMaximum = 50
 
-    ELSEIF size <= MI_LARGE_SYSTEM THEN
+    ELSEIF size <= MM_LARGE_SYSTEM THEN
         partition^.ModifiedPageMaximum = 100
 
     ELSE
@@ -151,10 +151,10 @@ FN MiSetPartitionSize (
 
     // Set the page zeroing threshold.
 
-    IF size <= MI_TINY_SYSTEM THEN
+    IF size <= MM_TINY_SYSTEM THEN
         partition^.ZeroingThreshold = 75
 
-    ELSEIF size <= MI_MEDIUM_SYSTEM THEN
+    ELSEIF size <= MM_MEDIUM_SYSTEM THEN
         partition^.ZeroingThreshold = 150
 
     ELSE
@@ -163,11 +163,11 @@ FN MiSetPartitionSize (
 
     // Set the paging thresholds.
 
-    IF size <= MI_TINY_SYSTEM THEN
+    IF size <= MM_TINY_SYSTEM THEN
         partition^.LowPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 8
         partition^.SufficientPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 50
 
-    ELSEIF size <= MI_LARGE_SYSTEM THEN
+    ELSEIF size <= MM_LARGE_SYSTEM THEN
         partition^.LowPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 20
         partition^.SufficientPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 100
 
@@ -726,4 +726,11 @@ FN MmUnchargeCommit (
     END
 #END
 
+END
+
+FN MmGetSystemSize () : UWORD
+
+    // Get the size of the system partition.
+
+    RETURN MiSystemPartition.SizeLevel
 END

@@ -8,9 +8,13 @@
 #INCLUDE "<inc>/Mm.hjk"
 #INCLUDE "<inc>/Ns.hjk"
 
+#INCLUDE "<ll>/System/OsNamespace.hjk"
+
 EXTERN NspTreeLock : KeLock
 
 EXTERN FN NspInitializeNames ()
+
+EXTERN FN NspInitializeTree ()
 
 STRUCT NspName
     Entry : RtlAvlNode,
@@ -46,4 +50,8 @@ EXTERN FN NspUnreferenceName (
 
 #MACRO NspDowngradeTreeLock () [
     KeConvertLockToShared ( &NspTreeLock )
+]
+
+#MACRO NspUnlockTree () [
+    KeReleaseLock ( &NspTreeLock )
 ]

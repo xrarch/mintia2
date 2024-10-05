@@ -109,7 +109,7 @@ END
 
 KiTurnstileChains : KiTurnstileChain[KI_TURNSTILE_CHAINS]
 
-#DEFINE KI_INITIAL_TURNSTILES 64
+#DEFINE KI_INITIAL_TURNSTILES 128
 
 #DEFINE KI_SPIN_CYCLES 400
 
@@ -119,9 +119,10 @@ FN KeAllocateTurnstile () : ^KiTurnstile
 
     // Allocate a turnstile from the lookaside list.
     // We never fail this because Ps has magically ensured that there are enough
-    // turnstiles for us to allocate some; there have to always be the same as
-    // the number of threads in the system and Ps has expanded the list to
-    // maintain that invariant.
+    // turnstiles for us to allocate some; there have to always be the same
+    // amount of turnstiles as there are threads in the system. If necessary, Ps
+    // has expanded the list at some point before making this call to maintain
+    // that invariant.
 
     ipl := KiAcquireTurnstileList ()
 

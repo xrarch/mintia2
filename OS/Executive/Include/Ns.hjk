@@ -4,15 +4,17 @@
 
 #INCLUDE "<inc>/Ob.hjk"
 
-#DEFINE NSP_ENTRY_LEAF 1
-#DEFINE NSP_ENTRY_PERMANENT 2
+#DEFINE NS_ENTRY_VIRTUAL 2
+#DEFINE NS_ENTRY_NEGATIVE 4
+#DEFINE NS_ENTRY_TRANSITION 8
+#DEFINE NS_ENTRY_LEAF 16
 
-STRUCT NspEntryLeaf
+STRUCT NsEntry
     LookupEntry : RtlAvlNode,
 
     ReclaimEntry : RtlListEntry,
 
-    PermanentChildEntry : RtlListEntry,
+    VirtualChildEntry : RtlListEntry,
 
     Name : ^NspName,
 
@@ -20,17 +22,15 @@ STRUCT NspEntryLeaf
 
     Parent : ^NsEntry,
 
-    References : ULONG,
-
-    Flags : UBYTE,
-END
-
-STRUCT NsEntry
-    L : NspEntryLeaf,
-
     LookupRoot : RtlAvlNode,
 
-    PermanentChildListHead : RtlListEntry,
+    VirtualChildListHead : RtlListEntry,
+
+    References : ULONG,
+    VirtualChildCount : ULONG,
+    MountedOnCount : ULONG,
+
+    Flags : UBYTE,
 END
 
 STRUCT NsHandle
@@ -39,8 +39,12 @@ STRUCT NsHandle
 END
 
 STRUCT NsSubspace
+    MountListEntry : RtlListEntry,
+
     Root : ^NsEntry,
     MountedUpon : NsHandle,
+
+    References : ULONG,
 END
 
 EXTERN FN NsUnlinkObject (

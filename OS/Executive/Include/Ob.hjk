@@ -27,6 +27,14 @@ FNPTR ObTypeSetSecurityF (
     IN gid : UWORD,
 )
 
+FNPTR ObTypeNamespaceLookupF (
+    IN object : ^VOID,
+    IN name : ^UBYTE,
+    IN flags : UWORD,
+    OUT newobject : ^VOID,
+    OUT entryflags : UWORD,
+) : OsStatus
+
 #DEFINE OB_NAME_MAX 256
 
 #DEFINE OB_FLAG_PERMANENT 1
@@ -38,6 +46,7 @@ STRUCT ObType
     Close : ObTypeCloseF,
     Delete : ObTypeDeleteF,
     SetSecurity : ObTypeSetSecurityF,
+    NamespaceLookup : ObTypeNamespaceLookupF,
 
     WaitOffset : ULONG,
     TypeIdentifier : ULONG,
@@ -68,8 +77,6 @@ STRUCT ObHeader
 
     QuotaBlock : ^MiQuotaBlock,
 
-    Name : ^UBYTE,
-
     Lock : KeLock,
 
     NamespaceEntry : ^NsEntry,
@@ -90,7 +97,6 @@ END
 
 STRUCT ObParameters
     Type : ^ObType,
-    Name : ^UBYTE,
 
     Permissions : ULONG,
     Flags : ULONG,
