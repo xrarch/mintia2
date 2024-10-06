@@ -12,29 +12,7 @@
 
 EXTERN NspTreeLock : KeLock
 
-EXTERN FN NspInitializeNames ()
-
 EXTERN FN NspInitializeTree ()
-
-STRUCT NspName
-    Entry : RtlAvlNode,
-
-    References : ULONG,
-
-    BucketIndex : UBYTE,
-END
-
-#MACRO NspNameToString ( name ) [
-    (CAST (name + SIZEOF NspName) TO ^UBYTE)
-]
-
-EXTERN FN NspFindName (
-    IN name : ^UBYTE,
-) : ^NspName
-
-EXTERN FN NspUnreferenceName (
-    IN name : ^NspName,
-)
 
 #MACRO NspLockTreeExclusive () [
     KeAcquireLockExclusive ( &NspTreeLock )

@@ -16,7 +16,9 @@ STRUCT NsEntry
 
     VirtualChildEntry : RtlListEntry,
 
-    Name : ^NspName,
+    Name : ^ExName,
+
+    BouncePath : ^ExName,
 
     Object : ^VOID,
 
@@ -45,6 +47,29 @@ STRUCT NsSubspace
     MountedUpon : NsHandle,
 
     References : ULONG,
+END
+
+STRUCT NsLookupContext
+    // The parent object is passed in through here, and the new object is passed
+    // out through the same field.
+
+    Object : ^VOID,
+
+    // The name is passed in through here.
+
+    Name : ^UBYTE,
+    
+    // If a symlink is followed, a new path should be passed out here.
+
+    BouncePath : ^ExName,
+
+    // Open flags are passed in through here.
+
+    Flags : ULONG,
+    
+    // Namespace entry flags are passed out through here.
+
+    EntryFlags : ULONG,
 END
 
 EXTERN FN NsUnlinkObject (

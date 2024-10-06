@@ -1,33 +1,35 @@
 //
-// Management for name string internment for the MINTIA namespace.
+// Management for string internment for the MINTIA Executive.
 //
 
-#INCLUDE "Nsp.hjk"
+#INCLUDE "Exp.hjk"
 
-#DEFINE NSP_NAME_BUCKETS 32
+#DEFINE EXP_NAME_BUCKETS 32
 
-STRUCT NspNameBucket
+STRUCT ExpNameBucket
     TreeRoot : RtlAvlNode,
+    Lock : KeLock,
 END
 
-NspNameBuckets : NspNameBucket[NSP_NAME_BUCKETS]
+ExpNameBuckets : ExpNameBucket[EXP_NAME_BUCKETS]
 
 #SECTION "INITtext"
-FN NspInitializeNames ()
+FN ExpInitializeNames ()
 
-    // Initialize the interned name buckets for the namespace.
+    // Initialize the interned name buckets.
 
     i := 0
 
-    WHILE i < NSP_NAME_BUCKETS DO
-        RtlInitializeAvl ( &NspNameBuckets[i].TreeRoot )
+    WHILE i < EXP_NAME_BUCKETS DO
+        RtlInitializeAvl ( &ExpNameBuckets[i].TreeRoot )
+        KeInitializeLock ( &ExpNameBuckets[i].Lock )
 
         i += 1
     END
 END
 
 #SECTION "PAGEtext"
-FN (RtlAvlLessThanF) NspCompareNameNodes (
+FN (RtlAvlLessThanF) ExpCompareNameNodes (
     IN a : ^RtlAvlNode,
     IN b : ^RtlAvlNode,
 ) : UWORD
@@ -35,13 +37,13 @@ FN (RtlAvlLessThanF) NspCompareNameNodes (
     // Return whether A < B, lexicographically.
 
     RETURN CAST RtlCompareString (
-        NspNameToString ( CONTAINEROF a TO NspName.Entry ), // str1
-        NspNameToString ( CONTAINEROF b TO NspName.Entry ), // str2
+        ExNameToString ( CONTAINEROF a TO ExName.Entry ), // str1
+        ExNameToString ( CONTAINEROF b TO ExName.Entry ), // str2
     ) TO WORD < 0
 END
 
 #SECTION "PAGEtext"
-FN NspHash (
+FN ExpHash (
     IN str : ^UBYTE,
     OUT len : UWORD,
 ) : UWORD
@@ -68,27 +70,30 @@ FN NspHash (
 END
 
 #SECTION "PAGEtext"
-FN NspFindName (
-    IN name : ^UBYTE,
-) : ^NspName
+FN ExFindName (
+    IN str : ^UBYTE,
+) : ^ExName
 
     // Find a name in the string internment buckets.
-    // Tree lock should be held exclusively.
 
-    node : ^NspName
+    node : ^ExName
 
     // Hash the name.
 
     len : UWORD
 
-    hash := NspHash (
-        name, // name
+    hash := ExpHash (
+        str, // name
         OUT len, // len
     )
 
     // Get the hash bucket.
 
-    bucket := &NspNameBuckets[hash & (NSP_NAME_BUCKETS - 1)]
+    bucket := &ExpNameBuckets[hash & (EXP_NAME_BUCKETS - 1)]
+
+    // Lock the bucket.
+
+    KeAcquireLockExclusive ( &bucket^.Lock )
 
     // Look up the name in the bucket, which is an AVL tree keyed by string and
     // ordered lexicographically.
@@ -102,17 +107,19 @@ FN NspFindName (
             BREAK
         END
 
-        node = CONTAINEROF avlnode TO NspName.Entry
+        node = CONTAINEROF avlnode TO ExName.Entry
 
         res := CAST RtlCompareString (
-            name, // str1
-            NspNameToString ( node ), // str2
+            str, // str1
+            ExNameToString ( node ), // str2
         ) TO WORD
 
         IF res == 0 THEN
             // Found it! Unlock the bucket and return the node.
 
             node^.References += 1
+
+            KeReleaseLock ( &bucket^.Lock )
 
             RETURN node
         END
@@ -136,7 +143,7 @@ FN NspFindName (
 
     node = MmAllocatePool (
         MM_PAGED_POOL, // poolindex
-        SIZEOF NspName + len, // bytes
+        SIZEOF ExName + len, // bytes
         'Name', // tag
         TRUE, // wait
     )
@@ -144,17 +151,19 @@ FN NspFindName (
     IF NOT node THEN
         // Failed to allocate the name.
 
+        KeReleaseLock ( &bucket^.Lock )
+
         RETURN NULLPTR
     END
 
     // Initialize the name.
 
     node^.References = 1
-    node^.BucketIndex = hash & (NSP_NAME_BUCKETS - 1)
+    node^.BucketIndex = hash & (EXP_NAME_BUCKETS - 1)
 
     RtlCopyString (
-        NspNameToString ( node ), // dest
-        name, // src
+        ExNameToString ( node ), // dest
+        str, // src
         -1, // bufsize
     )
 
@@ -163,23 +172,28 @@ FN NspFindName (
     RtlInsertAvl (
         &bucket^.TreeRoot, // root
         &node^.Entry, // node
-        &NspCompareNameNodes, // comparisonfunc
+        &ExpCompareNameNodes, // comparisonfunc
     )
 
     // Unlock bucket and return node.
+
+    KeReleaseLock ( &bucket^.Lock )
 
     RETURN node
 END
 
 #SECTION "PAGEtext"
-FN NspUnreferenceName (
-    IN name : ^NspName,
+FN ExUnreferenceName (
+    IN name : ^ExName,
 )
 
     // Unreference the name node.
-    // Tree lock should be held exclusively.
 
-    bucket := &NspNameBuckets[name^.BucketIndex]
+    bucket := &ExpNameBuckets[name^.BucketIndex]
+
+    // Lock the bucket.
+
+    KeAcquireLockExclusive ( &bucket^.Lock )
 
     // Decrement the reference count.
 
@@ -201,4 +215,31 @@ FN NspUnreferenceName (
             'Name', // tag
         )
     END
+
+    // Unlock the bucket.
+
+    KeReleaseLock ( &bucket^.Lock )
+END
+
+#SECTION "PAGEtext"
+FN ExReferenceName (
+    IN name : ^ExName,
+)
+
+    // Reference the name node.
+
+    bucket := &ExpNameBuckets[name^.BucketIndex]
+
+    // Lock the bucket.
+
+    KeAcquireLockExclusive ( &bucket^.Lock )
+
+    // Increment the reference count.
+
+    oldcount := name^.References
+    name^.References = oldcount + 1
+
+    // Unlock the bucket.
+
+    KeReleaseLock ( &bucket^.Lock )
 END

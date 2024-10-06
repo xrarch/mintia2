@@ -80,3 +80,27 @@ EXTERN FN ExReferenceEventCounter (
 EXTERN FN ExUnreferenceEventCounter (
     IN counter : ^ExEventCounter,
 )
+
+STRUCT ExName
+    Entry : RtlAvlNode,
+
+    References : ULONG,
+
+    BucketIndex : UBYTE,
+END
+
+#MACRO ExNameToString ( name ) [
+    (CAST (name + SIZEOF ExName) TO ^UBYTE)
+]
+
+EXTERN FN ExFindName (
+    IN str : ^UBYTE,
+) : ^ExName
+
+EXTERN FN ExUnreferenceName (
+    IN name : ^ExName,
+)
+
+EXTERN FN ExReferenceName (
+    IN name : ^ExName,
+)

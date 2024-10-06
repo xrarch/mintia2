@@ -35,11 +35,13 @@ FN NspInitializeEntry (
 
     RtlInitializeList ( &entry^.VirtualChildListHead )
 
-    entry^.Name = NspFindName ( name )
+    entry^.Name = ExFindName ( name )
 
     IF NOT entry^.Name THEN
         RETURN FALSE
     END
+
+    entry^.BouncePath = NULLPTR
 
     entry^.Object = NULLPTR
 
@@ -64,8 +66,8 @@ FN (RtlAvlLessThanF) NspCompareEntries (
 
     // Return whether A < B, lexicographically.
 
-    str1 := NspNameToString ( (CONTAINEROF a TO NsEntry.LookupEntry)^.Name )
-    str2 := NspNameToString ( (CONTAINEROF b TO NsEntry.LookupEntry)^.Name )
+    str1 := ExNameToString ( (CONTAINEROF a TO NsEntry.LookupEntry)^.Name )
+    str2 := ExNameToString ( (CONTAINEROF b TO NsEntry.LookupEntry)^.Name )
 
     RETURN CAST RtlCompareString (
         str1, // str1
@@ -91,12 +93,18 @@ FN NspDeleteEntry (
 
     // First unreference the interned name.
 
-    NspUnreferenceName ( entry^.Name )
+    ExUnreferenceName ( entry^.Name )
 
     // Unreference the object.
 
     IF entry^.Object THEN
         ObUnreferenceObject ( entry^.Object )
+    END
+
+    // Delete the bounce path if this is a symlink.
+
+    IF entry^.BouncePath THEN
+        ExUnreferenceName ( entry^.BouncePath )
     END
 
     // Now delete the entry itself.
@@ -499,7 +507,7 @@ FN NspLookupChild (
 
         res := CAST RtlCompareString (
             name, // str1
-            NspNameToString ( child^.Name ), // str2
+            ExNameToString ( child^.Name ), // str2
         ) TO WORD
 
         IF res == 0 THEN
@@ -529,10 +537,18 @@ FN NsReferenceEntryByPath (
 
     component : UBYTE[OS_NAME_MAX + 1]
 
-    currententry : ^NsEntry
-    currentspace : ^NsSubspace
+    roothandle : NsHandle
+
+    roothandle.Entry = initialhandle^.Entry
+    roothandle.Subspace = initialhandle^.Subspace
+
+    lookupcontext : NsLookupContext
 
     event : ^ExEventCounter
+
+    symlinkcookie : ^ExName = NULLPTR
+
+    symlinkcount := 0
 
     status : OsStatus
 
@@ -546,16 +562,8 @@ FN NsReferenceEntryByPath (
 
     currentpath := path
 
-    IF initialhandle THEN
-        currententry = initialhandle^.Entry
-        currentspace = initialhandle^.Subspace
-    
-    ELSE
-        // No initial handle was supplied, start from the root.
-
-        currententry = &NspRootEntry
-        currentspace = &NspRootSubspace
-    END
+    currententry := roothandle.Entry
+    currentspace := roothandle.Subspace
 
     WHILE TRUE DO
         IF currententry^.Flags & NS_ENTRY_TRANSITION THEN
@@ -605,7 +613,9 @@ FN NsReferenceEntryByPath (
 
             NspUnlockTree ()
 
-            RETURN OS_STATUS_NOT_DIRECTORY
+            status = OS_STATUS_NOT_DIRECTORY
+
+            GOTO Exit
         END
 
         // Collect the next path component.
@@ -622,7 +632,7 @@ FN NsReferenceEntryByPath (
 
             NspUnlockTree ()
 
-            RETURN status
+            GOTO Exit
         END
 
         IF NOT currentpath THEN
@@ -688,18 +698,26 @@ FN NsReferenceEntryByPath (
         )
 
         IF child THEN
+
+@NextChild
+
             IF child^.Flags & NS_ENTRY_NEGATIVE THEN
                 // The child was a negative entry.
 
-                IF flags & OS_OPEN_CREATE THEN
-                    // But that's okay, we want to create.
+                IF flags & OS_OPEN_CREATE AND
+                    currentpath[0] == 0 THEN
+
+                    // But that's okay, we want to create and this is the final
+                    // path component.
 
                     GOTO Create
                 END
 
                 NspUnlockTree ()
 
-                RETURN OS_STATUS_NOT_FOUND
+                status = OS_STATUS_NOT_FOUND
+
+                GOTO Exit
             END
 
             IF flags & OS_OPEN_MUST_CREATE THEN
@@ -707,7 +725,48 @@ FN NsReferenceEntryByPath (
 
                 NspUnlockTree ()
 
-                RETURN OS_STATUS_EXISTS
+                status = OS_STATUS_NOT_FOUND
+
+                GOTO Exit
+            END
+
+            IF child^.BouncePath AND
+                flags & OS_OPEN_NO_SYMLINK == 0 THEN
+
+                // This is a symlink and the caller wants to follow them.
+
+                symlinkcount += 1
+
+                IF symlinkcount >= OS_SYMLINK_MAX THEN
+                    NspUnlockTree ()
+
+                    status = OS_STATUS_MAXIMUM_SYMLINKS
+
+                    GOTO Exit
+                END
+
+                IF symlinkcookie THEN
+                    ExUnreferenceName ( symlinkcookie )
+                END
+
+                symlinkcookie = child^.BouncePath
+
+                ExReferenceName ( symlinkcookie )
+
+                // Set the lookup path to the symlink path.
+
+                path = ExNameToString ( symlinkcookie )
+
+                IF path[0] == '/' THEN
+                    // The symlink path is relative to root.
+
+                    // TODO per-process root for chroot
+
+                    roothandle.Entry = &NspRootEntry
+                    roothandle.Subspace = &NspRootSubspace
+                END
+
+                GOTO Retry
             END
 
             IF child^.MountedOnCount THEN
@@ -726,6 +785,8 @@ FN NsReferenceEntryByPath (
                 END
             END
 
+            // Advance to the next path component.
+
             currententry = child
 
             CONTINUE
@@ -741,7 +802,9 @@ FN NsReferenceEntryByPath (
 
             NspUnlockTree ()
 
-            RETURN OS_STATUS_NOT_FOUND
+            status = OS_STATUS_NOT_FOUND
+
+            GOTO Exit
         END
 
         lookupfunc :=
@@ -752,7 +815,9 @@ FN NsReferenceEntryByPath (
 
             NspUnlockTree ()
 
-            RETURN OS_STATUS_NOT_FOUND
+            status = OS_STATUS_NOT_FOUND
+
+            GOTO Exit
         END
 
         IF NOT exclusive THEN
@@ -812,7 +877,9 @@ FN NsReferenceEntryByPath (
         IF NOT event THEN
             NspUnlockTree ()
 
-            RETURN OS_STATUS_NO_MEMORY
+            status = OS_STATUS_NO_MEMORY
+
+            GOTO Exit
         END
 
         IF NOT child THEN
@@ -829,7 +896,9 @@ FN NsReferenceEntryByPath (
 
                 ExUnreferenceEventCounter ( event )
 
-                RETURN OS_STATUS_NO_MEMORY
+                status = OS_STATUS_NO_MEMORY
+
+                GOTO Exit
             END
 
         ELSE
@@ -863,16 +932,19 @@ FN NsReferenceEntryByPath (
         // Call the lookup function to acquire a referenced pointer to the
         // object that should back this new entry.
 
-        object : ^VOID
-        entryflags : UWORD
+        lookupcontext.Object = currententry^.Object
+        lookupcontext.Name = &component[0]
+        lookupcontext.Flags = flags
+        lookupcontext.EntryFlags = 0
+        lookupcontext.BouncePath = NULLPTR
 
-        status = lookupfunc (
-            currententry^.Object, // object
-            &component[0], // name
-            flags, // flags
-            OUT object, // newobject
-            OUT entryflags, // entryflags
-        )
+        // Only pass in the CREATE flag if this is the final path component.
+
+        IF currentpath[0] != 0 THEN
+            lookupcontext.Flags &= ~OS_OPEN_CREATE
+        END
+
+        status = lookupfunc ( &lookupcontext )
 
         // Re-take the lock.
         // Note that we dropped the tree lock, but we don't have to retry
@@ -894,7 +966,8 @@ FN NsReferenceEntryByPath (
         IF OsError ( status ) THEN
             IF status == OS_STATUS_NOT_FOUND THEN
                 // This can only happen if our flags didn't specify to
-                // create.
+                // create. If they did, the provider would have created the
+                // object.
                 // Set this entry up as a negative entry so that we don't call
                 // the FS again upon later attempts to open the same path.
 
@@ -915,20 +988,22 @@ FN NsReferenceEntryByPath (
 
             NspUnlockTree ()
 
-            RETURN status
+            GOTO Exit
         END
 
         // Turn into a full entry.
 
-        child^.Flags = entryflags
+        child^.Flags = lookupcontext.EntryFlags
+        child^.Object = lookupcontext.Object
+        child^.BouncePath = lookupcontext.BouncePath
 
-        child^.Object = object
-
-        // Unreference and proceed to the next path component.
+        // Unreference this new entry (which begins life with a refcount of 1).
 
         NspUnreferenceEntry ( child )
 
-        currententry = child
+        // Proceed to next path component.
+
+        GOTO NextChild
     END
 
     // We reached the final component of the path.
@@ -944,5 +1019,13 @@ FN NsReferenceEntryByPath (
     handle^.Entry = currententry
     handle^.Subspace = currentspace
 
-    RETURN OS_STATUS_SUCCESS
+    status = OS_STATUS_SUCCESS
+
+@Exit
+
+    IF symlinkcookie THEN
+        ExUnreferenceName ( symlinkcookie )
+    END
+
+    RETURN status
 END
