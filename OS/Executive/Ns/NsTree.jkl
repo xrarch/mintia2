@@ -525,11 +525,13 @@ FN NspLookupChild (
 END
 
 #SECTION "PAGEtext"
-FN NsReferenceEntryByPath (
+FN NsLookupEntryByPath (
     IN path : ^UBYTE,
     IN handle : ^NsHandle,
     IN initialhandle : ^NsHandle,
     IN flags : UWORD,
+    IN permissions : UWORD,
+    IN creationfunc : ObTypeNamespaceLookupF,
 ) : OsStatus
 
     // Parse the specified path and initialize the 'handle' with a referenced
@@ -810,8 +812,9 @@ FN NsReferenceEntryByPath (
         lookupfunc :=
             (ObFindHeader(currententry^.Object))^.Type^.NamespaceLookup
 
-        IF NOT lookupfunc THEN
-            // The object's type doesn't support namespace child lookups.
+        IF NOT lookupfunc AND NOT creationfunc THEN
+            // The object's type doesn't support namespace child lookups, and
+            // we aren't creating a child object.
 
             NspUnlockTree ()
 
@@ -937,14 +940,63 @@ FN NsReferenceEntryByPath (
         lookupcontext.Flags = flags
         lookupcontext.EntryFlags = 0
         lookupcontext.BouncePath = NULLPTR
+        lookupcontext.Permissions = permissions
 
-        // Only pass in the CREATE flag if this is the final path component.
+        IF lookupfunc THEN
+            // Only pass in the CREATE flag if this is the final path component
+            // and we aren't creating a specific object type.
 
-        IF currentpath[0] != 0 THEN
-            lookupcontext.Flags &= ~OS_OPEN_CREATE
+            IF currentpath[0] != 0 OR creationfunc THEN
+                lookupcontext.Flags &= ~OS_OPEN_CREATE
+            END
+
+            status = lookupfunc ( &lookupcontext )
+
+            IF creationfunc AND
+                status == OS_STATUS_NOT_FOUND THEN
+
+                // We're creating a specific object type and there is no element
+                // of this name, according to the object type for the parent
+                // entry, so we should create that object.
+
+                lookupcontext.Flags = flags
+
+                GOTO CreateObject
+            END
+
+        ELSE
+
+            // No lookup function, but if we got there, there has to be a
+            // creation function.
+
+@CreateObject
+
+#IF BLD_CHK
+            IF NOT creationfunc THEN
+                KeCrash ( "NsReferenceEntryByPath: no creationfunc\n" )
+            END
+#END
+
+            status = creationfunc ( &lookupcontext )
+
+            IF NOT OsError ( status ) THEN
+                // Set up this entry as the namespace entry of this new object.
+
+                header := ObFindHeader ( lookupcontext.Object )
+
+                header^.NamespaceEntry = child
+
+                // The entry and the object reference one another, so both
+                // refcounts should be biased. This will be undone when the
+                // final handle of the object is closed, if it is temporary.
+                // Otherwise it will be undone when the object is explicitly
+                // removed from the namespace with an unlink call.
+
+                ObReferenceObject ( lookupcontext.Object )
+
+                NspReferenceEntry ( child )
+            END
         END
-
-        status = lookupfunc ( &lookupcontext )
 
         // Re-take the lock.
         // Note that we dropped the tree lock, but we don't have to retry
