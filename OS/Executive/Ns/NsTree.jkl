@@ -798,23 +798,20 @@ FN NsLookupEntryByPath (
 
         // No child. Grab the object for this entry.
 
-        IF NOT currententry^.Object THEN
-            // No object, so this is a pure container. If there's no child
-            // with this name then there's no child with this name.
+        lookupfunc : ObTypeNamespaceLookupF = NULLPTR
 
-            NspUnlockTree ()
+        IF currententry^.Object THEN
+            // This entry has an associated object, so grab the type's lookup
+            // function.
 
-            status = OS_STATUS_NOT_FOUND
-
-            GOTO Exit
+            lookupfunc =
+                (ObFindHeader(currententry^.Object))^.Type^.NamespaceLookup
         END
 
-        lookupfunc :=
-            (ObFindHeader(currententry^.Object))^.Type^.NamespaceLookup
-
         IF NOT lookupfunc AND NOT (creationfunc AND currentpath[0] == 0) THEN
-            // The object's type doesn't support namespace child lookups, and
-            // we aren't creating a child object.
+            // The object's type doesn't support namespace child lookups, or
+            // there is no object. Also, we aren't specifically creating a child
+            // object.
 
             NspUnlockTree ()
 
@@ -1049,6 +1046,15 @@ FN NsLookupEntryByPath (
         child^.Flags = lookupcontext.EntryFlags
         child^.Object = lookupcontext.Object
         child^.BouncePath = lookupcontext.BouncePath
+
+        IF lookupcontext.EntryFlags & NS_ENTRY_VIRTUAL THEN
+            // Insert into the virtual child list of the parent.
+
+            RtlInsertAtTailList (
+                &currententry^.VirtualChildListHead, // head
+                &child^.VirtualChildEntry, // entry
+            )
+        END
 
         // Unreference this new entry (which begins life with a refcount of 1).
 
