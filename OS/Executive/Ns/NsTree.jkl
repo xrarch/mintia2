@@ -524,6 +524,9 @@ FN NspLookupChild (
     END
 END
 
+#DEFINE NS_LOOKUP_TREE_HELD_EXCLUSIVE 1
+#DEFINE NS_LOOKUP_CREATED 2
+
 #SECTION "PAGEtext"
 FN NsLookupEntryByPath (
     IN path : ^UBYTE,
@@ -554,7 +557,7 @@ FN NsLookupEntryByPath (
 
     status : OsStatus
 
-    exclusive := FALSE
+    state := 0
 
     // Acquire the tree lock.
 
@@ -596,7 +599,7 @@ FN NsLookupEntryByPath (
 
             // Re-take the lock.
 
-            IF exclusive THEN
+            IF state & NS_LOOKUP_TREE_HELD_EXCLUSIVE THEN
                 NspLockTreeExclusive ()
             ELSE
                 NspLockTreeShared ()
@@ -700,9 +703,6 @@ FN NsLookupEntryByPath (
         )
 
         IF child THEN
-
-@NextChild
-
             IF child^.Flags & NS_ENTRY_NEGATIVE THEN
                 // The child was a negative entry.
 
@@ -722,15 +722,23 @@ FN NsLookupEntryByPath (
                 GOTO Exit
             END
 
-            IF flags & OS_OPEN_MUST_CREATE THEN
-                // Flags specify must-create, but it already exists.
+            IF child^.MountedOnCount THEN
+                // This entry has been a mountpoint in one or more subspaces.
+                // Look up the mount list to see if we should jump to a
+                // new subspace.
 
-                NspUnlockTree ()
+                newspace := NspFindSubspaceByRoot (
+                    currentspace, // subspace
+                    child, // entry
+                )
 
-                status = OS_STATUS_NOT_FOUND
-
-                GOTO Exit
+                IF newspace THEN
+                    currentspace = newspace
+                    child = newspace^.Root
+                END
             END
+
+@ProcessCreatedChild
 
             IF child^.BouncePath AND
                 flags & OS_OPEN_NO_SYMLINK == 0 THEN
@@ -771,22 +779,6 @@ FN NsLookupEntryByPath (
                 GOTO Retry
             END
 
-            IF child^.MountedOnCount THEN
-                // This entry has been a mountpoint in one or more subspaces.
-                // Look up the hash table to see if we should jump to a
-                // new subspace.
-
-                newspace := NspFindSubspaceByRoot (
-                    currentspace, // subspace
-                    child, // entry
-                )
-
-                IF newspace THEN
-                    currentspace = newspace
-                    child = newspace^.Root
-                END
-            END
-
             // Advance to the next path component.
 
             currententry = child
@@ -820,11 +812,11 @@ FN NsLookupEntryByPath (
             GOTO Exit
         END
 
-        IF NOT exclusive THEN
+        IF state & NS_LOOKUP_TREE_HELD_EXCLUSIVE == 0 THEN
             // We hold the lock shared, but we're about to add a child to
             // this node so we need to upgrade it to exclusive.
 
-            exclusive = TRUE
+            state |= NS_LOOKUP_TREE_HELD_EXCLUSIVE
 
             IF NOT NspTryUpgradeTreeLock () THEN
                 // Failed to upgrade atomically. We need to drop the lock,
@@ -868,9 +860,6 @@ FN NsLookupEntryByPath (
         // dropped. Anyone who tries to look up the old name will block
         // until the transition entry is awoken and will then repeat their
         // lookup from the beginning.
-        //
-        // Multiple uses of this "transition entry" concept are why it has
-        // its own family of subroutines.
 
         event = ExAllocateEventCounter ( TRUE )
 
@@ -947,6 +936,10 @@ FN NsLookupEntryByPath (
                 lookupcontext.Flags &= ~OS_OPEN_CREATE
             END
 
+            // Responsibilities of this function are to create if the CREATE
+            // flag is specified and the object does not exist. If it did create
+            // it should return NS_ENTRY_CREATED as one of the EntryFlags.
+
             status = lookupfunc ( &lookupcontext )
 
             IF creationfunc AND
@@ -965,7 +958,7 @@ FN NsLookupEntryByPath (
         ELSE
 
             // No lookup function, but if we got there, there has to be a
-            // creation function.
+            // creation function and this has to be the final path component.
 
 @CreateObject
 
@@ -975,10 +968,24 @@ FN NsLookupEntryByPath (
             END
 #END
 
+            // Call the creation callback given by the caller to allow it to
+            // atomically create a new object under the umbrella of the
+            // transition entry.
+            //
+            // On success, it probably wants to set the NS_ENTRY_VIRTUAL flag
+            // (which will allow it to appear in directory listings), and MUST
+            // set the NS_ENTRY_CREATED flag.
+
             status = creationfunc ( &lookupcontext )
 
             IF NOT OsError ( status ) THEN
                 // Set up this entry as the namespace entry of this new object.
+
+#IF BLD_CHK
+                IF lookupcontext.EntryFlags & NS_ENTRY_CREATED == 0 THEN
+                    KeCrash ( "NsReferenceEntryByPath: created not set\n" )
+                END
+#END
 
                 header := ObFindHeader ( lookupcontext.Object )
 
@@ -1056,24 +1063,45 @@ FN NsLookupEntryByPath (
             )
         END
 
+        IF lookupcontext.EntryFlags & NS_ENTRY_CREATED THEN
+            // Looking up this entry caused the object to be created.
+
+            state |= NS_LOOKUP_CREATED
+        END
+
         // Unreference this new entry (which begins life with a refcount of 1).
 
         NspUnreferenceEntry ( child )
 
-        // Proceed to next path component.
+        // Process the new entry and proceed to the next path component.
 
-        GOTO NextChild
+        GOTO ProcessCreatedChild
     END
 
-    // We reached the final component of the path.
-    // currententry and currentspace contain an unreferenced entry and subspace.
-    // Reference them.
+    // We reached the final component of the path and have resolved it to a
+    // specific namespace entry and subspace.
+
+    IF flags & OS_OPEN_MUST_CREATE AND
+        state & NS_LOOKUP_CREATED == 0 THEN
+
+        // Caller wanted to create, but we found that the object already exists.
+
+        NspUnlockTree ()
+
+        status = OS_STATUS_EXISTS
+
+        GOTO Exit
+    END
+
+    // The entry and subspace are unreferenced, so reference them now.
 
     NspReferenceEntry ( currententry )
 
     NspReferenceSubspace ( currentspace )
 
     NspUnlockTree ()
+
+    // Return them.
 
     handle^.Entry = currententry
     handle^.Subspace = currentspace
