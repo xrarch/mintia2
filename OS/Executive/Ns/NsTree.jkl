@@ -524,8 +524,13 @@ FN NspLookupChild (
     END
 END
 
-#DEFINE NS_LOOKUP_TREE_HELD_EXCLUSIVE 1
-#DEFINE NS_LOOKUP_CREATED 2
+#DEFINE NSP_LOOKUP_TREE_HELD_EXCLUSIVE 1
+#DEFINE NSP_LOOKUP_CREATED 2
+
+STRUCT NspSymlinkState
+    SymlinkCookie : ^ExName,
+    SymlinkCount : ULONG,
+END
 
 #SECTION "PAGEtext"
 FN NsLookupEntryByPath (
@@ -551,9 +556,10 @@ FN NsLookupEntryByPath (
 
     event : ^ExEventCounter
 
-    symlinkcookie : ^ExName = NULLPTR
+    symstate : NspSymlinkState
 
-    symlinkcount := 0
+    symstate.SymlinkCookie = NULLPTR
+    symstate.SymlinkCount = 0
 
     status : OsStatus
 
@@ -571,45 +577,6 @@ FN NsLookupEntryByPath (
     currentspace := roothandle.Subspace
 
     WHILE TRUE DO
-        IF currententry^.Flags & NS_ENTRY_TRANSITION THEN
-            // We've stumbled on a transition entry. We need to wait and retry.
-
-            // The event was stashed in the object pointer.
-
-            event = currententry^.Object
-
-            ExReferenceEventCounter ( event )
-
-            // Drop the lock.
-
-            NspUnlockTree ()
-
-            // Wait on the event counter.
-
-            KeWaitForSingleObject (
-                KE_KERNEL_MODE, // waitmode
-                FALSE, // alertable
-                NULLPTR, // timeout
-                &event^.Used.Event.Header, // object
-            )
-
-            // Unreference the event counter.
-
-            ExUnreferenceEventCounter ( event )
-
-            // Re-take the lock.
-
-            IF state & NS_LOOKUP_TREE_HELD_EXCLUSIVE THEN
-                NspLockTreeExclusive ()
-            ELSE
-                NspLockTreeShared ()
-            END
-
-            // Retry everything.
-
-            GOTO Retry
-        END
-
         IF currentpath[0] == '/' AND
             currententry^.Flags & NS_ENTRY_LEAF THEN
 
@@ -648,15 +615,14 @@ FN NsLookupEntryByPath (
 
         IF component[0] == '.' THEN
             IF component[1] == 0 THEN
-                // The path component was dot.
-                // Nothing to do.
+                // The path component was dot, the current directory.
+                // Stay on the same entry.
 
                 CONTINUE
             END
 
             IF component[1] == '.' AND component[2] == 0 THEN
-                // The path component was dotdot.
-                // Go to the parent.
+                // The path component was dotdot, the parent directory.
 
                 IF currententry != currentspace^.Root THEN
 #IF BLD_CHK
@@ -703,6 +669,44 @@ FN NsLookupEntryByPath (
         )
 
         IF child THEN
+            IF child^.Flags & NS_ENTRY_TRANSITION THEN
+                // We've stumbled on a transition entry. We need to wait with
+                // the tree lock dropped and then retry our entire lookup.
+
+                // The event was stashed in the object pointer.
+
+                event = child^.Object
+
+                ExReferenceEventCounter ( event )
+
+                // Drop the lock.
+
+                NspUnlockTree ()
+
+                // Wait on the event counter.
+
+                KeWaitForSingleObject (
+                    KE_KERNEL_MODE, // waitmode
+                    FALSE, // alertable
+                    NULLPTR, // timeout
+                    &event^.Used.Event.Header, // object
+                )
+
+                // Unreference the event counter.
+
+                ExUnreferenceEventCounter ( event )
+
+                // Re-take the lock.
+
+                state &= ~NSP_LOOKUP_TREE_HELD_EXCLUSIVE
+
+                NspLockTreeShared ()
+
+                // Retry everything.
+
+                GOTO Retry
+            END
+
             IF child^.Flags & NS_ENTRY_NEGATIVE THEN
                 // The child was a negative entry.
 
@@ -745,9 +749,9 @@ FN NsLookupEntryByPath (
 
                 // This is a symlink and the caller wants to follow them.
 
-                symlinkcount += 1
+                symstate.SymlinkCount += 1
 
-                IF symlinkcount >= OS_SYMLINK_MAX THEN
+                IF symstate.SymlinkCount >= OS_SYMLINK_MAX THEN
                     NspUnlockTree ()
 
                     status = OS_STATUS_MAXIMUM_SYMLINKS
@@ -755,17 +759,17 @@ FN NsLookupEntryByPath (
                     GOTO Exit
                 END
 
-                IF symlinkcookie THEN
-                    ExUnreferenceName ( symlinkcookie )
+                IF symstate.SymlinkCookie THEN
+                    ExUnreferenceName ( symstate.SymlinkCookie )
                 END
 
-                symlinkcookie = child^.BouncePath
+                symstate.SymlinkCookie = child^.BouncePath
 
-                ExReferenceName ( symlinkcookie )
+                ExReferenceName ( symstate.SymlinkCookie )
 
                 // Set the lookup path to the symlink path.
 
-                path = ExNameToString ( symlinkcookie )
+                path = ExNameToString ( symstate.SymlinkCookie )
 
                 IF path[0] == '/' THEN
                     // The symlink path is relative to root.
@@ -812,11 +816,11 @@ FN NsLookupEntryByPath (
             GOTO Exit
         END
 
-        IF state & NS_LOOKUP_TREE_HELD_EXCLUSIVE == 0 THEN
+        IF state & NSP_LOOKUP_TREE_HELD_EXCLUSIVE == 0 THEN
             // We hold the lock shared, but we're about to add a child to
             // this node so we need to upgrade it to exclusive.
 
-            state |= NS_LOOKUP_TREE_HELD_EXCLUSIVE
+            state |= NSP_LOOKUP_TREE_HELD_EXCLUSIVE
 
             IF NOT NspTryUpgradeTreeLock () THEN
                 // Failed to upgrade atomically. We need to drop the lock,
@@ -1066,7 +1070,7 @@ FN NsLookupEntryByPath (
         IF lookupcontext.EntryFlags & NS_ENTRY_CREATED THEN
             // Looking up this entry caused the object to be created.
 
-            state |= NS_LOOKUP_CREATED
+            state |= NSP_LOOKUP_CREATED
         END
 
         // Unreference this new entry (which begins life with a refcount of 1).
@@ -1082,7 +1086,7 @@ FN NsLookupEntryByPath (
     // specific namespace entry and subspace.
 
     IF flags & OS_OPEN_MUST_CREATE AND
-        state & NS_LOOKUP_CREATED == 0 THEN
+        state & NSP_LOOKUP_CREATED == 0 THEN
 
         // Caller wanted to create, but we found that the object already exists.
 
@@ -1110,8 +1114,8 @@ FN NsLookupEntryByPath (
 
 @Exit
 
-    IF symlinkcookie THEN
-        ExUnreferenceName ( symlinkcookie )
+    IF symstate.SymlinkCookie THEN
+        ExUnreferenceName ( symstate.SymlinkCookie )
     END
 
     RETURN status
