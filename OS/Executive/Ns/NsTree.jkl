@@ -426,7 +426,7 @@ END
 
 #SECTION "PAGEtext"
 FN NsUnlinkObject (
-    IN header : ^ObHeader,
+    IN object : ^VOID,
 )
 
     // Unlink the given object from the namespace.
@@ -434,7 +434,31 @@ FN NsUnlinkObject (
     // explicit unlink operation then the header lock of the object is held
     // exclusively.
 
-    KeCrash ( "TODO NsUnlinkObject\n" )
+    header := ObFindHeader ( object )
+
+    entry := header^.NamespaceEntry
+
+    // Set the object as not linked into the namespace.
+
+    header^.NamespaceEntry = NULLPTR
+
+    NspLockTreeExclusive ()
+
+    // Unlink the namespace entry from its parent.
+
+    NspUnlinkEntry ( entry )
+
+    // Unreference the entry, whose refcount was biased since it tracked an
+    // object.
+
+    NspUnreferenceEntry ( entry )
+
+    NspUnlockTree ()
+
+    // Unreference the object, whose refcount was biased since it was tracked
+    // by a namespace entry.
+
+    ObUnreferenceObject ( object )
 END
 
 #SECTION "PAGEtext"
