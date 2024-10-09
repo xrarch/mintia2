@@ -66,6 +66,16 @@ UNION ObpHeaderUnion
     Used : ObpHeaderUsed,
 END
 
+STRUCT ObCredentials
+    Uid : ULONG,
+    Gid : ULONG,
+END
+
+STRUCT ObPermissions
+    Cred : ObCredentials,
+    Access : ULONG,
+END
+
 STRUCT ObHeader
     Type : ^ObType,
 
@@ -77,11 +87,9 @@ STRUCT ObHeader
 
     NamespaceEntry : ^NsEntry,
 
-    Flags : ULONG,
+    Permissions : ObPermissions,
 
-    Uid : ULONG,
-    Gid : ULONG,
-    Permissions : ULONG,
+    Flags : ULONG,
 
     PagedQuotaCharge : ULONG,
     NonpagedQuotaCharge : ULONG,
@@ -104,6 +112,17 @@ END
 #MACRO ObFindHeader ( object ) [
     ((CAST object - SIZEOF ObpCommonHeader TO ^ObpCommonHeader)^.Header)
 ]
+
+#MACRO ObMoveCredentials ( dest, src ) [
+    NOTHING (dest)^.Uid = (src)^.Uid
+    NOTHING (dest)^.Gid = (src)^.Gid
+]
+
+EXTERN FN ObCheckAccess (
+    IN permissions : ^ObPermissions,
+    IN cred : ^ObCredentials,
+    IN access : UWORD,
+) : UWORD
 
 EXTERN FN ObCreateObject (
     IN obparams : ^ObParameters,

@@ -325,6 +325,8 @@ FN NspUnlinkEntry (
     IF entry^.Flags & NS_ENTRY_VIRTUAL THEN
         // Remove from the virtual node list.
 
+        parent^.VirtualChildCount -= 1
+
         RtlRemoveEntryList ( &entry^.VirtualChildEntry )
     END
 
@@ -436,54 +438,6 @@ FN NsUnlinkObject (
 END
 
 #SECTION "PAGEtext"
-FN NspNextPathComponent (
-    IN component : ^UBYTE,
-    IN path : ^UBYTE,
-    OUT nextpath : ^UBYTE,
-) : OsStatus
-
-    // Crunch the next path component into the buffer pointed to by 'component'.
-    // A pointer to the component after that one is returned in 'nextpath'. The
-    // primary return value is an indicator of the component's sanity.
-
-    // Skip initial slashes.
-
-    WHILE path[0] == '/' DO
-        path += 1
-    END
-
-    IF path[0] == 0 THEN
-        // Empty path.
-
-        nextpath = NULLPTR
-
-        RETURN OS_STATUS_SUCCESS
-    END
-
-    i := 0
-
-    WHILE path[i] != 0 AND path[i] != '/' DO
-        IF i == OS_NAME_MAX THEN
-            // Too long.
-
-            RETURN OS_STATUS_NAME_TOO_LONG
-        END
-
-        component[i] = path[i]
-
-        i += 1
-    END
-
-    // Insert null terminator.
-
-    component[i] = 0
-
-    nextpath = path
-
-    RETURN OS_STATUS_SUCCESS
-END
-
-#SECTION "PAGEtext"
 FN NspLookupChild (
     IN entry : ^NsEntry,
     IN name : ^UBYTE,
@@ -539,7 +493,8 @@ FN NsLookupEntryByPath (
     IN initialhandle : ^NsHandle,
     IN roothandle : ^NsHandle,
     IN flags : UWORD,
-    IN permissions : UWORD,
+    IN permissions : ^ObPermissions,
+    IN access : UWORD,
     IN creationfunc : ObTypeNamespaceLookupF,
 ) : OsStatus
 
@@ -578,7 +533,7 @@ FN NsLookupEntryByPath (
         IF currentpath[0] == '/' AND
             currententry^.Flags & NS_ENTRY_LEAF THEN
 
-            // This is a leaf entry (i.e., a file or object). It can have no
+            // This is a leaf entry (i.e., not a directory). It can have no
             // children, so just return an error status.
 
             NspUnlockTree ()
@@ -588,28 +543,59 @@ FN NsLookupEntryByPath (
             GOTO Exit
         END
 
-        // Collect the next path component.
+        // Skip initial slashes.
 
-        status = NspNextPathComponent (
-            &component[0], // component
-            currentpath, // path
-            OUT currentpath, // path
-        )
-
-        IF OsError ( status ) THEN
-            // Got an error status while collecting the path component. Early
-            // return.
-
-            NspUnlockTree ()
-
-            GOTO Exit
+        WHILE currentpath[0] == '/' DO
+            currentpath += 1
         END
 
-        IF NOT currentpath THEN
+        IF currentpath[0] == 0 THEN
             // No more components.
 
             BREAK
         END
+
+        // Check for traversal access.
+
+        IF NOT ObCheckAccess (
+            currententry^.Permissions, // permissions
+            &permissions^.Cred, // cred
+            OS_ACCESS_EXEC, // access
+        ) THEN
+
+            // No traversal access.
+
+            NspUnlockTree ()
+
+            status = OS_STATUS_ACCESS_DENIED
+
+            GOTO Exit
+        END
+
+        // Reuse status for the length of the component.
+
+        status = 0
+
+        WHILE currentpath[0] != 0 AND currentpath[0] != '/' DO
+            IF status == OS_NAME_MAX THEN
+                // Too long.
+
+                NspUnlockTree ()
+
+                status = OS_STATUS_NAME_TOO_LONG
+
+                GOTO Exit
+            END
+
+            component[status] = currentpath[0]
+
+            status += 1
+            currentpath += 1
+        END
+
+        // Insert null terminator.
+
+        component[status] = 0
 
         IF component[0] == '.' THEN
             IF component[1] == 0 THEN
@@ -1057,6 +1043,8 @@ FN NsLookupEntryByPath (
         IF lookupcontext.EntryFlags & NS_ENTRY_VIRTUAL THEN
             // Insert into the virtual child list of the parent.
 
+            currententry^.VirtualChildCount += 1
+
             RtlInsertAtTailList (
                 &currententry^.VirtualChildListHead, // head
                 &child^.VirtualChildEntry, // entry
@@ -1081,14 +1069,28 @@ FN NsLookupEntryByPath (
     // We reached the final component of the path and have resolved it to a
     // specific namespace entry and subspace.
 
-    IF flags & OS_OPEN_MUST_CREATE AND
-        state & NSP_LOOKUP_CREATED == 0 THEN
+    IF state & NSP_LOOKUP_CREATED == 0 THEN
+        IF flags & OS_OPEN_MUST_CREATE THEN
+            // Caller wanted to create, but we found that the object already exists.
 
-        // Caller wanted to create, but we found that the object already exists.
+            NspUnlockTree ()
+
+            status = OS_STATUS_EXISTS
+
+            GOTO Exit
+        END
+
+    ELSEIF NOT ObCheckAccess (
+        currententry^.Permissions, // permissions
+        &permissions^.Cred, // cred
+        access,// access
+    ) THEN
+
+        // No access to this entry, and we didn't just now create it.
 
         NspUnlockTree ()
 
-        status = OS_STATUS_EXISTS
+        status = OS_STATUS_ACCESS_DENIED
 
         GOTO Exit
     END

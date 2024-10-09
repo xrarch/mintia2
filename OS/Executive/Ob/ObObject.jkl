@@ -129,10 +129,13 @@ FN ObCreateObject (
     header^.QuotaBlock = quotablock
 
     header^.Flags = obparams^.Flags
-    header^.Permissions = obparams^.Permissions
 
-    header^.Uid = process^.Paged^.Uid
-    header^.Gid = process^.Paged^.Gid
+    header^.Permissions.Access = obparams^.Permissions
+
+    ObMoveCredentials (
+        &header^.Permissions.Cred, // dest
+        &process^.Paged^.Cred, // src
+    )
 
     header^.U.Used.PointerCount = 1
     header^.U.Used.HandleCount = 0
@@ -360,4 +363,48 @@ FN ObConditionallyReferenceObject (
 
         oldcount = new
     END
+END
+
+#SECTION "PAGEtext"
+FN ObCheckAccess (
+    IN permissions : ^ObPermissions,
+    IN cred : ^ObCredentials,
+    IN access : UWORD,
+) : UWORD
+
+    // Check the requested access against the permissions.
+
+    shift := 0
+
+    IF permissions^.Cred.Uid == cred^.Uid THEN
+        shift = 6 // owner
+    ELSEIF permissions^.Cred.Gid == cred^.Gid THEN
+        shift = 3 // group
+    END
+
+    permbits := (permissions^.Access >> shift) & OS_ACCESS_ALL
+
+    IF permbits | access == permbits THEN
+        // Access is a subset of the permissions we have.
+
+        RETURN TRUE
+    END
+
+    IF cred^.Uid == OS_SYSTEM_UID THEN
+        // Access isn't a subset, but we are the system user.
+
+        RETURN TRUE
+    END
+
+    IF permissions^.Cred.Uid == OS_SYSTEM_UID THEN
+        // Access isn't a subset, and we aren't the system user, and the owner
+        // of this object is the system user. Permission is denied.
+
+        RETURN FALSE
+    END
+
+    // As an admin, we can access all objects except those owned by the system
+    // user.
+
+    RETURN cred^.Gid == OS_SYSTEM_GID
 END
