@@ -517,9 +517,9 @@ FN NsLookupEntryByPath (
     IN initialhandle : ^NsHandle,
     IN roothandle : ^NsHandle,
     IN flags : UWORD,
-    IN permissions : ^ObPermissions,
     IN access : UWORD,
     IN creationfunc : ObTypeNamespaceLookupF,
+    IN obparams : ^ObParameters,
 ) : OsStatus
 
     // Parse the specified path and initialize the 'handle' with a referenced
@@ -583,7 +583,7 @@ FN NsLookupEntryByPath (
 
         IF NOT ObCheckAccess (
             currententry^.Permissions, // permissions
-            &permissions^.Cred, // cred
+            &obparams^.Permissions^.Cred, // cred
             OS_ACCESS_EXEC, // access
         ) THEN
 
@@ -936,7 +936,7 @@ FN NsLookupEntryByPath (
         lookupcontext.Flags = flags
         lookupcontext.EntryFlags = 0
         lookupcontext.BouncePath = NULLPTR
-        lookupcontext.Permissions = permissions
+        lookupcontext.Parameters = obparams
 
         IF lookupfunc THEN
             // Only pass in the CREATE flag if this is the final path component
@@ -984,7 +984,7 @@ FN NsLookupEntryByPath (
 
             IF NOT ObCheckAccess (
                 currententry^.Permissions, // permissions
-                &permissions^.Cred, // cred
+                &obparams^.Permissions^.Cred, // cred
                 OS_ACCESS_WRITE, // access
             ) THEN
 
@@ -1127,7 +1127,7 @@ FN NsLookupEntryByPath (
 
     ELSEIF NOT ObCheckAccess (
         currententry^.Permissions, // permissions
-        &permissions^.Cred, // cred
+        &obparams^.Permissions^.Cred, // cred
         access,// access
     ) THEN
 

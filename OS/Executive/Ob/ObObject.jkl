@@ -130,12 +130,12 @@ FN ObCreateObject (
 
     header^.Flags = obparams^.Flags
 
-    header^.Permissions.Access = obparams^.Permissions
-
     ObMoveCredentials (
         &header^.Permissions.Cred, // dest
-        &process^.Paged^.Cred, // src
+        &obparams^.Permissions^.Cred, // src
     )
+
+    header^.Permissions.Access = obparams^.Permissions^.Access
 
     header^.U.Used.PointerCount = 1
     header^.U.Used.HandleCount = 0
