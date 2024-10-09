@@ -925,6 +925,8 @@ FN NsLookupEntryByPath (
             // Responsibilities of this function are to create if the CREATE
             // flag is specified and the object does not exist. If it did create
             // it should return NS_ENTRY_CREATED as one of the EntryFlags.
+            // If it creates it should check for the OS_ACCESS_WRITE permission
+            // on the parent object.
 
             status = lookupfunc ( &lookupcontext )
 
@@ -954,6 +956,21 @@ FN NsLookupEntryByPath (
             END
 #END
 
+            // Check for write access to the parent.
+
+            IF NOT ObCheckAccess (
+                currententry^.Permissions, // permissions
+                &permissions^.Cred, // cred
+                OS_ACCESS_WRITE, // access
+            ) THEN
+
+                // No write access.
+
+                status = OS_STATUS_ACCESS_DENIED
+
+                GOTO ErrorCreatingObject
+            END
+
             // Call the creation callback given by the caller to allow it to
             // atomically create a new object under the umbrella of the
             // transition entry.
@@ -964,30 +981,34 @@ FN NsLookupEntryByPath (
 
             status = creationfunc ( &lookupcontext )
 
-            IF NOT OsError ( status ) THEN
-                // Set up this entry as the namespace entry of this new object.
+            IF OsError ( status ) THEN
+                GOTO ErrorCreatingObject
+            END
+
+            // Set up this entry as the namespace entry of this new object.
 
 #IF BLD_CHK
-                IF lookupcontext.EntryFlags & NS_ENTRY_CREATED == 0 THEN
-                    KeCrash ( "NsReferenceEntryByPath: created not set\n" )
-                END
+            IF lookupcontext.EntryFlags & NS_ENTRY_CREATED == 0 THEN
+                KeCrash ( "NsReferenceEntryByPath: created not set\n" )
+            END
 #END
 
-                header := ObFindHeader ( lookupcontext.Object )
+            header := ObFindHeader ( lookupcontext.Object )
 
-                header^.NamespaceEntry = child
+            header^.NamespaceEntry = child
 
-                // The entry and the object reference one another, so both
-                // refcounts should be biased. This will be undone when the
-                // final handle of the object is closed, if it is temporary.
-                // Otherwise it will be undone when the object is explicitly
-                // removed from the namespace with an unlink call.
+            // The entry and the object reference one another, so both
+            // refcounts should be biased. This will be undone when the
+            // final handle of the object is closed, if it is temporary.
+            // Otherwise it will be undone when the object is explicitly
+            // removed from the namespace with an unlink call.
 
-                ObReferenceObject ( lookupcontext.Object )
+            ObReferenceObject ( lookupcontext.Object )
 
-                NspReferenceEntry ( child )
-            END
+            NspReferenceEntry ( child )
         END
+
+@ErrorCreatingObject
 
         // Re-take the lock.
         // Note that we dropped the tree lock, but we don't have to retry
