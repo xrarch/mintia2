@@ -537,6 +537,7 @@ FN NsLookupEntryByPath (
     IN path : ^UBYTE,
     IN handle : ^NsHandle,
     IN initialhandle : ^NsHandle,
+    IN roothandle : ^NsHandle,
     IN flags : UWORD,
     IN permissions : UWORD,
     IN creationfunc : ObTypeNamespaceLookupF,
@@ -545,12 +546,9 @@ FN NsLookupEntryByPath (
     // Parse the specified path and initialize the 'handle' with a referenced
     // subspace and namespace entry.
 
+    // The contents of the struct passed in 'initialhandle' are destroyed.
+
     component : UBYTE[OS_NAME_MAX + 1]
-
-    roothandle : NsHandle
-
-    roothandle.Entry = initialhandle^.Entry
-    roothandle.Subspace = initialhandle^.Subspace
 
     lookupcontext : NsLookupContext
 
@@ -573,8 +571,8 @@ FN NsLookupEntryByPath (
 
     currentpath := path
 
-    currententry := roothandle.Entry
-    currentspace := roothandle.Subspace
+    currententry := initialhandle^.Entry
+    currentspace := initialhandle^.Subspace
 
     WHILE TRUE DO
         IF currentpath[0] == '/' AND
@@ -774,10 +772,8 @@ FN NsLookupEntryByPath (
                 IF path[0] == '/' THEN
                     // The symlink path is relative to root.
 
-                    // TODO per-process root for chroot
-
-                    roothandle.Entry = &NspRootEntry
-                    roothandle.Subspace = &NspRootSubspace
+                    initialhandle^.Entry = roothandle^.Entry
+                    initialhandle^.Subspace = roothandle^.Subspace
                 END
 
                 GOTO Retry
