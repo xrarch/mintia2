@@ -120,7 +120,9 @@ FN NspReferenceEntry (
     IN entry : ^NsEntry,
 )
 
-    // Reference the supplied entry. Tree lock must be held at least shared.
+    // Reference the supplied entry. Tree lock must be held at least shared if
+    // a pointer to the entry is being acquired, otherwise it could be reclaimed
+    // at any moment.
 
     KeAcquireLockExclusive ( &NspReclaimLock )
 
@@ -150,7 +152,8 @@ FN NspUnreferenceEntry (
     IN entry : ^NsEntry,
 )
 
-    // Unreference the supplied entry. Tree lock must be held at least shared.
+    // Unreference the supplied entry. Tree lock need not be held, but if it is
+    // not, the pointer to this entry cannot be trusted after this operation.
 
     KeAcquireLockExclusive ( &NspReclaimLock )
 
@@ -442,18 +445,18 @@ FN NsUnlinkObject (
 
     header^.NamespaceEntry = NULLPTR
 
-    NspLockTreeExclusive ()
-
     // Unlink the namespace entry from its parent.
 
+    NspLockTreeExclusive ()
+
     NspUnlinkEntry ( entry )
+
+    NspUnlockTree ()
 
     // Unreference the entry, whose refcount was biased since it tracked an
     // object.
 
     NspUnreferenceEntry ( entry )
-
-    NspUnlockTree ()
 END
 
 #SECTION "PAGEtext"
