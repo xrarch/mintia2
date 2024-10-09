@@ -688,29 +688,39 @@ FN KiSelectRealTimeThread (
             thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
 
 #IF BLD_MP
-            IF NOT thread^.Pinned OR NOT migrate THEN
-#END
+            IF migrate THEN
+                WHILE thread^.Pinned DO
+                    // Seek to a non-pinned thread.
 
-                RtlRemoveEntryList ( &thread^.ReadyEntry )
+                    IF thread^.ReadyEntry.Next == queue THEN
+                        // Reached the end. Check the next queue.
 
-                IF RtlEmptyList ( queue ) THEN
-                    // The queue is empty now. Clear the bit.
+                        CONTINUE
+                    END
 
-                    prb^.RealTimeReady = readybits & ~(1 << i)
+                    thread = CONTAINEROF thread^.ReadyEntry.Next TO
+                        KeThread.ReadyEntry
                 END
-
-                // Decrement count of ready threads.
-
-                KiDecrementLoad ( prb )
-
-                // No longer on a queue, so set INFLIGHT.
-
-                thread^.Status = KI_THREAD_INFLIGHT
-
-                RETURN thread
-#IF BLD_MP
             END
 #END
+
+            RtlRemoveEntryList ( &thread^.ReadyEntry )
+
+            IF RtlEmptyList ( queue ) THEN
+                // The queue is empty now. Clear the bit.
+
+                prb^.RealTimeReady = readybits & ~(1 << i)
+            END
+
+            // Decrement count of ready threads.
+
+            KiDecrementLoad ( prb )
+
+            // No longer on a queue, so set INFLIGHT.
+
+            thread^.Status = KI_THREAD_INFLIGHT
+
+            RETURN thread
         END
     END
 
@@ -745,7 +755,11 @@ FN KiSelectTimesharedThread (
 
         count := KI_TIMESHARED_QUEUES
 
-        WHILE (readybits >> k) & 1 == 0 AND count DO
+        WHILE (readybits >> k) & 1 == 0 DO
+            IF NOT count THEN
+                RETURN NULLPTR
+            END
+
             k += 1
             count -= 1
 
@@ -753,9 +767,8 @@ FN KiSelectTimesharedThread (
                 k = 0
             END
         END
-    END
 
-    IF (readybits >> k) & 1 == 0 THEN
+    ELSEIF (readybits >> k) & 1 == 0 THEN
         RETURN NULLPTR
     END
 
@@ -766,42 +779,40 @@ FN KiSelectTimesharedThread (
     thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
 
 #IF BLD_MP
-    IF NOT thread^.Pinned OR NOT migrate THEN
-#END
-        RtlRemoveEntryList ( &thread^.ReadyEntry )
-
-        IF RtlEmptyList ( queue ) THEN
-            // The queue is empty now. Clear the bit.
-
-            prb^.CalendarReady = readybits & ~(1 << k)
-
-#IF BLD_MP
-            IF NOT migrate THEN
-#END
-                // Advance the run index.
-
-                IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex THEN
-                    prb^.CalendarRunIndex = (k + 1) % KI_TIMESHARED_QUEUES
-                END
-#IF BLD_MP
-            END
-#END
-        END
-
-        // Decrement count of ready threads.
-
-        KiDecrementLoad ( prb )
-
-        // No longer on a queue, so set INFLIGHT.
-
-        thread^.Status = KI_THREAD_INFLIGHT
-
-        RETURN thread
-#IF BLD_MP
+    IF thread^.Pinned AND migrate THEN
+        RETURN NULLPTR
     END
 #END
 
-    RETURN NULLPTR
+    RtlRemoveEntryList ( &thread^.ReadyEntry )
+
+    IF RtlEmptyList ( queue ) THEN
+        // The queue is empty now. Clear the bit.
+
+        prb^.CalendarReady = readybits & ~(1 << k)
+
+#IF BLD_MP
+        IF NOT migrate THEN
+#END
+            // Advance the run index.
+
+            IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex THEN
+                prb^.CalendarRunIndex = (k + 1) % KI_TIMESHARED_QUEUES
+            END
+#IF BLD_MP
+        END
+#END
+    END
+
+    // Decrement count of ready threads.
+
+    KiDecrementLoad ( prb )
+
+    // No longer on a queue, so set INFLIGHT.
+
+    thread^.Status = KI_THREAD_INFLIGHT
+
+    RETURN thread
 END
 
 FN KiSelectThread (
