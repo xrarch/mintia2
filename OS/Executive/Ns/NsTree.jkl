@@ -454,11 +454,6 @@ FN NsUnlinkObject (
     NspUnreferenceEntry ( entry )
 
     NspUnlockTree ()
-
-    // Unreference the object, whose refcount was biased since it was tracked
-    // by a namespace entry.
-
-    ObUnreferenceObject ( object )
 END
 
 #SECTION "PAGEtext"
@@ -1027,7 +1022,8 @@ FN NsLookupEntryByPath (
             // Otherwise it will be undone when the object is explicitly
             // removed from the namespace with an unlink call.
 
-            ObReferenceObject ( lookupcontext.Object )
+            // XXX Nope, only the entry needs its refcount biased, since the
+            //     object's refcount is biased by the existence of the entry.
 
             NspReferenceEntry ( child )
         END
