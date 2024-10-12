@@ -437,9 +437,11 @@ FN KiServiceIpi (
             0, // newvalue
         )
 
-        // OR this set of pending soft ints into our mask.
+        // OR this set of pending soft ints into our bit set.
+
         // We don't use an atomic OR because an IPI is at the highest IPL, so
-        // this R-M-W will work fine.
+        // this R-M-W will work fine. All other accesses of this bit set are
+        // accessed with interrupts disabled or otherwise blocking out IPIs.
 
         prb^.PendingSoftwareInterrupts |= pendingset
     END
