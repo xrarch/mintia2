@@ -142,7 +142,9 @@ EXPORT FN KeDequeueDpc (
     ipl := KiAcquireOtherDpcQueue ( trgprb )
 
     IF dpc^.EnqueuedTo != trgprb THEN
-        // It changed while we were checking.
+        // It changed while we were checking. This could include the DPC being
+        // dequeued, so we need to check this even on UP builds.
+
         // Retry.
 
         KiReleaseOtherDpcQueue ( trgprb, ipl )
