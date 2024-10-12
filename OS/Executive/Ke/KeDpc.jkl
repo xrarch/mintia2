@@ -98,13 +98,10 @@ EXPORT FN KeEnqueueDpc (
 
     // Set the DPC interrupt pending.
 
-    // Note that we subtract 1 from the IPL shift so that we can do a right
-    // shift by IPL to check for pending bits later (which is the hotter path).
-    // Also this assumes interrupts disabled.
-
     prb^.PendingSoftwareInterrupts |= KiPendingIpl ( KI_IPL_DPC )
 
     // Release the DPC queue lock.
+    
     // Note that we simply re-enable interrupts and therefore may not actually
     // dispatch the DPC here.
     //
