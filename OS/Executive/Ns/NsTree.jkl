@@ -612,6 +612,50 @@ FN NsLookupEntryByPath (
     currentspace := params^.InitialHandle.Subspace
 
     WHILE TRUE DO
+        IF currententry^.Flags & NS_ENTRY_TRANSITION THEN
+            // We've stumbled on a transition entry. We need to wait with
+            // the tree lock dropped and then retry our entire lookup.
+            // It is possible for the very first entry (which we already
+            // had a pointer to) to be a transition entry in the case where
+            // it is a file being renamed, and the old name is still in
+            // transition temporarily. We want to wait on such a transition
+            // entry so that we can't get multiple concurrent renames on the
+            // same thing.
+
+            // The event was stashed in the object pointer.
+
+            event = currententry^.Object
+
+            ExReferenceEventCounter ( event )
+
+            // Drop the lock.
+
+            NspUnlockTree ()
+
+            // Wait on the event counter.
+
+            KeWaitForSingleObject (
+                KE_KERNEL_MODE, // waitmode
+                FALSE, // alertable
+                NULLPTR, // timeout
+                &event^.Used.Event.Header, // object
+            )
+
+            // Unreference the event counter.
+
+            ExUnreferenceEventCounter ( event )
+
+            // Re-take the lock.
+
+            state &= ~NSP_LOOKUP_TREE_HELD_EXCLUSIVE
+
+            NspLockTreeShared ()
+
+            // Retry everything.
+
+            GOTO Retry
+        END
+
         IF currentpath[0] == '/' AND
             currententry^.Flags & NS_ENTRY_LEAF THEN
 
@@ -735,44 +779,6 @@ FN NsLookupEntryByPath (
         )
 
         IF child THEN
-            IF child^.Flags & NS_ENTRY_TRANSITION THEN
-                // We've stumbled on a transition entry. We need to wait with
-                // the tree lock dropped and then retry our entire lookup.
-
-                // The event was stashed in the object pointer.
-
-                event = child^.Object
-
-                ExReferenceEventCounter ( event )
-
-                // Drop the lock.
-
-                NspUnlockTree ()
-
-                // Wait on the event counter.
-
-                KeWaitForSingleObject (
-                    KE_KERNEL_MODE, // waitmode
-                    FALSE, // alertable
-                    NULLPTR, // timeout
-                    &event^.Used.Event.Header, // object
-                )
-
-                // Unreference the event counter.
-
-                ExUnreferenceEventCounter ( event )
-
-                // Re-take the lock.
-
-                state &= ~NSP_LOOKUP_TREE_HELD_EXCLUSIVE
-
-                NspLockTreeShared ()
-
-                // Retry everything.
-
-                GOTO Retry
-            END
-
             IF child^.Flags & NS_ENTRY_NEGATIVE THEN
                 // The child was a negative entry.
 
