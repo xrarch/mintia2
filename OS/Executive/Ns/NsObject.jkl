@@ -25,60 +25,59 @@ FN NsCaptureOpenParameters (
         RETURN status
     END
 
-    IF sysparams^.Captured.Path THEN
-        // Copy in the path.
-
-        status = ExCaptureString (
-            sysparams^.Captured.Path, // string
-            OUT sysparams^.Path, // output
-        )
-
-        IF OsError ( status ) THEN
-            RETURN status
-        END
-
-        // There's a path, so initialize the initial handle.
-
-        IF sysparams^.Captured.InitialHandle == OS_NULL_HANDLE THEN
-            // The initial path is the root directory.
-
-            sysparams^.InitialHandle.Entry = NULLPTR
-
-            RETURN OS_STATUS_SUCCESS
-        END
-
-        // Translate the initial handle.
-
-        file : ^IoFile
-        access : UWORD
-
-        status = ObReferenceByHandle (
-            sysparams^.Captured.InitialHandle, // handle
-            &IoFileType, // type
-            OUT file, // object
-            OUT access, // access
-        )
-
-        IF OsError ( status ) THEN
-            ExFreeString ( sysparams^.Path )
-
-            RETURN status
-        END
-
-        // Capture the namespace handle stored in the file object.
-
-        sysparams^.InitialHandle.Entry = file^.Handle.Entry
-        sysparams^.InitialHandle.Subspace = file^.Handle.Subspace
-
-        NsReferenceHandle ( &sysparams^.InitialHandle )
-
-        ObUnreferenceObject ( file )
+    IF NOT sysparams^.Captured.Path THEN
+        sysparams^.Path = NULLPTR
 
         RETURN OS_STATUS_SUCCESS
-
-    ELSE
-        sysparams^.Path = NULLPTR
     END
+
+    // Copy in the path.
+
+    status = ExCaptureString (
+        sysparams^.Captured.Path, // string
+        OUT sysparams^.Path, // output
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // There's a path, so initialize the initial handle.
+
+    IF sysparams^.Captured.InitialHandle == OS_NULL_HANDLE THEN
+        // The initial path is the root directory.
+
+        sysparams^.InitialHandle.Entry = NULLPTR
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    // Translate the initial handle.
+
+    file : ^IoFile
+    access : UWORD
+
+    status = ObReferenceByHandle (
+        sysparams^.Captured.InitialHandle, // handle
+        &IoFileType, // type
+        OUT file, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        ExFreeString ( sysparams^.Path )
+
+        RETURN status
+    END
+
+    // Capture the namespace handle stored in the file object.
+
+    sysparams^.InitialHandle.Entry = file^.Handle.Entry
+    sysparams^.InitialHandle.Subspace = file^.Handle.Subspace
+
+    NsReferenceHandle ( &sysparams^.InitialHandle )
+
+    ObUnreferenceObject ( file )
 
     RETURN OS_STATUS_SUCCESS
 END
