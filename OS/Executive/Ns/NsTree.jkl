@@ -1271,6 +1271,9 @@ FN NsLookupEntryByPath (
 
     NsUnreferenceHandle ( &params^.InitialHandle )
 
+    // Zero out the initial handle to make sure NsFreeOpenParameters doesn't do
+    // it upon return from the system service (if we're even in one).
+
     params^.InitialHandle.Entry = NULLPTR
 
     RETURN status
