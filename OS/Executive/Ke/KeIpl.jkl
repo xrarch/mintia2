@@ -76,9 +76,9 @@ FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
 #IF BLD_MP
     IF prb^.WakeStackSwapper THEN
         // A request was made to wake the stack swapper.
-        // On MP we do this here because when we notice we have to, we are deep
-        // in some spinlocks. UP does not have this issue - DPC level is DPC
-        // level.
+        // On MP we do this here because when we noticed we had to, we were deep
+        // in some spinlocks. UP does not have this issue because DPC level is
+        // DPC level, so we just signal the event at that time instead of here.
 
         prb^.WakeStackSwapper = FALSE
 
