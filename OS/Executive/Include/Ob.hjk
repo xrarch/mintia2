@@ -18,22 +18,27 @@ FNPTR ObTypeCloseF (
 
 FNPTR ObTypeDeleteF (
     IN object : ^VOID,
-)
+) : UWORD
 
 FNPTR ObTypeSetSecurityF (
     IN object : ^VOID,
-    IN permissions : UWORD,
-    IN uid : UWORD,
-    IN gid : UWORD,
-)
+    IN permissions : ^ObPermissions,
+) : OsStatus
 
 FNPTR ObTypeNamespaceLookupF (
     IN context : ^NsLookupContext,
 ) : OsStatus
 
+FNPTR ObTypeInitializeF (
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
 #DEFINE OB_NAME_MAX 256
 
 #DEFINE OB_FLAG_PERMANENT 1
+
+#DEFINE OB_TYPE_NO_WAIT_OFFSET 0xFFFFFFFF
 
 STRUCT ObType
     Name : ^UBYTE,
@@ -43,6 +48,8 @@ STRUCT ObType
     Delete : ObTypeDeleteF,
     SetSecurity : ObTypeSetSecurityF,
     NamespaceLookup : ObTypeNamespaceLookupF,
+
+    Initialize : ObTypeInitializeF,
 
     WaitOffset : ULONG,
     TypeIdentifier : ULONG,
@@ -102,7 +109,9 @@ END
 STRUCT ObParameters
     Type : ^ObType,
 
-    Permissions : ^ObPermissions,
+    Context : ^VOID,
+
+    Permissions : ObPermissions,
     Flags : ULONG,
     BodySize : ULONG,
     NpQuotaBias : ULONG,
@@ -124,7 +133,7 @@ EXTERN FN ObCheckAccess (
     IN access : UWORD,
 ) : UWORD
 
-EXTERN FN ObCreateObject (
+EXTERN FN ObAllocateObject (
     IN obparams : ^ObParameters,
     OUT object : ^VOID,
 ) : OsStatus

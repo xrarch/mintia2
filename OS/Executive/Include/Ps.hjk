@@ -5,6 +5,7 @@
 #INCLUDE "<inc>/Ke.hjk"
 #INCLUDE "<inc>/Ex.hjk"
 #INCLUDE "<inc>/Ob.hjk"
+#INCLUDE "<inc>/Ns.hjk"
 
 EXTERN PsProcessType : ObType
 
@@ -16,6 +17,10 @@ STRUCT PsPagedProcess
     HandleTableLock : KeLock,
 
     Cred : ObCredentials,
+
+    RootHandle : NsHandle,
+
+    RootLock : KeLock,
 END
 
 STRUCT PsProcess
@@ -40,6 +45,8 @@ EXTERN PsUexecApcDispatcher : ^VOID
 EXTERN PsUexecSignalDispatcher : ^VOID
 
 EXTERN FN PsExitThread ()
+
+EXTERN FN PsInitializeIdleProcess ()
 
 EXTERN KeIdleProcess : PsProcess
 

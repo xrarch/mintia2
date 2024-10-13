@@ -1,0 +1,207 @@
+//
+// Implements namespace-level object management.
+//
+
+#INCLUDE "Nsp.hjk"
+#INCLUDE "<inc>/Io.hjk"
+
+EXTERN IoFileType : ObType
+
+#SECTION "PAGEtext"
+FN NsCaptureOpenParameters (
+    IN userparams : ^OsOpenParameters,
+    IN sysparams : ^NsOpenParameters,
+) : OsStatus
+
+    // Copy open parameters into system space.
+
+    status := ExSafeCopyIn (
+        &sysparams^.Captured, // dest
+        userparams, // src
+        SIZEOF OsOpenParameters, // sz
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF sysparams^.Captured.Path THEN
+        // Copy in the path.
+
+        status = ExCaptureString (
+            sysparams^.Captured.Path, // string
+            OUT sysparams^.Path, // output
+        )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+
+        // There's a path, so initialize the initial handle.
+
+        IF sysparams^.Captured.InitialHandle == OS_NULL_HANDLE THEN
+            // The initial path is the root directory.
+
+            sysparams^.InitialHandle.Entry = NULLPTR
+
+            RETURN OS_STATUS_SUCCESS
+        END
+
+        // Translate the initial handle.
+
+        file : ^IoFile
+        access : UWORD
+
+        status = ObReferenceByHandle (
+            sysparams^.Captured.InitialHandle, // handle
+            &IoFileType, // type
+            OUT file, // object
+            OUT access, // access
+        )
+
+        IF OsError ( status ) THEN
+            ExFreeString ( sysparams^.Path )
+
+            RETURN status
+        END
+
+        // Capture the namespace handle stored in the file object.
+
+        sysparams^.InitialHandle.Entry = file^.Handle.Entry
+        sysparams^.InitialHandle.Subspace = file^.Handle.Subspace
+
+        NsReferenceHandle ( &sysparams^.InitialHandle )
+
+        ObUnreferenceObject ( file )
+
+        RETURN OS_STATUS_SUCCESS
+
+    ELSE
+        sysparams^.Path = NULLPTR
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN NsFreeOpenParameters (
+    IN params : ^NsOpenParameters,
+)
+
+    // Free open parameters that were previously copied in from userspace.
+
+    IF params^.Path THEN
+        ExFreeString ( params^.Path )
+
+        IF params^.InitialHandle.Entry THEN
+            // Unreference the initial handle.
+
+            NsUnreferenceHandle ( &params^.InitialHandle )
+        END
+    END
+END
+
+#SECTION "PAGEtext"
+FN NsCreateObject (
+    IN params : ^NsOpenParameters,
+    IN obparams : ^ObParameters,
+    OUT object : ^VOID,
+) : OsStatus
+
+    // This is a helper routine for simple cases of creating an object.
+    // Most instances of file object creation are not a simple case, so that
+    // does not call this, but most other things do.
+
+    // 'params' should be a fully initialized NsOpenParameters structure, which
+    // means it should have been in-copied from userspace and the initial handle
+    // should have been resolved. Caller takes care of undoing these things.
+
+    // 'obparams' should be fully initialized other than the permissions and
+    // object flags which we helpfully fill in here.
+
+    mycred := &PsCurrentProcess()^.Paged^.Cred
+
+    ObMoveCredentials (
+        &obparams^.Permissions.Cred, // dest
+        mycred, // src
+    )
+
+    obparams^.Permissions.Access = params^.Captured.Permissions
+
+    obparams^.Flags = params^.Captured.ObFlags
+
+    IF params^.Path THEN
+        // We are atomically creating the object within the namespace.
+
+        params^.Captured.Flags |= OS_OPEN_CREATE
+
+        handle : NsHandle
+
+        status := NsLookupEntryByPath (
+            params, // params
+            &handle, // handle
+            mycred, // cred
+            obparams, // obparams
+            obparams^.Type, // type
+        )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+
+        object = handle.Entry^.Object
+
+        ObReferenceObject ( object )
+
+        NsUnreferenceHandle ( &handle )
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    RETURN ObAllocateObject (
+        obparams, // obparams
+        OUT object, // object
+    )
+END
+
+#SECTION "PAGEtext"
+FN NsLookupObject (
+    IN params : ^NsOpenParameters,
+    IN type : ^ObType,
+    OUT object : ^VOID,
+) : OsStatus
+
+    // This is a helper routine for looking up an object within the namespace.
+
+    IF NOT params^.Path THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
+    IF params^.Captured.Flags & OS_OPEN_CREATE THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
+    mycred := &PsCurrentProcess()^.Paged^.Cred
+
+    handle : NsHandle
+
+    status := NsLookupEntryByPath (
+        params, // params
+        &handle, // handle
+        mycred, // cred
+        NULLPTR, // obparams
+        type, // type
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    object = handle.Entry^.Object
+
+    ObReferenceObject ( object )
+
+    NsUnreferenceHandle ( &handle )
+
+    RETURN OS_STATUS_SUCCESS
+END

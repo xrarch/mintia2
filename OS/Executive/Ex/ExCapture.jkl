@@ -1,0 +1,89 @@
+//
+// Implements various safe-capture routines for system services.
+//
+
+#INCLUDE "Exp.hjk"
+
+#INCLUDE "../Mm/Mi.hjk"
+
+#SECTION "PAGEtext"
+EXPORT FN ExSafeCopyIn (
+    IN dest : ^VOID,
+    IN src : ^VOID,
+    IN sz : UWORD,
+) : OsStatus
+
+    // Safely copy a hunk of bytes from userspace.
+    // The "src" pointer is supplied by usermode. The "dest" pointer is trusted.
+
+    IF src >= MI_USER_SPACE_END THEN
+        RETURN OS_STATUS_READ_FAULT
+    END
+
+#IF BLD_CHK
+    IF dest < MI_SYSTEM_SPACE THEN
+        KeCrash ( "ExSafeCopyIn: dest < MI_SYSTEM_SPACE\n" )
+    END
+#END
+
+    // Call RtlCopyBytes through an exception wrapper.
+
+    KeCrash ( "ExSafeCopyIn: NYI\n" )
+END
+
+#SECTION "PAGEtext"
+EXPORT FN ExSafeCopyOut (
+    IN dest : ^VOID,
+    IN src : ^VOID,
+    IN sz : UWORD,
+) : OsStatus
+
+    // Safely copy a hunk of bytes to userspace.
+    // The "dest" pointer is supplied by usermode. The "src" pointer is trusted.
+
+    IF dest >= MI_USER_SPACE_END THEN
+        RETURN OS_STATUS_WRITE_FAULT
+    END
+
+#IF BLD_CHK
+    IF src < MI_SYSTEM_SPACE THEN
+        KeCrash ( "ExSafeCopyOut: src < MI_SYSTEM_SPACE\n" )
+    END
+#END
+
+    // Call RtlCopyBytes through an exception wrapper.
+
+    KeCrash ( "ExSafeCopyOut: NYI\n" )
+END
+
+#SECTION "PAGEtext"
+EXPORT FN ExCaptureString (
+    IN string : ^UBYTE,
+    OUT output : ^UBYTE,
+) : OsStatus
+
+    // Safely capture a null-terminated string from userspace.
+    // The "string" pointer is supplied by usermode.
+
+    IF string >= MI_USER_SPACE_END THEN
+        RETURN OS_STATUS_READ_FAULT
+    END
+
+    // Measure the length of the string, allocate an appropriately sized pool
+    // block, and copy it in, all inside an exception wrapper.
+
+    KeCrash ( "ExCaptureString: NYI\n" )
+END
+
+#SECTION "PAGEtext"
+EXPORT FN ExFreeString (
+    IN string : ^UBYTE,
+)
+
+    // Free a previously captured string.
+
+    MmFreePool (
+        string, // ptr
+        'ExSt', // tag
+    )
+END

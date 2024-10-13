@@ -7,12 +7,12 @@
 PUBLIC ObFullyNonpagedObjects := TRUE
 
 #SECTION "PAGEtext"
-FN ObCreateObject (
+FN ObAllocateObject (
     IN obparams : ^ObParameters,
     OUT object : ^VOID,
 ) : OsStatus
 
-    // Create an object of the specified type.
+    // Allocate an object of the specified type.
 
     // Calculate the sizes of the paged and nonpaged part of the object.
 
@@ -132,19 +132,38 @@ FN ObCreateObject (
 
     ObMoveCredentials (
         &header^.Permissions.Cred, // dest
-        &obparams^.Permissions^.Cred, // src
+        &obparams^.Permissions.Cred, // src
     )
 
-    header^.Permissions.Access = obparams^.Permissions^.Access
+    header^.Permissions.Access = obparams^.Permissions.Access
 
     header^.U.Used.PointerCount = 1
     header^.U.Used.HandleCount = 0
 
     header^.NamespaceEntry = NULLPTR
 
+    header^.Type = obparams^.Type
+
     KeInitializeLock ( &header^.Lock )
 
     object = commonheader + SIZEOF ObpCommonHeader
+
+    IF obparams^.Type^.Initialize THEN
+        // Call the initialization callback.
+
+        status = obparams^.Type^.Initialize (
+            object, // object
+            obparams^.Context, // context
+        )
+
+        IF OsError ( status ) THEN
+            // Initialization failed so just free everything we did.
+
+            ObFreeObject ( object )
+
+            RETURN status
+        END
+    END
 
     RETURN OS_STATUS_SUCCESS
 
@@ -228,17 +247,21 @@ FN ObFreeObject (
 
     // Uncharge quota.
 
-    MmUnchargePoolQuota (
-        quotablock, // quotablock
-        pquota, // charge
-        MM_PAGED_POOL, // poolindex
-    )
+    IF pquota THEN
+        MmUnchargePoolQuota (
+            quotablock, // quotablock
+            pquota, // charge
+            MM_PAGED_POOL, // poolindex
+        )
+    END
 
-    MmUnchargePoolQuota (
-        quotablock, // quotablock
-        npquota, // charge
-        MM_NONPAGED_POOL, // poolindex
-    )
+    IF npquota THEN
+        MmUnchargePoolQuota (
+            quotablock, // quotablock
+            npquota, // charge
+            MM_NONPAGED_POOL, // poolindex
+        )
+    END
 
     MmUnreferenceQuotaBlock ( quotablock )
 END
@@ -253,7 +276,11 @@ FN ObDeleteObject (
     header := ObFindHeader ( object )
 
     IF header^.Type^.Delete THEN
-        header^.Type^.Delete ( object )
+        IF NOT header^.Type^.Delete ( object ) THEN
+            // Type routine said nevermind, don't delete.
+
+            LEAVE
+        END
     END
 
     ObFreeObject ( object )

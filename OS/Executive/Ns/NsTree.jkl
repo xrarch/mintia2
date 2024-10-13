@@ -6,7 +6,7 @@
 
 PUBLIC NspTreeLock : KeLock
 
-PUBLIC NspRootEntry : NsEntry
+PUBLIC NspRootEntry : NsContainerEntry
 PUBLIC NspRootSubspace : NsSubspace
 
 PUBLIC NspReclaimListHead : RtlListEntry
@@ -35,10 +35,15 @@ FN NspInitializeEntry (
 
     RtlInitializeList ( &entry^.VirtualChildListHead )
 
-    entry^.Name = ExFindName ( name )
+    IF name THEN
+        entry^.Name = ExFindName ( name )
 
-    IF NOT entry^.Name THEN
-        RETURN FALSE
+        IF NOT entry^.Name THEN
+            RETURN FALSE
+        END
+
+    ELSE
+        entry^.Name = NULLPTR
     END
 
     entry^.BouncePath = NULLPTR
@@ -54,6 +59,8 @@ FN NspInitializeEntry (
     entry^.Parent = NULLPTR
 
     entry^.MountedOnCount = 0
+
+    entry^.Permissions = NULLPTR
 
     RETURN TRUE
 END
@@ -388,16 +395,31 @@ FN NspInitializeTree ()
         &subspace^.MountListEntry, // entry
     )
 
-    subspace^.Root = &NspRootEntry
+    subspace^.Root = &NspRootEntry.Entry
     subspace^.MountedUpon.Entry = NULLPTR
     subspace^.MountedUpon.Subspace = NULLPTR
     subspace^.References = 0
 
     NspInitializeEntry (
-        &NspRootEntry, // entry
+        &NspRootEntry.Entry, // entry
         0, // flags
-        "[ROOT]", // name
+        NULLPTR, // name
     )
+
+    rootperms := &NspRootEntry.Permissions
+
+    rootperms^.Cred.Uid = OS_SYSTEM_UID
+    rootperms^.Cred.Gid = OS_SYSTEM_GID
+    rootperms^.Access = 0755
+
+    NspRootEntry.Entry.Permissions = rootperms
+
+    // Set the root directory of the idle process.
+
+    idleproc := KeIdleProcess.Paged
+
+    idleproc^.RootHandle.Entry = &NspRootEntry.Entry
+    idleproc^.RootHandle.Subspace = &NspRootSubspace
 END
 
 #SECTION "PAGEtext"
@@ -500,6 +522,25 @@ FN NspLookupChild (
     END
 END
 
+#SECTION "PAGEtext"
+FN NspCaptureRootHandle (
+    IN roothandle : ^NsHandle,
+)
+
+    // Capture the current process's root handle.
+
+    processpaged := PsCurrentProcess()^.Paged
+
+    KeAcquireLockShared ( &processpaged^.RootLock )
+
+    roothandle^.Entry = processpaged^.RootHandle.Entry
+    roothandle^.Subspace = processpaged^.RootHandle.Subspace
+
+    NsReferenceHandle ( roothandle )
+
+    KeReleaseLock ( &processpaged^.RootLock )
+END
+
 #DEFINE NSP_LOOKUP_TREE_HELD_EXCLUSIVE 1
 #DEFINE NSP_LOOKUP_CREATED 2
 
@@ -510,20 +551,39 @@ END
 
 #SECTION "PAGEtext"
 FN NsLookupEntryByPath (
-    IN path : ^UBYTE,
+    IN params : ^NsOpenParameters,
     IN handle : ^NsHandle,
-    IN initialhandle : ^NsHandle,
-    IN roothandle : ^NsHandle,
-    IN flags : UWORD,
-    IN access : UWORD,
-    IN creationfunc : ObTypeNamespaceLookupF,
+    IN cred : ^ObCredentials,
     IN obparams : ^ObParameters,
+    IN type : ^ObType,
 ) : OsStatus
 
     // Parse the specified path and initialize the 'handle' with a referenced
     // subspace and namespace entry.
 
-    // The contents of the struct passed in 'initialhandle' are destroyed.
+    // The initial handle should be referenced on entry, and unreferenced after
+    // exit. Note that the passed initial handle may not be the same as the one
+    // on exit. The initial handle is unreferenced on exit.
+
+    // Initialize the root directory.
+
+    roothandle : NsHandle
+
+    roothandle.Entry = NULLPTR
+
+    IF params^.InitialHandle.Entry == NULLPTR THEN
+        // The initial handle should be the root directory.
+
+        NspCaptureRootHandle ( &roothandle )
+
+        params^.InitialHandle.Entry = roothandle.Entry
+        params^.InitialHandle.Subspace = roothandle.Subspace
+
+        NsReferenceHandle ( &params^.InitialHandle )
+    END
+
+    path := params^.Path
+    flags := params^.Captured.Flags
 
     component : UBYTE[OS_NAME_MAX + 1]
 
@@ -548,8 +608,8 @@ FN NsLookupEntryByPath (
 
     currentpath := path
 
-    currententry := initialhandle^.Entry
-    currentspace := initialhandle^.Subspace
+    currententry := params^.InitialHandle.Entry
+    currentspace := params^.InitialHandle.Subspace
 
     WHILE TRUE DO
         IF currentpath[0] == '/' AND
@@ -581,7 +641,7 @@ FN NsLookupEntryByPath (
 
         IF NOT ObCheckAccess (
             currententry^.Permissions, // permissions
-            &obparams^.Permissions^.Cred, // cred
+            cred, // cred
             OS_ACCESS_EXEC, // access
         ) THEN
 
@@ -777,12 +837,39 @@ FN NsLookupEntryByPath (
 
                 path = ExNameToString ( symstate.SymlinkCookie )
 
+                // We're changing the initial handle, so unreference the current
+                // one.
+
+                NsUnreferenceHandle ( &params^.InitialHandle )
+
                 IF path[0] == '/' THEN
                     // The symlink path is relative to root.
 
-                    initialhandle^.Entry = roothandle^.Entry
-                    initialhandle^.Subspace = roothandle^.Subspace
+                    IF roothandle.Entry == NULLPTR THEN
+                        // Capture the root handle here.
+                        //
+                        // NOTE: This places the process's root directory lock as
+                        //       inferior to the tree lock.
+
+                        NspCaptureRootHandle ( &roothandle )
+                    END
+
+                    params^.InitialHandle.Entry = roothandle.Entry
+                    params^.InitialHandle.Subspace = roothandle.Subspace
+
+                ELSE
+                    // The symlink path is relative to the parent of the
+                    // symlink.
+
+                    params^.InitialHandle.Entry = currententry
+                    params^.InitialHandle.Subspace = currentspace
                 END
+
+                // Reference the new initial handle.
+
+                NsReferenceHandle ( &params^.InitialHandle )
+
+                // Retry the lookup.
 
                 GOTO Retry
             END
@@ -808,10 +895,12 @@ FN NsLookupEntryByPath (
                 (ObFindHeader(currententry^.Object))^.Type^.NamespaceLookup
         END
 
-        IF NOT lookupfunc AND NOT (creationfunc AND currentpath[0] == 0) THEN
+        IF NOT lookupfunc AND
+            NOT (obparams AND currentpath[0] == 0) THEN
+
             // The object's type doesn't support namespace child lookups, or
             // there is no object. Also, we aren't specifically creating a child
-            // object.
+            // object, or we are but this isn't the final path component.
 
             NspUnlockTree ()
 
@@ -934,13 +1023,12 @@ FN NsLookupEntryByPath (
         lookupcontext.Flags = flags
         lookupcontext.EntryFlags = 0
         lookupcontext.BouncePath = NULLPTR
-        lookupcontext.Parameters = obparams
 
         IF lookupfunc THEN
             // Only pass in the CREATE flag if this is the final path component
             // and we aren't creating a specific object type.
 
-            IF currentpath[0] != 0 OR creationfunc THEN
+            IF currentpath[0] != 0 OR obparams THEN
                 lookupcontext.Flags &= ~OS_OPEN_CREATE
             END
 
@@ -952,7 +1040,7 @@ FN NsLookupEntryByPath (
 
             status = lookupfunc ( &lookupcontext )
 
-            IF creationfunc AND
+            IF obparams AND
                 status == OS_STATUS_NOT_FOUND AND
                 currentpath[0] == 0 THEN
 
@@ -967,13 +1055,13 @@ FN NsLookupEntryByPath (
 
         ELSE
 
-            // No lookup function, but if we got there, there has to be a
+            // No lookup function, but if we got here, there has to be a
             // creation function and this has to be the final path component.
 
 @CreateObject
 
 #IF BLD_CHK
-            IF NOT creationfunc THEN
+            IF NOT obparams THEN
                 KeCrash ( "NsReferenceEntryByPath: no creationfunc\n" )
             END
 #END
@@ -982,7 +1070,7 @@ FN NsLookupEntryByPath (
 
             IF NOT ObCheckAccess (
                 currententry^.Permissions, // permissions
-                &obparams^.Permissions^.Cred, // cred
+                cred, // cred
                 OS_ACCESS_WRITE, // access
             ) THEN
 
@@ -996,24 +1084,21 @@ FN NsLookupEntryByPath (
             // Call the creation callback given by the caller to allow it to
             // atomically create a new object under the umbrella of the
             // transition entry.
-            //
-            // On success, it probably wants to set the NS_ENTRY_VIRTUAL flag
-            // (which will allow it to appear in directory listings), and MUST
-            // set the NS_ENTRY_CREATED flag.
 
-            status = creationfunc ( &lookupcontext )
+            lookupcontext.EntryFlags = NS_ENTRY_VIRTUAL |
+                NS_ENTRY_CREATED |
+                NS_ENTRY_LEAF
+
+            status = ObAllocateObject (
+                obparams, // obparams
+                OUT lookupcontext.Object, // object
+            )
 
             IF OsError ( status ) THEN
                 GOTO ErrorCreatingObject
             END
 
             // Set up this entry as the namespace entry of this new object.
-
-#IF BLD_CHK
-            IF lookupcontext.EntryFlags & NS_ENTRY_CREATED == 0 THEN
-                KeCrash ( "NsReferenceEntryByPath: created not set\n" )
-            END
-#END
 
             header := ObFindHeader ( lookupcontext.Object )
 
@@ -1084,6 +1169,11 @@ FN NsLookupEntryByPath (
         child^.Object = lookupcontext.Object
         child^.BouncePath = lookupcontext.BouncePath
 
+        // Set the permissions of the namespace entry to track those of the
+        // object.
+
+        child^.Permissions = &ObFindHeader ( lookupcontext.Object )^.Permissions
+
         IF lookupcontext.EntryFlags & NS_ENTRY_VIRTUAL THEN
             // Insert into the virtual child list of the parent.
 
@@ -1124,19 +1214,34 @@ FN NsLookupEntryByPath (
             GOTO Exit
         END
 
-    ELSEIF NOT ObCheckAccess (
-        currententry^.Permissions, // permissions
-        &obparams^.Permissions^.Cred, // cred
-        access,// access
-    ) THEN
+        IF NOT ObCheckAccess (
+            currententry^.Permissions, // permissions
+            cred, // cred
+            params^.Captured.Access, // access
+        ) THEN
 
-        // No access to this entry, and we didn't just now create it.
+            // No access to this entry, and we didn't just now create it.
 
-        NspUnlockTree ()
+            NspUnlockTree ()
 
-        status = OS_STATUS_ACCESS_DENIED
+            status = OS_STATUS_ACCESS_DENIED
 
-        GOTO Exit
+            GOTO Exit
+        END
+
+        IF type THEN
+            // Check the type of the object.
+
+            IF NOT currententry^.Object OR
+                ObFindHeader ( currententry^.Object )^.Type != type THEN
+
+                NspUnlockTree ()
+
+                status = OS_STATUS_INVALID_OBJECT_TYPE
+
+                GOTO Exit
+            END
+        END
     END
 
     // The entry and subspace are unreferenced, so reference them now.
@@ -1159,6 +1264,14 @@ FN NsLookupEntryByPath (
     IF symstate.SymlinkCookie THEN
         ExUnreferenceName ( symstate.SymlinkCookie )
     END
+
+    IF roothandle.Entry THEN
+        NsUnreferenceHandle ( &roothandle )
+    END
+
+    NsUnreferenceHandle ( &params^.InitialHandle )
+
+    params^.InitialHandle.Entry = NULLPTR
 
     RETURN status
 END

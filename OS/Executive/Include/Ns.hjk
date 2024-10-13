@@ -4,6 +4,8 @@
 
 #INCLUDE "<inc>/Ob.hjk"
 
+#INCLUDE "<ll>/System/OsNamespace.hjk"
+
 #DEFINE NS_ENTRY_CREATED 1
 #DEFINE NS_ENTRY_VIRTUAL 2
 #DEFINE NS_ENTRY_NEGATIVE 4
@@ -36,6 +38,11 @@ STRUCT NsEntry
     Permissions : ^ObPermissions,
 
     Flags : UBYTE,
+END
+
+STRUCT NsContainerEntry
+    Entry : NsEntry,
+    Permissions : ObPermissions,
 END
 
 STRUCT NsHandle
@@ -73,12 +80,75 @@ STRUCT NsLookupContext
     // Namespace entry flags are passed out through here.
 
     EntryFlags : ULONG,
-
-    // Context record for if the lookup results in creation.
-
-    Parameters : ^ObParameters,
 END
+
+FNPTR NsObjectInitializationF (
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+STRUCT NsOpenParameters
+    Captured : OsOpenParameters,
+
+    Path : ^UBYTE,
+    InitialHandle : NsHandle,
+END
+
+EXTERN FN NsCreateObject (
+    IN params : ^NsOpenParameters,
+    IN obparams : ^ObParameters,
+    OUT object : ^VOID,
+) : OsStatus
+
+EXTERN FN NsLookupObject (
+    IN params : ^NsOpenParameters,
+    IN type : ^ObType,
+    OUT object : ^VOID,
+) : OsStatus
 
 EXTERN FN NsUnlinkObject (
     IN object : ^VOID,
 )
+
+EXTERN FN NsLookupEntryByPath (
+    IN params : ^NsOpenParameters,
+    IN handle : ^NsHandle,
+    IN cred : ^ObCredentials,
+    IN obparams : ^ObParameters,
+    IN type : ^ObType,
+) : OsStatus
+
+EXTERN FN NsCaptureOpenParameters (
+    IN userparams : ^OsOpenParameters,
+    IN sysparams : ^NsOpenParameters,
+) : OsStatus
+
+EXTERN FN NsFreeOpenParameters (
+    IN params : ^NsOpenParameters,
+)
+
+EXTERN FN NspReferenceEntry (
+    IN entry : ^NsEntry,
+)
+
+EXTERN FN NspUnreferenceEntry (
+    IN entry : ^NsEntry,
+)
+
+EXTERN FN NspReferenceSubspace (
+    IN subspace : ^NsSubspace,
+)
+
+EXTERN FN NspUnreferenceSubspace (
+    IN subspace : ^NsSubspace,
+)
+
+#MACRO NsUnreferenceHandle ( handle ) [
+    NspUnreferenceEntry ( (handle)^.Entry )
+    NspUnreferenceSubspace ( (handle)^.Subspace )
+]
+
+#MACRO NsReferenceHandle ( handle ) [
+    NspReferenceEntry ( (handle)^.Entry )
+    NspReferenceSubspace ( (handle)^.Subspace )
+]

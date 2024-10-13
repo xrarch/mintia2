@@ -1,0 +1,56 @@
+//
+// Public header for I/O management for the MINTIA Executive.
+//
+
+#INCLUDE "<inc>/Ns.hjk"
+
+FNPTR IoOpenFileObjectF (
+    IN process : ^PsProcess,
+    IN file : ^IoFile,
+    IN access : UWORD,
+) : OsStatus
+
+FNPTR IoCloseFileObjectF (
+    IN file : ^IoFile,
+    IN access : UWORD,
+    IN lasthandlecount : UWORD,
+)
+
+FNPTR IoDeleteFileObjectF (
+    IN file : ^IoFile,
+)
+
+FNPTR IoDeleteFcbF (
+    IN fcb : ^IoFcb,
+) : UWORD
+
+FNPTR IoSetSecurityFcbF (
+    IN fcb : ^IoFcb,
+    IN permissions : ^ObPermissions,
+) : OsStatus
+
+FNPTR IoNamespaceLookupF (
+    IN context : ^NsLookupContext,
+) : OsStatus
+
+STRUCT IoDispatchTable
+    OpenFileObject : IoOpenFileObjectF,
+    CloseFileObject : IoCloseFileObjectF,
+    DeleteFileObject : IoDeleteFileObjectF,
+
+    DeleteFcb : IoDeleteFcbF,
+    SetSecurityFcb : IoSetSecurityFcbF,
+    NamespaceLookup : IoNamespaceLookupF,
+END
+
+STRUCT IoFcb
+    Dispatch : ^IoDispatchTable,
+END
+
+STRUCT IoFile
+    Handle : NsHandle,
+
+    Fcb : ^IoFcb,
+
+    Seek : RtlUquad,
+END

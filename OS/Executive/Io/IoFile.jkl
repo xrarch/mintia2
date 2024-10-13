@@ -1,0 +1,197 @@
+//
+// Implements the File object type for the I/O subsystem of the MINTIA
+// Executive.
+//
+
+#INCLUDE "Iop.hjk"
+
+#SECTION "PAGEtext"
+FN (ObTypeOpenF) IoOpenFileType (
+    IN process : ^PsProcess,
+    IN object : ^VOID,
+    IN access : UWORD,
+) : OsStatus
+
+    // Call the driver's file object open function, if present.
+
+    file := CAST object TO ^IoFile
+
+    fcb := file^.Fcb
+
+    IF NOT fcb THEN
+        // This is a file object for a namespace container.
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    openfunc := fcb^.Dispatch^.OpenFileObject
+
+    IF NOT openfunc THEN
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    RETURN openfunc (
+        process, // process
+        file, // file
+        access, // access
+    )
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeCloseF) IoCloseFileType (
+    IN object : ^VOID,
+    IN access : UWORD,
+    IN lasthandlecount : UWORD,
+)
+
+    // Call the driver's file object close function, if present.
+
+    file := CAST object TO ^IoFile
+
+    fcb := file^.Fcb
+
+    IF NOT fcb THEN
+        // This is a file object for a namespace container.
+
+        LEAVE
+    END
+
+    closefunc := fcb^.Dispatch^.CloseFileObject
+
+    IF NOT closefunc THEN
+        LEAVE
+    END
+
+    closefunc (
+        file, // file
+        access, // access
+        lasthandlecount, // lasthandlecount
+    )
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeDeleteF) IoDeleteFileType (
+    IN object : ^VOID,
+) : UWORD
+
+    // Delete a file object.
+
+    file := CAST object TO ^IoFile
+
+    // Call the driver's file object deletion function, if present.
+
+    fcb := file^.Fcb
+
+    IF fcb THEN
+        deletefunc := fcb^.Dispatch^.DeleteFileObject
+
+        IF deletefunc THEN
+            deletefunc ( file )
+        END
+    END
+
+    // Unreference the namespace handle tracked by the file object.
+
+    NsUnreferenceHandle ( &file^.Handle )
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeSetSecurityF) IoSetSecurityFileType (
+    IN object : ^VOID,
+    IN permissions : ^ObPermissions,
+) : OsStatus
+
+    // Acquire a pointer to the namespace entry and call the driver's file
+    // object security function, if present.
+
+    file := CAST object TO ^IoFile
+
+    fcb := file^.Fcb
+
+    IF NOT fcb THEN
+        // This is a file object for a namespace container.
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    func := fcb^.Dispatch^.SetSecurityFcb
+
+    IF NOT func THEN
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    RETURN func (
+        fcb, // fcb
+        permissions, // permissions
+    )
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeDeleteF) IoDeleteFcbType (
+    IN object : ^VOID,
+) : UWORD
+
+    // Delete an FCB object.
+
+    fcb := CAST object TO ^IoFcb
+
+    // Call the driver's FCB deletion function, if present.
+
+    deletefunc := fcb^.Dispatch^.DeleteFcb
+
+    IF deletefunc THEN
+        RETURN deletefunc ( fcb )
+    END
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeNamespaceLookupF) IoNamespaceLookupFcbType (
+    IN context : ^NsLookupContext,
+) : OsStatus
+
+    // Lookup a name under this FCB.
+
+    fcb := CAST context^.Object TO ^IoFcb
+
+    lookupfunc := fcb^.Dispatch^.NamespaceLookup
+
+    IF NOT lookupfunc THEN
+        RETURN OS_STATUS_NOT_SUPPORTED
+    END
+
+    RETURN lookupfunc ( context )
+END
+
+#SECTION "PAGEtext"
+PUBLIC IoFileType : ObType = {
+    [Name] = "File",
+
+    [Open] = &IoOpenFileType,
+    [Close] = &IoCloseFileType,
+    [Delete] = &IoDeleteFileType,
+    [SetSecurity] = &IoSetSecurityFileType,
+
+    [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
+    [TypeIdentifier] = OS_FILE_TYPE,
+    [Tag] = 'File',
+
+    [IsPaged] = TRUE,
+}
+
+#SECTION "PAGEtext"
+PUBLIC IoFcbType : ObType = {
+    [Name] = "Fcb",
+
+    [Delete] = &IoDeleteFcbType,
+    [NamespaceLookup] = &IoNamespaceLookupFcbType,
+
+    [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
+    [TypeIdentifier] = OS_FCB_TYPE,
+    [Tag] = 'Fcb',
+
+    [IsPaged] = FALSE,
+}

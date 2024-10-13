@@ -4,6 +4,8 @@
 
 #INCLUDE "Psp.hjk"
 
+#INCLUDE "<ll>/System/OsObject.hjk"
+
 PUBLIC PsProcessType : ObType
 
 PUBLIC PsThreadType : ObType
@@ -13,7 +15,22 @@ PUBLIC PsSystemProcess : ^PsProcess
 PUBLIC PsUexecApcDispatcher : ^VOID
 PUBLIC PsUexecSignalDispatcher : ^VOID
 
+PspIdleProcessPaged : PsPagedProcess
+
 FN PsExitThread ()
 
     KeCrash ( "NYI PsExitThread\n" )
+END
+
+#SECTION "INITtext"
+FN PsInitializeIdleProcess ()
+
+    // Initialize the idle process enough to bootstrap other stuff.
+
+    idleproc := &KeIdleProcess
+
+    idleproc^.Paged = &PspIdleProcessPaged
+
+    idleproc^.Paged^.Cred.Uid = OS_SYSTEM_UID
+    idleproc^.Paged^.Cred.Gid = OS_SYSTEM_GID
 END
