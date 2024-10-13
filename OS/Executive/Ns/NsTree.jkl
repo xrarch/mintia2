@@ -944,19 +944,20 @@ FN NsLookupEntryByPath (
         // transition entry into the real name cache entry.
         //
         // We (will) use this same trick in other places - for instance,
-        // file rename. The tree lock will be taken exclusive, the old name
-        // will be converted into a transition entry, and the new name will
-        // be created as a new transition entry. The lock will then be
-        // released across the FS call to perform the rename on disk or over
-        // the network or whatever, and then reacquired to release the
-        // waiters on the old name (which is deleted) and turn the new name
-        // into a fully initialized entry.
+        // file rename. The tree lock will be taken exclusive, and the old
+        // name will be detached from the hierarchy. It will receive the new
+        // name in-place, and then re-attached at the new location, with the
+        // transition flag set to cause waits when it is looked up. A new
+        // transition entry is created and placed where the old name was. The
+        // lock is then released across whatever FS call performs the rename on
+        // disk, or over the network, or whatever, and then reacquired to
+        // release the waiters on both transition names.
         //
-        // Also, file deletion. The old name will become a transition entry
-        // and the FS deletion routine will be called with the tree lock
-        // dropped. Anyone who tries to look up the old name will block
-        // until the transition entry is awoken and will then repeat their
-        // lookup from the beginning.
+        // Also, file unlink. The old name will be detached from the hierarchy,
+        // and a new entry will be created as a transition entry where the old
+        // name was. The FS unlink routine is called with the tree lock dropped.
+        // Then the lock is reacquired and the transition entry is awoken and
+        // destroyed.
 
         event = ExAllocateEventCounter ( TRUE )
 
