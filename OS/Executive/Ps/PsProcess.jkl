@@ -1,0 +1,229 @@
+//
+// Implements executive-level process objects.
+//
+
+#INCLUDE "Psp.hjk"
+
+STRUCT PspProcessContext
+    Name : ^UBYTE,
+
+    QuotaUid : ULONG,
+
+    Flags : ULONG,
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeDeleteF) PspDeleteProcessObject (
+    IN object : ^VOID,
+) : UWORD
+
+    process := CAST object TO ^PsProcess
+
+    // Delete a process object.
+
+    KeCrash ( "NYI PspDeleteProcessObject\n" )
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeInitializeF) PspInitializeProcessObject (
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+    process := CAST object TO ^PsProcess
+    ctx := CAST context TO ^PspProcessContext
+
+    status : OsStatus
+
+    // Initialize the process object.
+
+    currentprocess := PsCurrentProcess ()
+
+    flags := ctx^.Flags
+
+    IF flags & (OS_PROCESS_DETACH_JOB | OS_PROCESS_NEW_SESSION) THEN
+        // If either of these flags were specified, we can only do this if we
+        // are an admin.
+
+        IF currentprocess^.Paged^.Cred.Gid != OS_SYSTEM_GID THEN
+            RETURN OS_STATUS_ACCESS_DENIED
+        END
+    END
+
+    // Allocate the paged part of the process object.
+
+    paged := CAST MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
+        SIZEOF PsPagedProcess, // bytes
+        'PgPr', // tag
+        TRUE, // wait
+    ) TO ^PsPagedProcess
+
+    IF NOT paged THEN
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    // Set the paged part.
+
+    process^.Paged = paged
+
+    quotablock := PsQuotaBlock ( currentprocess )
+
+    IF flags & OS_PROCESS_NEW_SESSION AND ctx^.QuotaUid != -1 THEN
+        // Assign a new quota block.
+
+        quotablock = MmLookupQuotaBlock (
+            ctx^.QuotaUid, // uid
+            quotablock, // copyquotablock
+        )
+
+        IF NOT quotablock THEN
+            status = OS_STATUS_NO_MEMORY
+
+            GOTO Error1
+        END
+
+    ELSE
+        // Inherit the current process's quota block.
+
+        MmReferenceQuotaBlock ( quotablock )
+    END
+
+    // Initialize the process for usage by Ke.
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    // Allocate an AsidTable.
+
+    process^.Pcb.AsidTable = MmAllocatePool (
+        MM_NONPAGED_POOL, // poolindex
+        SIZEOF KiAsidInfoEntry * KeLoaderBlock.ProcessorCount, // bytes
+        'Asid', // tag
+        TRUE, // wait
+    )
+
+    IF NOT process^.Pcb.AsidTable THEN
+        status = OS_STATUS_NO_MEMORY
+
+        GOTO Error2
+    END
+#END
+
+    KeInitializeProcess (
+        &process^.Pcb, // process
+        ctx^.Name, // name
+    )
+
+    // Initialize the process for usage by Ob.
+    // This also sets the quotablock for the process.
+
+    ObInitializeProcess (
+        currentprocess, // parentprocess
+        process, // process
+        quotablock, // quotablock
+    )
+
+    // Initialize the process for usage by Ns.
+
+    NsInitializeProcess (
+        process, // process
+        currentprocess, // parentprocess
+    )
+
+    // Initialize the process for usage by Ps.
+
+    // Intern the name.
+
+    paged^.Name = ExFindName ( ctx^.Name )
+
+    IF NOT paged^.Name THEN
+        status = OS_STATUS_NO_MEMORY
+
+        GOTO Error3
+    END
+
+    // Initialize the termination event.
+
+    KeInitializeEvent (
+        &process^.TerminationEvent, // event
+        "Termination", // name
+        TRUE, // notification
+        FALSE, // signalstate
+    )
+
+    // ... lots more stuff ...
+
+    RETURN OS_STATUS_SUCCESS
+
+@Error3
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    // Allocate an AsidTable.
+
+    MmFreePool (
+        process^.Pcb.AsidTable, // ptr
+        'Asid', // tag
+    )
+#END
+
+@Error2
+
+    MmUnreferenceQuotaBlock ( quotablock )
+
+@Error1
+
+    MmFreePool (
+        paged, // ptr
+        'PgPr', // tag
+    )
+
+    RETURN status
+END
+
+PUBLIC PsProcessType : ObType = {
+    [Name] = "Process",
+
+    [Delete] = &PspDeleteProcessObject,
+
+    [Initialize] = &PspInitializeProcessObject,
+
+    [WaitOffset] = OFFSETOF PsProcess.TerminationEvent,
+    [TypeIdentifier] = OS_PROCESS_TYPE,
+    [Tag] = 'Proc',
+
+    [IsPaged] = FALSE,
+}
+
+#SECTION "PAGEtext"
+FN PsCreateProcessObject (
+    IN params : ^NsOpenParameters,
+    IN name : ^UBYTE,
+    IN quotauid : UWORD,
+    IN flags : UWORD,
+    OUT process : ^PsProcess,
+) : OsStatus
+
+    // Create a process object.
+
+    ctx : PspProcessContext
+
+    ctx.Name = name
+    ctx.QuotaUid = quotauid
+    ctx.Flags = flags
+
+    obparams : ObParameters
+
+    obparams.Type = &PsProcessType
+    obparams.BodySize = SIZEOF PsProcess
+    obparams.NpQuotaBias = 0
+    obparams.PgQuotaBias = MmGetOverheadOfBytes ( SIZEOF PsPagedProcess )
+
+    obparams.Context = &ctx
+
+    RETURN NsCreateObject (
+        params, // params
+        &obparams, // obparams
+        OUT process, // object
+    )
+END

@@ -149,12 +149,30 @@ FN (KeStartThreadF) ExpInitializeExecutive (
 
     NsInitialize ()
 
+    // Initialize the system process and create the balance manager, in whose
+    // context we will finish initialization.
+
+    PsInitializeStage1 ()
+
     // The Executive is initialized, become the ZPW.
 
     MmZeroPageWorker (
         0, // context1
         0, // context2
     )
+END
+
+#SECTION "INITtext"
+FN (KeStartThreadF) ExStartSystemProcess (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Perform stage 2 initialization of the Executive. We are now inside the
+    // system process which means we have a proper container for kernel virtual
+    // memory. This thread will become the balance manager.
+
+    KeCrash ( "ExStartSystemProcess\n" )
 END
 
 #SECTION "INITtext"

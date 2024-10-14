@@ -6,11 +6,9 @@
 
 #INCLUDE "<ll>/System/OsObject.hjk"
 
-PUBLIC PsProcessType : ObType
-
-PUBLIC PsThreadType : ObType
-
 PUBLIC PsSystemProcess : ^PsProcess
+
+PUBLIC PsInitialThread : ^PsThread
 
 PUBLIC PsUexecApcDispatcher : ^VOID
 PUBLIC PsUexecSignalDispatcher : ^VOID
@@ -33,4 +31,57 @@ FN PsInitializeIdleProcess ()
 
     idleproc^.Paged^.Cred.Uid = OS_SYSTEM_UID
     idleproc^.Paged^.Cred.Gid = OS_SYSTEM_GID
+END
+
+#SECTION "INITtext"
+FN PsInitializeStage1 ()
+
+    // Stage 1 initialization for Ps.
+
+    // Create the system process.
+
+    params : NsOpenParameters
+
+    params.Path = NULLPTR
+
+    params.Captured.Flags = 0
+    params.Captured.ObFlags = 0
+    params.Captured.Permissions = OS_ACCESS_OWNER_ALL
+
+    status := PsCreateProcessObject (
+        &params, // params
+        "System", // name
+        -1, // quotauid
+        0, // flags
+        OUT PsSystemProcess, // process
+    )
+
+    IF OsError ( status ) THEN
+        KeCrash ( "PsInitializeStage1: failed to create system process (%x)\n",
+            status )
+    END
+
+    // Create the balance manager thread.
+
+    params.Path = NULLPTR
+
+    params.Captured.Flags = 0
+    params.Captured.ObFlags = 0
+    params.Captured.Permissions = OS_ACCESS_OWNER_ALL
+
+    status = PsCreateThreadObject (
+        &params, // params
+        "Balance Manager", // name
+        &ExStartSystemProcess, // startfunc
+        0, // context1
+        0, // context2
+        PsSystemProcess, // process
+        0, // flags
+        OUT PsInitialThread, // thread
+    )
+
+    IF OsError ( status ) THEN
+        KeCrash ( "PsInitializeStage1: failed to create bal mgr (%x)\n",
+            status )
+    END
 END

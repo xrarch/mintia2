@@ -4,8 +4,6 @@
 
 #INCLUDE "Obp.hjk"
 
-PUBLIC ObFullyNonpagedObjects := TRUE
-
 #SECTION "PAGEtext"
 FN ObAllocateObject (
     IN obparams : ^ObParameters,
@@ -19,14 +17,7 @@ FN ObAllocateObject (
     psize : UWORD
     npsize : UWORD
 
-    IF ObFullyNonpagedObjects THEN
-        psize = 0
-
-        npsize = SIZEOF ObHeader +
-            SIZEOF ObpCommonHeader +
-            obparams^.BodySize
-
-    ELSEIF obparams^.Type^.IsPaged THEN
+    IF obparams^.Type^.IsPaged THEN
         npsize = 0
 
         psize = SIZEOF ObHeader +
@@ -105,11 +96,7 @@ FN ObAllocateObject (
     header : ^ObHeader
     commonheader : ^ObpCommonHeader
 
-    IF ObFullyNonpagedObjects THEN
-        header = nppart
-        commonheader = nppart + SIZEOF ObHeader
-
-    ELSEIF obparams^.Type^.IsPaged THEN
+    IF obparams^.Type^.IsPaged THEN
         header = pgpart
         commonheader = pgpart + SIZEOF ObHeader
 

@@ -204,3 +204,25 @@ FN NsLookupObject (
 
     RETURN OS_STATUS_SUCCESS
 END
+
+#SECTION "PAGEtext"
+FN NsInitializeProcess (
+    IN process : ^PsProcess,
+    IN parentprocess : ^PsProcess,
+)
+
+    // Initialize the process for usage by the namespace.
+
+    paged := process^.Paged
+
+    // Initialize the root handle from that of the parent process.
+
+    NspCaptureRootHandle (
+        parentprocess, // process
+        &paged^.RootHandle, // roothandle
+    )
+
+    // Initialize the root handle lock.
+
+    KeInitializeLock ( &paged^.RootLock )
+END

@@ -83,7 +83,9 @@ END
 
 MiNonpagedPoolColor : ULONG = 0
 
-MiPoolTable : MiPool[MM_MAXIMUM_POOL]
+MiPoolRecords : MiPool[MM_MAXIMUM_POOL]
+
+MiPoolTable : ^MiPool[MM_MAXIMUM_POOL]
 
 FN MiAllocateExtensionSpace () : ^MiPoolExtension
 
@@ -334,15 +336,30 @@ END
 #SECTION "INITtext"
 FN MiInitializePools ()
 
-    // Initialize the system pools.
+    // Initialize the system pools as part of stage 1 Mm init.
 
-    MiInitializeNonpagedPool ( &MiPoolTable[MM_NONPAGED_POOL] )
+    MiInitializeNonpagedPool ( &MiPoolRecords[MM_NONPAGED_POOL] )
 
-    // TEMP
+    // Set paged pool to point to nonpaged pool for now, since we don't have
+    // enough initialized to deal with faults on paged pool yet.
 
-    MiInitializeNonpagedPool ( &MiPoolTable[MM_PAGED_POOL] )
+    MiPoolTable[MM_NONPAGED_POOL] = &MiPoolRecords[MM_NONPAGED_POOL]
 
-    MiInitializeNonpagedPool ( &MiPoolTable[MM_PAGE_TRACKING_POOL] )
+    MiPoolTable[MM_PAGED_POOL] = &MiPoolRecords[MM_NONPAGED_POOL]
+END
+
+#SECTION "INITtext"
+FN MiInitializePagedPools ()
+
+    // Initialize the paged pools as part of stage 2 Mm init.
+
+    MiInitializePagedPool ( &MiPoolRecords[MM_PAGED_POOL] )
+
+    MiInitializePagedPool ( &MiPoolRecords[MM_PAGE_TRACKING_POOL] )
+
+    MiPoolTable[MM_PAGED_POOL] = &MiPoolRecords[MM_PAGED_POOL]
+
+    MiPoolTable[MM_PAGE_TRACKING_POOL] = &MiPoolRecords[MM_PAGE_TRACKING_POOL]
 END
 
 MiEightBitLog : UBYTE[256] = {
@@ -1048,7 +1065,7 @@ FN MmAllocatePool (
 
     // Allocate a block of memory from the specified pool.
 
-    pool := &MiPoolTable[poolindex]
+    pool := MiPoolTable[poolindex]
 
     ptr : ^VOID
 

@@ -168,7 +168,27 @@ FN KiDoCrashPrints (
 
     HalSetConsolePosition ( 0, 0 )
 
-    RtlPrint ( "*** STOP: MINTIA %s BASE LEVEL %u\n", PLATFORM_FULL_NAME_STR, BLD_BASE_LEVEL )
+    procname := "?"
+    thrdname := "?"
+
+    prb := KI_CURRENT_PRB
+
+    IF prb^.CurrentThread THEN
+        thrdname = &prb^.CurrentThread^.Name[0]
+        procname = &prb^.CurrentThread^.Process^.Name[0]
+    END
+
+    RtlPrint (
+        "MINTIA %s %u IPL=%u CPU=%u PROC='%s' THRD='%s'\n",
+        PLATFORM_FULL_NAME_STR,
+        BLD_BASE_LEVEL,
+        prb^.Ipl,
+        prb^.Id,
+        procname,
+        thrdname,
+    )
+
+    RtlPrint ( "*** STOP: " )
 
     RtlPrintByVarTable (
         NULLPTR, // handle

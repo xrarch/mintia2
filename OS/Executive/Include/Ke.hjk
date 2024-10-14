@@ -398,6 +398,15 @@ EXTERN FN KeFreeTurnstile (
 
 EXTERN FN KeAllocateTurnstile () : ^KiTurnstile
 
+EXTERN FN KeAttachProcess (
+    IN process : ^KeProcess,
+    IN try : UWORD,
+) : UWORD
+
+EXTERN FN KeDetachProcess (
+    IN process : ^KeProcess,
+)
+
 EXTERN FN KeInitializeProcess (
     IN process : ^KeProcess,
     IN name : ^UBYTE,
@@ -422,6 +431,14 @@ EXTERN FN KeInitializeThread (
 EXTERN FN KeUninitializeThread (
     IN thread : ^KeThread,
 ) : UWORD
+
+// This is the per-processor entry in the ASID table attached to each KeProcess
+// object.
+
+STRUCT KiAsidInfoEntry
+    AsidSequenceNumber : RtlUquad,
+    Asid : UWORD,
+END
 
 #DEFINE KE_DEBUG_NAME_LENGTH 32
 

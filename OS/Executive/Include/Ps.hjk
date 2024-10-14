@@ -4,6 +4,7 @@
 
 #INCLUDE "<inc>/Ke.hjk"
 #INCLUDE "<inc>/Ex.hjk"
+#INCLUDE "<inc>/Mm.hjk"
 #INCLUDE "<inc>/Ob.hjk"
 #INCLUDE "<inc>/Ns.hjk"
 
@@ -21,16 +22,20 @@ STRUCT PsPagedProcess
     RootHandle : NsHandle,
 
     RootLock : KeLock,
+
+    Name : ^ExName,
 END
 
 STRUCT PsProcess
     Pcb : KeProcess,
 
     Paged : ^PsPagedProcess,
+
+    TerminationEvent : KeEvent,
 END
 
 STRUCT PsPagedThread
-    NamespaceHitTimer : UBYTE,
+    Name : ^ExName,
 END
 
 STRUCT PsThread
@@ -47,6 +52,27 @@ EXTERN PsUexecSignalDispatcher : ^VOID
 EXTERN FN PsExitThread ()
 
 EXTERN FN PsInitializeIdleProcess ()
+
+EXTERN FN PsInitializeStage1 ()
+
+EXTERN FN PsCreateProcessObject (
+    IN params : ^NsOpenParameters,
+    IN name : ^UBYTE,
+    IN quotauid : UWORD,
+    IN flags : UWORD,
+    OUT process : ^PsProcess,
+) : OsStatus
+
+EXTERN FN PsCreateThreadObject (
+    IN params : ^NsOpenParameters,
+    IN name : ^UBYTE,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+    IN process : ^PsProcess,
+    IN flags : UWORD,
+    OUT thread : ^PsThread,
+) : OsStatus
 
 EXTERN KeIdleProcess : PsProcess
 

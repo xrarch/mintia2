@@ -5,21 +5,38 @@
 #INCLUDE "Obp.hjk"
 
 #SECTION "PAGEtext"
+FN (ExHandleTableEnumerationF) ObpDestroyHandle (
+    IN handletable : ^ExHandleTable,
+    IN handle : UWORD,
+    IN entryptr : ^VOID,
+    IN context : UWORD,
+)
+
+    process := CAST context TO ^PsProcess
+
+    // Destroy the handle.
+
+    ObCloseObject (
+        process, // process
+        handle, // handle
+    )
+END
+
+#SECTION "PAGEtext"
 FN ObInitializeProcess (
+    IN parentprocess : ^PsProcess,
     IN process : ^PsProcess,
     IN quotablock : ^MiQuotaBlock,
 )
 
     // Initialize a process such that the object manager will play nice with it.
 
-    handletable := &process^.Paged^.HandleTable
-
     // Note that entrysizelog = 0 means the size of a handle table entry will be
     // two pointers, which fits our ObpHandleEntry structure, since the size of
     // an entry is calculated by (SIZEOF ^VOID * 2) << entrysizelog.
 
     ExInitializeHandleTable (
-        handletable, // handletable
+        &process^.Paged^.HandleTable, // handletable
         0, // entrysizelog
         quotablock, // quotablock
     )
@@ -27,6 +44,30 @@ FN ObInitializeProcess (
     // Initialize the handle table lock.
 
     KeInitializeLock ( &process^.Paged^.HandleTableLock )
+
+    // Inherit the credentials from the parent process.
+
+    parentcred := &parentprocess^.Paged^.Cred
+    mycred := &process^.Paged^.Cred
+
+    ObMoveCredentials (
+        mycred, // dest
+        parentcred, // src
+    )
+END
+
+#SECTION "PAGEtext"
+FN ObUninitializeProcess (
+    IN process : ^PsProcess,
+)
+
+    // Uninitialize a process.
+
+    ExDeleteHandleTable (
+        &process^.Paged^.HandleTable, // handletable
+        &ObpDestroyHandle, // func
+        process, // context
+    )
 END
 
 #SECTION "PAGEtext"

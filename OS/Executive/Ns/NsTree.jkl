@@ -524,12 +524,13 @@ END
 
 #SECTION "PAGEtext"
 FN NspCaptureRootHandle (
+    IN process : ^PsProcess,
     IN roothandle : ^NsHandle,
 )
 
-    // Capture the current process's root handle.
+    // Capture the process's root handle.
 
-    processpaged := PsCurrentProcess()^.Paged
+    processpaged := process^.Paged
 
     KeAcquireLockShared ( &processpaged^.RootLock )
 
@@ -574,7 +575,10 @@ FN NsLookupEntryByPath (
     IF params^.InitialHandle.Entry == NULLPTR THEN
         // The initial handle should be the root directory.
 
-        NspCaptureRootHandle ( &roothandle )
+        NspCaptureRootHandle (
+            PsCurrentProcess (), // process
+            &roothandle, // roothandle
+        )
 
         params^.InitialHandle.Entry = roothandle.Entry
         params^.InitialHandle.Subspace = roothandle.Subspace
@@ -857,7 +861,10 @@ FN NsLookupEntryByPath (
                         // NOTE: This places the process's root directory lock as
                         //       inferior to the tree lock.
 
-                        NspCaptureRootHandle ( &roothandle )
+                        NspCaptureRootHandle (
+                            PsCurrentProcess (), // process
+                            &roothandle, // roothandle
+                        )
                     END
 
                     params^.InitialHandle.Entry = roothandle.Entry

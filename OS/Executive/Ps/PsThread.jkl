@@ -1,0 +1,192 @@
+//
+// Implements executive-level process objects.
+//
+
+#INCLUDE "Psp.hjk"
+
+STRUCT PspThreadContext
+    Name : ^UBYTE,
+    StartFunc : KeStartThreadF,
+    Context1 : UWORD,
+    Context2 : UWORD,
+    Process : ^PsProcess,
+    Flags : ULONG,
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeDeleteF) PspDeleteThreadObject (
+    IN object : ^VOID,
+) : UWORD
+
+    thread := CAST object TO ^PsThread
+
+    // Delete a process object.
+
+    KeCrash ( "NYI PspDeleteThreadObject\n" )
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeInitializeF) PspInitializeThreadObject (
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+    thread := CAST object TO ^PsThread
+    ctx := CAST context TO ^PspThreadContext
+
+    status : OsStatus
+
+    // Initialize the thread object.
+
+    flags := ctx^.Flags
+    process := ctx^.Process
+
+    // Allocate the paged part of the thread object.
+
+    paged := CAST MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
+        SIZEOF PsPagedThread, // bytes
+        'PgTh', // tag
+        TRUE, // wait
+    ) TO ^PsPagedThread
+
+    IF NOT paged THEN
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    // Set the paged part.
+
+    thread^.Paged = paged
+
+    // Intern the name.
+
+    paged^.Name = ExFindName ( ctx^.Name )
+
+    IF NOT paged^.Name THEN
+        status = OS_STATUS_NO_MEMORY
+
+        GOTO Error1
+    END
+
+    // Allocate the kernel stack.
+
+    kstack := MmCreateKernelStack ()
+
+    IF NOT kstack THEN
+        status = OS_STATUS_NO_MEMORY
+
+        GOTO Error2
+    END
+
+    // Initialize the thread for usage by Ke.
+    // The thread should be initialized enough that its visibility to the
+    // process via the thread list is safe, since it's added to that by Ke here.
+
+    // Attach to the process to ensure it is resident.
+
+    KeAttachProcess (
+        &process^.Pcb, // process
+        FALSE, // try
+    )
+
+    IF NOT KeInitializeThread (
+        &process^.Pcb, // process
+        &thread^.Tcb, // thread
+        ctx^.Name, // name
+        kstack, // kstack
+        KE_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
+        ctx^.StartFunc, // startfunc
+        ctx^.Context1, // context1
+        ctx^.Context2, // context2
+    ) THEN
+        // The process was terminated already.
+
+        KeDetachProcess ( &process^.Pcb )
+
+        status = OS_STATUS_WAS_TERMINATED
+
+        GOTO Error3
+    END
+
+    KeDetachProcess ( &process^.Pcb )
+
+    // ... lots more stuff ...
+
+    // Set the thread a-runnin'.
+
+    KeReadyThread ( &thread^.Tcb )
+
+    RETURN OS_STATUS_SUCCESS
+
+@Error3
+
+    MmFreeKernelStack ( kstack )
+
+@Error2
+
+    ExUnreferenceName ( paged^.Name )
+
+@Error1
+
+    MmFreePool (
+        paged, // ptr
+        'PgTh', // tag
+    )
+
+    RETURN status
+END
+
+PUBLIC PsThreadType : ObType = {
+    [Name] = "Thread",
+
+    [Delete] = &PspDeleteThreadObject,
+
+    [Initialize] = &PspInitializeThreadObject,
+
+    [WaitOffset] = OFFSETOF PsThread.Tcb.TerminationEvent,
+    [TypeIdentifier] = OS_THREAD_TYPE,
+    [Tag] = 'Thrd',
+
+    [IsPaged] = FALSE,
+}
+
+#SECTION "PAGEtext"
+FN PsCreateThreadObject (
+    IN params : ^NsOpenParameters,
+    IN name : ^UBYTE,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+    IN process : ^PsProcess,
+    IN flags : UWORD,
+    OUT thread : ^PsThread,
+) : OsStatus
+
+    // Create a thread object.
+
+    ctx : PspThreadContext
+
+    ctx.Name = name
+    ctx.StartFunc = startfunc
+    ctx.Context1 = context1
+    ctx.Context2 = context2
+    ctx.Process = process
+    ctx.Flags = flags
+
+    obparams : ObParameters
+
+    obparams.Type = &PsThreadType
+    obparams.BodySize = SIZEOF PsThread
+    obparams.NpQuotaBias = 0
+    obparams.PgQuotaBias = MmGetOverheadOfBytes ( SIZEOF PsPagedThread )
+
+    obparams.Context = &ctx
+
+    RETURN NsCreateObject (
+        params, // params
+        &obparams, // obparams
+        OUT thread, // object
+    )
+END
