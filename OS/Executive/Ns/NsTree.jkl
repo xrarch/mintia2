@@ -560,11 +560,14 @@ FN NsLookupEntryByPath (
 ) : OsStatus
 
     // Parse the specified path and initialize the 'handle' with a referenced
-    // subspace and namespace entry.
+    // subspace and namespace entry. The path is interpreted relative to the
+    // initial handle passed in the params structure.
 
-    // The initial handle should be referenced on entry, and unreferenced after
-    // exit. Note that the passed initial handle may not be the same as the one
-    // on exit. The initial handle is unreferenced on exit.
+    // If an initial handle is passed, it should be referenced on entry. The
+    // 'Entry' field of the initial handle should be zero if none is passed, and
+    // then the lookup will be relative to the process's root directory. Note
+    // that the passed initial handle may change if symlinks are followed. The
+    // initial handle is unreferenced on exit.
 
     // Initialize the root directory.
 
@@ -586,14 +589,18 @@ FN NsLookupEntryByPath (
         NsReferenceHandle ( &params^.InitialHandle )
     END
 
-    path := params^.Path
-    flags := params^.Captured.Flags
-
     component : UBYTE[OS_NAME_MAX + 1]
 
     lookupcontext : NsLookupContext
 
     event : ^ExEventCounter
+
+    // Capture some stuff from the params structure.
+
+    path := params^.Path
+    flags := params^.Captured.Flags
+
+    // Initialize symlink following state.
 
     symstate : NspSymlinkState
 
@@ -601,6 +608,10 @@ FN NsLookupEntryByPath (
     symstate.SymlinkCount = 0
 
     status : OsStatus
+
+    // Initialize state flags we maintain throughout this routine, which track
+    // things like whether we have the tree lock shared or exclusive, and
+    // whether the lookup resulted in a creation.
 
     state := 0
 
@@ -1258,35 +1269,43 @@ FN NsLookupEntryByPath (
         END
     END
 
-    // The entry and subspace are unreferenced, so reference them now.
-
-    NspReferenceEntry ( currententry )
-
-    NspReferenceSubspace ( currentspace )
-
-    NspUnlockTree ()
-
-    // Return them.
+    // Return the entry and subspace in the handle structure whose pointer we
+    // were passed.
 
     handle^.Entry = currententry
     handle^.Subspace = currentspace
+
+    // Reference the returned handle before unlocking the tree.
+
+    NsReferenceHandle ( handle )
+
+    NspUnlockTree ()
 
     status = OS_STATUS_SUCCESS
 
 @Exit
 
     IF symstate.SymlinkCookie THEN
+        // We were keeping a symlink path around for parsing. Unreference it.
+
         ExUnreferenceName ( symstate.SymlinkCookie )
     END
 
     IF roothandle.Entry THEN
+        // We had to capture the root handle for the current process at some
+        // point, which referenced it. Unreference it now.
+
         NsUnreferenceHandle ( &roothandle )
     END
 
+    // Unreference the initial handle.
+
     NsUnreferenceHandle ( &params^.InitialHandle )
 
-    // Zero out the initial handle to make sure NsFreeOpenParameters doesn't do
-    // it upon return from the system service (if we're even in one).
+    // Zero out the initial handle to make sure NsFreeOpenParameters doesn't
+    // unref it upon return from the system service (if we're even in one).
+    // If it sees a nonzero initial handle then it assumes there was an error
+    // condition or something and that we never reached this point.
 
     params^.InitialHandle.Entry = NULLPTR
 
