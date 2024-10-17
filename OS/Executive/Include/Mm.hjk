@@ -9,9 +9,13 @@ EXTERN FN MmIsVirtualValid (
     IN vaddr : ^VOID,
 ) : UWORD
 
-EXTERN FN MmCreateKernelStack () : ^VOID
+EXTERN FN MmCreateKernelStack (
+    IN process : ^PsProcess,
+    OUT kstack : ^VOID,
+) : OsStatus
 
 EXTERN FN MmFreeKernelStack (
+    IN process : ^PsProcess,
     IN kstack : ^VOID,
 )
 
@@ -128,6 +132,15 @@ EXTERN FN MmSetQuotaLimits (
 EXTERN FN MmQueryQuota (
     IN quotablock : ^MiQuotaBlock,
     IN query : ^OsQuotaQuery,
+)
+
+EXTERN FN MmInitializeProcess (
+    IN process : ^PsProcess,
+    IN partition : ^MiPartition,
+) : OsStatus
+
+EXTERN FN MmUninitializeProcess (
+    IN process : ^PsProcess,
 )
 
 ENUM MmPoolIndices : UBYTE

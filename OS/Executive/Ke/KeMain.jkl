@@ -8,6 +8,8 @@ PUBLIC KeIdleProcess : PsProcess
 
 EXPORT KeLoaderBlock : BlInfoRecord
 
+PUBLIC KeSystemPageDirectoryPfn : UWORD
+
 FNPTR DbgMainF ()
 
 PUBLIC KeSharedUserPage : ^OsSharedUserPage
@@ -389,6 +391,10 @@ EXPORT FN KeMain (
     KeSharedUserPage = KeLoaderBlock.VirtualSharedUserPage
 
     KiUpdateTime ( prb )
+
+    // Export the page directory PFN.
+
+    KeSystemPageDirectoryPfn = KeLoaderBlock.SystemPageDirectoryPfn
 
     // Perform early initialization of the debugger.
 

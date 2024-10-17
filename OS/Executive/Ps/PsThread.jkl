@@ -72,11 +72,14 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     // Allocate the kernel stack.
 
-    kstack := MmCreateKernelStack ()
+    kstack : ^VOID
 
-    IF NOT kstack THEN
-        status = OS_STATUS_NO_MEMORY
+    status = MmCreateKernelStack (
+        process, // process
+        OUT kstack, // kstack
+    )
 
+    IF OsError ( status ) THEN
         GOTO Error2
     END
 
@@ -114,6 +117,26 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     // ... lots more stuff ...
 
+    // Bias the reference count of the thread object.
+    // This reflects an active execution context existing, which means its
+    // kernel stack and other resources should remain in existence. This bias is
+    // removed by the reaper thread after the thread terminates.
+
+    ObReferenceObject ( thread )
+
+    // Bias the reference count of the process object.
+    // This reflects an active thread existing within it. This bias is removed
+    // when the thread object is deleted.
+
+    ObReferenceObject ( process )
+
+    IF flags & OS_THREAD_SUSPENDED THEN
+        // Suspend the thread. It will block on the suspension event upon return
+        // to usermode.
+
+        KeSuspendThread ( &thread^.Tcb )
+    END
+
     // Set the thread a-runnin'.
 
     KeReadyThread ( &thread^.Tcb )
@@ -122,7 +145,10 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
 @Error3
 
-    MmFreeKernelStack ( kstack )
+    MmFreeKernelStack (
+        process, // process
+        kstack, // kstack
+    )
 
 @Error2
 

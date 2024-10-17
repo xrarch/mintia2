@@ -7,6 +7,8 @@
 STRUCT PspProcessContext
     Name : ^UBYTE,
 
+    Partition : ^MiPartition,
+
     QuotaUid : ULONG,
 
     Flags : ULONG,
@@ -131,6 +133,17 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
         currentprocess, // parentprocess
     )
 
+    // Initialize the process for usage by Mm.
+
+    status = MmInitializeProcess (
+        process, // process
+        ctx^.Partition, // partition
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Error3
+    END
+
     // Initialize the process for usage by Ps.
 
     // Intern the name.
@@ -140,7 +153,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     IF NOT paged^.Name THEN
         status = OS_STATUS_NO_MEMORY
 
-        GOTO Error3
+        GOTO Error4
     END
 
     // Initialize the termination event.
@@ -155,6 +168,10 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     // ... lots more stuff ...
 
     RETURN OS_STATUS_SUCCESS
+
+@Error4
+
+    MmUninitializeProcess ( process )
 
 @Error3
 
@@ -198,6 +215,7 @@ PUBLIC PsProcessType : ObType = {
 #SECTION "PAGEtext"
 FN PsCreateProcessObject (
     IN params : ^NsOpenParameters,
+    IN partition : ^MiPartition,
     IN name : ^UBYTE,
     IN quotauid : UWORD,
     IN flags : UWORD,
@@ -211,6 +229,7 @@ FN PsCreateProcessObject (
     ctx.Name = name
     ctx.QuotaUid = quotauid
     ctx.Flags = flags
+    ctx.Partition = partition
 
     obparams : ObParameters
 

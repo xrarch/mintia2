@@ -124,6 +124,12 @@ FN DbgTrace (
         ELSE
             frame := CAST fp TO ^^VOID
 
+            IF NOT MmIsVirtualValid ( frame + SIZEOF ^VOID * 2 ) THEN
+                RtlPrint ( "#\n" )
+
+                LEAVE
+            END
+
             pc = frame[1]
             fp = frame[0]
         END

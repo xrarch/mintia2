@@ -671,7 +671,7 @@ FN KiInitializeArchitecture (
             &KiSwitchMapCodeEnd - &KiSwitchMapCode, // sz
         )
 
-        KiSwitchMap = CAST eb TO KiSwitchMapF
+        KiSwitchMap = CAST KeLoaderBlock.U.Xr.ExceptionBlock TO KiSwitchMapF
 
         // Copy the syscall handler into the exception block.
         // This one is special because it doesn't need to save as much as the
@@ -703,7 +703,7 @@ FN KiSwitchAddressSpace (
     // Switch address space to the given process. Interrupts are enabled, thread
     // lock is held. IPL is KI_IPL_DPC, so we are pinned to this processor.
 
-    IF process^.PageDirectoryPfn == KeLoaderBlock.SystemPageDirectoryPfn THEN
+    IF process^.PageDirectoryPfn == KeSystemPageDirectoryPfn THEN
         // Just switch, don't bother dealing with ASIDs since ASID 0 is reserved
         // for the system address space.
 

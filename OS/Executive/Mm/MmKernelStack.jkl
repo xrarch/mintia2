@@ -4,18 +4,131 @@
 
 #INCLUDE "Mi.hjk"
 
-FN MmCreateKernelStack () : ^VOID
+MiNextStackColor : ULONG = 0
 
-    // Create a kernel stack, or return NULLPTR upon failure.
+#SECTION "PAGEtext"
+FN MmCreateKernelStack (
+    IN process : ^PsProcess,
+    OUT kstack : ^VOID,
+) : OsStatus
 
-    KeCrash ( "NYI MmCreateKernelStack\n" )
+    // Create a kernel stack.
+
+    partition := process^.Partition
+    quotablock := PsQuotaBlock ( process )
+
+    // Charge the process VM quota for the kernel stack.
+
+    status := MmChargeVmQuota (
+        partition, // partition
+        quotablock, // quotablock
+        KE_STACK_PAGES, // pages
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Allocate the required dynamic pages.
+
+    kstack = MiAllocateDynamicPages ( KE_STACK_PAGES )
+
+    IF NOT kstack THEN
+        // Couldn't acquire them.
+
+        status = OS_STATUS_NO_MEMORY
+
+        GOTO Error1
+    END
+
+    pfes : ^MiPfe[KE_STACK_PAGES]
+
+    // TEMP: Naive implementation. Full implementation will initialize these
+    //       pages as modified anonymous memory so that kernel stacks can be
+    //       swapped. We don't yet know exactly what anonymous PFEs will
+    //       look like at time of writing.
+
+    i := 0
+
+    WHILE i < KE_STACK_PAGES DO
+        // Allocate a physical page.
+
+        color := KeIncrementUlong (
+            &MiNextStackColor, // ptr
+            1, // inc
+        )
+
+        pfes[i] = MiAllocatePageWait (
+            partition, // partition
+            FALSE, // zeroed
+            FALSE, // low
+            color, // color
+        )
+
+        IF NOT pfes[i] THEN
+            // Failed to allocate this page frame.
+            // Deallocate the ones we did allocate and return the appropriate
+            // status.
+
+            WHILE i DO
+                i -= 1
+
+                MiFreePage (
+                    partition, // partition
+                    pfes[i], // pfe
+                )
+            END
+
+            status = OS_STATUS_NO_MEMORY
+
+            GOTO Error2
+        END
+
+        i += 1
+    END
+
+    // Acquire a pointer to the first PTE for this region.
+
+    pte := MiPteAddress ( kstack )
+
+    // Map the stack pages.
+
+    i = 0
+
+    WHILE i < KE_STACK_PAGES DO
+        pte[i] = MiBuildPoolPte ( MiPfeToPfn ( pfes[i]) )
+
+        i += 1
+    END
+
+    RETURN OS_STATUS_SUCCESS
+
+@Error2
+
+    MiReleaseDynamicPages (
+        kstack, // ptr
+        KE_STACK_PAGES, // pages
+        FALSE, // flush
+    )
+
+@Error1
+
+    MmUnchargeVmQuota (
+        partition, // partition
+        quotablock, // quotablock
+        KE_STACK_PAGES, // pages
+    )
+
+    RETURN status
 END
 
+#SECTION "PAGEtext"
 FN MmFreeKernelStack (
+    IN process : ^PsProcess,
     IN kstack : ^VOID,
 )
 
-    // Free a kernel stack. It must be inswapped.
+    // Free a kernel stack. It must be in an inswapped state.
 
     KeCrash ( "NYI MmFreeKernelStack\n" )
 END

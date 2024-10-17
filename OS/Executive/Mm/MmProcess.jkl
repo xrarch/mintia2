@@ -1,0 +1,59 @@
+//
+// Implements process support in the Memory Manager.
+//
+
+#INCLUDE "Mi.hjk"
+
+#SECTION "PAGEtext"
+FN MmInitializeProcess (
+    IN process : ^PsProcess,
+    IN partition : ^MiPartition,
+) : OsStatus
+
+    // Initialize the process so it can be used by the memory manager.
+
+    IF NOT partition THEN
+        // No partition object supplied, use the system partition.
+
+        partition = &MiSystemPartition
+
+    ELSE
+        // Custom partition object, reference it to reflect the existence of a
+        // process.
+
+        ObReferenceObject ( partition )
+    END
+
+    // Set the partition object.
+
+    process^.Partition = partition
+
+    IF NOT PsSystemProcess THEN
+        // This is the system process, so give it the system page directory.
+
+        process^.Pcb.PageDirectoryPfn = KeSystemPageDirectoryPfn
+
+    ELSE
+        KeCrash ( "NYI create address space\n" )
+    END
+
+    // ... many other things ...
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN MmUninitializeProcess (
+    IN process : ^PsProcess,
+)
+
+    // Uninitialize a process that was previously initialized.
+
+    IF process^.Partition != &MiSystemPartition THEN
+        // Unreference the partition object.
+
+        ObUnreferenceObject ( process^.Partition )
+    END
+
+    // ... many other things ...
+END
