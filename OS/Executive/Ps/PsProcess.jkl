@@ -167,6 +167,11 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
         FALSE, // signalstate
     )
 
+    // Stash the parent PID into the child. This is just a hint, nothing
+    // maintains this or relies on it to be accurate.
+
+    paged^.ParentPid = currentprocess^.Paged^.Pid
+
     // Give the process a PID. Do this last so that users can't look up an
     // incomplete process.
 
