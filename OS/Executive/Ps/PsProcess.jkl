@@ -73,7 +73,9 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     quotablock := PsQuotaBlock ( currentprocess )
 
-    IF flags & OS_PROCESS_NEW_SESSION AND ctx^.QuotaUid != -1 THEN
+    IF flags & (OS_PROCESS_NEW_SESSION | OS_PROCESS_NO_INHERIT_QUOTA) ==
+        (OS_PROCESS_NEW_SESSION | OS_PROCESS_NO_INHERIT_QUOTA) THEN
+
         // Assign a new quota block.
 
         quotablock = MmLookupQuotaBlock (
