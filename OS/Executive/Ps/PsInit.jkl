@@ -17,7 +17,8 @@ PspIdleProcessPaged : PsPagedProcess
 
 PspIdTable : ExHandleTable
 
-PUBLIC PspIdLock : KeLock = KE_INITIAL_LOCK
+PspIdLock : KeLock = KE_INITIAL_LOCK
+PUBLIC PspLookupLock : KeLock = KE_INITIAL_LOCK
 
 #DEFINE PSP_ID_INDEX_SHIFT 5
 #DEFINE PSP_ID_SEQUENCE_MASK 31
@@ -27,6 +28,18 @@ STRUCT PspIdEntry
     Sequence : UWORD,
 END
 
+#MACRO PspLockIdExclusive () [
+    KeAcquireLockExclusive ( &PspIdLock )
+]
+
+#MACRO PspLockIdShared () [
+    KeAcquireLockShared ( &PspIdLock )
+]
+
+#MACRO PspUnlockId () [
+    KeReleaseLock ( &PspIdLock )
+]
+
 #SECTION "PAGEtext"
 FN PspCreateId (
     IN object : ^VOID,
@@ -35,9 +48,11 @@ FN PspCreateId (
 
     // Insert an object into the PID/TID table. Should be fully initialized in
     // all relevant ways or people will be able to get a pointer to a bad
-    // object. Lock must be held exclusive.
+    // object.
 
     entry : ^PspIdEntry
+
+    PspLockIdExclusive ()
 
     status := ExCreateHandle (
         &PspIdTable, // handletable
@@ -46,6 +61,8 @@ FN PspCreateId (
     )
 
     IF OsError ( status ) THEN
+        PspUnlockId ()
+
         RETURN status
     END
 
@@ -60,6 +77,8 @@ FN PspCreateId (
     // Set the object.
 
     entry^.Object = object
+
+    PspUnlockId ()
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -93,6 +112,18 @@ FN PspReferenceById (
 
     entry : ^PspIdEntry
 
+    status := OS_STATUS_SUCCESS
+
+    lookuplocked := type == &PsThreadType
+
+    IF lookuplocked THEN
+        // We lock the lookup lock exclusive because it is anticipated that
+        // looking by ID will be much less common than creation. The creation
+        // codepath locks it shared.
+
+        PspLockLookupExclusive ()
+    END
+
     PspLockIdShared ()
 
     entry = ExLookupHandle (
@@ -101,9 +132,11 @@ FN PspReferenceById (
     )
 
     IF NOT entry THEN
-        PspUnlockId ()
+        // No such ID.
 
-        RETURN OS_STATUS_INVALID_HANDLE
+        status = OS_STATUS_INVALID_HANDLE
+
+        GOTO Exit
     END
 
     object = entry^.Object
@@ -113,30 +146,36 @@ FN PspReferenceById (
 
         // Wrong sequence number.
 
-        PspUnlockId ()
+        status = OS_STATUS_INVALID_HANDLE
 
-        RETURN OS_STATUS_INVALID_HANDLE
+        GOTO Exit
     END
 
     IF ObFindHeader ( object )^.Type != type THEN
         // Not the correct object type.
 
-        PspUnlockId ()
+        status = OS_STATUS_INVALID_OBJECT_TYPE
 
-        RETURN OS_STATUS_INVALID_OBJECT_TYPE
+        GOTO Exit
     END
 
     IF NOT ObConditionallyReferenceObject ( object ) THEN
         // Object is being deleted.
 
-        PspUnlockId ()
+        status = OS_STATUS_INVALID_HANDLE
 
-        RETURN OS_STATUS_INVALID_HANDLE
+        GOTO Exit
     END
+
+@Exit
 
     PspUnlockId ()
 
-    RETURN OS_STATUS_SUCCESS
+    IF lookuplocked THEN
+        PspUnlockLookup ()
+    END
+
+    RETURN status
 END
 
 #SECTION "INITtext"

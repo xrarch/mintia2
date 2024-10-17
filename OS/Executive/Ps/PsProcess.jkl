@@ -167,16 +167,13 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
         FALSE, // signalstate
     )
 
-    // Give the process a PID.
-
-    PspLockIdExclusive ()
+    // Give the process a PID. Do this last so that users can't look up an
+    // incomplete process.
 
     status = PspCreateId (
         process, // object
         OUT paged^.Pid, // id
     )
-
-    PspUnlockId ()
 
     IF OsError ( status ) THEN
         GOTO Error5
