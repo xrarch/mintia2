@@ -83,6 +83,23 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
         GOTO Error2
     END
 
+    // Create a TID.
+    // Keep the ID lock held so that the thread can't be looked up until it is
+    // fully initialized.
+
+    PspLockIdExclusive ()
+
+    status = PspCreateId (
+        thread, // object
+        OUT paged^.Tid, // id
+    )
+
+    IF OsError ( status ) THEN
+        PspUnlockId ()
+
+        GOTO Error3
+    END
+
     // Initialize the thread for usage by Ke.
     // The thread should be initialized enough that its visibility to the
     // process via the thread list is safe, since it's added to that by Ke here.
@@ -110,7 +127,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
         status = OS_STATUS_WAS_TERMINATED
 
-        GOTO Error3
+        GOTO Error4
     END
 
     KeDetachProcess ( &process^.Pcb )
@@ -130,6 +147,10 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     ObReferenceObject ( process )
 
+    // Unlock the ID table to allow it to be looked up by TID.
+
+    PspUnlockId ()
+
     IF flags & OS_THREAD_SUSPENDED THEN
         // Suspend the thread. It will block on the suspension event upon return
         // to usermode.
@@ -142,6 +163,12 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     KeReadyThread ( &thread^.Tcb )
 
     RETURN OS_STATUS_SUCCESS
+
+@Error4
+
+    PspDeleteId ( paged^.Tid )
+
+    PspUnlockId ()
 
 @Error3
 
@@ -215,4 +242,10 @@ FN PsCreateThreadObject (
         &obparams, // obparams
         OUT thread, // object
     )
+END
+
+#SECTION "PAGEtext"
+FN PsExitThread ()
+
+    KeCrash ( "NYI PsExitThread\n" )
 END

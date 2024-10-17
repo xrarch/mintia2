@@ -167,9 +167,28 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
         FALSE, // signalstate
     )
 
+    // Give the process a PID.
+
+    PspLockIdExclusive ()
+
+    status = PspCreateId (
+        process, // object
+        OUT paged^.Pid, // id
+    )
+
+    PspUnlockId ()
+
+    IF OsError ( status ) THEN
+        GOTO Error5
+    END
+
     // ... lots more stuff ...
 
     RETURN OS_STATUS_SUCCESS
+
+@Error5
+
+    ExUnreferenceName ( paged^.Name )
 
 @Error4
 

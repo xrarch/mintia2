@@ -15,9 +15,128 @@ PUBLIC PsUexecSignalDispatcher : ^VOID
 
 PspIdleProcessPaged : PsPagedProcess
 
-FN PsExitThread ()
+PspIdTable : ExHandleTable
 
-    KeCrash ( "NYI PsExitThread\n" )
+PUBLIC PspIdLock : KeLock = KE_INITIAL_LOCK
+
+#DEFINE PSP_ID_INDEX_SHIFT 5
+#DEFINE PSP_ID_SEQUENCE_MASK 31
+
+STRUCT PspIdEntry
+    Object : ^VOID,
+    Sequence : UWORD,
+END
+
+#SECTION "PAGEtext"
+FN PspCreateId (
+    IN object : ^VOID,
+    OUT id : UWORD,
+) : OsStatus
+
+    // Insert an object into the PID/TID table. Should be fully initialized in
+    // all relevant ways or people will be able to get a pointer to a bad
+    // object. Lock must be held exclusive.
+
+    entry : ^PspIdEntry
+
+    status := ExCreateHandle (
+        &PspIdTable, // handletable
+        OUT id, // handle
+        OUT entry, // entryptr
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Bitwise OR the 5-bit sequence number into the ID.
+
+    id = (id << PSP_ID_INDEX_SHIFT) | (entry^.Sequence & PSP_ID_SEQUENCE_MASK)
+
+    // Increment the sequence number.
+
+    entry^.Sequence += 1
+
+    // Set the object.
+
+    entry^.Object = object
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN PspDeleteId (
+    IN id : UWORD,
+)
+
+    // Delete an ID from the table.
+
+    PspLockIdExclusive ()
+
+    ExDeleteHandle (
+        &PspIdTable, // handletable
+        id >> PSP_ID_INDEX_SHIFT, // handle
+        NULLPTR, // entry
+    )
+
+    PspUnlockId ()
+END
+
+#SECTION "PAGEtext"
+FN PspReferenceById (
+    IN pid : UWORD,
+    IN type : ^ObType,
+    OUT object : ^VOID,
+) : OsStatus
+
+    // Reference an object by its PID or TID.
+
+    entry : ^PspIdEntry
+
+    PspLockIdShared ()
+
+    entry = ExLookupHandle (
+        &PspIdTable, // handletable
+        pid >> PSP_ID_INDEX_SHIFT, // handle
+    )
+
+    IF NOT entry THEN
+        PspUnlockId ()
+
+        RETURN OS_STATUS_INVALID_HANDLE
+    END
+
+    object = entry^.Object
+
+    IF pid & PSP_ID_SEQUENCE_MASK !=
+        entry^.Sequence & PSP_ID_SEQUENCE_MASK THEN
+
+        // Wrong sequence number.
+
+        PspUnlockId ()
+
+        RETURN OS_STATUS_INVALID_HANDLE
+    END
+
+    IF ObFindHeader ( object )^.Type != type THEN
+        // Not the correct object type.
+
+        PspUnlockId ()
+
+        RETURN OS_STATUS_INVALID_OBJECT_TYPE
+    END
+
+    IF NOT ObConditionallyReferenceObject ( object ) THEN
+        // Object is being deleted.
+
+        PspUnlockId ()
+
+        RETURN OS_STATUS_INVALID_HANDLE
+    END
+
+    PspUnlockId ()
+
+    RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "INITtext"
@@ -37,6 +156,18 @@ END
 FN PsInitializeStage1 ()
 
     // Stage 1 initialization for Ps.
+
+    // Initialize the PID/TID table.
+
+    // Note that entrysizelog = 0 means the size of a handle table entry will be
+    // two pointers, which fits our PspIdEntry structure, since the size of
+    // an entry is calculated by (SIZEOF ^VOID * 2) << entrysizelog.
+
+    ExInitializeHandleTable (
+        &PspIdTable, // handletable
+        0, // entrysizelog
+        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+    )
 
     // Create the system process.
 
@@ -62,7 +193,8 @@ FN PsInitializeStage1 ()
             status )
     END
 
-    // Create the balance manager thread.
+    // Create the balance manager thread, which will perform stage 2
+    // initialization of the system.
 
     params.Path = NULLPTR
 

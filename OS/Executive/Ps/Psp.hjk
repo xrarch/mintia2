@@ -11,3 +11,32 @@
 
 #INCLUDE "<ll>/System/OsObject.hjk"
 #INCLUDE "<ll>/System/OsProcess.hjk"
+
+EXTERN PspIdLock : KeLock
+
+#MACRO PspLockIdExclusive () [
+    KeAcquireLockExclusive ( &PspIdLock )
+]
+
+#MACRO PspLockIdShared () [
+    KeAcquireLockShared ( &PspIdLock )
+]
+
+#MACRO PspUnlockId () [
+    KeReleaseLock ( &PspIdLock )
+]
+
+EXTERN FN PspCreateId (
+    IN object : ^VOID,
+    OUT id : UWORD,
+) : OsStatus
+
+EXTERN FN PspDeleteId (
+    IN id : UWORD,
+)
+
+EXTERN FN PspReferenceById (
+    IN pid : UWORD,
+    IN type : ^ObType,
+    OUT object : ^VOID,
+) : OsStatus

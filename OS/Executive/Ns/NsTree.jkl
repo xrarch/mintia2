@@ -1151,12 +1151,14 @@ FN NsLookupEntryByPath (
 
         NspLockTreeExclusive ()
 
-        // Wake any collided threads.
+        IF event^.Used.Event.Header.WaiterCount THEN
+            // Wake any collided threads.
 
-        KeSignalEvent (
-            &event^.Used.Event, // event
-            0, // priorityboost
-        )
+            KeSignalEvent (
+                &event^.Used.Event, // event
+                0, // priorityboost
+            )
+        END
 
         ExUnreferenceEventCounter ( event )
 
