@@ -100,6 +100,7 @@ FN KeInitializeThread (
     IN name : ^UBYTE,
     IN kstack : ^VOID,
     IN kstacksize : UWORD,
+    IN turnstile : ^KiTurnstile,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -183,7 +184,7 @@ FN KeInitializeThread (
 
     // Initialize turnstiles.
 
-    thread^.Turnstile = KeAllocateTurnstile ()
+    thread^.Turnstile = turnstile
 
     thread^.BlockedOnTurnstile = NULLPTR
 
@@ -782,9 +783,6 @@ FN KePopReaperList () : ^KeThread
         KiReleaseThread ( thread, ipl )
 #END
 
-        // Free the thread's turnstile.
-
-        KeFreeTurnstile ( thread^.Turnstile )
     END
 
     RETURN thread

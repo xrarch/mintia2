@@ -13,6 +13,78 @@ STRUCT PspThreadContext
     Flags : ULONG,
 END
 
+#DEFINE PSP_TURNSTILE_EXTENSION 16
+
+PspTurnstileLock : KeLock = KE_INITIAL_LOCK
+
+PUBLIC PspTurnstileZone : MmZoneHeader
+
+#SECTION "PAGEtext"
+FN PspAllocateTurnstile () : ^KiTurnstile
+
+    // Allocate a turnstile from the free list.
+
+    KeAcquireLockExclusive ( &PspTurnstileLock )
+
+    turnstile := CAST MmAllocateZone (
+        &PspTurnstileZone, // zone
+    ) TO ^KiTurnstile
+
+    IF NOT turnstile THEN
+        // Allocate a new hunk of turnstiles.
+
+        hunk := MmAllocatePool (
+            MM_NONPAGED_POOL, // poolindex
+            SIZEOF KiTurnstile * PSP_TURNSTILE_EXTENSION +
+            MM_ZONE_OVERHEAD, // bytes
+            'Turn', // tag
+            TRUE, // wait
+        )
+
+        IF NOT hunk THEN
+            KeReleaseLock ( &PspTurnstileLock )
+
+            RETURN NULLPTR
+        END
+
+        MmExtendZone (
+            &PspTurnstileZone, // zone
+            hunk, // hunk
+            SIZEOF KiTurnstile * PSP_TURNSTILE_EXTENSION +
+            MM_ZONE_OVERHEAD, // bytes
+        )
+
+        turnstile = MmAllocateZone ( &PspTurnstileZone )
+
+#IF BLD_CHK
+        IF NOT turnstile THEN
+            KeCrash ( "PspAllocateTurnstile: just extended but no turnstile\n" )
+        END
+#END
+    END
+
+    KeReleaseLock ( &PspTurnstileLock )
+
+    RETURN turnstile
+END
+
+#SECTION "PAGEtext"
+FN PspFreeTurnstile (
+    IN turnstile : ^KiTurnstile,
+)
+
+    // Free a turnstile to the free list.
+
+    KeAcquireLockExclusive ( &PspTurnstileLock )
+
+    MmFreeZone (
+        &PspTurnstileZone, // zone
+        turnstile, // ptr
+    )
+
+    KeReleaseLock ( &PspTurnstileLock )
+END
+
 #SECTION "PAGEtext"
 FN (ObTypeDeleteF) PspDeleteThreadObject (
     IN object : ^VOID,
@@ -20,7 +92,7 @@ FN (ObTypeDeleteF) PspDeleteThreadObject (
 
     thread := CAST object TO ^PsThread
 
-    // Delete a process object.
+    // Delete a thread object.
 
     KeCrash ( "NYI PspDeleteThreadObject\n" )
 
@@ -95,9 +167,17 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     )
 
     IF OsError ( status ) THEN
-        PspUnlockLookup ()
-
         GOTO Error3
+    END
+
+    // Allocate a turnstile.
+
+    turnstile := PspAllocateTurnstile ()
+
+    IF NOT turnstile THEN
+        status = OS_STATUS_NO_MEMORY
+
+        GOTO Error4
     END
 
     // Initialize the thread for usage by Ke.
@@ -117,6 +197,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
         ctx^.Name, // name
         kstack, // kstack
         KE_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
+        turnstile, // turnstile
         ctx^.StartFunc, // startfunc
         ctx^.Context1, // context1
         ctx^.Context2, // context2
@@ -127,7 +208,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
         status = OS_STATUS_WAS_TERMINATED
 
-        GOTO Error4
+        GOTO Error5
     END
 
     KeDetachProcess ( &process^.Pcb )
@@ -164,13 +245,17 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     RETURN OS_STATUS_SUCCESS
 
+@Error5
+
+    PspFreeTurnstile ( turnstile )
+
 @Error4
 
     PspDeleteId ( paged^.Tid )
 
-    PspUnlockLookup ()
-
 @Error3
+
+    PspUnlockLookup ()
 
     MmFreeKernelStack (
         process, // process

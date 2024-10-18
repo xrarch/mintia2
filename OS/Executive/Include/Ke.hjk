@@ -392,11 +392,30 @@ STRUCT KeSemaphore
     Header : KiDispatchHeader,
 END
 
-EXTERN FN KeFreeTurnstile (
-    IN turnstile : ^KiTurnstile,
-)
+EXTERN FN KeAllocateInitialTurnstile () : ^KiTurnstile
 
-EXTERN FN KeAllocateTurnstile () : ^KiTurnstile
+STRUCT KiTurnstile
+    ChainEntry : RtlListEntry,
+
+    PiEntry : RtlListEntry,
+
+    WaiterHeapRoot : ^RtlHeapEntry,
+
+    Free : ^KiTurnstile,
+
+    Key : ^VOID,
+
+    Event : KeEvent,
+
+    Owner : ^KeThread,
+
+#IF BLD_MP
+    Spinlock : KiSpinlock,
+#END
+
+    Awoken : UBYTE,
+    Committed : UBYTE,
+END
 
 EXTERN FN KeAttachProcess (
     IN process : ^KeProcess,
@@ -423,6 +442,7 @@ EXTERN FN KeInitializeThread (
     IN name : ^UBYTE,
     IN kstack : ^VOID,
     IN kstacksize : UWORD,
+    IN turnstile : ^KiTurnstile,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,

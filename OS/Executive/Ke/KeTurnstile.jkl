@@ -109,52 +109,34 @@ END
 
 KiTurnstileChains : KiTurnstileChain[KI_TURNSTILE_CHAINS]
 
-#DEFINE KI_INITIAL_TURNSTILES 64
+#DEFINE KI_INITIAL_TURNSTILES [(KI_MAXIMUM_PROCESSORS + 1)]
 
 #DEFINE KI_SPIN_CYCLES 400
 
 KiInitialTurnstiles : KiTurnstile[KI_INITIAL_TURNSTILES]
 
-FN KeAllocateTurnstile () : ^KiTurnstile
+KiTurnstileIndex : ULONG = 0
 
-    // Allocate a turnstile from the lookaside list.
-    // We never fail this because Ps has magically ensured that there are enough
-    // turnstiles for us to allocate some; there have to always be the same
-    // amount of turnstiles as there are threads in the system. If necessary, Ps
-    // has expanded the list at some point before making this call to maintain
-    // that invariant.
+#SECTION "INITtext"
+FN KeAllocateInitialTurnstile () : ^KiTurnstile
 
-    ipl := KiAcquireTurnstileList ()
+    // Allocate an initial turnstile.
 
-    turnstile := KiTurnstileListHead
+    index := KeIncrementUlong (
+        &KiTurnstileIndex, // ptr
+        1, // inc
+    )
 
 #IF BLD_CHK
-    IF NOT turnstile THEN
-        KeCrash ( "KeAllocateTurnstile: no more turnstiles\n" )
+    IF index >= KI_INITIAL_TURNSTILES THEN
+        KeCrash ( "KeAllocateInitialTurnstile: no more turnstiles\n" )
     END
 #END
-    
-    KiTurnstileListHead = turnstile^.Free
 
-    KiReleaseTurnstileList ( ipl )
-
-    RETURN turnstile
+    RETURN &KiInitialTurnstiles[index]
 END
 
-FN KeFreeTurnstile (
-    IN turnstile : ^KiTurnstile,
-)
-
-    // Release a turnstile to the lookaside list.
-
-    ipl := KiAcquireTurnstileList ()
-
-    turnstile^.Free = KiTurnstileListHead
-    KiTurnstileListHead = turnstile
-
-    KiReleaseTurnstileList ( ipl )
-END
-
+#SECTION "INITtext"
 FN KiInitializeTurnstiles ()
 
     // Initialize the turnstile package.
@@ -165,16 +147,6 @@ FN KiInitializeTurnstiles ()
 
     WHILE i < KI_TURNSTILE_CHAINS DO
         RtlInitializeList ( &KiTurnstileChains[i].Head )
-
-        i += 1
-    END
-
-    // Initialize the initial turnstiles.
-
-    i = 0
-
-    WHILE i < KI_INITIAL_TURNSTILES DO
-        KeFreeTurnstile ( &KiInitialTurnstiles[i] )
 
         i += 1
     END
