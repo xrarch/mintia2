@@ -257,7 +257,7 @@ FN MiAllocatePageFromList (
         entry := list^.Heads[color].Next
 
         IF entry != &list^.Heads[color] THEN
-            // Found one. Pop it from the tail.
+            // Found one. Pop it from the head.
 
             RtlRemoveEntryList ( entry )
 
@@ -499,12 +499,12 @@ FN MiFreePage (
 
     partition^.AvailablePageCount = avail
 
-    // Insert at the tail so that we reuse it more quickly (hot in cache).
+    // Insert at the head so that we reuse it more quickly (hot in cache).
 
     MiInsertPageIntoList (
         &partition^.FreeList, // list
         pfe, // pfe
-        FALSE, // head
+        TRUE, // head
     )
 
     MiReleaseList ( partition, ipl )
