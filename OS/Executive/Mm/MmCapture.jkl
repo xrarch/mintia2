@@ -63,7 +63,7 @@ EXPORT FN MmSafeCopyIn (
     ctx.Source = src
     ctx.Size = sz
 
-    RETURN KeAbortableCall (
+    RETURN KeExceptionJacket (
         &ab, // abortblock
         &MiSafeCopy, // func
         &ctx, // context
@@ -98,7 +98,7 @@ EXPORT FN MmSafeCopyOut (
     ctx.Source = src
     ctx.Size = sz
 
-    RETURN KeAbortableCall (
+    RETURN KeExceptionJacket (
         &ab, // abortblock
         &MiSafeCopy, // func
         &ctx, // context
@@ -193,7 +193,7 @@ EXPORT FN MmCaptureString (
     ctx.Buffer = NULLPTR
     ctx.Charged = 0
 
-    status := KeAbortableCall (
+    status := KeExceptionJacket (
         &ab, // abortblock
         &MiSafeCaptureString, // func
         &ctx, // context
@@ -202,6 +202,15 @@ EXPORT FN MmCaptureString (
     IF OsError ( status ) THEN
         // The call aborted due to a bad exception.
 
+        IF ctx.Buffer THEN
+            // It allocated a buffer before it aborted, so free the buffer.
+
+            MmFreePool (
+                ctx.Buffer, // ptr
+                'CpSt', // tag
+            )
+        END
+
         IF ctx.Charged THEN
             // Uncharge pool quota.
 
@@ -209,15 +218,6 @@ EXPORT FN MmCaptureString (
                 PsQuotaBlock ( PsCurrentProcess () ), // quotablock
                 ctx.Charged, // charge
                 MM_PAGED_POOL, // poolindex
-            )
-        END
-
-        IF ctx.Buffer THEN
-            // It allocated a buffer before it aborted, so free the buffer.
-
-            MmFreePool (
-                ctx.Buffer, // ptr
-                'CpSt', // tag
             )
         END
     END

@@ -14,8 +14,8 @@ PUBLIC KiInterruptsDisabled := TRUE
 // a2 - context
 // outputs:
 // a3 - status
-KeAbortableCall:
-.export KeAbortableCall
+KeExceptionJacket:
+.export KeExceptionJacket
 
     // Set up an abort state for the current thread.
 
@@ -117,7 +117,7 @@ KiAbortVector:
     mov  s16, [s0 + (KeAbortBlock_Context + OsContext_S16)]
     mov  s17, [s0 + (KeAbortBlock_Context + OsContext_S17)]
 
-    rjmp KeAbortableCall.return
+    rjmp KeExceptionJacket.return
 
 // outputs:
 // a3 - old interrupt state
