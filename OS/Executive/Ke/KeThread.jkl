@@ -241,6 +241,12 @@ FN KeInitializeThread (
     thread^.UserInterrupt = FALSE
     thread^.UserApcTriggered = FALSE
 
+    // Initialize abort state.
+
+    thread^.AbortListHead = NULLPTR
+
+    thread^.LastFaultStatus = 0
+
     // Add to the process's thread list.
 
     KeAcquireLockExclusive ( &process^.Lock )

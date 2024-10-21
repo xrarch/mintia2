@@ -7,6 +7,115 @@
 
 #ASM [
 
+// a0 - abortblock
+// a1 - func
+// a2 - context
+// outputs:
+// a3 - status
+KeAbortableCall:
+.export KeAbortableCall
+
+    // Set up an abort state for the current thread.
+
+    subi sp, sp, 12
+    mov  long [sp + 8], lr
+    mov  long [sp + 4], s0
+    mov  long [sp], s1
+
+    mov  s0, a0
+
+    // Acquire a pointer to the current thread.
+
+    subi t0, zero, 4096
+    mov  s1, long [t0 + KiPrb_CurrentThread]
+
+    // Initialize the abort block.
+
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_Sp)], sp
+
+    // Save all the non-volatile (callee-saved) registers that we didn't already
+    // save on our stack frame.
+
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S2)], s2
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S3)], s3
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S4)], s4
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S5)], s5
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S6)], s6
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S7)], s7
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S8)], s8
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S9)], s9
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S10)], s10
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S11)], s11
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S12)], s12
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S13)], s13
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S14)], s14
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S15)], s15
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S16)], s16
+    mov  long [s0 + (KeAbortBlock_Context + OsContext_S17)], s17
+
+    // Link it into the thread. No sync needed because we only access the abort
+    // list from the context of this thread.
+
+    mov  t1, long [s1 + KeThread_AbortListHead]
+    mov  long [s0 + KeAbortBlock_Next], t1
+    mov  long [s1 + KeThread_AbortListHead], s0
+
+    // Call the function.
+
+    mov  a0, a2
+    jalr lr, a1, 0
+
+.return:
+
+    // Unlink the abort block.
+
+    mov  t0, long [s0 + KeAbortBlock_Next]
+    mov  long [s1 + KeThread_AbortListHead], t0
+
+    // Return normally.
+
+    mov  s1, long [sp]
+    mov  s0, long [sp + 4]
+    mov  lr, long [sp + 8]
+    addi sp, sp, 12
+
+    ret
+
+// s0 - abortblock
+// s1 - thread
+KiAbortVector:
+.global KiAbortVector
+
+    // We get vectored here when an abort occurred. We have to restore state
+    // from the abort block.
+
+    mov  sp, long [s0 + (KeAbortBlock_Context + OsContext_Sp)]
+
+    // Load the status the caller should receive.
+
+    mov  a3, long [s0 + KeAbortBlock_Status]
+
+    // Restore non-volatile state that wasn't saved on the stack frame.
+
+    mov  s2, long [s0 + (KeAbortBlock_Context + OsContext_S2)]
+    mov  s3, long [s0 + (KeAbortBlock_Context + OsContext_S3)]
+    mov  s4, long [s0 + (KeAbortBlock_Context + OsContext_S4)]
+    mov  s5, long [s0 + (KeAbortBlock_Context + OsContext_S5)]
+    mov  s6, long [s0 + (KeAbortBlock_Context + OsContext_S6)]
+    mov  s7, long [s0 + (KeAbortBlock_Context + OsContext_S7)]
+    mov  s8, long [s0 + (KeAbortBlock_Context + OsContext_S8)]
+    mov  s9, long [s0 + (KeAbortBlock_Context + OsContext_S9)]
+    mov  s10, long [s0 + (KeAbortBlock_Context + OsContext_S10)]
+    mov  s11, long [s0 + (KeAbortBlock_Context + OsContext_S11)]
+    mov  s12, long [s0 + (KeAbortBlock_Context + OsContext_S12)]
+    mov  s13, long [s0 + (KeAbortBlock_Context + OsContext_S13)]
+    mov  s14, long [s0 + (KeAbortBlock_Context + OsContext_S14)]
+    mov  s15, long [s0 + (KeAbortBlock_Context + OsContext_S15)]
+    mov  s16, long [s0 + (KeAbortBlock_Context + OsContext_S16)]
+    mov  s17, long [s0 + (KeAbortBlock_Context + OsContext_S17)]
+
+    b    KeAbortableCall.return
+
 // outputs:
 // a3 - old interrupt state
 KiDisableInterrupts:

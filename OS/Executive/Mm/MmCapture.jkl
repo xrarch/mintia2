@@ -1,0 +1,249 @@
+//
+// Implements various safe-capture routines for system services.
+//
+
+#INCLUDE "../Mm/Mi.hjk"
+
+STRUCT MiCopyContext
+    Destination : ^VOID,
+    Source : ^VOID,
+    Size : UWORD,
+END
+
+STRUCT MiStringCopyContext
+    Buffer : ^VOID,
+    Source : ^VOID,
+    Charged : UWORD,
+END
+
+#SECTION "PAGEtext"
+FN (KeAbortableF) MiSafeCopy (
+    IN context : ^VOID,
+) : OsStatus
+
+    // Inner copy worker. Can terminate early and longjmp back to caller if
+    // we take a bad exception here.
+
+    ctx := CAST context TO ^MiCopyContext
+
+    RtlCopyBytes (
+        ctx^.Destination, // dest
+        ctx^.Source, // src
+        ctx^.Size, // sz
+    )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+EXPORT FN MmSafeCopyIn (
+    IN dest : ^VOID,
+    IN src : ^VOID,
+    IN sz : UWORD,
+) : OsStatus
+
+    // Safely copy a hunk of bytes from userspace.
+    // The "src" pointer is supplied by usermode. The "dest" pointer is trusted.
+
+    IF src >= MI_USER_SPACE_END THEN
+        RETURN OS_STATUS_READ_FAULT
+    END
+
+#IF BLD_CHK
+    IF dest < MI_SYSTEM_SPACE THEN
+        KeCrash ( "MmSafeCopyIn: dest < MI_SYSTEM_SPACE\n" )
+    END
+#END
+
+    ab : KeAbortBlock
+
+    ctx : MiCopyContext
+
+    ctx.Destination = dest
+    ctx.Source = src
+    ctx.Size = sz
+
+    RETURN KeAbortableCall (
+        &ab, // abortblock
+        &MiSafeCopy, // func
+        &ctx, // context
+    )
+END
+
+#SECTION "PAGEtext"
+EXPORT FN MmSafeCopyOut (
+    IN dest : ^VOID,
+    IN src : ^VOID,
+    IN sz : UWORD,
+) : OsStatus
+
+    // Safely copy a hunk of bytes to userspace.
+    // The "dest" pointer is supplied by usermode. The "src" pointer is trusted.
+
+    IF dest >= MI_USER_SPACE_END THEN
+        RETURN OS_STATUS_WRITE_FAULT
+    END
+
+#IF BLD_CHK
+    IF src < MI_SYSTEM_SPACE THEN
+        KeCrash ( "MmSafeCopyOut: src < MI_SYSTEM_SPACE\n" )
+    END
+#END
+
+    ab : KeAbortBlock
+
+    ctx : MiCopyContext
+
+    ctx.Destination = dest
+    ctx.Source = src
+    ctx.Size = sz
+
+    RETURN KeAbortableCall (
+        &ab, // abortblock
+        &MiSafeCopy, // func
+        &ctx, // context
+    )
+END
+
+#SECTION "PAGEtext"
+FN (KeAbortableF) MiSafeCaptureString (
+    IN context : ^VOID,
+) : OsStatus
+
+    // Inner copy worker. Can terminate early and longjmp back to caller if
+    // we take a bad exception here.
+
+    ctx := CAST context TO ^MiStringCopyContext
+
+    // Measure the length of the string. This can take an exception if we got a
+    // bad user pointer.
+
+    len := RtlMeasureString ( ctx^.Source )
+
+    // Charge quota.
+
+    quota := MmGetOverheadOfBytes ( len + 1 )
+
+    status := MmChargePoolQuota (
+        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+        quota, // charge
+        MM_PAGED_POOL, // poolindex
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Save the charged quota so it gets uncharged if we abort.
+
+    ctx^.Charged = quota
+
+    // Allocate a buffer.
+
+    buf := CAST MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
+        len + 1, // bytes
+        'CpSt', // tag
+        TRUE, // wait
+    ) TO ^UBYTE
+
+    IF NOT buf THEN
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    // Set the buffer field of the context so it gets freed if the copy throws
+    // an exception.
+
+    ctx^.Buffer = buf
+
+    RtlCopyBytes (
+        buf, // dest
+        ctx^.Source, // src
+        len, // sz
+    )
+
+    // Set a null terminator.
+
+    buf[len] = 0
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+EXPORT FN MmCaptureString (
+    IN string : ^UBYTE,
+    OUT output : ^UBYTE,
+) : OsStatus
+
+    // Safely capture a null-terminated string from userspace.
+    // The "string" pointer is supplied by usermode.
+
+    IF string >= MI_USER_SPACE_END THEN
+        RETURN OS_STATUS_READ_FAULT
+    END
+
+    // Measure the length of the string, allocate an appropriately sized pool
+    // block, and copy it in, all inside an exception wrapper.
+
+    ab : KeAbortBlock
+
+    ctx : MiStringCopyContext
+
+    ctx.Source = string
+    ctx.Buffer = NULLPTR
+    ctx.Charged = 0
+
+    status := KeAbortableCall (
+        &ab, // abortblock
+        &MiSafeCaptureString, // func
+        &ctx, // context
+    )
+
+    IF OsError ( status ) THEN
+        // The call aborted due to a bad exception.
+
+        IF ctx.Charged THEN
+            // Uncharge pool quota.
+
+            MmUnchargePoolQuota (
+                PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+                ctx.Charged, // charge
+                MM_PAGED_POOL, // poolindex
+            )
+        END
+
+        IF ctx.Buffer THEN
+            // It allocated a buffer before it aborted, so free the buffer.
+
+            MmFreePool (
+                ctx.Buffer, // ptr
+                'CpSt', // tag
+            )
+        END
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+EXPORT FN MmFreeString (
+    IN string : ^UBYTE,
+)
+
+    // Free a previously captured string.
+
+    charge := MmGetOverheadOfBlock ( string )
+
+    MmFreePool (
+        string, // ptr
+        'ExSt', // tag
+    )
+
+    // Uncharge pool quota.
+
+    MmUnchargePoolQuota (
+        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+        charge, // charge
+        MM_PAGED_POOL, // poolindex
+    )
+END

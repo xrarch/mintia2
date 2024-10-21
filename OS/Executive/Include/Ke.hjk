@@ -3,6 +3,7 @@
 //
 
 #INCLUDE "<ll>/System/OsStatus.hjk"
+#INCLUDE "<ll>/System/OsContext.hjk"
 
 #IF BLD_MP
 
@@ -611,6 +612,8 @@ STRUCT KeThread
 
     PiTurnstileListHead : RtlListEntry,
 
+    AbortListHead : ^KeAbortBlock,
+
     UserTimeMs : RtlUquad,
     DpcTimeMs : RtlUquad,
     SystemTimeMs : RtlUquad,
@@ -624,6 +627,8 @@ STRUCT KeThread
     TerminationEvent : KeEvent,
 
     WaitBlocks : KiWaitBlock[KI_THREAD_WAIT_BLOCKS],
+
+    LastFaultStatus : OsStatus,
 
     Name : UBYTE[KE_DEBUG_NAME_LENGTH],
 END
@@ -994,3 +999,19 @@ EXTERN FN KeZeroPage (
 )
 
 EXTERN KeSystemPageDirectoryPfn : UWORD
+
+FNPTR KeAbortableF (
+    IN context : ^VOID,
+) : OsStatus
+
+STRUCT KeAbortBlock
+    Next : ^KeAbortBlock,
+    Context : OsContext,
+    Status : ULONG,
+END
+
+EXTERN FN KeAbortableCall (
+    IN abortblock : ^KeAbortBlock,
+    IN func : KeAbortableF,
+    IN context : ^VOID,
+) : OsStatus

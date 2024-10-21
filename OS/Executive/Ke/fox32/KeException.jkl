@@ -3,7 +3,10 @@
 //
 
 #INCLUDE "../Ki.hjk"
-#INCLUDE "<ll>/System/OsContext.hjk"
+
+#INCLUDE "<ll>/System/OsSignal.hjk"
+
+#INCLUDE "<inc>/Mm.hjk"
 
 // The exact interface to the HAL for interrupts is private to the architecture.
 
@@ -589,7 +592,7 @@ KiJumpIntoThread:
     pop  tp
     pop  r31
     pop  fp
-    add  sp, 17 // Skip Eflags, BadAddr, Epc, Sp, fp
+    add  sp, 17 // Skip Eflags, BadAddr, Epc, Sp, Fp
 
     ret
 
@@ -609,6 +612,82 @@ KiSoftInterruptSelfSet:
     ret
 
 ]
+
+#DEFINE FOX_EXC_DIV_ZERO 0
+#DEFINE FOX_EXC_ILLEGAL 1
+#DEFINE FOX_EXC_READ_FAULT 2
+#DEFINE FOX_EXC_WRITE_FAULT 3
+#DEFINE FOX_EXC_DEBUGGER 4
+#DEFINE FOX_EXC_BUS_ERROR 5
+
+KiCauseNames : ^UBYTE[16] = {
+    [FOX_EXC_DIV_ZERO] = "DIVBYZERO",
+    [FOX_EXC_ILLEGAL] = "ILLEGAL",
+    [FOX_EXC_READ_FAULT] = "READFAULT",
+    [FOX_EXC_WRITE_FAULT] = "WRITEFAULT",
+    [FOX_EXC_DEBUGGER] = "DEBUGGER",
+    [FOX_EXC_BUS_ERROR] = "BUSERR",
+}
+
+KiExceptionToStatus : OsStatus[16] = {
+    [FOX_EXC_DIV_ZERO] = OS_STATUS_DIVIDE_BY_ZERO,
+    [FOX_EXC_ILLEGAL] = OS_STATUS_ILLEGAL_INSTRUCTION,
+    [FOX_EXC_READ_FAULT] = OS_STATUS_READ_FAULT,
+    [FOX_EXC_WRITE_FAULT] = OS_STATUS_WRITE_FAULT,
+    [FOX_EXC_BUS_ERROR] = OS_STATUS_BUS_ERROR,
+}
+
+KiExceptionToSignal : UBYTE[16] = {
+    [FOX_EXC_DIV_ZERO] = OS_SIGNAL_FPE,
+    [FOX_EXC_ILLEGAL] = OS_SIGNAL_ILL,
+    [FOX_EXC_READ_FAULT] = OS_SIGNAL_ACV,
+    [FOX_EXC_WRITE_FAULT] = OS_SIGNAL_ACV,
+    [FOX_EXC_BUS_ERROR] = OS_SIGNAL_BUS,
+}
+
+FN KiFaultCrash (
+    IN context : ^OsContext,
+    IN ecause : UWORD,
+)
+
+    KeCrash (
+        "EFLAGS=%02x BADADDR=%08x EPC=%08x ECAUSE=%s\n", // fmt
+        context^.Eflags,
+        context^.BadAddr,
+        context^.Epc,
+        KiCauseNames[ecause],
+    )
+END
+
+EXTERN KiAbortVector : UBYTE
+
+FN KiAbort (
+    IN thread : ^KeThread,
+    IN context : ^OsContext,
+    IN status : OsStatus,
+    IN ecause : UWORD,
+)
+
+    // Abort the current operation of the thread.
+
+    abortblock := thread^.AbortListHead
+
+    IF NOT abortblock THEN
+        // No abortable operation was in progress, this is just a kernel bug.
+
+        KiFaultCrash ( context, ecause )
+    END
+
+    // Save the status corresponding to the error.
+
+    abortblock^.Status = status
+
+    // Redirect the trap frame to return to the abort vector.
+
+    context^.S0 = abortblock
+    context^.S1 = &thread^.AbortListHead
+    context^.Epc = &KiAbortVector
+END
 
 EXTERN FN KiThreadTrampoline ()
 
@@ -736,67 +815,115 @@ END
 
 FNPTR KiExceptionHandlerF (
     IN context : ^OsContext,
+    IN ecause : UWORD,
 )
 
-FN (KiExceptionHandlerF) KiDivByZero (
+FN (KiExceptionHandlerF) KiErrorFault (
     IN context : ^OsContext,
+    IN ecause : UWORD,
 )
 
-    KeCrash ( "Division by zero at %p\n", context^.Epc )
+    // An "error" fault occurred. If this happened in kernel mode, figure out
+    // if its handled by a SafeCopy function. If not, crash.
+    //
+    // If it happened in usermode, generate a signal to the thread.
+
+    KiEnableInterrupts ()
+
+    thread := KeCurrentThread ()
+
+    IF context^.Eflags & 8 THEN
+        // Happened in usermode, send a signal.
+
+        thread^.LastFaultStatus = KiExceptionToStatus[ecause]
+
+        KeSignalThread (
+            thread, // thread
+            KiExceptionToSignal[ecause], // signal
+        )
+
+    ELSE
+        // Happened in kernel mode, abort the operation.
+
+        KiAbort (
+            thread, // thread
+            context, // context
+            KiExceptionToStatus[ecause], // status
+            ecause, // ecause
+        )
+    END
+
+    KiDisableInterrupts ()
 END
 
-FN (KiExceptionHandlerF) KiIllegalOpcode (
+FN (KiExceptionHandlerF) KiPageFault (
     IN context : ^OsContext,
+    IN ecause : UWORD,
 )
 
-    KeCrash ( "Illegal opcode at %p\n", context^.Epc )
-END
+    // Enable interrupts and dispatch the page fault to Mm.
 
-FN (KiExceptionHandlerF) KiReadFault (
-    IN context : ^OsContext,
-)
+    KiEnableInterrupts ()
 
-    KeCrash ( "Read fault of %p at %p\n", context^.BadAddr, context^.Epc )
-END
+    status := MmPageFault (
+        CAST context^.BadAddr TO ^VOID, // address
+        ecause == FOX_EXC_WRITE_FAULT, // writing
+        context^.Eflags & 8, // usermode
+    )
 
-FN (KiExceptionHandlerF) KiWriteFault (
-    IN context : ^OsContext,
-)
+    IF OsError ( status ) THEN
+        // Failed to handle the fault.
 
-    KeCrash ( "Write fault of %p at %p\n", context^.BadAddr, context^.Epc )
+        thread := KeCurrentThread ()
+
+        IF context^.Eflags & 8 THEN
+            // Happened in usermode. Send a signal.
+
+            thread^.LastFaultStatus = status
+
+            KeSignalThread (
+                thread, // thread
+                OS_SIGNAL_ACV, // signal
+            )
+
+        ELSE
+            // Happened in kernel mode. Abort the current operation.
+
+            KiAbort (
+                thread, // thread
+                context, // context
+                status, // status
+                ecause, // ecause
+            )
+        END
+    END
+
+    KiDisableInterrupts ()
 END
 
 FN (KiExceptionHandlerF) KiDebugger (
     IN context : ^OsContext,
+    IN ecause : UWORD,
 )
 
     IF context^.Eflags & 8 THEN
         KeCrash ( "NYI usermode breakpoints\n" )
 
-    ELSE
-        IF KeDebuggerEntry THEN
+    ELSEIF KeDebuggerEntry THEN
             KeDebuggerEntry ( context )
 
-        ELSE
-            KeCrash ( "Unhandled kernel mode breakpoint\n" )
-        END
+    ELSE
+        KeCrash ( "Unhandled kernel mode breakpoint\n" )
     END
 END
 
-FN (KiExceptionHandlerF) KiBusError (
-    IN context : ^OsContext,
-)
-
-    KeCrash ( "Bus error of %p at %p\n", context^.BadAddr, context^.Epc )
-END
-
 KiExceptionHandlers : KiExceptionHandlerF[16] = {
-    [0] = &KiDivByZero,
-    [1] = &KiIllegalOpcode,
-    [2] = &KiReadFault,
-    [3] = &KiWriteFault,
-    [4] = &KiDebugger,
-    [5] = &KiBusError,
+    [FOX_EXC_DIV_ZERO] = &KiErrorFault,
+    [FOX_EXC_ILLEGAL] = &KiErrorFault,
+    [FOX_EXC_READ_FAULT] = &KiPageFault,
+    [FOX_EXC_WRITE_FAULT] = &KiPageFault,
+    [FOX_EXC_DEBUGGER] = &KiDebugger,
+    [FOX_EXC_BUS_ERROR] = &KiErrorFault,
 }
 
 EXTERN KiInterruptsDisabled : UWORD
@@ -827,7 +954,10 @@ FN KiExceptionHandler (
     END
 
     IF exc >= 256 THEN
-        KiExceptionHandlers[exc - 256] ( context )
+        KiExceptionHandlers[exc - 256] (
+            context, // context
+            exc - 256, // ecause
+        )
 
     ELSE
         HalInterrupt (
@@ -925,7 +1055,7 @@ FN KiInterruptUsermode (
 
     // Save the trapframe to the user stack.
     // If that fails, and the thread has a panic stack, switch to it and copy
-    // out to that instead.
+    // out to that instead. If THAT fails, terminate the entire process.
 
     // Can't implement this until we get copy-out figured out.
     KeCrash ( "NYI KiInterruptUsermode\n" )

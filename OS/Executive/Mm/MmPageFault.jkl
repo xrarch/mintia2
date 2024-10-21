@@ -1,0 +1,22 @@
+//
+// Implements the MINTIA page fault handler.
+//
+
+#INCLUDE "Mi.hjk"
+
+FN MmPageFault (
+    IN address : ^VOID,
+    IN writing : UWORD,
+    IN usermode : UWORD,
+) : OsStatus
+
+    // TEMP
+
+    RtlPrint ( "fault on %x\n", address )
+
+    IF writing THEN
+        RETURN OS_STATUS_WRITE_FAULT
+    ELSE
+        RETURN OS_STATUS_READ_FAULT
+    END
+END

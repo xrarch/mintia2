@@ -3,7 +3,10 @@
 //
 
 #INCLUDE "../Ki.hjk"
-#INCLUDE "<ll>/System/OsContext.hjk"
+
+#INCLUDE "<ll>/System/OsSignal.hjk"
+
+#INCLUDE "<inc>/Mm.hjk"
 
 // The exact interface to the HAL for interrupts is private to the architecture.
 
@@ -60,6 +63,36 @@ FN KiFaultCrash (
     )
 END
 
+EXTERN KiAbortVector : UBYTE
+
+FN KiAbort (
+    IN thread : ^KeThread,
+    IN context : ^OsContext,
+    IN status : OsStatus,
+    IN badaddr : ^VOID,
+)
+
+    // Abort the current operation of the thread.
+
+    abortblock := thread^.AbortListHead
+
+    IF NOT abortblock THEN
+        // No abortable operation was in progress, this is just a kernel bug.
+
+        KiFaultCrash ( context, badaddr )
+    END
+
+    // Save the status corresponding to the error.
+
+    abortblock^.Status = status
+
+    // Redirect the trap frame to return to the abort vector.
+
+    context^.S0 = abortblock
+    context^.S1 = thread
+    context^.Epc = &KiAbortVector
+END
+
 FN (KiHighLevelHandlerF) KiSpuriousException (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
@@ -88,6 +121,20 @@ FN (KiHighLevelHandlerF) KiHandleInterrupt (
     END
 END
 
+KiExceptionToSignal : UBYTE[16] = {
+    [EXC_BUS] = OS_SIGNAL_BUS,
+    [EXC_INV] = OS_SIGNAL_ILL,
+    [EXC_PRV] = OS_SIGNAL_ILL,
+    [EXC_UNA] = OS_SIGNAL_ACV,
+}
+
+KiExceptionToStatus : OsStatus[16] = {
+    [EXC_BUS] = OS_STATUS_BUS_ERROR,
+    [EXC_INV] = OS_STATUS_ILLEGAL_INSTRUCTION,
+    [EXC_PRV] = OS_STATUS_ILLEGAL_INSTRUCTION,
+    [EXC_UNA] = OS_STATUS_UNALIGNED_FAULT,
+}
+
 FN (KiHighLevelHandlerF) KiHandleError (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
@@ -98,8 +145,32 @@ FN (KiHighLevelHandlerF) KiHandleError (
     //
     // If it happened in usermode, generate a signal to the thread.
 
-    // NYI KiHandleError
-    KiFaultCrash ( context, badaddr )
+    KiEnableInterrupts ()
+
+    thread := KeCurrentThread ()
+
+    IF context^.Rs & (1 << 8) THEN
+        // Happened in usermode, send a signal.
+
+        thread^.LastFaultStatus = KiExceptionToStatus[context^.Rs >> 28]
+
+        KeSignalThread (
+            thread, // thread
+            KiExceptionToSignal[context^.Rs >> 28], // signal
+        )
+
+    ELSE
+        // Happened in kernel mode, abort the operation.
+
+        KiAbort (
+            thread, // thread
+            context, // context
+            KiExceptionToStatus[context^.Rs >> 28], // status
+            badaddr, // badaddr
+        )
+    END
+
+    KiDisableInterrupts ()
 END
 
 FN (KiHighLevelHandlerF) KiHandleBreakpoint (
@@ -109,25 +180,23 @@ FN (KiHighLevelHandlerF) KiHandleBreakpoint (
 
     ecause := context^.Rs >> 28
 
-    IF context^.Rs & 1 AND ecause != EXC_NMI THEN
+    IF context^.Rs & (1 << 8) AND ecause != EXC_NMI THEN
         // Usermode breakpoint. Dispatch to debugger or send an illegal
         // instruction signal to the thread if no debugger attached.
 
-        KeCrash ( "Usermode breakpoint Unimplemented\n" )
+        KeCrash ( "NYI Usermode breakpoint\n" )
 
-    ELSE
-        IF KeDebuggerEntry THEN
-            KeDebuggerEntry ( context )
+    ELSEIF KeDebuggerEntry THEN
+        KeDebuggerEntry ( context )
 
-            IF ecause == EXC_BRK AND context^.Epc == &KeBreakpoint THEN
-                // Skip over the explicit breakpoint.
+        IF ecause == EXC_BRK AND context^.Epc == &KeBreakpoint THEN
+            // Skip over the explicit breakpoint.
 
-                context^.Epc += 4
-            END
-
-        ELSEIF ecause != EXC_NMI THEN
-            KeCrash ( "Unhandled kernel mode breakpoint\n" )
+            context^.Epc += 4
         END
+
+    ELSEIF ecause != EXC_NMI THEN
+        KeCrash ( "Unhandled kernel mode breakpoint\n" )
     END
 END
 
@@ -136,8 +205,44 @@ FN (KiHighLevelHandlerF) KiHandlePageFault (
     IN badaddr : ^VOID,
 )
 
-    // NYI KiHandlePageFault
-    KiFaultCrash ( context, badaddr )
+    // Enable interrupts and dispatch the page fault to Mm.
+
+    KiEnableInterrupts ()
+
+    status := MmPageFault (
+        badaddr, // address
+        (context^.Rs >> 28) == EXC_PFW, // writing
+        context^.Rs & (1 << 8), // usermode
+    )
+
+    IF OsError ( status ) THEN
+        // Failed to handle the fault.
+
+        thread := KeCurrentThread ()
+
+        IF context^.Rs & (1 << 8) THEN
+            // Happened in usermode. Send a signal.
+
+            thread^.LastFaultStatus = status
+
+            KeSignalThread (
+                thread, // thread
+                OS_SIGNAL_ACV, // signal
+            )
+
+        ELSE
+            // Happened in kernel mode. Abort the current operation.
+
+            KiAbort (
+                thread, // thread
+                context, // context
+                status, // status
+                badaddr, // badaddr
+            )
+        END
+    END
+
+    KiDisableInterrupts ()
 END
 
 #SECTION "text"
@@ -450,7 +555,6 @@ KiSwitchContext:
     mov  long [sp + OsContext_S15], s15
     mov  long [sp + OsContext_S16], s16
     mov  long [sp + OsContext_S17], s17
-    mov  long [sp + OsContext_Tp], tp
 
     mov  long [a1 + KeThread_Context], sp
 
@@ -515,7 +619,6 @@ LoadContext:
     mov  s15, long [sp + OsContext_S15]
     mov  s16, long [sp + OsContext_S16]
     mov  s17, long [sp + OsContext_S17]
-    mov  tp, long [sp + OsContext_Tp]
     addi sp, sp, OsContext__SIZEOF
 
     // Return into the new thread.
@@ -806,7 +909,7 @@ FN KiInterruptUsermode (
 
     // Save the trapframe to the user stack.
     // If that fails, and the thread has a panic stack, switch to it and copy
-    // out to that instead.
+    // out to that instead. If THAT fails, terminate the entire process.
 
     // Can't implement this until we get copy-out figured out.
     KeCrash ( "NYI KiInterruptUsermode\n" )
