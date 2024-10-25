@@ -172,6 +172,21 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     paged^.ParentPid = currentprocess^.Paged^.Pid
 
+    // Set not cleaned up yet.
+
+    paged^.CleanedUp = FALSE
+
+    // Put on the global process list.
+
+    KeAcquireLockExclusive ( &PspProcessListLock )
+
+    RtlInsertAtTailList (
+        &PspProcessListHead, // head
+        &paged^.GlobalEntry, // entry
+    )
+
+    KeReleaseLock ( &PspProcessListLock )
+
     // ... lots more stuff ...
 
     // Give the process a PID. Do this last so that users can't look up an

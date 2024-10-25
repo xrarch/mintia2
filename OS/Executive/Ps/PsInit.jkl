@@ -6,6 +6,10 @@
 
 #INCLUDE "<ll>/System/OsObject.hjk"
 
+PUBLIC PspProcessListLock : KeLock = KE_INITIAL_LOCK
+
+PUBLIC PspProcessListHead : RtlListEntry
+
 PUBLIC PsSystemProcess : ^PsProcess
 
 PUBLIC PsInitialThread : ^PsThread
@@ -61,9 +65,7 @@ FN PspCreateId (
     )
 
     IF OsError ( status ) THEN
-        PspUnlockId ()
-
-        RETURN status
+        GOTO Exit
     END
 
     // Bitwise OR the 5-bit sequence number into the ID.
@@ -78,9 +80,11 @@ FN PspCreateId (
 
     entry^.Object = object
 
+@Exit
+
     PspUnlockId ()
 
-    RETURN OS_STATUS_SUCCESS
+    RETURN status
 END
 
 #SECTION "PAGEtext"
@@ -118,8 +122,8 @@ FN PspReferenceById (
 
     IF lookuplocked THEN
         // We lock the lookup lock exclusive because it is anticipated that
-        // looking by ID will be much less common than creation. The creation
-        // codepath locks it shared.
+        // looking up threads by ID will be much less common than creation of
+        // threads. The creation codepath locks this shared.
 
         PspLockLookupExclusive ()
     END
@@ -163,8 +167,6 @@ FN PspReferenceById (
         // Object is being deleted.
 
         status = OS_STATUS_INVALID_HANDLE
-
-        GOTO Exit
     END
 
 @Exit
@@ -214,6 +216,10 @@ FN PsInitializeStage1 ()
         0, // entrysizelog
         PsQuotaBlock ( PsCurrentProcess () ), // quotablock
     )
+
+    // Initialize the global process list.
+
+    RtlInitializeList ( &PspProcessListHead )
 
     // Create the system process.
 

@@ -33,7 +33,7 @@ FN PspAllocateTurnstile () : ^KiTurnstile
     IF NOT turnstile THEN
         // Allocate a new hunk of turnstiles.
 
-        hunk := MmAllocatePool (
+        turnstile = MmAllocatePool (
             MM_NONPAGED_POOL, // poolindex
             SIZEOF KiTurnstile * PSP_TURNSTILE_EXTENSION +
             MM_ZONE_OVERHEAD, // bytes
@@ -41,26 +41,21 @@ FN PspAllocateTurnstile () : ^KiTurnstile
             TRUE, // wait
         )
 
-        IF NOT hunk THEN
+        IF NOT turnstile THEN
             KeReleaseLock ( &PspTurnstileLock )
 
             RETURN NULLPTR
         END
 
+        // Extend the zone starting from the second turnstile in the hunk. We
+        // take the first for ourselves.
+
         MmExtendZone (
             &PspTurnstileZone, // zone
-            hunk, // hunk
-            SIZEOF KiTurnstile * PSP_TURNSTILE_EXTENSION +
+            turnstile + SIZEOF KiTurnstile, // hunk
+            SIZEOF KiTurnstile * (PSP_TURNSTILE_EXTENSION - 1) +
             MM_ZONE_OVERHEAD, // bytes
         )
-
-        turnstile = MmAllocateZone ( &PspTurnstileZone )
-
-#IF BLD_CHK
-        IF NOT turnstile THEN
-            KeCrash ( "PspAllocateTurnstile: just extended but no turnstile\n" )
-        END
-#END
     END
 
     KeReleaseLock ( &PspTurnstileLock )

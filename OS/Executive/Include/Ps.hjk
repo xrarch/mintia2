@@ -13,9 +13,9 @@ EXTERN PsProcessType : ObType
 EXTERN PsThreadType : ObType
 
 STRUCT PsPagedProcess
-    HandleTable : ExHandleTable,
+    GlobalEntry : RtlListEntry,
 
-    HandleTableLock : KeLock,
+    HandleTable : ExHandleTable,
 
     Cred : ObCredentials,
 
@@ -25,8 +25,12 @@ STRUCT PsPagedProcess
 
     RootLock : KeLock,
 
+    HandleTableLock : KeLock,
+
     Pid : ULONG,
     ParentPid : ULONG,
+
+    CleanedUp : UBYTE,
 END
 
 STRUCT PsProcess
