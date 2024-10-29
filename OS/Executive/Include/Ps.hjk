@@ -23,12 +23,19 @@ STRUCT PsPagedProcess
 
     Name : ^ExName,
 
+    ActivationEvent : ^ExEventCounter,
+
+    Job : ^PsJob,
+
+    ConsoleGroup : ^DuConsoleGroup,
+
     RootLock : KeLock,
 
     HandleTableLock : KeLock,
 
     Pid : ULONG,
     ParentPid : ULONG,
+    ActivationStatus : OsStatus,
 
     CleanedUp : UBYTE,
 END
@@ -46,6 +53,8 @@ END
 STRUCT PsPagedThread
     Name : ^ExName,
 
+    IpcBlock : ^IpcpThreadBlock,
+
     Tid : ULONG,
 END
 
@@ -53,6 +62,35 @@ STRUCT PsThread
     Tcb : KeThread,
 
     Paged : ^PsPagedThread,
+
+    IopListHead : RtlListEntry,
+
+    DeferredIopListHead : RtlListEntry,
+END
+
+STRUCT PsJob
+    RootJob : ^PsJob,
+    ParentJob : ^PsJob,
+
+    Entry : RtlListEntry,
+
+    SubJobListHead : RtlListEntry,
+
+    ProcessListHead : RtlListEntry,
+
+    TerminationEvent : KeEvent,
+
+    // Counts both processes and sub-jobs. Job termination signaling occurs
+    // when this count transitions to zero due to process exit.
+
+    ActiveCount : ULONG,
+
+    Depth : UBYTE,
+    Flags : UBYTE,
+    SignalOnClose : UBYTE,
+    Terminated : UBYTE,
+
+    CleanedUp : UBYTE,
 END
 
 EXTERN PsSystemProcess : ^PsProcess
@@ -99,3 +137,12 @@ EXTERN KeIdleProcess : PsProcess
 #MACRO PsQuotaBlock ( process ) [
     (process^.Paged^.HandleTable.QuotaBlock)
 ]
+
+#MACRO PsUnblockRundownProcess ( process ) [
+    KeReleaseLock ( &(process)^.Pcb.Lock )
+]
+
+EXTERN FN PsBlockRundownProcess (
+    IN process : ^PsProcess,
+    IN needsthread : UWORD,
+) : UWORD

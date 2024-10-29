@@ -95,6 +95,31 @@ FN (ObTypeDeleteF) PspDeleteThreadObject (
 END
 
 #SECTION "PAGEtext"
+FN (KeStartThreadF) PspUserThreadEntry (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Entry point for all usermode threads.
+
+    thread := PsCurrentThread ()
+
+    // Build the TEB.
+
+    // ...
+
+    // Copy the TEB to userspace.
+
+    // ...
+
+    // Enter usermode for the first time, in some architecture-dependent way.
+
+    // ...
+
+    KeCrash ( "NYI PspUserThreadEntry\n" )
+END
+
+#SECTION "PAGEtext"
 FN (ObTypeInitializeF) PspInitializeThreadObject (
     IN object : ^VOID,
     IN context : ^VOID,
@@ -175,6 +200,30 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
         GOTO Error4
     END
 
+    IF ctx^.StartFunc == &PspUserThreadEntry THEN
+        // This is a user thread, so it should get userspace virtual memory
+        // structures.
+
+        status = MmInitializeThread (
+            process, // process
+            thread, // thread
+        )
+
+        IF OsError ( status ) THEN
+            GOTO Error5
+        END
+    END
+
+    // Initialize the thread for usage by Io.
+
+    RtlInitializeList ( &thread^.IopListHead )
+
+    RtlInitializeList ( &thread^.DeferredIopListHead )
+
+    // Initialize for usage by Ipc.
+
+    paged^.IpcBlock = NULLPTR
+
     // Initialize the thread for usage by Ke.
     // The thread should be initialized enough that its visibility to the
     // process via the thread list is safe, since it's added to that by Ke here.
@@ -203,12 +252,14 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
         status = OS_STATUS_WAS_TERMINATED
 
-        GOTO Error5
+        GOTO Error6
     END
 
     KeDetachProcess ( &process^.Pcb )
 
-    // ... lots more stuff ...
+    // Inherit the signal mask from the current thread.
+
+    thread^.Tcb.SignalAcceptMask = PsCurrentThread()^.Tcb.SignalAcceptMask
 
     // Bias the reference count of the thread object.
     // This reflects an active execution context existing, which means its
@@ -239,6 +290,15 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     KeReadyThread ( &thread^.Tcb )
 
     RETURN OS_STATUS_SUCCESS
+
+@Error6
+
+    IF ctx^.StartFunc == &PspUserThreadEntry THEN
+        MmUninitializeThread (
+            process, // process
+            thread, // thread
+        )
+    END
 
 @Error5
 

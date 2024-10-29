@@ -17,7 +17,7 @@ FN MmCreateKernelStack (
     partition := process^.Partition
     quotablock := PsQuotaBlock ( process )
 
-    // Charge the process VM quota for the kernel stack.
+    // Charge the process's virtual memory quota for the kernel stack.
 
     status := MmChargeVmQuota (
         partition, // partition
@@ -130,5 +130,58 @@ FN MmFreeKernelStack (
 
     // Free a kernel stack. It must be in an inswapped state.
 
-    KeCrash ( "NYI MmFreeKernelStack\n" )
+    partition := process^.Partition
+
+    // Acquire a pointer to the first PTE for this region.
+
+    pte := MiPteAddress ( kstack )
+
+    // Free the kernel stack pages.
+
+    i := 0
+
+    WHILE i < KE_STACK_PAGES DO
+        // Load the PTE for this page.
+
+        ptecontents := pte[i]
+
+#IF BLD_CHK
+        IF NOT MiIsPteValid ( ptecontents ) THEN
+            KeCrash ( "MmFreeKernelStack: invalid stack pte %p\n", ptecontents )
+        END
+#END
+
+        // Clear the PTE, makes it more likely we'll see it if a bad pointer
+        // within this space is used later. Due to the TB it's not 100% though.
+
+        pte[i] = MI_INVALID_KERNEL_PTE
+
+        // Free the page frame.
+
+        // TEMP: Does not yet handle kernel stacks being private anonymous
+        //       memory.
+
+        MiFreePage (
+            partition, // partition
+            MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
+        )
+
+        i += 1
+    END
+
+    // Release the system space containing the stack.
+
+    MiReleaseDynamicPages (
+        kstack, // ptr
+        KE_STACK_PAGES, // pages
+        TRUE, // flush
+    )
+
+    // Uncharge the virtual memory quota consumed by the kernel stack.
+
+    MmUnchargeVmQuota (
+        partition, // partition
+        PsQuotaBlock ( process ), // quotablock
+        KE_STACK_PAGES, // pages
+    )
 END

@@ -15,6 +15,36 @@ STRUCT PspProcessContext
 END
 
 #SECTION "PAGEtext"
+FN PsBlockRundownProcess (
+    IN process : ^PsProcess,
+    IN needsthread : UWORD,
+) : UWORD
+
+    // Prevent the rundown (clean-up) of the process until the next
+    // PsUnblockRundownProcess. This works by locking the process lock shared,
+    // so recursive nesting of this state is inadvisable (if not prohibited).
+    //
+    // If needsthread is set, atomically check for the existence of a living
+    // thread who is going to tear down the process if its terminated. This is
+    // intended to provide a guarantee that terminating a process, even one that
+    // is only partially constructed, will reliably tear down certain resources
+    // like handles and memory mappings. Returns TRUE on success, FALSE
+    // otherwise.
+
+    KeAcquireLockShared ( &process^.Pcb.Lock )
+
+    IF NOT process^.Pcb.SignalThread THEN
+        // No living thread.
+
+        KeReleaseLock ( &process^.Pcb.Lock )
+
+        RETURN FALSE
+    END
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
 FN (ObTypeDeleteF) PspDeleteProcessObject (
     IN object : ^VOID,
 ) : UWORD
@@ -73,8 +103,8 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     quotablock := PsQuotaBlock ( currentprocess )
 
-    IF flags & (OS_PROCESS_NEW_SESSION | OS_PROCESS_NO_INHERIT_QUOTA) ==
-        (OS_PROCESS_NEW_SESSION | OS_PROCESS_NO_INHERIT_QUOTA) THEN
+    IF flags & (OS_PROCESS_NEW_SESSION | OS_PROCESS_DETACH_QUOTA) ==
+        (OS_PROCESS_NEW_SESSION | OS_PROCESS_DETACH_QUOTA) THEN
 
         // Assign a new quota block.
 
@@ -168,13 +198,52 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     )
 
     // Stash the parent PID into the child. This is just a hint, nothing
-    // maintains this or relies on it to be accurate.
+    // maintains this or relies on it to be completely accurate.
 
     paged^.ParentPid = currentprocess^.Paged^.Pid
 
     // Set not cleaned up yet.
 
     paged^.CleanedUp = FALSE
+
+    // Create the activation event.
+
+    paged^.ActivationEvent = ExAllocateEventCounter ( TRUE )
+
+    IF NOT paged^.ActivationEvent THEN
+        status = OS_STATUS_NO_MEMORY
+
+        GOTO Error5
+    END
+
+    paged^.ActivationStatus = 0
+
+    paged^.Job = NULLPTR
+    paged^.ConsoleGroup = NULLPTR
+
+    IF flags & OS_PROCESS_DETACH_JOB == 0 THEN
+        // Inherit the parent process's job object.
+        // This is also the point where we'll notice that a job has been terminated
+        // and that this process creation should not be allowed to proceed.
+
+        status = PspInheritJob (
+            process, // child
+            currentprocess, // parent
+        )
+
+        IF OsError ( status ) THEN
+            GOTO Error6
+        END
+    END
+
+    IF flags & OS_PROCESS_DETACH_CONSOLE == 0 THEN
+        // Inherit the parent process's console group.
+
+        DuInheritConsoleGroup (
+            process, // child
+            currentprocess, // parent
+        )
+    END
 
     // Put on the global process list.
 
@@ -187,8 +256,6 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     KeReleaseLock ( &PspProcessListLock )
 
-    // ... lots more stuff ...
-
     // Give the process a PID. Do this last so that users can't look up an
     // incomplete process.
 
@@ -198,10 +265,33 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     )
 
     IF OsError ( status ) THEN
-        GOTO Error5
+        GOTO Error7
     END
 
     RETURN OS_STATUS_SUCCESS
+
+@Error7
+
+    KeAcquireLockExclusive ( &PspProcessListLock )
+
+    RtlRemoveEntryList ( &paged^.GlobalEntry )
+
+    KeReleaseLock ( &PspProcessListLock )
+
+    IF paged^.ConsoleGroup THEN
+        DuRemoveConsoleGroup ( process )
+    END
+
+    IF paged^.Job THEN
+        PspExitJobProcess (
+            paged^.Job, // job
+            process, // process
+        )
+    END
+
+@Error6
+
+    ExUnreferenceEventCounter ( paged^.ActivationEvent )
 
 @Error5
 
@@ -214,8 +304,6 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 @Error3
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
-    // Allocate an AsidTable.
-
     MmFreePool (
         process^.Pcb.AsidTable, // ptr
         'Asid', // tag

@@ -749,7 +749,8 @@ FN MiFreeToPool (
     block := CAST ptr - SIZEOF MiBlock TO ^MiFreeBlock
 
     IF tag != block^.Block.Tag THEN
-        KeCrash ( "MiFreeToPool: wrong tag %x on %p (expected %x)\n", block^.Block.Tag, ptr, tag )
+        KeCrash ( "MiFreeToPool: wrong tag %x on %p (expected %x)\n",
+            block^.Block.Tag, ptr, tag )
     END
 
     // Acquire a pointer to the pool extension.
@@ -846,7 +847,7 @@ FN MiFreeToPool (
     IF NOT ext^.References THEN
         // The extension is totally empty and should be released.
         // This involves removing all of its blocks (except this one!) from the
-        // free lists and then returning the extension from whence it came.
+        // free lists and then returning the extension to whence it came.
 
         // The form of the extension should be a partial block (with a piece cut
         // out for the extension header) plus a number of maximum sized blocks.
@@ -1024,7 +1025,8 @@ FN MiFreePageAligned (
 #END
 
     IF node^.U.Pool.Tag != tag THEN
-        KeCrash ( "MiFreePageAligned: wrong tag %x on %p, expected %x\n", node^.StartVa, node^.U.Pool.Tag, tag )
+        KeCrash ( "MiFreePageAligned: wrong tag %x on %p, expected %x\n",
+            node^.StartVa, node^.U.Pool.Tag, tag )
     END
 
     // Uninitialize the allocation.
