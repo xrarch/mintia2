@@ -202,13 +202,20 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
-    IF NOT thread^.BalancedQueue THEN
+    IF thread^.BalancedQueue != queue THEN
         // Associate the thread with this queue.
         // Note that this queue will not be ran down while we're trying to
         // remove an item, because the Executive is holding a reference to the
         // associated object.
 
-@InsertIntoQueue
+        IF thread^.BalancedQueue THEN
+            // Remove the thread from its current queue and insert it into this
+            // queue. This may involve waking a waiter on the old queue.
+            // The queue removal spinlock is superior to all the dispatcher
+            // locks, so we can awaken threads and so on with it held.
+
+            KiDisassociateFromBalancedQueue ( thread )
+        END
 
         thread^.BalancedQueue = queue
 
@@ -222,16 +229,6 @@ EXPORT FN KeRemoveFromBalancedQueue (
         queue^.ActiveThreadCount += 1
 
         KiReleaseObjectElevated ( &queue^.Header )
-
-    ELSEIF thread^.BalancedQueue != queue THEN
-        // Remove the thread from its current queue and insert it into this
-        // queue. This may involve waking a waiter on the old queue.
-        // The queue removal spinlock is superior to all the dispatcher locks,
-        // so we can awaken threads and so on with it held.
-
-        KiDisassociateFromBalancedQueue ( thread )
-
-        GOTO InsertIntoQueue
     END
 
     // The thread is now definitely associated with this queue, and won't become
