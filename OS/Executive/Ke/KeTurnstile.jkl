@@ -636,14 +636,11 @@ FN KiBlockOnLock (
             )
 
 #IF BLD_MP
+            KeMemoryBarrier ()
+
             IF thread^.Boosted THEN
                 // At some point, I was boosted, while boosting. Frick! Retry
                 // everything.
-
-                // NOTE: No memory barrier is currently needed here, because we
-                //       acquire and release spinlocks during boosting in such a
-                //       way that the necessary barriers have been performed by
-                //       the spinlock package.
 
                 GOTO UnreferenceAndLeave
             END

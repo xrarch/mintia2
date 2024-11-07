@@ -58,8 +58,8 @@ KiAcquireSpinlock:
 
     ret
 
-    // Spin until free without using LL since it brings the cache line in
-    // exclusive which is overzealous.
+    // Spin until free without using atomics since the incur more cache
+    // coherency traffic.
 
 .spin:
     mov  t0, long [a0]
