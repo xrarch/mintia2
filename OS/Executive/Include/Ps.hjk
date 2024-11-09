@@ -12,6 +12,16 @@ EXTERN PsProcessType : ObType
 
 EXTERN PsThreadType : ObType
 
+EXTERN PsGroupType : ObType
+
+STRUCT PsProcessGroup
+    ProcessListHead : RtlListEntry,
+
+    LeaderPid : ULONG,
+
+    Lock : KeLock,
+END
+
 STRUCT PsPagedProcess
     GlobalEntry : RtlListEntry,
 
@@ -27,15 +37,19 @@ STRUCT PsPagedProcess
 
     Job : ^PsJob,
 
-    ConsoleGroup : ^DuConsoleGroup,
+    ProcessGroup : ^PsProcessGroup,
 
     RootLock : KeLock,
+
+    ActivationLock : KeLock,
 
     HandleTableLock : KeLock,
 
     Pid : ULONG,
     ParentPid : ULONG,
+
     ActivationStatus : OsStatus,
+    TerminationStatus : OsStatus,
 
     CleanedUp : UBYTE,
 END
@@ -56,6 +70,9 @@ STRUCT PsPagedThread
     IpcBlock : ^IpcpThreadBlock,
 
     Tid : ULONG,
+    TerminationStatus : OsStatus,
+
+    Mode : UBYTE,
 END
 
 STRUCT PsThread

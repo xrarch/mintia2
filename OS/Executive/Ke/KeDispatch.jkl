@@ -842,16 +842,20 @@ FN KiSelectThread (
     interactive := FALSE
 
     IF current THEN
+        // We're selecting a thread whose priority is >= the 'current' thread.
+
         minimumpriority = current^.Priority
         interactive = current^.Interactive | current^.InteractivityFloor
 
         IF exclusive THEN
-            // Only pick threads that can preempt the given one.
+            // Only pick a thread whose priority is strictly > the 'current'
+            // thread.
 
             minimumpriority += 1
 
-            IF minimumpriority == 32 THEN
-                // None can.
+            IF minimumpriority == OS_PRIORITY_MAX THEN
+                // The thread is already at the highest priority, it can't be
+                // preempted.
 
                 RETURN NULLPTR
             END
@@ -871,7 +875,7 @@ FN KiSelectThread (
         )
 
 #IF BLD_MP
-        IF NOT migrate OR next != NULLPTR THEN
+        IF NOT migrate OR next THEN
             RETURN next
         END
 #ELSE
@@ -899,7 +903,7 @@ FN KiSelectThread (
         )
 
 #IF BLD_MP
-        IF NOT migrate OR next != NULLPTR THEN
+        IF NOT migrate OR next THEN
             RETURN next
         END
 #ELSE

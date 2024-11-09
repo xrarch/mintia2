@@ -44,6 +44,171 @@ FN PsBlockRundownProcess (
 END
 
 #SECTION "PAGEtext"
+FN PspSignalActivation (
+    IN process : ^PsProcess,
+    IN status : OsStatus,
+)
+
+    // Signal the activation of the process.
+
+    paged := process^.Paged
+
+    KeAcquireLockExclusive ( &paged^.ActivationLock )
+
+    event := paged^.ActivationEvent
+
+    IF NOT event THEN
+        // Already activated.
+
+        KeReleaseLock ( &paged^.ActivationLock )
+
+        LEAVE
+    END
+
+    paged^.ActivationStatus = status
+
+    paged^.ActivationEvent = NULLPTR
+
+    KeReleaseLock ( &paged^.ActivationLock )
+
+    // Wake anyone awaiting activation of this process.
+
+    KeSignalEvent (
+        &event^.Used.Event, // event
+        0, // priorityboost
+    )
+
+    // Decrement the reference count on the event counter.
+
+    ExUnreferenceEventCounter ( event )
+END
+
+#SECTION "PAGEtext"
+FN PspAwaitActivation (
+    IN process : ^PsProcess,
+    IN timeout : ^RtlUquad,
+    IN alertable : UWORD,
+    OUT activationstatus : OsStatus,
+) : OsStatus
+
+    // Wait for the activation of the process.
+
+    paged := process^.Paged
+
+    KeAcquireLockShared ( &paged^.ActivationLock )
+
+    event := paged^.ActivationEvent
+
+    IF NOT event THEN
+        // Already activated.
+
+        KeReleaseLock ( &paged^.ActivationLock )
+
+        activationstatus = paged^.ActivationStatus
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    ExReferenceEventCounter ( event )
+
+    KeReleaseLock ( &paged^.ActivationLock )
+
+    // Wait on the event counter.
+
+    status := KeWaitForSingleObject (
+        KE_USER_MODE, // waitmode
+        KE_ALERTABLE, // alertable
+        timeout, // timeout
+        &event^.Used.Event.Header, // object
+    )
+
+    ExUnreferenceEventCounter ( event )
+
+    activationstatus = paged^.ActivationStatus
+
+    IF status == 0 THEN
+        status = OS_STATUS_SUCCESS
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PspExitProcess (
+    IN process : ^PsProcess,
+    IN status : OsStatus,
+)
+
+    // The process has exited and exit-time teardown must be performed. This can
+    // occur in two situations:
+    //
+    //  1. The process's final thread has terminated, and called this routine.
+    //  2. The process never had any threads, and the object is being deleted.
+    //
+    // We distinguish between exit-time and deletion-time teardown for the
+    // process object so that it's more difficult for a malicious or buggy
+    // program to hog system resources by keeping a long-lived handle to a
+    // process that has terminated. The second thing we do is to forbid certain
+    // operations (like memory mapping) from being performed until the first
+    // thread for a process has been created. That way there's always someone
+    // obvious to terminate, who will make their way through this codepath here,
+    // and relinquish all of the resources associated with the process.
+
+    paged := process^.Paged
+
+    IF paged^.TerminationStatus == 0 THEN
+        paged^.TerminationStatus = status
+    END
+
+#IF BLD_CHK
+    IF paged^.CleanedUp THEN
+        KeCrash ( "PspExitProcess: already exited\n" )
+    END
+#END
+
+    paged^.CleanedUp = TRUE
+
+    IF paged^.Job THEN
+        // Indicate termination to job.
+
+        PspExitJobProcess (
+            paged^.Job, // job
+            process, // process
+        )
+    END
+
+    // Uninitialize the process with respect to Ob.
+
+    ObUninitializeProcess ( process )
+
+    // Uninitialize the process's virtual memory structures.
+
+    MmUninitializeProcess ( process )
+
+    // Remove from process group.
+
+    IF paged^.ProcessGroup THEN
+        PspRemoveProcessGroup ( process )
+    END
+
+    // Signal activation.
+
+    IF paged^.ActivationEvent THEN
+        PspSignalActivation (
+            process, // process
+            status, // status
+        )
+    END
+
+    // Signal the termination event.
+
+    KeSignalEvent (
+        &process^.TerminationEvent, // event
+        0, // priorityboost
+    )
+END
+
+#SECTION "PAGEtext"
 FN (ObTypeDeleteF) PspDeleteProcessObject (
     IN object : ^VOID,
 ) : UWORD
@@ -215,10 +380,13 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
         GOTO Error5
     END
 
+    KeInitializeLock ( &paged^.ActivationLock )
+
     paged^.ActivationStatus = 0
+    paged^.TerminationStatus = 0
 
     paged^.Job = NULLPTR
-    paged^.ConsoleGroup = NULLPTR
+    paged^.ProcessGroup = NULLPTR
 
     IF flags & OS_PROCESS_DETACH_JOB == 0 THEN
         // Inherit the parent process's job object.
@@ -238,7 +406,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     IF flags & OS_PROCESS_DETACH_CONSOLE == 0 THEN
         // Inherit the parent process's console group.
 
-        DuInheritConsoleGroup (
+        PspInheritProcessGroup (
             process, // child
             currentprocess, // parent
         )
@@ -277,8 +445,8 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     KeReleaseLock ( &PspProcessListLock )
 
-    IF paged^.ConsoleGroup THEN
-        DuRemoveConsoleGroup ( process )
+    IF paged^.ProcessGroup THEN
+        PspRemoveProcessGroup ( process )
     END
 
     IF paged^.Job THEN
@@ -302,6 +470,8 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
 @Error3
 
+    NsUninitializeProcess ( process )
+
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     MmFreePool (
         process^.Pcb.AsidTable, // ptr
@@ -323,6 +493,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     RETURN status
 END
 
+#SECTION "PAGEtext"
 PUBLIC PsProcessType : ObType = {
     [Name] = "Process",
 

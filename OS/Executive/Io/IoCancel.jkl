@@ -1,0 +1,49 @@
+//
+// Implements I/O cancellation functions.
+//
+
+#INCLUDE "Iop.hjk"
+
+#SECTION "PAGEtext"
+FN IoRundownThread (
+    IN thread : ^PsThread,
+)
+
+    // Cancel all the I/O requests pending for the current thread, and wait for
+    // them to fully disappear before returning.
+
+    // Mask APCs to protect the current thread's pending IOP list.
+
+    ipl := KeMaskApcs ()
+
+    listhead := &thread^.IopListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        // Cancel the IOP.
+
+        KeCrash ( "NYI IoRundownThread\n" )
+
+        listentry = listentry^.Next
+    END
+
+    KeUnmaskApcs ( ipl )
+
+    interval : RtlUquad
+
+    RtlSetUquadToUlong (
+        &interval, // uquad
+        100, // ulong
+    )
+
+    WHILE NOT RtlEmptyList ( listhead ) DO
+        // There are some requests taking a while, so wait a bit for them to
+        // complete.
+
+        KeSleep (
+            &interval, // interval
+            KE_KERNEL_MODE, // waitmode
+            KE_UNALERTABLE, // alertable
+        )
+    END
+END

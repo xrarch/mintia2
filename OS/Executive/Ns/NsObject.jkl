@@ -226,3 +226,17 @@ FN NsInitializeProcess (
 
     KeInitializeLock ( &paged^.RootLock )
 END
+
+#SECTION "PAGEtext"
+FN NsUninitializeProcess (
+    IN process : ^PsProcess,
+)
+
+    // Uninitialize a process with respect to the namespace.
+
+    paged := process^.Paged
+
+    // Unreference the root handle.
+
+    NsUnreferenceHandle ( &paged^.RootHandle )
+END

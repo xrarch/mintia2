@@ -49,13 +49,32 @@ FN MmUninitializeProcess (
 
     // Uninitialize a process that was previously initialized.
 
+    // We uninitialize everything, except for the page directory. We still need
+    // that because we might be in the address space of that process right now.
+
+    // NYI
+END
+
+#SECTION "PAGEtext"
+FN MmDeleteProcess (
+    IN process : ^PsProcess,
+)
+
+    // Finish deleting a process.
+
+    // First delete the page directory.
+
+    // NYI
+
     IF process^.Partition != &MiSystemPartition THEN
         // Unreference the partition object.
 
+        // Only do this after every page frame the process might possibly have
+        // ever consumed (including page directory, tables, etc) has been
+        // returned.
+
         ObUnreferenceObject ( process^.Partition )
     END
-
-    // NYI
 END
 
 #SECTION "PAGEtext"

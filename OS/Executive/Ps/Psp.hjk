@@ -6,6 +6,7 @@
 #INCLUDE "<inc>/Ke.hjk"
 #INCLUDE "<inc>/Ex.hjk"
 #INCLUDE "<inc>/Ps.hjk"
+#INCLUDE "<inc>/Io.hjk"
 #INCLUDE "<inc>/Du.hjk"
 
 #INCLUDE "../../Loader/Headers/Loader.hjk"
@@ -33,6 +34,11 @@ EXTERN PspProcessListHead : RtlListEntry
     KeReleaseLock ( &PspLookupLock )
 ]
 
+EXTERN FN PspExitProcess (
+    IN process : ^PsProcess,
+    IN status : OsStatus,
+)
+
 EXTERN FN PspExitJobProcess (
     IN job : ^PsJob,
     IN process : ^PsProcess,
@@ -57,3 +63,12 @@ EXTERN FN PspReferenceById (
     IN type : ^ObType,
     OUT object : ^VOID,
 ) : OsStatus
+
+EXTERN FN PspInheritProcessGroup (
+    IN child : ^PsProcess,
+    IN parent : ^PsProcess,
+)
+
+EXTERN FN PspRemoveProcessGroup (
+    IN process : ^PsProcess,
+)

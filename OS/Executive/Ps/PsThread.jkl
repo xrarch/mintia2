@@ -190,6 +190,8 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
         GOTO Error3
     END
 
+    paged^.TerminationStatus = 0
+
     // Allocate a turnstile.
 
     turnstile := PspAllocateTurnstile ()
@@ -212,6 +214,11 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
         IF OsError ( status ) THEN
             GOTO Error5
         END
+
+        paged^.Mode = KE_USER_MODE
+
+    ELSE
+        paged^.Mode = KE_KERNEL_MODE
     END
 
     // Initialize the thread for usage by Io.
@@ -331,6 +338,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     RETURN status
 END
 
+#SECTION "PAGEtext"
 PUBLIC PsThreadType : ObType = {
     [Name] = "Thread",
 
@@ -387,5 +395,63 @@ END
 #SECTION "PAGEtext"
 FN PsExitThread ()
 
-    KeCrash ( "NYI PsExitThread\n" )
+    // This thread has reached the end of its life. Usermode will never regain
+    // control.
+
+    thread := PsCurrentThread ()
+
+    process := PsCurrentProcess ()
+
+    // Make our priority the lowest real-time priority to expedite the releasing
+    // of this thread's resources.
+
+    KeSetPriorityThread (
+        &thread^.Tcb, // thread
+        OS_PRIORITY_LOW_REALTIME, // priority
+    )
+
+    // Ignore events so nothing weird happens while we're cleaning up.
+
+    KeIgnoreEvents ()
+
+    // If there are any asynchronous I/O operations in-flight, try to cancel
+    // them and wait for completion.
+
+    IF NOT RtlEmptyList ( &thread^.IopListHead ) THEN
+        // It's safe to check this list in this manner because the current
+        // thread is the only one who will ever enqueue items to this list,
+        // and we ain't doing that right now. Although, I/O completion APCs
+        // can asynchronously remove items from it in our context, but that
+        // doesn't matter when we're just checking for emptiness.
+
+        IoRundownThread ( thread )
+    END
+
+    IF thread^.Paged^.Mode == KE_USER_MODE THEN
+        // This was a usermode thread, so uninitialize the userspace structures
+        // created previously for it.
+
+        MmUninitializeThread (
+            process, // process
+            thread, // thread
+        )
+    END
+
+    // Uninitialize the thread with respect to Ke.
+
+    IF KeUninitializeThread ( &thread^.Tcb ) THEN
+        // Ke marked the thread's process terminated. Threads can no longer be
+        // created within the process and early exit processing should be
+        // performed.
+
+        PspExitProcess (
+            process, // process
+            thread^.Paged^.TerminationStatus, // status
+        )
+    END
+
+    // Now exit the thread. This does not return.
+    // The thread object will be enqueued to the reaper thread.
+
+    KeExitThread ( &thread^.Tcb )
 END
