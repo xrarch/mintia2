@@ -156,7 +156,7 @@ FN PspExitProcess (
 
     paged := process^.Paged
 
-    IF paged^.TerminationStatus == 0 THEN
+    IF NOT paged^.TerminationStatus THEN
         paged^.TerminationStatus = status
     END
 
@@ -191,7 +191,8 @@ FN PspExitProcess (
         PspRemoveProcessGroup ( process )
     END
 
-    // Signal activation.
+    // If activation hasn't been signaled, do so now in order to get rid of the
+    // activation event counter.
 
     IF paged^.ActivationEvent THEN
         PspSignalActivation (
@@ -213,11 +214,64 @@ FN (ObTypeDeleteF) PspDeleteProcessObject (
     IN object : ^VOID,
 ) : UWORD
 
-    process := CAST object TO ^PsProcess
-
     // Delete a process object.
 
-    KeCrash ( "NYI PspDeleteProcessObject\n" )
+    process := CAST object TO ^PsProcess
+
+    paged := process^.Paged
+
+    IF NOT paged^.CleanedUp THEN
+        // Clean up the process. It had no "final thread" to do this earlier.
+
+        PspExitProcess (
+            process, // process
+            0, // status
+        )
+    END
+
+    // Remove from the global process list.
+
+    KeAcquireLockExclusive ( &PspProcessListLock )
+
+    RtlRemoveEntryList ( &paged^.GlobalEntry )
+
+    KeReleaseLock ( &PspProcessListLock )
+
+    // Delete the PID.
+
+    PspDeleteId ( paged^.Pid )
+
+    // Uninitialize the root and current directory of the process.
+
+    NsUninitializeProcess ( process )
+
+    // Perform deletion of the page directory, etc.
+
+    MmDeleteProcess ( process )
+
+    // Unreference the name.
+
+    ExUnreferenceName ( paged^.Name )
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    // Free the AsidTable.
+
+    MmFreePool (
+        process^.Pcb.AsidTable, // ptr
+        'Asid', // tag
+    )
+#END
+
+    // Unreference the quota block.
+
+    MmUnreferenceQuotaBlock ( paged^.HandleTable.QuotaBlock )
+
+    // Free the paged part of the process.
+
+    MmFreePool (
+        paged, // ptr
+        'PgPr', // tag
+    )
 
     RETURN TRUE
 END
@@ -468,9 +522,13 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     MmUninitializeProcess ( process )
 
+    MmDeleteProcess ( process )
+
 @Error3
 
     NsUninitializeProcess ( process )
+
+    ObUninitializeProcess ( process )
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     MmFreePool (

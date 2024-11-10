@@ -85,13 +85,118 @@ FN (ObTypeDeleteF) PspDeleteThreadObject (
     IN object : ^VOID,
 ) : UWORD
 
-    thread := CAST object TO ^PsThread
-
     // Delete a thread object.
 
-    KeCrash ( "NYI PspDeleteThreadObject\n" )
+    thread := CAST object TO ^PsThread
+
+    paged := thread^.Paged
+
+    process := CONTAINEROF thread^.Tcb.Process TO PsProcess.Pcb
+
+    // Delete the TID.
+
+    PspDeleteId ( paged^.Tid )
+
+    // Unreference the interned name.
+
+    ExUnreferenceName ( paged^.Name )
+
+    // Free the turnstile.
+
+    PspFreeTurnstile ( thread^.Tcb.Turnstile )
+
+    // Free the kernel stack.
+
+    MmFreeKernelStack (
+        process, // process
+        thread^.Tcb.KernelStackTop - KE_STACK_PAGES << RTL_PAGE_SHIFT, // kstack
+    )
+
+    IF paged^.IpcBlock THEN
+        // Free the IPC block.
+
+        MmFreePool (
+            paged^.IpcBlock, // ptr
+            'Ipcb', // tag
+        )
+    END
+
+    // Unreference the process.
+
+    ObUnreferenceObject ( process )
+
+    // Free the paged part.
+
+    MmFreePool (
+        paged, // ptr
+        'PgTh', // tag
+    )
 
     RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN PsExitThread ()
+
+    // This thread has reached the end of its life. Usermode will never regain
+    // control.
+
+    thread := PsCurrentThread ()
+
+    process := PsCurrentProcess ()
+
+    // Make our priority the lowest real-time priority to expedite the releasing
+    // of this thread's resources.
+
+    KeSetPriorityThread (
+        &thread^.Tcb, // thread
+        OS_PRIORITY_LOW_REALTIME, // priority
+    )
+
+    // Ignore events so nothing weird happens while we're cleaning up.
+
+    KeIgnoreEvents ()
+
+    // If there are any asynchronous I/O operations in-flight, try to cancel
+    // them and wait for completion.
+
+    IF NOT RtlEmptyList ( &thread^.IopListHead ) THEN
+        // It's safe to check this list in this manner because the current
+        // thread is the only one who will ever enqueue items to this list,
+        // and we ain't doing that right now. Although, I/O completion APCs
+        // can asynchronously remove items from it in our context, but that
+        // doesn't matter when we're just checking for emptiness.
+
+        IoRundownThread ( thread )
+    END
+
+    IF thread^.Paged^.Mode == KE_USER_MODE THEN
+        // This was a usermode thread, so uninitialize the userspace structures
+        // created previously for it.
+
+        MmUninitializeThread (
+            process, // process
+            thread, // thread
+        )
+    END
+
+    // Uninitialize the thread with respect to Ke.
+
+    IF KeUninitializeThread ( &thread^.Tcb ) THEN
+        // Ke marked the thread's process terminated. Threads can no longer be
+        // created within the process and early exit processing should be
+        // performed.
+
+        PspExitProcess (
+            process, // process
+            thread^.Paged^.TerminationStatus, // status
+        )
+    END
+
+    // Now exit the thread. This does not return.
+    // The thread object will be enqueued to the reaper thread.
+
+    KeExitThread ( &thread^.Tcb )
 END
 
 #SECTION "PAGEtext"
@@ -300,7 +405,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
 @Error6
 
-    IF ctx^.StartFunc == &PspUserThreadEntry THEN
+    IF paged^.Mode == KE_USER_MODE THEN
         MmUninitializeThread (
             process, // process
             thread, // thread
@@ -390,68 +495,4 @@ FN PsCreateThreadObject (
         &obparams, // obparams
         OUT thread, // object
     )
-END
-
-#SECTION "PAGEtext"
-FN PsExitThread ()
-
-    // This thread has reached the end of its life. Usermode will never regain
-    // control.
-
-    thread := PsCurrentThread ()
-
-    process := PsCurrentProcess ()
-
-    // Make our priority the lowest real-time priority to expedite the releasing
-    // of this thread's resources.
-
-    KeSetPriorityThread (
-        &thread^.Tcb, // thread
-        OS_PRIORITY_LOW_REALTIME, // priority
-    )
-
-    // Ignore events so nothing weird happens while we're cleaning up.
-
-    KeIgnoreEvents ()
-
-    // If there are any asynchronous I/O operations in-flight, try to cancel
-    // them and wait for completion.
-
-    IF NOT RtlEmptyList ( &thread^.IopListHead ) THEN
-        // It's safe to check this list in this manner because the current
-        // thread is the only one who will ever enqueue items to this list,
-        // and we ain't doing that right now. Although, I/O completion APCs
-        // can asynchronously remove items from it in our context, but that
-        // doesn't matter when we're just checking for emptiness.
-
-        IoRundownThread ( thread )
-    END
-
-    IF thread^.Paged^.Mode == KE_USER_MODE THEN
-        // This was a usermode thread, so uninitialize the userspace structures
-        // created previously for it.
-
-        MmUninitializeThread (
-            process, // process
-            thread, // thread
-        )
-    END
-
-    // Uninitialize the thread with respect to Ke.
-
-    IF KeUninitializeThread ( &thread^.Tcb ) THEN
-        // Ke marked the thread's process terminated. Threads can no longer be
-        // created within the process and early exit processing should be
-        // performed.
-
-        PspExitProcess (
-            process, // process
-            thread^.Paged^.TerminationStatus, // status
-        )
-    END
-
-    // Now exit the thread. This does not return.
-    // The thread object will be enqueued to the reaper thread.
-
-    KeExitThread ( &thread^.Tcb )
 END
