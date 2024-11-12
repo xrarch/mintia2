@@ -180,7 +180,8 @@ FN PspReferenceById (
     RETURN status
 END
 
-#SECTION "INITtext"
+#ENTERSECTION "INITtext"
+
 FN PsInitializeIdleProcess ()
 
     // Initialize the idle process enough to bootstrap other stuff.
@@ -193,7 +194,6 @@ FN PsInitializeIdleProcess ()
     idleproc^.Paged^.Cred.Gid = OS_SYSTEM_GID
 END
 
-#SECTION "INITtext"
 FN PsInitializeStage1 ()
 
     // Stage 1 initialization for Ps.
@@ -245,6 +245,33 @@ FN PsInitializeStage1 ()
             status )
     END
 
+    // Create the reaper thread, which performs the final unreferencing of
+    // terminated threads.
+
+    dumpster : ^VOID
+
+    params.Path = NULLPTR
+
+    params.Captured.Flags = 0
+    params.Captured.ObFlags = 0
+    params.Captured.Permissions = OS_ACCESS_OWNER_ALL
+
+    status = PsCreateThreadObject (
+        &params, // params
+        "Reaper", // name
+        &PspReaperThread, // startfunc
+        0, // context1
+        0, // context2
+        PsSystemProcess, // process
+        0, // flags
+        OUT dumpster, // thread
+    )
+
+    IF OsError ( status ) THEN
+        KeCrash ( "PsInitializeStage1: failed to create reaper (%x)\n",
+            status )
+    END
+
     // Create the balance manager thread, which will perform stage 2
     // initialization of the system.
 
@@ -269,4 +296,33 @@ FN PsInitializeStage1 ()
         KeCrash ( "PsInitializeStage1: failed to create bal mgr (%x)\n",
             status )
     END
+
+    ObUnreferenceObject ( PsInitialThread )
 END
+
+FN PsInitializeStage2 ()
+
+    // Stage 2 initialization for Ps.
+
+    // Parse OSDLL and figure out where some symbols are.
+
+    // ... NYI ...
+
+    // Create the SystemInit.exe process.
+
+    // ... NYI ...
+
+    // Set it to the highest non-realtime priority.
+
+    // ... NYI ...
+
+    // Create its main thread.
+
+    // ... NYI ...
+
+    // Unreference the main thread.
+
+    // ... NYI ...
+END
+
+#LEAVESECTION

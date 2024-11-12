@@ -109,7 +109,7 @@ FN (ObTypeDeleteF) PspDeleteThreadObject (
 
     MmFreeKernelStack (
         process, // process
-        thread^.Tcb.KernelStackTop - KE_STACK_PAGES << RTL_PAGE_SHIFT, // kstack
+        thread^.Tcb.KernelStackTop - (KE_STACK_PAGES << RTL_PAGE_SHIFT), // kstack
     )
 
     IF paged^.IpcBlock THEN
@@ -121,16 +121,16 @@ FN (ObTypeDeleteF) PspDeleteThreadObject (
         )
     END
 
-    // Unreference the process.
-
-    ObUnreferenceObject ( process )
-
     // Free the paged part.
 
     MmFreePool (
         paged, // ptr
         'PgTh', // tag
     )
+
+    // Unreference the process.
+
+    ObUnreferenceObject ( process )
 
     RETURN TRUE
 END
@@ -495,4 +495,45 @@ FN PsCreateThreadObject (
         &obparams, // obparams
         OUT thread, // object
     )
+END
+
+FN (KeStartThreadF) PspReaperThread (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Implements the thread reaper.
+
+    KeSetBasePriorityThread (
+        KeCurrentThread (), // thread
+        OS_PRIORITY_HIGH_REALTIME, // priority
+        TRUE, // setcurrentpriority
+    )
+
+    WHILE TRUE DO
+        // Wait for a thread to reap.
+
+        KeWaitForSingleObject (
+            KE_KERNEL_MODE, // waitmode
+            KE_UNALERTABLE, // alertable
+            NULLPTR, // timeout
+            &KeReaperEvent.Header, // object
+        )
+
+        WHILE TRUE DO
+            thread := KePopReaperList ()
+
+            IF NOT thread THEN
+                // No more threads to reap.
+
+                BREAK
+            END
+
+            psthrd := CONTAINEROF thread TO PsThread.Tcb
+
+            // Unreference the thread object.
+
+            ObUnreferenceObject ( psthrd )
+        END
+    END
 END

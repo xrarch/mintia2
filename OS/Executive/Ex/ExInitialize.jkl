@@ -17,10 +17,6 @@ EXTERN FN (KeStartThreadF) MmZeroPageWorker (
     IN context2 : UWORD,
 )
 
-EXTERN FN MmInitializeStage1 ()
-EXTERN FN ObInitialize ()
-EXTERN FN NsInitialize ()
-
 #SECTION "INITtext"
 FN ExpGetExistenceArg (
     IN str : ^UBYTE,
@@ -100,13 +96,13 @@ FN ExpInitializeBootFlags ()
     END
 
     IF ExpGetExistenceArg ( "-nonpagedexec" ) THEN
-        // Force the paged executive, nonpaged.
+        // Force the paged executive to be nonpaged.
 
         ExBootFlags |= OS_BOOT_NONPAGED_EXECUTIVE
     END
 
     IF ExpGetExistenceArg ( "-nonpagedpool" ) THEN
-        // Force the paged pool, nonpaged.
+        // Force the paged pool to be nonpaged.
 
         ExBootFlags |= OS_BOOT_NONPAGED_POOL
     END
@@ -172,7 +168,37 @@ FN (KeStartThreadF) ExStartSystemProcess (
     // system process which means we have a proper container for kernel virtual
     // memory. This thread will become the balance manager.
 
-    KeCrash ( "ExStartSystemProcess %p\n", PsCurrentProcess () )
+    // Initialize virtual memory.
+
+    // MmInitializeStage2 ()
+
+    // Initialize I/O.
+
+    // IoInitialize ()
+
+    // Initialize IPC.
+
+    // IpcInitialize ()
+
+    // Initialize the executive video terminals.
+
+    // ExInitializeVideoTerminals ()
+
+    // Jettison unused boot resources.
+
+    MmJettisonUnusedResources ()
+
+    // Initialize the swap worker.
+
+    // MmInitializeSwapWorker ()
+
+    // Initialize OSDLL and the SystemInit.exe process.
+
+    PsInitializeStage2 ()
+
+    // Become the balance manager.
+
+    ExpBalanceManager ()
 END
 
 #SECTION "INITtext"

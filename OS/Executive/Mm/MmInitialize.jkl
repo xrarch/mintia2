@@ -44,9 +44,64 @@ END
 
 #ENTERSECTION "INITtext"
 
+FN MmJettisonUnusedResources ()
+
+    // We need to release the page frames taken up by any boot resources that
+    // were not claimed during the boot process.
+
+    listhead := &KeLoaderBlock.ResourceListHead
+    listentry := listhead^.Next
+
+    partition := &MiSystemPartition
+
+    WHILE listentry != listhead DO
+        rsrc := CONTAINEROF listentry TO BlResource.Entry
+
+        IF rsrc^.Jettison THEN
+            // Acquire a pointer to the first PTE for this region.
+
+            pte := MiPteAddress ( rsrc^.Data )
+
+            pages := rsrc^.Size + RTL_PAGE_OFFSET_MASK >> RTL_PAGE_SHIFT
+
+            i := 0
+
+            WHILE i < pages DO
+                ptecontents := pte[i]
+
+#IF BLD_CHK
+                IF NOT MiIsPteValid ( ptecontents ) THEN
+                    KeCrash ( "MmJettisonUnusedResources: invalid pte %p\n", ptecontents )
+                END
+#END
+
+                // Clear the PTE, makes it more likely we'll see it if a bad
+                // pointer within this space is used later. Due to the TB it's
+                // not 100% though.
+
+                pte[i] = MI_INVALID_KERNEL_PTE
+
+                // Free the page frame.
+
+                MiFreePage (
+                    partition, // partition
+                    MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
+                )
+
+                i += 1
+            END
+        END
+
+        listentry = listentry^.Next
+    END
+END
+
 FN MiIdentifyUnwireableSections (
     IN dll : ^BlDll,
 )
+
+    // Identify the bounds of this module's unwireable sections, and add them to
+    // a list.
 
     sectiontable := CAST dll^.Head + dll^.Head^.SectionTableOffset
         TO ^XloSectionHeader
@@ -106,7 +161,7 @@ FN MiIdentifyUnwireableSections (
         END
 
         IF type != MI_WIRED_REGION THEN
-            // Create a wired region record.
+            // Create an unwireable region record.
 
             region := CAST MmAllocatePool (
                 MM_NONPAGED_POOL, // poolindex
