@@ -780,16 +780,15 @@ FN KePopReaperList () : ^KeThread
 
     KiReleaseReaperList ( ipl )
 
+#IF BLD_MP
     IF thread THEN
         // Acquire and release the thread's spinlock as a barrier to ensure it
         // isn't currently context switching and has fully died.
 
-#IF BLD_MP
         ipl = KiAcquireThread ( thread )
         KiReleaseThread ( thread, ipl )
-#END
-
     END
+#END
 
     RETURN thread
 END
