@@ -171,10 +171,7 @@ FN PspExitProcess (
     IF paged^.Job THEN
         // Indicate termination to job.
 
-        PspExitJobProcess (
-            paged^.Job, // job
-            process, // process
-        )
+        PspExitJobProcess ( process )
     END
 
     // Uninitialize the process with respect to Ob.
@@ -318,6 +315,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     // Set the paged part.
 
     process^.Paged = paged
+    paged^.Process = process
 
     quotablock := PsQuotaBlock ( currentprocess )
 
@@ -504,10 +502,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     END
 
     IF paged^.Job THEN
-        PspExitJobProcess (
-            paged^.Job, // job
-            process, // process
-        )
+        PspExitJobProcess ( process )
     END
 
 @Error6

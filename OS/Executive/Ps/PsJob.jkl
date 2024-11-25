@@ -4,15 +4,412 @@
 
 #INCLUDE "Psp.hjk"
 
+PUBLIC PspJobHierarchyLock : KeLock = KE_INITIAL_LOCK
+
+#MACRO PspLockHierarchy () [
+    KeAcquireLockExclusive ( &PspJobHierarchyLock )
+]
+
+#MACRO PspUnlockHierarchy () [
+    KeReleaseLock ( &PspJobHierarchyLock )
+]
+
+#DEFINE PSP_MAX_JOB_DEPTH 8
+
+STRUCT PspJobContext
+    Flags : UWORD,
+    SignalOnClose : UWORD,
+    ParentJob : ^PsJob,
+END
+
+#SECTION "PAGEtext"
+FN PspSignalJobObject (
+    IN job : ^PsJob,
+    IN signal : UWORD,
+    IN propagate : UWORD,
+)
+
+    // Job hierarchy lock is held.
+
+    IF signal == OS_SIGNAL_KILL THEN
+        // It's a kill signal, so mark the job object terminated. No more
+        // processes will ever be able to be added to this job object.
+
+        job^.Terminated = TRUE
+    END
+
+    listhead := &job^.ProcessListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        // Send a signal to each process in the job.
+
+        KeSignalProcess (
+            &(CONTAINEROF listentry TO
+                PsPagedProcess.JobEntry)^.Process^.Pcb, // process
+            signal, // signal
+        )
+
+        listentry = listentry^.Next
+    END
+
+    IF propagate THEN
+        // Propagate the signal recursively to each sub-job.
+        // Infinite recursion is disallowed because of the PSP_MAX_JOB_DEPTH.
+
+        listhead = &job^.SubJobListHead
+        listentry = listhead^.Next
+
+        WHILE listentry != listhead DO
+            PspSignalJobObject (
+                CONTAINEROF listentry TO PsJob.Entry, // job
+                signal, // signal
+                TRUE, // propagate
+            )
+
+            listentry = listentry^.Next
+        END
+    END
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeCloseF) PspCloseJobObject (
+    IN object : ^VOID,
+    IN access : UWORD,
+    IN lasthandlecount : UWORD,
+)
+
+    // A handle to the job object was closed.
+
+    IF lasthandlecount != 1 THEN
+        // There are other handles, we don't care.
+
+        LEAVE
+    END
+
+    job := CAST object TO ^PsJob
+
+    IF NOT job^.SignalOnClose THEN
+        // Signal-on-close not specified.
+
+        LEAVE
+    END
+
+    // Send a signal to all of the processes in the job.
+
+    PspLockHierarchy ()
+
+    PspSignalJobObject (
+        job, // job
+        job^.SignalOnClose, // signal
+        TRUE, // propagate
+    )
+
+    PspUnlockHierarchy ()
+END
+
+#SECTION "PAGEtext"
+FN PspDecrementActiveCountJob (
+    IN job : ^PsJob,
+)
+
+    // Decrement the active count of a job.
+    // Hierarchy lock must be held.
+
+    oldcount := job^.ActiveCount
+
+#IF BLD_CHK
+    IF oldcount == 0 THEN
+        KeCrash ( "PspDecrementActiveCountJob: underflow\n" )
+    END
+#END
+
+    job^.ActiveCount = oldcount - 1
+
+    IF oldcount == 1 THEN
+        // Active count transitioned to zero. Do termination processing.
+
+        job^.Terminated = TRUE
+
+        KeSignalEvent (
+            &job^.TerminationEvent, // event
+            0, // priorityboost
+        )
+
+        IF NOT job^.CleanedUp THEN
+            job^.CleanedUp = TRUE
+
+            IF job^.ParentJob THEN
+                PspDecrementActiveCountJob ( job^.ParentJob )
+            END
+        END
+    END
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeDeleteF) PspDeleteJobObject (
+    IN object : ^VOID,
+) : UWORD
+
+    // There are no more processes in this job or handles open to the job
+    // object. This means the termination event has already been signaled, the
+    // subprocess list is empty, and the subjob list is empty. This means that
+    // we just need to remove this job from its parent.
+
+    job := CAST object TO ^PsJob
+
+    parent := job^.ParentJob
+
+    IF NOT parent THEN
+        // No parent job, nothing to do.
+
+        RETURN TRUE
+    END
+
+    PspLockHierarchy ()
+
+    IF NOT job^.CleanedUp THEN
+        // We didn't terminate in the normal way, so we need to unbias the
+        // ActiveCount of the parent job now.
+
+        PspDecrementActiveCountJob ( parent )
+    END
+
+    // Remove from the sub-job list of the parent job.
+
+    RtlRemoveEntryList ( &job^.Entry )
+
+    PspUnlockHierarchy ()
+
+    ObUnreferenceObject ( parent )
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeInitializeF) PspInitializeJobObject (
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+    // Initialize a new job object.
+
+    job := CAST object TO ^PsJob
+    ctx := CAST context TO ^PspJobContext
+
+    KeInitializeEvent (
+        &job^.TerminationEvent, // event
+        "JobTermination", // name
+        TRUE, // notification
+        FALSE, // signalstate
+    )
+
+    job^.Flags = ctx^.Flags
+
+    RtlInitializeList ( &job^.ProcessListHead )
+
+    RtlInitializeList ( &job^.SubJobListHead )
+
+    job^.ActiveCount = 0
+
+    job^.Terminated = FALSE
+    job^.CleanedUp = FALSE
+
+    job^.SignalOnClose = ctx^.SignalOnClose
+
+    IF ctx^.SignalOnClose >= OS_SIGNAL_COUNT THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
+    parentjob := ctx^.ParentJob
+
+    PspLockHierarchy ()
+
+    IF NOT parentjob THEN
+        // No parent job specified. Inherit from the current process.
+
+        currentprocess := PsCurrentProcess ()
+
+        parentjob = currentprocess^.Paged^.Job
+
+        IF NOT parentjob THEN
+            // Nothing to inherit.
+
+            job^.RootJob = job
+            job^.Depth = 1
+
+            GOTO Out
+        END
+    END
+
+    IF parentjob^.Terminated THEN
+        // Parent job is terminated - no new sub-jobs can be added.
+
+        PspUnlockHierarchy ()
+
+        RETURN OS_STATUS_JOB_IS_TERMINATED
+    END
+
+    IF parentjob^.Depth >= PSP_MAX_JOB_DEPTH THEN
+        // The maximum depth for the job tree is exceeded.
+
+        PspUnlockHierarchy ()
+
+        RETURN OS_STATUS_JOB_DEPTH
+    END
+
+    // Add to head of parent job list.
+
+    RtlInsertAtHeadList (
+        &parentjob^.SubJobListHead, // head
+        &job^.Entry, // entry
+    )
+
+    // Inherit the root job pointer to indicate that this job object is part of
+    // this tree.
+
+    job^.RootJob = parentjob^.RootJob
+    job^.Depth = parentjob^.Depth + 1
+
+    parentjob^.ActiveCount += 1
+
+    // Reference parent job to reflect the new child job.
+
+    ObReferenceObject ( parentjob )
+
+@Out
+
+    job^.ParentJob = parentjob
+
+    PspUnlockHierarchy ()
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+// FORWARD
+EXTERN FN PspRemoveProcessJob (
+    IN process : ^PsProcess,
+    IN toancestor : UWORD,
+) : OsStatus
+
+#SECTION "PAGEtext"
+FN PspAddProcessJob (
+    IN job : ^PsJob,
+    IN process : ^PsProcess,
+) : OsStatus
+
+    // Hierarchy lock is held.
+
+    IF job^.Terminated THEN
+        // Don't allow processes to be added to terminated jobs.
+
+        RETURN OS_STATUS_JOB_IS_TERMINATED
+    END
+
+    paged := process^.Paged
+
+    currentjob := paged^.Job
+
+    IF currentjob == job THEN
+        // No change.
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    IF currentjob THEN
+        // The process already has a job. check if its job is related to the
+        // requested job, and fail the request if it isn't.
+        // This is to prevent break-out from job hierarchy.
+
+        IF currentjob^.RootJob != job^.RootJob THEN
+            RETURN OS_STATUS_PROCESS_HAS_JOB
+        END
+
+        // Remove the process from the current job.
+
+        PspRemoveProcessJob (
+            process, // process
+            FALSE, // toancestor
+        )
+    END
+
+    // Add the process to the new job.
+
+    RtlInsertAtHeadList (
+        &job^.ProcessListHead, // head
+        &paged^.JobEntry, // entry
+    )
+
+    paged^.Job = job
+
+    job^.ActiveCount += 1
+
+    ObReferenceObject ( job )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN PspRemoveProcessJob (
+    IN process : ^PsProcess,
+    IN toancestor : UWORD,
+) : OsStatus
+
+    // Hierarchy lock is held.
+    // If toancestor is nonzero, and the process's job has a parent job, the
+    // process will be automatically reassigned to that job.
+
+    paged := process^.Paged
+
+    job := paged^.Job
+
+    IF NOT job THEN
+        RETURN OS_STATUS_PROCESS_HAS_NO_JOB
+    END
+
+    IF toancestor AND NOT job^.ParentJob THEN
+        RETURN OS_STATUS_PROCESS_HAS_NO_JOB
+    END
+
+    // Remove the process from the job's process list.
+
+    RtlRemoveEntryList ( &paged^.JobEntry )
+
+    paged^.Job = NULLPTR
+
+    status := OS_STATUS_SUCCESS
+
+    IF toancestor THEN
+        // Move to parent job of old job object.
+
+        status = PspAddProcessJob (
+            job^.ParentJob, // job
+            process, // process
+        )
+    END
+
+    PspDecrementActiveCountJob ( job )
+
+    ObUnreferenceObject ( job )
+
+    RETURN status
+END
+
 #SECTION "PAGEtext"
 FN PspExitJobProcess (
-    IN job : ^PsJob,
     IN process : ^PsProcess,
 )
 
     // A process belonging to this job has exited.
 
-    // NYI
+    PspLockHierarchy ()
+
+    PspRemoveProcessJob (
+        process, // process
+        FALSE, // toancestor
+    )
+
+    PspUnlockHierarchy ()
 END
 
 #SECTION "PAGEtext"
@@ -23,7 +420,73 @@ FN PspInheritJob (
 
     // Inherit the job object of the parent process in the child process.
 
-    // NYI
+    PspLockHierarchy ()
 
-    RETURN OS_STATUS_SUCCESS
+    job := parent^.Paged^.Job
+
+    IF NOT job THEN
+        // Nothing to inherit.
+
+        PspUnlockHierarchy ()
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    status := PspAddProcessJob (
+        job, // job
+        child, // process
+    )
+
+    PspUnlockHierarchy ()
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+PUBLIC PsJobType : ObType = {
+    [Name] = "Job",
+
+    [Close] = &PspCloseJobObject,
+    [Delete] = &PspDeleteJobObject,
+
+    [Initialize] = &PspInitializeJobObject,
+
+    [WaitOffset] = OFFSETOF PsJob.TerminationEvent,
+    [TypeIdentifier] = OS_JOB_TYPE,
+    [Tag] = 'JobO',
+
+    [IsPaged] = FALSE,
+}
+
+#SECTION "PAGEtext"
+FN PsCreateJobObject (
+    IN params : ^NsOpenParameters,
+    IN flags : UWORD,
+    IN signalonclose : UWORD,
+    IN parentjob : ^PsJob,
+    OUT job : ^PsJob,
+) : OsStatus
+
+    // Create a job object.
+
+    ctx : PspJobContext
+
+    ctx.Flags = flags
+    ctx.SignalOnClose = signalonclose
+    ctx.ParentJob = parentjob
+
+    obparams : ObParameters
+
+    obparams.Type = &PsJobType
+    obparams.BodySize = SIZEOF PsJob
+    obparams.NpQuotaBias = 0
+    obparams.PgQuotaBias = 0
+
+    obparams.Context = &ctx
+
+    RETURN NsCreateObject (
+        params, // params
+        &obparams, // obparams
+        OUT job, // object
+    )
 END
