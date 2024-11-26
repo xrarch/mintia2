@@ -296,6 +296,16 @@ FN ObReferenceObject (
 END
 
 #SECTION "PAGEtext"
+FN ObpDeferDeletion (
+    IN object : ^VOID,
+)
+
+    // Enqueue deleting this object as some work to the worker thread pool.
+
+    KeCrash ( "NYI ObpDeferDeletion\n" )
+END
+
+#SECTION "PAGEtext"
 FN ObUnreferenceObject (
     IN object : ^VOID,
 )
@@ -335,7 +345,38 @@ FN ObUnreferenceObject (
         // APCs are not deliverable so we're gonna defer this deletion to worker
         // thread context.
 
-        KeCrash ( "TODO ObUnreferenceObject worker item enqueue\n" )
+        ObpDeferDeletion ( object )
+    END
+END
+
+#SECTION "PAGEtext"
+FN ObUnreferenceObjectDeferDelete (
+    IN object : ^VOID,
+)
+
+    // Unreference an object by pointer.
+
+    // Unconditionally defer deletion instead of doing it in the context of this
+    // thread. This is useful when a lock is held that is also taken in the
+    // deletion routine.
+
+    header := ObFindHeader ( object )
+
+    oldcount := KeIncrementPtr (
+        &header^.U.Used.PointerCount, // ulong
+        -1, // inc
+    )
+
+#IF BLD_CHK
+    IF oldcount == 0 THEN
+        KeCrash ( "ObUnreferenceObject: underflow\n" )
+    END
+#END
+
+    IF oldcount == 1 THEN
+        // Delete it.
+
+        ObpDeferDeletion ( object )
     END
 END
 

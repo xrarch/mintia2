@@ -390,7 +390,7 @@ FN PspRemoveProcessJob (
 
     PspDecrementActiveCountJob ( job )
 
-    ObUnreferenceObject ( job )
+    ObUnreferenceObjectDeferDelete ( job )
 
     RETURN status
 END
@@ -489,4 +489,352 @@ FN PsCreateJobObject (
         &obparams, // obparams
         OUT job, // object
     )
+END
+
+#SECTION "PAGEtext"
+FN OsAddProcessJob (
+    IN jobhandle : UWORD,
+    IN processhandle : UWORD,
+) : OsStatus
+
+    // Insert a process into a job object. The process must either not be in a
+    // job object, or be in one that is in the same tree as the target job.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        // Not a subset of the required access.
+
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    job : ^PsJob
+
+    status = ObReferenceByHandle (
+        jobhandle, // handle
+        &PsJobType, // type
+        OUT job, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        // Not a subset of the required access.
+
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit2
+    END
+
+    IF NOT PsBlockRundownProcess ( process ) THEN
+        // Process isn't living.
+
+        status = OS_STATUS_WAS_TERMINATED
+
+        GOTO Exit2
+    END
+
+    PspLockHierarchy ()
+
+    status = PspAddProcessJob (
+        job, // job
+        process, // process
+    )
+
+    PspUnlockHierarchy ()
+
+    PsUnblockRundownProcess ( process )
+
+@Exit2
+
+    ObUnreferenceObject ( job )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsRemoveProcessJob (
+    IN handle : UWORD,
+) : OsStatus
+
+    // Remove a process from its job object.
+    // This will insert it into the parent of the current job.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        // Not a subset of the required access.
+
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    PspLockHierarchy ()
+
+    status = PspRemoveProcessJob (
+        process, // process
+        TRUE, // toancestor
+    )
+
+    PspUnlockHierarchy ()
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsSignalJob (
+    IN handle : UWORD,
+    IN signal : UWORD,
+    IN propagate : UWORD,
+) : OsStatus
+
+    // Signal a job tree.
+
+    job : ^PsJob
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsJobType, // type
+        OUT job, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_EXEC != access THEN
+        // Not a subset of the required access.
+
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    PspLockHierarchy ()
+
+    PspSignalJobObject (
+        job, // job
+        signal, // signal
+        propagate, // propagate
+    )
+
+    PspUnlockHierarchy ()
+
+@Exit
+
+    ObUnreferenceObject ( job )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsCreateJob (
+    IN params : ^NsOpenParameters,
+    IN flags : UWORD,
+    IN signalonclose : UWORD,
+    IN parentjobhandle : UWORD,
+    OUT handle : ULONG,
+) : OsStatus
+
+    // Create a job object handle.
+
+    parentjob : ^PsJob = NULLPTR
+
+    status : OsStatus
+
+    IF parentjobhandle != OS_NULL_HANDLE THEN
+        // A parent job was specified.
+
+        access : UWORD
+
+        status = ObReferenceByHandle (
+            parentjobhandle, // handle
+            &PsJobType, // type
+            OUT parentjob, // object
+            OUT access, // access
+        )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+
+        IF access | OS_ACCESS_WRITE != access THEN
+            // Not a subset of the required access.
+
+            status = OS_STATUS_ACCESS_DENIED
+
+            GOTO Exit
+        END
+    END
+
+    object : ^PsJob
+
+    status = PsCreateJobObject (
+        params, // params
+        flags, // flags
+        signalonclose, // signalonclose
+        parentjob, // parentjob
+        OUT object, // object
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    status = ObInsertObject (
+        PsCurrentProcess (), // process
+        object, // object
+        params^.Captured.Access, // access
+        OUT handle, // handle
+    )
+
+    IF OsError ( status ) THEN
+        ObUnreferenceObject ( object )
+    END
+
+@Exit
+
+    IF parentjob THEN
+        ObUnreferenceObject ( parentjob )
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsOpenJob (
+    IN params : ^NsOpenParameters,
+    OUT handle : ULONG,
+) : OsStatus
+
+    // Open a handle to a job object.
+
+    object : ^PsJob
+
+    status := NsLookupObject (
+        params, // params
+        &PsJobType, // type
+        OUT object, // event
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    status = ObInsertObject (
+        PsCurrentProcess (), // process
+        object, // object
+        params^.Captured.Access, // access
+        OUT handle, // handle
+    )
+
+    IF OsError ( status ) THEN
+        ObUnreferenceObject ( object )
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsCreateJob (
+    IN params : ^OsOpenParameters,
+    IN flags : UWORD,
+    IN signalonclose : UWORD,
+    IN parentjobhandle : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+    // Create a job object, system service.
+
+    sysparams : NsOpenParameters
+
+    status := NsCaptureOpenParameters (
+        params, // userparams
+        &sysparams, // sysparams
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    status = PsCreateJob (
+        &sysparams, // params
+        flags, // flags
+        signalonclose, // signalonclose
+        parentjobhandle, // parentjobhandle
+        OUT handle, // handle
+    )
+
+    NsFreeOpenParameters ( &sysparams )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsOpenJob (
+    IN params : ^OsOpenParameters,
+    OUT handle : ULONG,
+) : OsStatus
+
+    // Open a job object, system service.
+
+    sysparams : NsOpenParameters
+
+    status := NsCaptureOpenParameters (
+        params, // userparams
+        &sysparams, // sysparams
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    status = PsOpenJob (
+        &sysparams, // params
+        OUT handle, // handle
+    )
+
+    NsFreeOpenParameters ( &sysparams )
+
+    RETURN status
 END

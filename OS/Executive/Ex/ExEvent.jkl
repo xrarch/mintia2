@@ -50,21 +50,6 @@ ExpEventType : ObType = {
 }
 
 #SECTION "PAGEtext"
-FN ExLookupEventObject (
-    IN params : ^NsOpenParameters,
-    OUT event : ^ExEvent,
-) : OsStatus
-
-    // Look up an event object.
-
-    RETURN NsLookupObject (
-        params, // params
-        &ExpEventType, // type
-        OUT event, // event
-    )
-END
-
-#SECTION "PAGEtext"
 FN ExOpenEvent (
     IN params : ^NsOpenParameters,
     OUT handle : ULONG,
@@ -74,9 +59,10 @@ FN ExOpenEvent (
 
     object : ^ExEvent
 
-    status := ExLookupEventObject (
+    status := NsLookupObject (
         params, // params
-        OUT object, // object
+        &ExpEventType, // type
+        OUT object, // event
     )
 
     IF OsError ( status ) THEN
