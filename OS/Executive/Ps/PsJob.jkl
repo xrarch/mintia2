@@ -390,6 +390,9 @@ FN PspRemoveProcessJob (
 
     PspDecrementActiveCountJob ( job )
 
+    // Defer deletion if we dropped the refcount to 0 because we are holding the
+    // hierarchy lock, which is taken by the deletion routine as well.
+
     ObUnreferenceObjectDeferDelete ( job )
 
     RETURN status
@@ -479,6 +482,7 @@ FN PsCreateJobObject (
 
     obparams.Type = &PsJobType
     obparams.BodySize = SIZEOF PsJob
+    obparams.PagedBodySize = 0
     obparams.NpQuotaBias = 0
     obparams.PgQuotaBias = 0
 

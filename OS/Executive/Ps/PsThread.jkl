@@ -41,21 +41,17 @@ FN PspAllocateTurnstile () : ^KiTurnstile
             TRUE, // wait
         )
 
-        IF NOT turnstile THEN
-            KeReleaseLock ( &PspTurnstileLock )
+        IF turnstile THEN
+            // Extend the zone starting from the second turnstile in the hunk.
+            // We take the first for ourselves.
 
-            RETURN NULLPTR
+            MmExtendZone (
+                &PspTurnstileZone, // zone
+                turnstile + SIZEOF KiTurnstile, // hunk
+                SIZEOF KiTurnstile * (PSP_TURNSTILE_EXTENSION - 1) +
+                MM_ZONE_OVERHEAD, // bytes
+            )
         END
-
-        // Extend the zone starting from the second turnstile in the hunk. We
-        // take the first for ourselves.
-
-        MmExtendZone (
-            &PspTurnstileZone, // zone
-            turnstile + SIZEOF KiTurnstile, // hunk
-            SIZEOF KiTurnstile * (PSP_TURNSTILE_EXTENSION - 1) +
-            MM_ZONE_OVERHEAD, // bytes
-        )
     END
 
     KeReleaseLock ( &PspTurnstileLock )
@@ -120,13 +116,6 @@ FN (ObTypeDeleteF) PspDeleteThreadObject (
             'Ipcb', // tag
         )
     END
-
-    // Free the paged part.
-
-    MmFreePool (
-        paged, // ptr
-        'PgTh', // tag
-    )
 
     // Unreference the process.
 
@@ -240,20 +229,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     flags := ctx^.Flags
     process := ctx^.Process
 
-    // Allocate the paged part of the thread object.
-
-    paged := CAST MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
-        SIZEOF PsPagedThread, // bytes
-        'PgTh', // tag
-        TRUE, // wait
-    ) TO ^PsPagedThread
-
-    IF NOT paged THEN
-        RETURN OS_STATUS_NO_MEMORY
-    END
-
-    // Set the paged part.
+    paged := CAST ObFindPagedPart ( thread ) TO ^PsPagedThread
 
     thread^.Paged = paged
 
@@ -262,9 +238,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     paged^.Name = ExFindName ( ctx^.Name )
 
     IF NOT paged^.Name THEN
-        status = OS_STATUS_NO_MEMORY
-
-        GOTO Error1
+        RETURN OS_STATUS_NO_MEMORY
     END
 
     // Allocate the kernel stack.
@@ -433,13 +407,6 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     ExUnreferenceName ( paged^.Name )
 
-@Error1
-
-    MmFreePool (
-        paged, // ptr
-        'PgTh', // tag
-    )
-
     RETURN status
 END
 
@@ -485,6 +452,7 @@ FN PsCreateThreadObject (
 
     obparams.Type = &PsThreadType
     obparams.BodySize = SIZEOF PsThread
+    obparams.PagedBodySize = SIZEOF PsPagedThread
     obparams.NpQuotaBias = 0
     obparams.PgQuotaBias = MmGetOverheadOfBytes ( SIZEOF PsPagedThread )
 

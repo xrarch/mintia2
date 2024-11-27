@@ -260,13 +260,6 @@ FN (ObTypeDeleteF) PspDeleteProcessObject (
 
     MmUnreferenceQuotaBlock ( paged^.HandleTable.QuotaBlock )
 
-    // Free the paged part of the process.
-
-    MmFreePool (
-        paged, // ptr
-        'PgPr', // tag
-    )
-
     RETURN TRUE
 END
 
@@ -296,20 +289,9 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
         END
     END
 
-    // Allocate the paged part of the process object.
-
-    paged := CAST MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
-        SIZEOF PsPagedProcess, // bytes
-        'PgPr', // tag
-        TRUE, // wait
-    ) TO ^PsPagedProcess
-
-    IF NOT paged THEN
-        RETURN OS_STATUS_NO_MEMORY
-    END
-
     // Set the paged part.
+
+    paged := CAST ObFindPagedPart ( process ) TO ^PsPagedProcess
 
     process^.Paged = paged
     paged^.Process = process
@@ -327,9 +309,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
         )
 
         IF NOT quotablock THEN
-            status = OS_STATUS_NO_MEMORY
-
-            GOTO Error1
+            RETURN OS_STATUS_NO_MEMORY
         END
 
     ELSE
@@ -533,13 +513,6 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     MmUnreferenceQuotaBlock ( quotablock )
 
-@Error1
-
-    MmFreePool (
-        paged, // ptr
-        'PgPr', // tag
-    )
-
     RETURN status
 END
 
@@ -581,6 +554,7 @@ FN PsCreateProcessObject (
 
     obparams.Type = &PsProcessType
     obparams.BodySize = SIZEOF PsProcess
+    obparams.PagedBodySize = SIZEOF PsPagedProcess
     obparams.NpQuotaBias = 0
     obparams.PgQuotaBias = MmGetOverheadOfBytes ( SIZEOF PsPagedProcess )
 

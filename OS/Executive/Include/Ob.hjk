@@ -114,12 +114,17 @@ STRUCT ObParameters
     Permissions : ObPermissions,
     Flags : ULONG,
     BodySize : ULONG,
+    PagedBodySize : ULONG,
     NpQuotaBias : ULONG,
     PgQuotaBias : ULONG,
 END
 
 #MACRO ObFindHeader ( object ) [
-    ((CAST object - SIZEOF ObpCommonHeader TO ^ObpCommonHeader)^.Header)
+    ((CAST (object - SIZEOF ObpCommonHeader) TO ^ObpCommonHeader)^.Header)
+]
+
+#MACRO ObFindPagedPart ( object ) [
+    (ObFindHeader ( object ) + SIZEOF ObHeader)
 ]
 
 #MACRO ObMoveCredentials ( dest, src ) [
