@@ -746,40 +746,6 @@ FN PsCreateJob (
 END
 
 #SECTION "PAGEtext"
-FN PsOpenJob (
-    IN params : ^NsOpenParameters,
-    OUT handle : ULONG,
-) : OsStatus
-
-    // Open a handle to a job object.
-
-    object : ^PsJob
-
-    status := NsLookupObject (
-        params, // params
-        &PsJobType, // type
-        OUT object, // event
-    )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    status = ObInsertObject (
-        PsCurrentProcess (), // process
-        object, // object
-        params^.Captured.Access, // access
-        OUT handle, // handle
-    )
-
-    IF OsError ( status ) THEN
-        ObUnreferenceObject ( object )
-    END
-
-    RETURN status
-END
-
-#SECTION "PAGEtext"
 FN OsCreateJob (
     IN params : ^OsOpenParameters,
     IN flags : UWORD,
@@ -806,35 +772,6 @@ FN OsCreateJob (
         flags, // flags
         signalonclose, // signalonclose
         parentjobhandle, // parentjobhandle
-        OUT handle, // handle
-    )
-
-    NsFreeOpenParameters ( &sysparams )
-
-    RETURN status
-END
-
-#SECTION "PAGEtext"
-FN OsOpenJob (
-    IN params : ^OsOpenParameters,
-    OUT handle : ULONG,
-) : OsStatus
-
-    // Open a job object, system service.
-
-    sysparams : NsOpenParameters
-
-    status := NsCaptureOpenParameters (
-        params, // userparams
-        &sysparams, // sysparams
-    )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    status = PsOpenJob (
-        &sysparams, // params
         OUT handle, // handle
     )
 

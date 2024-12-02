@@ -734,3 +734,38 @@ FN MmGetSystemSize () : UWORD
 
     RETURN MiSystemPartition.SizeLevel
 END
+
+#SECTION "PAGEtext"
+FN (ObTypeDeleteF) MiDeletePartitionObject (
+    IN object : ^VOID,
+) : UWORD
+
+    // Delete a partition object.
+
+    KeCrash ( "TODO MiDeletePartitionObject\n" )
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeInitializeF) MiInitializePartitionObject (
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+    // Initialize a partition object.
+
+    KeCrash ( "TODO MiInitializePartitionObject\n" )
+END
+
+PUBLIC MmPartitionType : ObType = {
+    [Name] = "Partition",
+
+    [Delete] = &MiDeletePartitionObject,
+
+    [Initialize] = &MiInitializePartitionObject,
+
+    [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
+    [TypeIdentifier] = OS_PARTITION_TYPE,
+    [Tag] = 'MmPr',
+
+    [IsPaged] = FALSE,
+}

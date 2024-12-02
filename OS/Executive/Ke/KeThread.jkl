@@ -679,6 +679,9 @@ FN KeSignalThread (
     // If this is a KILL signal, unsuspend the thread.
 
     IF signal == OS_SIGNAL_KILL THEN
+        // The thread must be set terminated *before* being unsuspended, so that
+        // it can't be suspended again.
+
         thread^.Terminated = TRUE
 
         KeUnsuspendThread (

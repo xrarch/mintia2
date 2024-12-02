@@ -37,7 +37,7 @@ FN (ObTypeInitializeF) ExpInitializeEventObject (
 END
 
 #SECTION "PAGEtext"
-ExpEventType : ObType = {
+PUBLIC ExEventType : ObType = {
     [Name] = "Event", // name
 
     [Initialize] = &ExpInitializeEventObject,
@@ -48,69 +48,6 @@ ExpEventType : ObType = {
 
     [IsPaged] = FALSE,
 }
-
-#SECTION "PAGEtext"
-FN ExOpenEvent (
-    IN params : ^NsOpenParameters,
-    OUT handle : ULONG,
-) : OsStatus
-
-    // Open a handle to an event object.
-
-    object : ^ExEvent
-
-    status := NsLookupObject (
-        params, // params
-        &ExpEventType, // type
-        OUT object, // event
-    )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    status = ObInsertObject (
-        PsCurrentProcess (), // process
-        object, // object
-        params^.Captured.Access, // access
-        OUT handle, // handle
-    )
-
-    IF OsError ( status ) THEN
-        ObUnreferenceObject ( object )
-    END
-
-    RETURN status
-END
-
-#SECTION "PAGEtext"
-FN OsOpenEvent (
-    IN params : ^OsOpenParameters,
-    OUT handle : ULONG,
-) : OsStatus
-
-    // Open an event object, system service.
-
-    sysparams : NsOpenParameters
-
-    status := NsCaptureOpenParameters (
-        params, // userparams
-        &sysparams, // sysparams
-    )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    status = ExOpenEvent (
-        &sysparams, // params
-        OUT handle, // handle
-    )
-
-    NsFreeOpenParameters ( &sysparams )
-
-    RETURN status
-END
 
 #SECTION "PAGEtext"
 FN ExCreateEventObject (
@@ -129,7 +66,7 @@ FN ExCreateEventObject (
 
     obparams : ObParameters
 
-    obparams.Type = &ExpEventType
+    obparams.Type = &ExEventType
     obparams.BodySize = SIZEOF ExEvent
     obparams.PagedBodySize = 0
     obparams.NpQuotaBias = 0
@@ -149,7 +86,7 @@ FN ExCreateEvent (
     IN params : ^NsOpenParameters,
     IN notification : UWORD,
     IN signalstate : UWORD,
-    OUT handle : ULONG,
+    OUT handle : UWORD,
 ) : OsStatus
 
     // Create an event object handle.
@@ -186,7 +123,7 @@ FN OsCreateEvent (
     IN params : ^OsOpenParameters,
     IN notification : UWORD,
     IN signalstate : UWORD,
-    OUT handle : ULONG,
+    OUT handle : UWORD,
 ) : OsStatus
 
     // Create an event object, system service.
@@ -225,7 +162,7 @@ FN OsResetEvent (
 
     status := ObReferenceByHandle (
         handle, // handle
-        &ExpEventType, // type
+        &ExEventType, // type
         OUT event, // object
         OUT access, // access
     )
@@ -262,7 +199,7 @@ FN OsSignalEvent (
 
     status := ObReferenceByHandle (
         handle, // handle
-        &ExpEventType, // type
+        &ExEventType, // type
         OUT event, // object
         OUT access, // access
     )
@@ -302,7 +239,7 @@ FN OsReadEvent (
 
     status := ObReferenceByHandle (
         handle, // handle
-        &ExpEventType, // type
+        &ExEventType, // type
         OUT event, // object
         OUT access, // access
     )

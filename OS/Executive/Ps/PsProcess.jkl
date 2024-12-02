@@ -229,6 +229,8 @@ FN (ObTypeDeleteF) PspDeleteProcessObject (
 
     RtlRemoveEntryList ( &paged^.GlobalEntry )
 
+    PsActiveProcessCount -= 1
+
     KeReleaseLock ( &PspProcessListLock )
 
     // Delete the PID.
@@ -361,6 +363,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     // Initialize the process for usage by Mm.
 
     status = MmInitializeProcess (
+        currentprocess, // parentprocess
         process, // process
         ctx^.Partition, // partition
     )
@@ -450,6 +453,8 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
         &paged^.GlobalEntry, // entry
     )
 
+    PsActiveProcessCount += 1
+
     KeReleaseLock ( &PspProcessListLock )
 
     // Give the process a PID. Do this last so that users can't look up an
@@ -471,6 +476,8 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     KeAcquireLockExclusive ( &PspProcessListLock )
 
     RtlRemoveEntryList ( &paged^.GlobalEntry )
+
+    PsActiveProcessCount -= 1
 
     KeReleaseLock ( &PspProcessListLock )
 
@@ -512,6 +519,111 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 @Error2
 
     MmUnreferenceQuotaBlock ( quotablock )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsSignalProcess (
+    IN handle : UWORD,
+    IN signal : UWORD,
+) : OsStatus
+
+    // Signal a process, system service.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_EXEC != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    KeSignalProcess (
+        &process^.Pcb, // process
+        signal, // signal
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsSignalActivationProcess (
+    IN status : OsStatus,
+)
+
+    // Signal activation for the current process, system service.
+
+    PspSignalActivation (
+        PsCurrentProcess (), // process
+        status, // status
+    )
+END
+
+#SECTION "PAGEtext"
+FN OsAwaitActivationProcess (
+    IN handle : UWORD,
+    IN timeout : ^RtlUquad,
+    IN alertable : UWORD,
+    OUT activationstatus : OsStatus,
+) : OsStatus
+
+    // Await activation for the given process, system service.
+
+    IF KeInvalidAlertability ( alertable ) THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
+    sysinterval : RtlUquad
+
+    status := MmSafeCopyIn (
+        &sysinterval, // dest
+        timeout, // src
+        SIZEOF RtlUquad, // size
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    process : ^PsProcess
+    access : UWORD
+
+    status = ObReferenceByHandle (
+        handle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    status = PspAwaitActivation (
+        process, // process
+        &sysinterval, // timeout
+        alertable, // alertable
+        OUT activationstatus, // activationstatus
+    )
+
+    ObUnreferenceObject ( process )
 
     RETURN status
 END
@@ -565,4 +677,130 @@ FN PsCreateProcessObject (
         &obparams, // obparams
         OUT process, // object
     )
+END
+
+EXTERN MmPartitionType : ObType
+
+#SECTION "PAGEtext"
+FN PsCreateProcess (
+    IN params : ^NsOpenParameters,
+    IN partitionhandle : UWORD,
+    IN name : ^UBYTE,
+    IN quotauid : UWORD,
+    IN flags : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+    // Create a process object - handle interface.
+
+    partition : ^MiPartition = NULLPTR
+    access : UWORD
+    status : OsStatus
+
+    IF partitionhandle != OS_NULL_HANDLE THEN
+        status = ObReferenceByHandle (
+            partitionhandle, // handle
+            &MmPartitionType, // type
+            OUT partition, // object
+            OUT access, // access
+        )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+
+        IF access | OS_ACCESS_WRITE != access THEN
+            // Not a subset of the required access.
+
+            status = OS_STATUS_ACCESS_DENIED
+
+            GOTO Exit
+        END
+    END
+
+    process : ^PsProcess
+
+    status = PsCreateProcessObject (
+        params, // params
+        partition, // partition
+        name, // name
+        quotauid, // quotauid
+        flags, // flags
+        OUT process, // process
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    status = ObInsertObject (
+        PsCurrentProcess (), // process
+        process, // object
+        params^.Captured.Access, // access
+        OUT handle, // handle
+    )
+
+    IF OsError ( status ) THEN
+        ObUnreferenceObject ( process )
+    END
+
+@Exit
+
+    IF partition THEN
+        ObUnreferenceObject ( partition )
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsCreateProcess (
+    IN params : ^OsOpenParameters,
+    IN partitionhandle : UWORD,
+    IN name : ^UBYTE,
+    IN quotauid : UWORD,
+    IN flags : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+    // Create a thread object, system service.
+
+    sysname : ^UBYTE
+
+    status := MmCaptureString (
+        name, // string
+        OUT sysname, // output
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    sysparams : NsOpenParameters
+
+    status = NsCaptureOpenParameters (
+        params, // userparams
+        &sysparams, // sysparams
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    status = PsCreateProcess (
+        &sysparams, // params
+        partitionhandle, // partitionhandle
+        sysname, // name
+        quotauid, // quotauid
+        flags, // flags
+        OUT handle, // handle
+    )
+
+    NsFreeOpenParameters ( &sysparams )
+
+@Exit
+
+    MmFreeString ( sysname )
+
+    RETURN status
 END

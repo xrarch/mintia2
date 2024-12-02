@@ -2,6 +2,9 @@
 // Process and threads public header file for the MINTIA system.
 //
 
+#INCLUDE "<ll>/System/OsStatus.hjk"
+#INCLUDE "<ll>/System/OsNamespace.hjk"
+
 #DEFINE OS_PRIORITY_IDLE 0
 #DEFINE OS_PRIORITY_LOW_USER 1
 #DEFINE OS_PRIORITY_DEFAULT 8
@@ -38,9 +41,48 @@ STRUCT OsSharedUserPage
     TimeZoneOffset : ULONG,
 END
 
+STRUCT OsProcessQuery
+    Pid : ULONG,
+    ParentPid : ULONG,
+
+    OwningUid : ULONG,
+    OwningGid : ULONG,
+
+    Status : ULONG,
+    Priority : ULONG,
+    BasePriority : ULONG,
+    Terminated : ULONG,
+    ExitStatus : ULONG,
+    WorkingSetSize : ULONG,
+    PageFaultCount : ULONG,
+
+    Name : UBYTE[OS_NAME_MAX + 1],
+    ConsoleName : UBYTE[OS_NAME_MAX + 1],
+
+    Reserved : UBYTE[48],
+END
+
+STRUCT OsThreadQuery
+    UserTimeMs : RtlUquad,
+    SystemTimeMs : RtlUquad,
+    DpcTimeMs : RtlUquad,
+
+    Status : ULONG,
+    Terminated : ULONG,
+    ExitStatus : ULONG,
+    Priority : ULONG,
+    BasePriority : ULONG,
+
+    Reserved : UBYTE[48],
+END
+
 #DEFINE OS_PROCESS_DETACH_JOB 1
 #DEFINE OS_PROCESS_NEW_SESSION 2
 #DEFINE OS_PROCESS_DETACH_QUOTA 4
 #DEFINE OS_PROCESS_DETACH_CONSOLE 8
 
 #DEFINE OS_THREAD_SUSPENDED 1
+
+FNPTR OsStartThreadF (
+    IN context : UWORD,
+) : OsStatus

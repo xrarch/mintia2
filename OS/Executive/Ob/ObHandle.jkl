@@ -336,3 +336,108 @@ FN ObReferenceByHandle (
         OUT access, // access
     )
 END
+
+EXTERN ExEventType : ObType
+EXTERN PsJobType : ObType
+EXTERN MmPartitionType : ObType
+
+ObpTypeTable : ^ObType[OS_MAX_TYPE] = {
+    [OS_EVENT_TYPE] = &ExEventType,
+    [OS_PROCESS_TYPE] = &PsProcessType,
+    [OS_THREAD_TYPE] = &PsThreadType,
+    [OS_JOB_TYPE] = &PsJobType,
+    [OS_PARTITION_TYPE] = &MmPartitionType,
+}
+
+#SECTION "PAGEtext"
+FN ObOpenObject (
+    IN params : ^NsOpenParameters,
+    IN type : OsObjectType,
+    OUT handle : UWORD,
+) : OsStatus
+
+    // Open a handle to an object of the specified type.
+
+    obtype : ^ObType = NULLPTR
+
+    IF type != OS_ANY_TYPE THEN
+        IF type >= OS_MAX_TYPE THEN
+            RETURN OS_STATUS_INVALID_TYPE
+        END
+
+        obtype = ObpTypeTable[type]
+
+        IF NOT obtype THEN
+            RETURN OS_STATUS_INVALID_TYPE
+        END
+    END
+
+    object : ^VOID
+
+    status := NsLookupObject (
+        params, // params
+        obtype, // type
+        OUT object, // event
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    status = ObInsertObject (
+        PsCurrentProcess (), // process
+        object, // object
+        params^.Captured.Access, // access
+        OUT handle, // handle
+    )
+
+    IF OsError ( status ) THEN
+        ObUnreferenceObject ( object )
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsOpenObject (
+    IN params : ^OsOpenParameters,
+    IN type : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+    // Open an object, system service.
+
+    sysparams : NsOpenParameters
+
+    status := NsCaptureOpenParameters (
+        params, // userparams
+        &sysparams, // sysparams
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    status = ObOpenObject (
+        &sysparams, // params
+        type, // type
+        OUT handle, // handle
+    )
+
+    NsFreeOpenParameters ( &sysparams )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsClose (
+    IN handle : UWORD,
+) : OsStatus
+
+    // Close the specified handle.
+
+    RETURN ObCloseObject (
+        PsCurrentProcess (), // process
+        handle, // handle
+    )
+END

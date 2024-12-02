@@ -119,6 +119,8 @@ EXTERN PsSystemProcess : ^PsProcess
 EXTERN PsUexecApcDispatcher : ^VOID
 EXTERN PsUexecSignalDispatcher : ^VOID
 
+EXTERN PsActiveProcessCount : UWORD
+
 EXTERN FN PsExitThread ()
 
 EXTERN FN PsInitializeIdleProcess ()
@@ -158,7 +160,7 @@ EXTERN KeIdleProcess : PsProcess
 ]
 
 #MACRO PsQuotaBlock ( process ) [
-    (process^.Paged^.HandleTable.QuotaBlock)
+    ((process)^.Paged^.HandleTable.QuotaBlock)
 ]
 
 #MACRO PsUnblockRundownProcess ( process ) [

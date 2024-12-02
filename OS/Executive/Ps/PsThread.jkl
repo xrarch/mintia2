@@ -411,6 +411,528 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 END
 
 #SECTION "PAGEtext"
+FN (KeStartThreadF) PspReaperThread (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Implements the thread reaper.
+
+    KeSetBasePriorityThread (
+        KeCurrentThread (), // thread
+        OS_PRIORITY_HIGH_REALTIME, // priority
+        TRUE, // setcurrentpriority
+    )
+
+    WHILE TRUE DO
+        // Wait for a thread to reap.
+
+        KeWaitForSingleObject (
+            KE_KERNEL_MODE, // waitmode
+            KE_UNALERTABLE, // alertable
+            NULLPTR, // timeout
+            &KeReaperEvent.Header, // object
+        )
+
+        WHILE TRUE DO
+            thread := KePopReaperList ()
+
+            IF NOT thread THEN
+                // No more threads to reap.
+
+                BREAK
+            END
+
+            psthrd := CONTAINEROF thread TO PsThread.Tcb
+
+            // Remove the reference from the thread object, which signified that
+            // there was an active execution context that depended on it. There
+            // no longer is (and its last act was to place itself on our reaper
+            // list), so unreference it.
+
+            ObUnreferenceObject ( psthrd )
+        END
+    END
+END
+
+#SECTION "PAGEtext"
+FN PsTerminateThreadObject (
+    IN thread : ^PsThread,
+    IN status : OsStatus,
+)
+
+    // Terminate the thread object.
+
+    thread^.Paged^.TerminationStatus = status
+
+    KeSignalThread (
+        &thread^.Tcb, // thread
+        OS_SIGNAL_KILL, // signal
+    )
+END
+
+#SECTION "PAGEtext"
+FN OsTerminateThread (
+    IN handle : UWORD,
+    IN status : OsStatus,
+) : OsStatus
+
+    // Terminate a thread, system service.
+
+    thread : ^PsThread
+    access : UWORD
+
+    retstatus := ObReferenceByHandle (
+        handle, // handle
+        &PsThreadType, // type
+        OUT thread, // object
+        OUT access, // access
+    )
+
+    IF OsError ( retstatus ) THEN
+        RETURN retstatus
+    END
+
+    IF access | OS_ACCESS_EXEC != access THEN
+        retstatus = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    PsTerminateThreadObject (
+        thread, // thread
+        status, // status
+    )
+
+@Exit
+
+    ObUnreferenceObject ( thread )
+
+    RETURN retstatus
+END
+
+#SECTION "PAGEtext"
+FN OsSuspendThread (
+    IN handle : UWORD,
+) : OsStatus
+
+    // Suspend a thread, system service.
+
+    thread : ^PsThread
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsThreadType, // type
+        OUT thread, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_EXEC != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    KeSuspendThread ( &thread^.Tcb )
+
+@Exit
+
+    ObUnreferenceObject ( thread )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsUnsuspendThread (
+    IN handle : UWORD,
+    IN force : UWORD,
+) : OsStatus
+
+    // Unsuspend a thread, system service.
+
+    thread : ^PsThread
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsThreadType, // type
+        OUT thread, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_EXEC != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    KeUnsuspendThread (
+        &thread^.Tcb, // thread
+        force, // force
+    )
+
+@Exit
+
+    ObUnreferenceObject ( thread )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsReadStatusThreadObject (
+    IN thread : ^PsThread,
+) : OsStatus
+
+    // Read the termination status of a thread.
+
+    IF NOT thread^.Tcb.Terminated THEN
+        RETURN OS_STATUS_THREAD_IS_ALIVE
+    END
+
+    RETURN thread^.Paged^.TerminationStatus
+END
+
+#SECTION "PAGEtext"
+FN OsReadStatusThread (
+    IN handle : UWORD,
+) : OsStatus
+
+    // Read the termination status of a thread, system service.
+
+    thread : ^PsThread
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsThreadType, // type
+        OUT thread, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_READ != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    status = PsReadStatusThreadObject ( thread )
+
+@Exit
+
+    ObUnreferenceObject ( thread )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsQueryThreadObject (
+    IN thread : ^PsThread,
+    IN query : ^OsThreadQuery,
+)
+
+    // Query information about a thread object.
+
+    RtlFillMemoryWithUlong (
+        query, // dest
+        SIZEOF OsThreadQuery, // sz
+        0, // ulong
+    )
+
+    RtlMoveUquad (
+        &query^.UserTimeMs, // destquad
+        &thread^.Tcb.UserTimeMs, // srcquad
+    )
+
+    RtlMoveUquad (
+        &query^.SystemTimeMs, // destquad
+        &thread^.Tcb.SystemTimeMs, // srcquad
+    )
+
+    RtlMoveUquad (
+        &query^.DpcTimeMs, // destquad
+        &thread^.Tcb.DpcTimeMs, // srcquad
+    )
+
+    query^.Status = thread^.Tcb.Status
+    query^.Terminated = thread^.Tcb.Terminated
+    query^.ExitStatus = thread^.Paged^.TerminationStatus
+    query^.Priority = thread^.Tcb.Priority
+    query^.BasePriority = thread^.Tcb.BasePriority
+END
+
+#SECTION "PAGEtext"
+FN PsQueryThread (
+    IN handle : UWORD,
+    IN query : ^OsThreadQuery,
+) : OsStatus
+
+    // Query information about a thread handle.
+
+    thread : ^PsThread
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsThreadType, // type
+        OUT thread, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_READ != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    PsQueryThreadObject (
+        thread, // thread
+        query, // query
+    )
+
+@Exit
+
+    ObUnreferenceObject ( thread )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsQueryThread (
+    IN handle : UWORD,
+    IN query : ^OsThreadQuery,
+) : OsStatus
+
+    // Query information about a thread, system service.
+
+    sysquery : OsThreadQuery
+
+    status := PsQueryThread (
+        handle, // handle
+        &sysquery, // query
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Copy the information to userspace.
+
+    RETURN MmSafeCopyOut (
+        query, // dest
+        &sysquery, // src
+        SIZEOF OsThreadQuery, // size
+    )
+END
+
+#SECTION "PAGEtext"
+FN OsSignalThread (
+    IN handle : UWORD,
+    IN signal : UWORD,
+) : OsStatus
+
+    // Signal a thread, system service.
+
+    thread : ^PsThread
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsThreadType, // type
+        OUT thread, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_EXEC != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    KeSignalThread (
+        &thread^.Tcb, // thread
+        signal, // signal
+    )
+
+@Exit
+
+    ObUnreferenceObject ( thread )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsMaskSignalThread (
+    IN handle : UWORD,
+    IN signal : UWORD,
+    IN enable : UWORD,
+) : OsStatus
+
+    // Mask a signal in a thread, system service.
+
+    thread : ^PsThread
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsThreadType, // type
+        OUT thread, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    KeMaskSignalThread (
+        &thread^.Tcb, // thread
+        signal, // signal
+        enable, // enable
+    )
+
+@Exit
+
+    ObUnreferenceObject ( thread )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsDeliverOnWaitSignalThread (
+    IN handle : UWORD,
+    IN signal : UWORD,
+    IN enable : UWORD,
+) : OsStatus
+
+    // Deliver-on-wait a signal in a thread, system service.
+
+    thread : ^PsThread
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsThreadType, // type
+        OUT thread, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    KeDeliverOnWaitSignalThread (
+        &thread^.Tcb, // thread
+        signal, // signal
+        enable, // enable
+    )
+
+@Exit
+
+    ObUnreferenceObject ( thread )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsGetFaultStatusThread (
+    IN handle : UWORD,
+) : OsStatus
+
+    // Get the status for the last fault that the thread incurred.
+
+    thread : ^PsThread
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsThreadType, // type
+        OUT thread, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_READ != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    status = thread^.Tcb.LastFaultStatus
+
+@Exit
+
+    ObUnreferenceObject ( thread )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsSleepThread (
+    IN interval : ^RtlUquad,
+    IN alertable : UWORD,
+) : OsStatus
+
+    // Put the current thread to sleep for the specified number of milliseconds.
+
+    IF KeInvalidAlertability ( alertable ) THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
+    sysinterval : RtlUquad
+
+    status := MmSafeCopyIn (
+        &sysinterval, // dest
+        interval, // src
+        SIZEOF RtlUquad, // size
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    RETURN KeSleep (
+        &sysinterval, // interval
+        KE_USER_MODE, // waitmode
+        alertable, // alertable
+    )
+END
+
+#SECTION "PAGEtext"
 PUBLIC PsThreadType : ObType = {
     [Name] = "Thread",
 
@@ -465,43 +987,133 @@ FN PsCreateThreadObject (
     )
 END
 
-FN (KeStartThreadF) PspReaperThread (
+#SECTION "PAGEtext"
+FN PsCreateThread (
+    IN params : ^NsOpenParameters,
+    IN name : ^UBYTE,
+    IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
-)
+    IN processhandle : UWORD,
+    IN flags : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
 
-    // Implements the thread reaper.
+    // Create a thread object - handle interface.
 
-    KeSetBasePriorityThread (
-        KeCurrentThread (), // thread
-        OS_PRIORITY_HIGH_REALTIME, // priority
-        TRUE, // setcurrentpriority
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
     )
 
-    WHILE TRUE DO
-        // Wait for a thread to reap.
+    IF OsError ( status ) THEN
+        RETURN status
+    END
 
-        KeWaitForSingleObject (
-            KE_KERNEL_MODE, // waitmode
-            KE_UNALERTABLE, // alertable
-            NULLPTR, // timeout
-            &KeReaperEvent.Header, // object
+    IF access | OS_ACCESS_WRITE != access THEN
+        // Not a subset of the required access.
+
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    thread : ^PsThread
+
+    status = PsCreateThreadObject (
+        params, // params
+        name, // name
+        startfunc, // startfunc
+        context1, // context1
+        context2, // context2
+        process, // process
+        flags, // flags
+        OUT thread, // thread
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    status = ObInsertObject (
+        PsCurrentProcess (), // process
+        thread, // object
+        params^.Captured.Access, // access
+        OUT handle, // handle
+    )
+
+    IF OsError ( status ) THEN
+        PsTerminateThreadObject (
+            thread, // thread
+            status, // status
         )
 
-        WHILE TRUE DO
-            thread := KePopReaperList ()
-
-            IF NOT thread THEN
-                // No more threads to reap.
-
-                BREAK
-            END
-
-            psthrd := CONTAINEROF thread TO PsThread.Tcb
-
-            // Unreference the thread object.
-
-            ObUnreferenceObject ( psthrd )
-        END
+        ObUnreferenceObject ( thread )
     END
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsCreateThread (
+    IN params : ^OsOpenParameters,
+    IN name : ^UBYTE,
+    IN startfunc : OsStartThreadF,
+    IN context : UWORD,
+    IN processhandle : UWORD,
+    IN flags : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+    // Create a thread object, system service.
+
+    sysname : ^UBYTE
+
+    status := MmCaptureString (
+        name, // string
+        OUT sysname, // output
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    sysparams : NsOpenParameters
+
+    status = NsCaptureOpenParameters (
+        params, // userparams
+        &sysparams, // sysparams
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    status = PsCreateThread (
+        &sysparams, // params
+        sysname, // name
+        &PspUserThreadEntry, // startfunc
+        CAST startfunc TO UWORD, // context1
+        context, // context2
+        processhandle, // processhandle
+        flags, // flags
+        OUT handle, // handle
+    )
+
+    NsFreeOpenParameters ( &sysparams )
+
+@Exit
+
+    MmFreeString ( sysname )
+
+    RETURN status
 END

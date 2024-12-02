@@ -1,0 +1,154 @@
+//
+// All of the system services exposed to userspace by the MINTIA Executive.
+//
+
+// NOTE: This header is used to generate the syscall stubs and trampolines.
+//       The format of the prototypes should be carefully kept because the tool
+//       is stupid.
+
+#INCLUDE "<ll>/System/OsStatus.hjk"
+#INCLUDE "<ll>/System/OsProcess.hjk"
+
+// Ob
+
+EXTERN FN OsOpenObject (
+    IN params : ^OsOpenParameters,
+    OUT handle : UWORD,
+) : OsStatus
+
+EXTERN FN OsClose (
+    IN handle : UWORD,
+) : OsStatus
+
+// Ex
+
+EXTERN FN OsReadEvent (
+    IN handle : UWORD,
+    OUT signaled : UWORD,
+) : OsStatus
+
+EXTERN FN OsSignalEvent (
+    IN handle : UWORD,
+    OUT signaled : UWORD,
+) : OsStatus
+
+EXTERN FN OsResetEvent (
+    IN handle : UWORD,
+    OUT signaled : UWORD,
+) : OsStatus
+
+EXTERN FN OsCreateEvent (
+    IN params : ^OsOpenParameters,
+    IN notification : UWORD,
+    IN signalstate : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+// Ps
+
+EXTERN FN OsCreateJob (
+    IN params : ^OsOpenParameters,
+    IN flags : UWORD,
+    IN signalonclose : UWORD,
+    IN parentjobhandle : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+EXTERN FN OsSignalJob (
+    IN handle : UWORD,
+    IN signal : UWORD,
+    IN propagate : UWORD,
+) : OsStatus
+
+EXTERN FN OsRemoveProcessJob (
+    IN handle : UWORD,
+) : OsStatus
+
+EXTERN FN OsAddProcessJob (
+    IN jobhandle : UWORD,
+    IN processhandle : UWORD,
+) : OsStatus
+
+EXTERN FN OsCreateThread (
+    IN params : ^OsOpenParameters,
+    IN name : ^UBYTE,
+    IN startfunc : OsStartThreadF,
+    IN context : UWORD,
+    IN processhandle : UWORD,
+    IN flags : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+EXTERN FN OsTerminateThread (
+    IN handle : UWORD,
+    IN status : OsStatus,
+) : OsStatus
+
+EXTERN FN OsSuspendThread (
+    IN handle : UWORD,
+) : OsStatus
+
+EXTERN FN OsUnsuspendThread (
+    IN handle : UWORD,
+    IN force : UWORD,
+) : OsStatus
+
+EXTERN FN OsReadStatusThread (
+    IN handle : UWORD,
+) : OsStatus
+
+EXTERN FN OsQueryThread (
+    IN handle : UWORD,
+    IN query : ^OsThreadQuery,
+) : OsStatus
+
+EXTERN FN OsSignalThread (
+    IN handle : UWORD,
+    IN signal : UWORD,
+) : OsStatus
+
+EXTERN FN OsMaskSignalThread (
+    IN handle : UWORD,
+    IN signal : UWORD,
+    IN enable : UWORD,
+) : OsStatus
+
+EXTERN FN OsDeliverOnWaitSignalThread (
+    IN handle : UWORD,
+    IN signal : UWORD,
+    IN enable : UWORD,
+) : OsStatus
+
+EXTERN FN OsGetFaultStatusThread (
+    IN handle : UWORD,
+) : OsStatus
+
+EXTERN FN OsSleepThread (
+    IN interval : ^RtlUquad,
+    IN alertable : UWORD,
+) : OsStatus
+
+EXTERN FN OsCreateProcess (
+    IN params : ^OsOpenParameters,
+    IN partitionhandle : UWORD,
+    IN name : ^UBYTE,
+    IN quotauid : UWORD,
+    IN flags : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+EXTERN FN OsSignalProcess (
+    IN handle : UWORD,
+    IN signal : UWORD,
+) : OsStatus
+
+EXTERN FN OsSignalActivationProcess (
+    IN status : OsStatus,
+)
+
+EXTERN FN OsAwaitActivationProcess (
+    IN handle : UWORD,
+    IN timeout : ^RtlUquad,
+    IN alertable : UWORD,
+    OUT activationstatus : OsStatus,
+) : OsStatus

@@ -6,6 +6,7 @@
 
 #SECTION "PAGEtext"
 FN MmInitializeProcess (
+    IN parentprocess : ^PsProcess,
     IN process : ^PsProcess,
     IN partition : ^MiPartition,
 ) : OsStatus
@@ -13,14 +14,12 @@ FN MmInitializeProcess (
     // Initialize the process so it can be used by the memory manager.
 
     IF NOT partition THEN
-        // No partition object supplied, use the system partition.
+        // No partition object supplied, use the parent process's partition.
 
-        partition = &MiSystemPartition
+        partition = parentprocess^.Partition
+    END
 
-    ELSE
-        // Custom partition object, reference it to reflect the existence of a
-        // process.
-
+    IF partition != &MiSystemPartition THEN
         ObReferenceObject ( partition )
     END
 

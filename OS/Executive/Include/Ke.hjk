@@ -686,6 +686,18 @@ EXTERN FN KeUnsuspendThread (
     IN force : UWORD,
 ) : UWORD
 
+EXTERN FN KeMaskSignalThread (
+    IN thread : ^KeThread,
+    IN signal : UWORD,
+    IN enable : UWORD,
+) : UWORD
+
+EXTERN FN KeDeliverOnWaitSignalThread (
+    IN thread : ^KeThread,
+    IN signal : UWORD,
+    IN enable : UWORD,
+) : UWORD
+
 EXTERN FN KeInitializeSemaphore (
     IN semaphore : ^KeSemaphore,
     IN name : ^UBYTE,
@@ -733,6 +745,11 @@ EXTERN FN KeTryConvertLockToExclusive (
 #DEFINE KE_UNALERTABLE 0
 #DEFINE KE_ALERTABLE 1
 #DEFINE KE_CANCEL_ON_KAPC 2
+#DEFINE KE_MAX_USER_ALERTABLE 2
+
+#MACRO KeInvalidAlertability ( alertable ) [
+    ((alertable) >= KE_MAX_USER_ALERTABLE)
+]
 
 EXTERN FN KeWaitForObjects (
     IN waitmode : UWORD,
