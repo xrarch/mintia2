@@ -372,8 +372,12 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     END
 
     // Set the thread a-runnin'.
-
-    KeReadyThread ( &thread^.Tcb )
+    //
+    // KeReadyThread ( &thread^.Tcb )
+    //
+    // Nevermind, the caller will do that. Basically there might still be outer
+    // failure modes and we can't know at this stage whether the thread should
+    // be set running yet.
 
     RETURN OS_STATUS_SUCCESS
 
@@ -988,6 +992,47 @@ FN PsCreateThreadObject (
 END
 
 #SECTION "PAGEtext"
+FN PsCreateExecutiveThread (
+    IN name : ^UBYTE,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+    IN flags : UWORD,
+    OUT thread : ^PsThread,
+) : OsStatus
+
+    // Helper function for creating a thread that only executes code in the
+    // system executive.
+
+    params : NsOpenParameters
+
+    params.Path = NULLPTR
+
+    params.Captured.Flags = 0
+    params.Captured.ObFlags = 0
+    params.Captured.Permissions = OS_ACCESS_OWNER_ALL
+
+    status := PsCreateThreadObject (
+        &params, // params
+        name, // name
+        startfunc, // startfunc
+        0, // context1
+        0, // context2
+        PsSystemProcess, // process
+        0, // flags
+        OUT thread, // thread
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Set the thread running.
+
+    KeReadyThread ( &thread^.Tcb )
+END
+
+#SECTION "PAGEtext"
 FN PsCreateThread (
     IN params : ^NsOpenParameters,
     IN name : ^UBYTE,
@@ -1048,12 +1093,31 @@ FN PsCreateThread (
     )
 
     IF OsError ( status ) THEN
-        PsTerminateThreadObject (
-            thread, // thread
-            status, // status
-        )
+        IF params^.ResultFlags & NS_RESULT_CREATED THEN
+            // We created the thread object successfully, but we failed to
+            // insert it into the handle table (quota limit reached or some
+            // such). Set the thread terminated and ready it so that it kills
+            // itself.
+
+            PsTerminateThreadObject (
+                thread, // thread
+                status, // status
+            )
+
+            KeReadyThread ( &thread^.Tcb )
+        END
 
         ObUnreferenceObject ( thread )
+
+    ELSEIF params^.ResultFlags & NS_RESULT_CREATED THEN
+        // Ready the thread because PsCreateThreadObject didn't do it yet.
+        // We need to do this after a successful handle table insertion so that
+        // the thread is only set loose when we know the caller will receive a
+        // successful status. Otherwise we could get a situation where a user
+        // process is very confused when a thread executed some stuff even
+        // though it got an error back from the thread creation call.
+
+        KeReadyThread ( &thread^.Tcb )
     END
 
 @Exit

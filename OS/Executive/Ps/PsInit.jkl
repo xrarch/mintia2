@@ -252,19 +252,11 @@ FN PsInitializeStage1 ()
 
     dumpster : ^VOID
 
-    params.Path = NULLPTR
-
-    params.Captured.Flags = 0
-    params.Captured.ObFlags = 0
-    params.Captured.Permissions = OS_ACCESS_OWNER_ALL
-
-    status = PsCreateThreadObject (
-        &params, // params
+    status = PsCreateExecutiveThread (
         "Reaper", // name
         &PspReaperThread, // startfunc
         0, // context1
         0, // context2
-        PsSystemProcess, // process
         0, // flags
         OUT dumpster, // thread
     )
@@ -277,19 +269,11 @@ FN PsInitializeStage1 ()
     // Create the balance manager thread, which will perform stage 2
     // initialization of the system.
 
-    params.Path = NULLPTR
-
-    params.Captured.Flags = 0
-    params.Captured.ObFlags = 0
-    params.Captured.Permissions = OS_ACCESS_OWNER_ALL
-
-    status = PsCreateThreadObject (
-        &params, // params
+    status = PsCreateExecutiveThread (
         "Balance Manager", // name
         &ExStartSystemProcess, // startfunc
         0, // context1
         0, // context2
-        PsSystemProcess, // process
         0, // flags
         OUT PsInitialThread, // thread
     )

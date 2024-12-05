@@ -452,6 +452,10 @@ FN MmInitializeStage1 ()
 
     KeIdleProcess.Paged^.HandleTable.QuotaBlock = &MiSystemQuota
 
+    // Set the idle process's partition to the system partition.
+
+    KeIdleProcess.Partition = &MiSystemPartition
+
     // Reclaim boot time memory. Nothing in "loader space" is safe to access
     // after this point.
 

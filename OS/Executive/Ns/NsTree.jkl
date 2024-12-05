@@ -1106,13 +1106,14 @@ FN NsLookupEntryByPath (
                 GOTO ErrorCreatingObject
             END
 
-            // Call the creation callback given by the caller to allow it to
-            // atomically create a new object under the umbrella of the
+            // Atomically create a new object under the umbrella of the
             // transition entry.
 
             lookupcontext.EntryFlags = NS_ENTRY_VIRTUAL |
                 NS_ENTRY_CREATED |
                 NS_ENTRY_LEAF
+
+            params^.ResultFlags |= NS_RESULT_CREATED
 
             status = ObAllocateObject (
                 obparams, // obparams

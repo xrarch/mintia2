@@ -133,6 +133,7 @@ FN NsCreateObject (
         // We are atomically creating the object within the namespace.
 
         params^.Captured.Flags |= OS_OPEN_CREATE
+        params^.ResultFlags = 0
 
         handle : NsHandle
 
@@ -156,6 +157,8 @@ FN NsCreateObject (
 
         RETURN OS_STATUS_SUCCESS
     END
+
+    params^.ResultFlags = NS_RESULT_CREATED
 
     RETURN ObAllocateObject (
         obparams, // obparams
