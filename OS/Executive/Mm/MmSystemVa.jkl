@@ -465,9 +465,11 @@ FN MiAllocateDynamicPages (
     // Allocate a page aligned region of dynamic space.
     // Returns NULLPTR if none available.
 
-    ipl := KeAcquireApcLockExclusive ( &MiDynamicSpaceLock )
-
 @Retry
+
+    // Find a clear run of bits locklessly.
+    // Note that the bitmap hint is just a hint, so there's no need to do any
+    // synchronization for it, since "corruption" is harmless.
 
     index := RtlFindRunBitmap (
         &MiDynamicSpaceBitmap, // header
@@ -475,23 +477,52 @@ FN MiAllocateDynamicPages (
         MiDynamicSpaceHint, // hint
     )
 
+    ipl := KeAcquireApcLockExclusive ( &MiDynamicSpaceLock )
+
     IF index == -1 THEN
+        // Dynamic space has completely filled up.
+
         IF MiDeferredFlushIndex THEN
             // Try freeing the deferred regions and trying again.
-            // This should only happen once because MiFlushDynamicSpace will
-            // zero out MiDeferredFlushIndex.
 
             MiFlushDynamicSpace ()
+        END
+
+        // Search again with the lock held, to be absolutely sure it's full.
+
+        index = RtlFindRunBitmap (
+            &MiDynamicSpaceBitmap, // header
+            pages, // runlength
+            MiDynamicSpaceHint, // hint
+        )
+
+        IF index == -1 THEN
+            // Yep, full.
+
+            KeReleaseApcLock ( &MiDynamicSpaceLock, ipl )
+
+            RETURN NULLPTR
+        END
+    
+    ELSE
+        // Check that the range is still free with the lock held.
+
+        IF NOT RtlCheckClearBitsBitmap (
+            &MiDynamicSpaceBitmap, // header
+            index, // index
+            pages, // runlength
+        ) THEN
+            // Someone else nabbed it, so retry.
+
+            KeReleaseApcLock ( &MiDynamicSpaceLock, ipl )
 
             GOTO Retry
         END
-
-        // No room left. Return NULLPTR.
-
-        KeReleaseApcLock ( &MiDynamicSpaceLock, ipl )
-
-        RETURN NULLPTR
     END
+
+    // Set the hint.
+
+    MiDynamicSpaceHint = index
 
     // Mark bits set.
 
@@ -500,8 +531,6 @@ FN MiAllocateDynamicPages (
         index, // index
         pages, // runlength
     )
-
-    MiDynamicSpaceHint = index
 
     KeReleaseApcLock ( &MiDynamicSpaceLock, ipl )
 
