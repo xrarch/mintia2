@@ -241,6 +241,8 @@ FN KeInitializeThread (
     thread^.UserInterrupt = FALSE
     thread^.UserApcTriggered = FALSE
 
+    thread^.PanicStackPointer = NULLPTR
+
     // Initialize abort state.
 
     thread^.AbortListHead = NULLPTR
@@ -938,6 +940,7 @@ FN KiDispatchSignal (
         thread^.UserFrame, // trapframe
         0, // userfunc
         signal, // context
+        thread, // thread
     )
 END
 

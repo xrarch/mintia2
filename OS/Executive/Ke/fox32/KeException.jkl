@@ -1038,11 +1038,13 @@ FN KiInitializeContext (
     RETURN context
 END
 
+#SECTION "PAGEtext"
 FN KiInterruptUsermode (
     IN dispatchfunc : ^VOID,
     IN trapframe : ^OsContext,
     IN userfunc : UWORD,
     IN context : UWORD,
+    IN thread : ^KeThread,
 )
 
     // Cause a usermode interrupt of the current thread by saving the context
@@ -1057,8 +1059,41 @@ FN KiInterruptUsermode (
     // If that fails, and the thread has a panic stack, switch to it and copy
     // out to that instead. If THAT fails, terminate the entire process.
 
-    // Can't implement this until we get copy-out figured out.
-    KeCrash ( "NYI KiInterruptUsermode\n" )
+    status := MmSafeCopyOut (
+        CAST usp TO ^VOID, // dest
+        trapframe, // src
+        SIZEOF OsContext, // sz
+    )
+
+    IF OsError ( status ) THEN
+        // Failed to copy out the context frame.
+
+        usp = thread^.PanicStackPointer
+
+        IF usp THEN
+            // Thread has a panic stack, switch to it.
+
+            usp -= SIZEOF OsContext
+
+            status = MmSafeCopyOut (
+                CAST usp TO ^VOID, // dest
+                trapframe, // src
+                SIZEOF OsContext, // sz
+            )
+        END
+
+        IF OsError ( status ) THEN
+            // No panic stack or failed to copy out to it. This is fatal to the
+            // entire process.
+
+            KeSignalProcess (
+                thread^.Process, // process
+                OS_SIGNAL_KILL, // signal
+            )
+
+            LEAVE
+        END
+    END
 
     // Redirect the trapframe to the usermode interrupt handler.
 
