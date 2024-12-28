@@ -1,0 +1,58 @@
+#INCLUDE "Fwt.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
+
+PixBuff : ^UBYTE
+PixPitch : UWORD
+EXPORT PixWidth : UWORD
+EXPORT PixHeight : UWORD
+
+FN FillScreen(IN Color : UWORD)
+    
+    i : ULONG
+    
+#IF ( STRCMP PLATFORM "fox32" )
+    RtlFillMemoryWithUlong(PixBuff, PixPitch * PixHeight, Color)
+
+#ELSEIF ( STRCMP PLATFORM "XRstation" )
+    // This is basically just a memset.
+    Ulg : ULONG
+    Ulg = (Color << 24) | (Color << 16) | (Color << 8) | Color
+    
+    RtlFillMemoryWithUlong(PixBuff, PixPitch * PixHeight, Ulg)
+#END
+
+END
+
+FN SetPixel(IN Color : UWORD, IN x : WORD, IN y : WORD)
+    IF x < 0 OR y < 0 OR x >= PixWidth OR y >= PixHeight THEN
+        LEAVE
+    END
+
+#IF ( STRCMP PLATFORM "fox32" )
+    Place := CAST PixBuff + y * PixPitch + x * 4 TO ^ULONG
+    Place[0] = Color
+
+#ELSEIF ( STRCMP PLATFORM "XRstation" )
+    Place := CAST PixBuff + y * PixPitch + x TO ^UBYTE
+    Place[0] = Color
+#END
+
+END
+
+FN InitGraphics()
+
+    PixBuff   = CAST KeLoaderBlock.BootFbBase TO ^UBYTE
+    PixWidth  = KeLoaderBlock.BootFbWidth
+    PixHeight = KeLoaderBlock.BootFbHeight
+    
+    // KeLoaderBlock doesn't provide a pitch, so it seems we'll have to assume the
+    // pitch is equal to the width.
+
+#IF ( STRCMP PLATFORM "fox32" )
+    PixPitch  = PixWidth * 4
+
+#ELSEIF ( STRCMP PLATFORM "XRstation" )
+    PixPitch  = PixWidth
+#END
+
+END

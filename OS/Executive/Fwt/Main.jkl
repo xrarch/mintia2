@@ -1,0 +1,52 @@
+#INCLUDE "Fwt.hjk"
+
+FN (KeStartThreadF) MainThreadFunc(
+    IN context1 : UWORD,
+    IN context2 : UWORD
+)
+
+    RtlPrint("Main thread up\n")
+    
+    WHILE TRUE DO
+        SpawnCount : WORD
+        i : WORD
+        i = 0
+        SpawnCount = Rand() % 2 + 1
+        
+        WHILE i < SpawnCount DO
+            i += 1
+            SpawnExplodeable()
+        END
+        
+        Interval : RtlUquad
+        Interval.High = 0
+        Interval.Low = CAST 2000 + Rand() % 2000 TO UWORD
+        KeSleep(&Interval, KE_KERNEL_MODE, FALSE)
+    END
+
+END
+
+FN PerformFireworksTest()
+    
+    MainThread : ^PsThread
+    
+    InitGraphics()
+    FillScreen(BACKGROUND_COLOR)
+    
+    PsCreateExecutiveThread(
+        "FireworksMain", // name
+        &MainThreadFunc, // startfunc
+        NULLPTR,         // context1
+        NULLPTR,         // context2
+        0,               // flags
+        OUT MainThread   // thread
+    )
+    
+    IF NOT MainThread THEN
+        RtlPrint("Could not create Fireworks Test main thread!\n")
+        LEAVE
+    END
+    
+    ObUnreferenceObject(MainThread)
+
+END

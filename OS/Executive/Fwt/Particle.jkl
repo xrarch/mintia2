@@ -1,0 +1,138 @@
+#INCLUDE "Fwt.hjk"
+
+#DEFINE GRAVITY_AMT 10
+
+FN (KeStartThreadF) T_Particle(
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+    interval : RtlUquad
+    interval.High = 0
+    
+    thisfwd : ^FireworkData
+    thisfwd = CAST context1 TO ^FireworkData
+    
+    Angle := Rand() % (1 << FIXED_POINT)
+    
+    // back the data up from thisfwd
+    x := thisfwd^.x
+    y := thisfwd^.y
+    ExplosionRange := thisfwd^.ExplosionRange
+    
+    // and free it
+    MmFreePool(thisfwd, 'Fire')
+    
+    actX := INT_TO_FP(x)
+    actY := INT_TO_FP(y)
+    velX := MUL_FP_FP_SM(Cos(Angle), RandFPSign()) * ExplosionRange
+    velY := MUL_FP_FP_SM(Sin(Angle), RandFPSign()) * ExplosionRange
+    
+    expireIn := 2000 + Rand() % 1000
+    color := RandomColor()
+    i := 0
+    t := 0
+    WHILE i < expireIn DO
+        SetPixel(color, x, y)
+        
+        interval.Low = 16
+        KeSleep(&interval, KE_KERNEL_MODE, FALSE)
+        i += interval.Low
+        
+        SetPixel(BACKGROUND_COLOR, x, y)
+        
+        // Update the particle
+        actX += velX * interval.Low / 1000
+        actY += velY * interval.Low / 1000
+        
+        x = FP_TO_INT(actX)
+        y = FP_TO_INT(actY)
+        
+        // Gravity
+        velY += INT_TO_FP(GRAVITY_AMT) * interval.Low / 1000
+    END
+    
+    ExitCurrentThread()
+END
+
+FN (KeStartThreadF) T_Explodeable(
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+    interval : RtlUquad
+    interval.High = 0
+    
+    Fwd : FireworkData
+    
+    OffsetX := CAST (PixWidth * 400 / 1024) TO WORD
+    
+    x : WORD
+    y : WORD
+    actX := INT_TO_FP(CAST PixWidth / 2 TO WORD)
+    actY := INT_TO_FP(CAST PixHeight - 1 TO WORD)
+    velX : WORD = OffsetX * RandFPSign()
+    velY : WORD = -INT_TO_FP(400 + Rand() % 300)
+    color := RandomColor()
+    explosionRange := Rand() % 100 + 100
+    
+    expireIn := 500 + Rand() % 500
+    i := 0
+    t := 0
+    WHILE i < expireIn DO
+        SetPixel(color, x, y)
+        
+        interval.Low = 16 + (t != 0)
+        t += 1
+        IF t == 3 THEN t = 0 END
+        KeSleep(&interval, KE_KERNEL_MODE, FALSE)
+        i += interval.Low
+        
+        SetPixel(BACKGROUND_COLOR, x, y)
+        
+        // Update the particle
+        actX += velX * interval.Low / 1000
+        actY += velY * interval.Low / 1000
+        
+        x = FP_TO_INT(actX)
+        y = FP_TO_INT(actY)
+        
+        // Gravity
+        velY += INT_TO_FP(GRAVITY_AMT) * interval.Low / 1000
+    
+    END
+    
+    // Explode it!
+    // This spawns many, many threads! Cause why not, right?!
+    
+    
+    PartCount := Rand() % 100 + 100
+    i = 0
+    
+    WHILE i < PartCount DO
+        i += 1
+        
+        Data : ^FireworkData = CAST MmAllocatePool(MM_NONPAGED_POOL, SIZEOF FireworkData, 'Fire', FALSE) TO ^FireworkData
+        
+        IF NOT Data THEN
+            RtlPrint("Out of memory, can't allocate thread data, sorry bucko\n")
+            LEAVE
+        END
+        
+        // Copy data into the FireworkData instance.
+        Data^.x = x
+        Data^.y = y
+        Data^.ExplosionRange = explosionRange
+        
+        IF NOT CreateThread(&T_Particle, Data) THEN
+            RtlPrint("Out of system resources, can't initiate a new thread, sorry bucko\n")
+            MmFreePool(Data, 'Fire')
+        END
+    END
+    
+    ExitCurrentThread()
+END
+
+FN SpawnExplodeable()
+    IF NOT CreateThread(&T_Explodeable, NULLPTR) THEN
+        RtlPrint("Out of fireworks to fire!\n")
+    END
+END

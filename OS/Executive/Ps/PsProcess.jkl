@@ -249,15 +249,6 @@ FN (ObTypeDeleteF) PspDeleteProcessObject (
 
     ExUnreferenceName ( paged^.Name )
 
-#IF ( STRCMP ARCHITECTURE "xr17032" )
-    // Free the AsidTable.
-
-    MmFreePool (
-        process^.Pcb.AsidTable, // ptr
-        'Asid', // tag
-    )
-#END
-
     // Unreference the quota block.
 
     MmUnreferenceQuotaBlock ( paged^.HandleTable.QuotaBlock )
@@ -323,20 +314,11 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     // Initialize the process for usage by Ke.
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
-    // Allocate an AsidTable.
+    // Enough space for the AsidTable was allocated at the end of the nonpaged
+    // part of the process object.
 
-    process^.Pcb.AsidTable = MmAllocatePool (
-        MM_NONPAGED_POOL, // poolindex
-        SIZEOF KiAsidInfoEntry * KeLoaderBlock.ProcessorCount, // bytes
-        'Asid', // tag
-        TRUE, // wait
-    )
-
-    IF NOT process^.Pcb.AsidTable THEN
-        status = OS_STATUS_NO_MEMORY
-
-        GOTO Error2
-    END
+    process^.Pcb.AsidTable =
+        CAST (process + SIZEOF PsProcess) TO ^KiAsidInfoEntry
 #END
 
     KeInitializeProcess (
@@ -509,15 +491,6 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     ObUninitializeProcess ( process )
 
-#IF ( STRCMP ARCHITECTURE "xr17032" )
-    MmFreePool (
-        process^.Pcb.AsidTable, // ptr
-        'Asid', // tag
-    )
-#END
-
-@Error2
-
     MmUnreferenceQuotaBlock ( quotablock )
 
     RETURN status
@@ -671,6 +644,13 @@ FN PsCreateProcessObject (
     obparams.PgQuotaBias = 0
 
     obparams.Context = &ctx
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    // Put enough space at the end of the nonpaged part of the process for the
+    // ASID table.
+
+    obparams.BodySize += SIZEOF KiAsidInfoEntry * KeLoaderBlock.ProcessorCount
+#END
 
     RETURN NsCreateObject (
         params, // params

@@ -1,0 +1,22 @@
+#INCLUDE "Fwt.hjk"
+
+FN CreateThread(IN StartRoutine : KeStartThreadF, IN Fwd : ^FireworkData) : UWORD
+
+    Thrd : ^PsThread
+    
+    PsCreateExecutiveThread (
+        "FireworksPart",   // name
+        StartRoutine,      // startfunc
+        CAST Fwd TO UWORD, // context1
+        NULLPTR,           // context2
+        0,                 // flags
+        OUT Thrd           // thread
+    )
+    
+    IF NOT Thrd THEN
+        RETURN 0
+    END
+    
+    ObUnreferenceObject(Thrd)
+    RETURN 1
+END

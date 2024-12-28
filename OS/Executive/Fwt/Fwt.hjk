@@ -1,0 +1,61 @@
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "<inc>/Ex.hjk"
+#INCLUDE "<inc>/Ps.hjk"
+#INCLUDE "<inc>/Ob.hjk"
+#INCLUDE "<inc>/Mm.hjk"
+
+#DEFINE BACKGROUND_COLOR 0x00
+
+STRUCT FireworkData
+    x : WORD,
+    y : WORD,
+    ExplosionRange : WORD,
+END
+
+EXTERN PixWidth : UWORD
+EXTERN PixHeight : UWORD
+
+// Graphics
+EXTERN FN FillScreen(IN Color : UWORD)
+EXTERN FN SetPixel(IN Color : UWORD, IN x : WORD, IN y : WORD)
+EXTERN FN InitGraphics()
+
+// RNG
+EXTERN FN Rand() : WORD
+EXTERN FN RandFP() : WORD
+EXTERN FN RandFPSign() : WORD
+EXTERN FN RandomColor() : UWORD
+
+// Math
+EXTERN FN Sin(IN Ang : WORD) : WORD
+EXTERN FN Cos(IN Ang : WORD) : WORD
+
+// Threading
+#MACRO ExitCurrentThread () [
+    PsExitThread()
+]
+
+EXTERN FN CreateThread(IN StartRoutine : KeStartThreadF, IN Fwd : ^FireworkData) : UWORD
+EXTERN FN SpawnExplodeable()
+
+// Fixed Point
+
+#DEFINE FIXED_POINT 12  // fixedvalue = realvalue * 2^FIXED_POINT
+
+#MACRO FP_TO_INT (fp) [
+    ((fp) >> FIXED_POINT)
+]
+
+#MACRO INT_TO_FP (int) [
+    ((int) << FIXED_POINT)
+]
+
+#MACRO MUL_FP_FP (fp1, fp2) [
+    // This is crap, but since we can't do 64-bit multiply, it's fine for now
+    (((fp1) >> (FIXED_POINT / 2)) * ((fp2) >> (FIXED_POINT / 2)))
+]
+
+// Intended for when fp2 is small and fp1 is maybe big
+#MACRO MUL_FP_FP_SM (fp1, fp2) [
+    ((fp2) * ((fp1) >> FIXED_POINT)) + (((fp1 & ((1 << FIXED_POINT) - 1)) * (fp2)) >> FIXED_POINT)
+]

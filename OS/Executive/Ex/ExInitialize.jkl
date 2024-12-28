@@ -7,6 +7,8 @@
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 #INCLUDE "<ll>/System/OsBootFlags.hjk"
 
+EXTERN FN PerformFireworksTest()
+
 ExZeroPageWorker : KeThread
 ExZeroPageWorkerStack : UBYTE[(KE_STACK_PAGES << RTL_PAGE_SHIFT) + 32]
 
@@ -149,6 +151,10 @@ FN (KeStartThreadF) ExpInitializeExecutive (
     // context we will finish initialization.
 
     PsInitializeStage1 ()
+
+#IF BLD_TEST
+    PerformFireworksTest ()
+#END
 
     // The Executive is initialized, become the ZPW.
 
