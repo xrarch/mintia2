@@ -30,6 +30,18 @@
     END
 ]
 
+#MACRO KiSetNextThreadParameters ( prb, thread ) [
+    // Stash these in the Prb so that they can be examined locklessly by
+    // remote processors. These fields are *ONLY* used as a hint for the
+    // scheduling policies. Tearing with respect to one another is expected;
+    // consistency is NOT enforced.
+
+    prb^.Idle = (thread == &prb^.IdleThread)
+    prb^.CurrentThreadPriority = thread^.Priority
+    prb^.CurrentThreadInteractivity =
+        (thread^.Interactive | thread^.InteractivityFloor)
+]
+
 #MACRO KiDecrementLoad ( prb ) [
     NOTHING (prb)^.Load -= 1
 ]
@@ -46,11 +58,20 @@
 
 #MACRO KiWaitForSwitch ( thread ) []
 
+#MACRO KiSetNextThreadParameters ( prb, thread ) []
+
 #MACRO KiDecrementLoad ( prb ) []
 
 #MACRO KiIncrementLoad ( prb ) []
 
 #END
+
+#MACRO KiSetNextThread ( prb, next ) [
+    prb^.NextThread = next
+    next^.Status = KI_THREAD_STANDBY
+
+    KiSetNextThreadParameters ( prb, next )
+]
 
 #DEFINE KI_INTERACT_MAX 100
 #DEFINE KI_INTERACT_HALF ( / KI_INTERACT_MAX 2 )
@@ -241,6 +262,15 @@ FN KiSwitchThread (
     prb^.CurrentThread = thread
     prb^.KernelStackTop = thread^.KernelStackTop
 
+#IF BLD_MP
+    IF NOT prb^.NextThread THEN
+        KiSetNextThreadParameters (
+            prb, // prb
+            thread, // thread
+        )
+    END
+#END
+
     // Note that KiSwitchContext releases the old thread's lock.
     // It is not reacquired before switching back in.
 
@@ -385,9 +415,10 @@ FN KiInsertThread (
 
     // Cause a preemption.
 
-    thread^.Status = KI_THREAD_STANDBY
-
-    prb^.NextThread = thread
+    KiSetNextThread (
+        prb, // prb
+        thread, // thread
+    )
 
     IF next THEN
         // Recursively re-ready the preempted NextThread. Don't fear - this can
@@ -427,19 +458,14 @@ FN KiWouldPreempt (
     IN targetprb : ^KiPrb,
 ) : UWORD
 
-    // Returns TRUE if thread1 would preempt thread2.
-
-    thread2 := targetprb^.NextThread
-
-    IF NOT thread2 THEN
-        thread2 = targetprb^.CurrentThread
-    END
+    // Returns TRUE if thread1 would preempt the current thread on the target
+    // processor. We do this locklessly.
 
     pri1 := thread1^.Priority
-    pri2 := thread2^.Priority
+    pri2 := targetprb^.CurrentThreadPriority
 
     IF (thread1^.Interactive | thread1^.InteractivityFloor) THEN
-        IF NOT (thread2^.Interactive | thread2^.InteractivityFloor) THEN
+        IF NOT targetprb^.CurrentThreadInteractivity THEN
             // Interactive threads always preempt non-interactive threads.
 
             RETURN TRUE
@@ -466,7 +492,7 @@ FN KiWouldPreempt (
         RETURN TRUE
     END
 
-    IF thread2 == &targetprb^.IdleThread THEN
+    IF targetprb^.Idle THEN
         // Always preempt the idle thread.
 
         RETURN TRUE
@@ -496,14 +522,10 @@ FN KiFindProcessor (
     WHILE i < procs DO
         prb = KiPrbFromNumber ( i )
 
-        KiAcquireReadyQueueElevated ( prb )
-
         preempt := KiWouldPreempt (
             thread, // thread
             prb, // targetprb
         )
-
-        KiReleaseReadyQueueElevated ( prb )
 
         IF preempt THEN
             IF NOT preemptprb THEN
@@ -609,8 +631,6 @@ FN KiReadyThread (
     prb := thread^.AffinityPrb
 
     IF prb THEN
-        KiAcquireReadyQueueElevated ( prb )
-
         IF thread^.Pinned OR KiWouldPreempt (
             thread, // thread1
             prb, // targetprb
@@ -618,8 +638,6 @@ FN KiReadyThread (
 
             GOTO Found
         END
-
-        KiReleaseReadyQueueElevated ( prb )
     END
 
     // Scan for the preemptible processor with the lowest load.
@@ -632,9 +650,9 @@ FN KiReadyThread (
     END
 #END
 
-    KiAcquireReadyQueueElevated ( prb )
-
 @Found
+
+    KiAcquireReadyQueueElevated ( prb )
 
     KiInsertThread (
         prb, // prb
@@ -1168,8 +1186,10 @@ FN KiSetPriorityThread (
             GOTO Exit
         END
 
-        next^.Status = KI_THREAD_STANDBY
-        prb^.NextThread = next
+        KiSetNextThread (
+            prb, // prb
+            next, // thread
+        )
 
         // Re-ready our thread to place it on the normal ready queue.
 
@@ -1205,8 +1225,10 @@ FN KiSetPriorityThread (
 
         // Cause a preemption.
 
-        next^.Status = KI_THREAD_STANDBY
-        prb^.NextThread = next
+        KiSetNextThread (
+            prb, // prb
+            next, // thread
+        )
 
 #IF BLD_MP
         IF other THEN
@@ -1303,8 +1325,10 @@ FN KiCheckInteractivity (
         IF next THEN
             // Found one. Set it as the next thread.
 
-            next^.Status = KI_THREAD_STANDBY
-            prb^.NextThread = next
+            KiSetNextThread (
+                prb, // prb
+                next, // thread
+            )
         END
     END
 
@@ -1396,8 +1420,10 @@ FN KiQuantumEnd (
         IF next THEN
             // Found one. Set it as the next thread.
 
-            next^.Status = KI_THREAD_STANDBY
-            prb^.NextThread = next
+            KiSetNextThread (
+                prb, // prb
+                next, // thread
+            )
         END
     END
 
