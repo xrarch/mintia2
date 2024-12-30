@@ -87,7 +87,6 @@ FN KiJumpIntoIdleThread (
 
     prb^.CurrentThread = &prb^.IdleThread
     prb^.KernelStackTop = prb^.IdleThread.KernelStackTop
-    prb^.Idle = TRUE
 
     // Switch into our idle thread.
 
@@ -443,6 +442,8 @@ FN KiInsertThread (
     END
 END
 
+#IF BLD_MP
+
 FN KiWouldPreempt (
     IN thread1 : ^KeThread,
     IN targetprb : ^KiPrb,
@@ -490,8 +491,6 @@ FN KiWouldPreempt (
 
     RETURN FALSE
 END
-
-#IF BLD_MP
 
 FN KiFindProcessor (
     IN thread : ^KeThread,
