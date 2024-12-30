@@ -30,16 +30,6 @@
     END
 ]
 
-#MACRO KiSetNextThreadParameters ( prb, thread ) [
-    // Stash these in the Prb so that they can be examined locklessly by
-    // remote processors.
-
-    prb^.CurrentThreadPriority = thread^.Priority
-    prb^.CurrentThreadInteractivity =
-        (thread^.Interactive | thread^.InteractivityFloor)
-    prb^.Idle = FALSE
-]
-
 #MACRO KiDecrementLoad ( prb ) [
     NOTHING (prb)^.Load -= 1
 ]
@@ -56,8 +46,6 @@
 
 #MACRO KiWaitForSwitch ( thread ) []
 
-#MACRO KiSetNextThreadParameters ( prb, thread ) []
-
 #MACRO KiDecrementLoad ( prb ) []
 
 #MACRO KiIncrementLoad ( prb ) []
@@ -68,7 +56,15 @@
     prb^.NextThread = next
     next^.Status = KI_THREAD_STANDBY
 
-    KiSetNextThreadParameters ( prb, next )
+#IF BLD_MP
+    // Stash these in the Prb so that they can be examined locklessly by
+    // remote processors.
+
+    prb^.CurrentThreadPriority = next^.Priority
+    prb^.CurrentThreadInteractivity =
+        (next^.Interactive | next^.InteractivityFloor)
+    prb^.Idle = FALSE
+#END
 ]
 
 #DEFINE KI_INTERACT_MAX 100
