@@ -32,14 +32,12 @@
 
 #MACRO KiSetNextThreadParameters ( prb, thread ) [
     // Stash these in the Prb so that they can be examined locklessly by
-    // remote processors. These fields are *ONLY* used as a hint for the
-    // scheduling policies. Tearing with respect to one another is expected;
-    // consistency is NOT enforced.
+    // remote processors.
 
-    prb^.Idle = (thread == &prb^.IdleThread)
     prb^.CurrentThreadPriority = thread^.Priority
     prb^.CurrentThreadInteractivity =
         (thread^.Interactive | thread^.InteractivityFloor)
+    prb^.Idle = FALSE
 ]
 
 #MACRO KiDecrementLoad ( prb ) [
@@ -89,6 +87,7 @@ FN KiJumpIntoIdleThread (
 
     prb^.CurrentThread = &prb^.IdleThread
     prb^.KernelStackTop = prb^.IdleThread.KernelStackTop
+    prb^.Idle = TRUE
 
     // Switch into our idle thread.
 
@@ -261,15 +260,6 @@ FN KiSwitchThread (
 
     prb^.CurrentThread = thread
     prb^.KernelStackTop = thread^.KernelStackTop
-
-#IF BLD_MP
-    IF NOT prb^.NextThread THEN
-        KiSetNextThreadParameters (
-            prb, // prb
-            thread, // thread
-        )
-    END
-#END
 
     // Note that KiSwitchContext releases the old thread's lock.
     // It is not reacquired before switching back in.
@@ -1467,6 +1457,7 @@ FN KiYield (
     ELSE
 #IF BLD_MP
         prb^.StealWork = TRUE
+        prb^.Idle = TRUE
 #END
 
         // Switch to the idle thread. KiSwitchThread returns with the thread
