@@ -16,6 +16,8 @@ PUBLIC PsSystemProcess : ^PsProcess
 
 PUBLIC PsInitialThread : ^PsThread
 
+PUBLIC PsReaperThread : ^PsThread
+
 PUBLIC PsUexecApcDispatcher : ^VOID
 PUBLIC PsUexecSignalDispatcher : ^VOID
 
@@ -250,15 +252,13 @@ FN PsInitializeStage1 ()
     // Create the reaper thread, which performs the final unreferencing of
     // terminated threads.
 
-    dumpster : ^VOID
-
     status = PsCreateExecutiveThread (
         "Reaper", // name
         &PspReaperThread, // startfunc
         0, // context1
         0, // context2
         0, // flags
-        OUT dumpster, // thread
+        OUT PsReaperThread, // thread
     )
 
     IF OsError ( status ) THEN

@@ -33,7 +33,7 @@ FN PerformFireworksTest()
     InitGraphics()
     FillScreen(BACKGROUND_COLOR)
     
-    PsCreateExecutiveThread(
+    status := PsCreateExecutiveThread(
         "FireworksMain", // name
         &MainThreadFunc, // startfunc
         NULLPTR,         // context1
@@ -42,7 +42,7 @@ FN PerformFireworksTest()
         OUT MainThread   // thread
     )
     
-    IF NOT MainThread THEN
+    IF OsError ( status ) THEN
         RtlPrint("Could not create Fireworks Test main thread!\n")
         LEAVE
     END

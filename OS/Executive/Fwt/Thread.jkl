@@ -4,7 +4,7 @@ FN CreateThread(IN StartRoutine : KeStartThreadF, IN Fwd : ^FireworkData) : UWOR
 
     Thrd : ^PsThread
     
-    PsCreateExecutiveThread (
+    status := PsCreateExecutiveThread (
         "FireworksPart",   // name
         StartRoutine,      // startfunc
         CAST Fwd TO UWORD, // context1
@@ -13,7 +13,7 @@ FN CreateThread(IN StartRoutine : KeStartThreadF, IN Fwd : ^FireworkData) : UWOR
         OUT Thrd           // thread
     )
     
-    IF NOT Thrd THEN
+    IF OsError ( status ) THEN
         RETURN 0
     END
     

@@ -187,7 +187,6 @@ END
             &(partition)^.PageAvailableEvent, // event
             0, // priorityboost
         )
-    
     END
 
     IF (partition)^.LowPageAvailableEvent.Header.SignalCount == 0 THEN
@@ -507,8 +506,6 @@ FN MiFreePage (
         TRUE, // head
     )
 
-    MiReleaseList ( partition, ipl )
-
     IF partition^.FreeList.Count > partition^.ZeroingThreshold AND
         partition^.ZeroPageEvent.Header.SignalCount == 0 THEN
 
@@ -519,6 +516,8 @@ FN MiFreePage (
             0, // priorityboost
         )
     END
+
+    MiReleaseList ( partition, ipl )
 
     // Wake waiters for available pages.
 
@@ -543,7 +542,7 @@ FN MiWaitForPages (
     event : ^KeEvent
     timeout : RtlUquad
 
-    RtlSetUquadToUlong ( &timeout, 5000 )
+    RtlSetUquadToUlong ( &timeout, 60000 )
 
     IF low THEN
         threshold = 0
