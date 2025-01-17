@@ -194,7 +194,7 @@ FN KiBoostPriority (
     IN thread : ^KeThread,
     IN interactive : UWORD,
     IN priority : UWORD,
-)
+) : UWORD
 
     // As required, boost the priority of the thread and all of the threads upon
     // which it depends to make progress.
@@ -272,17 +272,6 @@ FN KiBoostPriority (
         // progress; all owners of locks being waited for, by owners of locks
         // being waited for, by owners of locks being waited for, etc, by this
         // thread.
-        //
-        // Because the lock ordering issues here are crazy, the way we do this
-        // is a little dance where we drop locks and re-check the turnstile.
-        // This can miss boosting people sometimes but that's fine. Why? Well,
-        // the owner of this lock has clearly woken up if the turnstile vanished
-        // after we released its lock, since turnstile lifetimes only end from
-        // the context of a thread that was blocked on the turnstile. But, we
-        // already boosted it, and it will pass on that boost to any other lock
-        // it blocks on until it releases the lock that we want. So, if the
-        // turnstile vanished, we know our job is done and its safe to just
-        // carry on.
 
         turnstile := owner^.BlockedOnTurnstile
 
@@ -306,7 +295,8 @@ FN KiBoostPriority (
         // Set new bestowed.
 
         owner^.BestowedPriority = owner^.Priority
-        owner^.BestowedInteractivity = owner^.Interactive
+        owner^.BestowedInteractivity = (owner^.Interactive |
+            owner^.InteractivityFloor)
 
         // Re-insert.
 
@@ -325,84 +315,78 @@ FN KiBoostPriority (
         owner^.Boosted = TRUE
 #END
 
-        // Capture the turnstile key for comparison.
-
-        key := turnstile^.Key
-
-        IF NOT key THEN
-            // If the turnstile was already awoken, don't try doing anything
-            // else with it. If we try to match with this key we will match
-            // invalidated turnstiles, which is not correct.
+        IF turnstile^.Awoken THEN
+            // The turnstile was already awoken and this thread just hasn't made
+            // its way out of KiBlockOnLock yet. Note that we aren't holding any
+            // lock that guards the Awoken field so this is just a hint; it
+            // could change from FALSE to TRUE at any moment after this (the
+            // reverse, however, could not happen).
 
             BREAK
         END
 
-        // Capture the next owner for comparison.
+#IF BLD_MP
+        chain := &KiTurnstileChains[KiTurnstileHash(turnstile^.Key)]
 
-        nextowner := turnstile^.Owner
+        // Try to acquire the chain spinlock. Note that this is out of order
+        // with respect to the thread lock, so we only try-acquire it and retry
+        // the entire lock operation if we fail.
+
+        IF NOT KiTryAcquireSpinlock ( &chain^.Spinlock ) THEN
+            // Failed to acquire it.
+
+            KiReleaseThread ( owner, KI_IPL_APC )
+
+            // Indicate to caller that a retry is needed.
+
+            RETURN TRUE
+        END
+
+        IF turnstile^.Awoken THEN
+            // The turnstile was awoken before we could acquire the chain
+            // spinlock.
+
+            KiReleaseChainElevated ( chain )
+
+            BREAK
+        END
+#END
 
         KiReleaseThreadElevated ( owner )
 
-        // All locks are dropped. We're going to reacquire them and then make
-        // sure this is the same turnstile with the same owner. This only works
-        // because turnstiles are "type stable memory"; once a piece of memory
-        // has been initialized as a turnstile, it will be a turnstile forever.
-
-        chain := &KiTurnstileChains[KiTurnstileHash(key)]
-
-        KiAcquireChainElevated ( chain )
-
-        // If these things changed while the locks were dropped, we've lost
-        // any sense of sanity and need to leave now. The 'nextowner' thread
-        // may no longer even exist at all.
-        //
-        // Note also, if the keys don't match, this is a lockless access
-        // since the chain lock held is for the incorrect hash chain.
-
-        IF turnstile^.Key != key OR
-            turnstile^.Owner != nextowner OR
-            NOT turnstile^.Committed THEN
+        IF NOT turnstile^.Committed THEN
+            // The owner of the turnstile is not yet known. We couldn't say this
+            // for sure until we held the appropriate chain lock.
 
             KiReleaseChain ( chain, KI_IPL_APC )
 
-            LEAVE
+            // Indicate to caller that no retry is necessary.
+
+            RETURN FALSE
         END
 
-        // Note that it's possible (although extremely unlikely) that the ABA
-        // problem has occurred and theres a completely different instance
-        // of the turnstile being used with an owner with the same address,
-        // for a lock with the same address. In this case we will go off
-        // boosting some other dependency chain but this is actually
-        // harmless, since the erroneous boost will be removed next time the
-        // thread releases the lock. It's just kinda weird. A sequence
-        // number could make it even unlikelier but here we choose to save
-        // some space in the turnstile block.
-        //
-        // The important thing is that this turnstile is a valid, in-use
-        // turnstile with an owner, which is why we clear the key when we
-        // remove a turnstile from the hash chain (such as when waking it or
-        // when backing out of waiting on one), to ensure it won't match the
-        // above conditional if there's no valid owner thread.
+        // Acquire the spinlock of the current owning thread of this next
+        // turnstile.
 
-        owner = nextowner
+        owner = turnstile^.Owner
+
+        IF owner == original THEN
+            // A cycle in the lock dependency chain indicates deadlock.
+            // Crash here or else we'll spin forever.
+
+            KeCrash ( "Turnstile waiter cycle (deadlock!)\n" )
+        END
 
         KiAcquireThreadElevated ( owner )
 
         KiReleaseChainElevated ( chain )
-
-        IF owner == original THEN
-            // A cycle in the lock dependency chain could indicate deadlock, but
-            // it could also mean that while the locks were dropped at some
-            // point in this process, the ABA problem case occurred and we
-            // examined a thread that was (innocently) upstream of our original
-            // thread in a dependency chain. We optimistically assume the latter
-            // and break out here.
-
-            BREAK
-        END
     END
 
     KiReleaseThread ( owner, KI_IPL_APC )
+
+    // Indicate to caller that no retry is necessary.
+
+    RETURN FALSE
 END
 
 FN KiBlockOnLock (
@@ -629,22 +613,26 @@ FN KiBlockOnLock (
 
             // Raise the priority floor. Returns with the thread lock released.
 
+#IF BLD_MP
+            IF KiBoostPriority (
+                owner, // owner
+                thread, // thread
+                interactive, // interactive
+                priority, // priority
+            ) OR thread^.Boosted THEN
+
+                // Failed to try-acquire a spinlock, or I was boosted while
+                // boosting. In either case, retry everything.
+
+                GOTO UnreferenceAndLeave
+            END
+#ELSE
             KiBoostPriority (
                 owner, // owner
                 thread, // thread
                 interactive, // interactive
                 priority, // priority
             )
-
-#IF BLD_MP
-            KeMemoryBarrier ()
-
-            IF thread^.Boosted THEN
-                // At some point, I was boosted, while boosting. Frick! Retry
-                // everything.
-
-                GOTO UnreferenceAndLeave
-            END
 #END
 
         ELSE
@@ -705,7 +693,7 @@ FN KiBlockOnLock (
 #END
 
     IF turnstile^.Free THEN
-        // Take a turnstile from the free list.
+        // Take a turnstile from the free list anchored in the lock turnstile.
 
         otherturnstile = turnstile^.Free
         turnstile^.Free = otherturnstile^.Free
@@ -713,7 +701,7 @@ FN KiBlockOnLock (
         thread^.Turnstile = otherturnstile
 
     ELSE
-        // Steal the turnstile itself.
+        // Steal the lock turnstile itself.
 
         thread^.Turnstile = turnstile
 
@@ -726,11 +714,6 @@ FN KiBlockOnLock (
             // just remove the turnstile from the chain here.
 
             RtlRemoveEntryList ( &turnstile^.ChainEntry )
-
-            // Invalidate the key so that boosters don't think the owner is
-            // still valid here.
-
-            turnstile^.Key = NULLPTR
 
             IF turnstile^.Committed THEN
                 KiAcquireThreadElevated ( owner )
@@ -848,10 +831,6 @@ FN KiWakeLock (
             turnstile^.Owner == owner THEN
 
             // Found the turnstile.
-
-            // Invalidate the key.
-
-            turnstile^.Key = NULLPTR
 
             // Mark awoken so that threads with a pointer to the turnstile know
             // we (the owner) are no longer safe to access.

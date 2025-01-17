@@ -8,6 +8,48 @@
 
 #ASM [
 
+// a0 - spinlock
+// outputs:
+// a3 - success
+KiTryAcquireSpinlock:
+.global KiTryAcquireSpinlock
+
+    // Initialize the try spin count.
+
+    li  t1, 128
+
+.retry:
+    ll  t0, a0
+    bne t0, .spin
+    sc  t0, a0, a0
+    beq t0, .retry
+
+    // Memory barrier to ensure reads in the critical section don't see stale
+    // junk.
+
+    mb
+
+    li   a3, 1
+    ret
+
+    // Spin until free without using atomics since they may incur more cache
+    // coherency traffic.
+
+.spin:
+    pause
+    mov  t0, long [a0]
+    beq  t0, .retry
+
+    // Decrement the try count and spin again if we have more tries left.
+
+    subi t1, t1, 1
+    bne  t1, .spin
+
+    // No tries left, report failure.
+
+    li   a3, 0
+    ret
+
 // a0 - offset
 // outputs:
 // a3 - oldipl
