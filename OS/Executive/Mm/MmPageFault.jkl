@@ -12,6 +12,11 @@ FN MmPageFault (
 
     // TEMP
 
+    // note to self: We need to handle the weird KeCompareSwapPtrAbortOnFault
+    // stuff here. In particular we have to check if the PTE is already valid
+    // and just needs the modified bit set, and do that if so. We also have to
+    // abort the CAS operation if it's any other case.
+
     RtlPrint ( "fault on %x\n", address )
 
     IF writing THEN
