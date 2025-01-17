@@ -359,16 +359,6 @@ FN KiBoostPriority (
 
         owner = turnstile^.Owner
 
-        IF NOT owner THEN
-            // There is no owner of the turnstile; the lock is held shared.
-
-            KiReleaseChain ( chain, KI_IPL_APC )
-
-            // Indicate to caller that no retry is necessary.
-
-            RETURN FALSE
-        END
-
         IF owner == original THEN
             // A cycle in the lock dependency chain indicates deadlock.
             // Crash here or else we'll spin forever.
@@ -525,36 +515,6 @@ FN KiBlockOnLock (
         listentry = listentry^.Next
     END
 
-    KiAcquireThreadElevated ( thread )
-
-    // Capture current priority as the BestowedPriority.
-
-    priority := thread^.Priority
-    thread^.BestowedPriority = priority
-
-    interactive := (thread^.Interactive | thread^.InteractivityFloor)
-    thread^.BestowedInteractivity = interactive
-
-#IF BLD_MP
-    thread^.Boosted = FALSE
-#END
-
-    thread^.BlockedOnTurnstile = turnstile
-
-    // Insert the thread into the turnstile's max heap.
-
-    KiAcquireTurnstileElevated ( turnstile )
-
-    RtlInsertIntoHeap (
-        &KiCompareThreads, // comparisonfunc
-        &turnstile^.WaiterHeapRoot, // rootptr
-        &thread^.TurnstileEntry, // entry
-    )
-
-    KiReleaseTurnstileElevated ( turnstile )
-
-    KiReleaseThreadElevated ( thread )
-
     IF owner THEN
         // At this point we know exactly who owns this lock and we know they
         // haven't fully left the lock yet, which means its safe to apply
@@ -598,6 +558,38 @@ FN KiBlockOnLock (
 #END
 
         // We're really going to wait, so do priority boosting.
+
+        KiAcquireThreadElevated ( thread )
+
+        // Capture current priority as the BestowedPriority.
+
+        priority := thread^.Priority
+        thread^.BestowedPriority = priority
+
+        interactive := (thread^.Interactive | thread^.InteractivityFloor)
+        thread^.BestowedInteractivity = interactive
+
+#IF BLD_MP
+        thread^.Boosted = FALSE
+#END
+
+        thread^.BlockedOnTurnstile = turnstile
+
+        // Insert the thread into the turnstile's max heap.
+
+        KiAcquireTurnstileElevated ( turnstile )
+
+        RtlInsertIntoHeap (
+            &KiCompareThreads, // comparisonfunc
+            &turnstile^.WaiterHeapRoot, // rootptr
+            &thread^.TurnstileEntry, // entry
+        )
+
+        KiReleaseTurnstileElevated ( turnstile )
+
+        KiReleaseThreadElevated ( thread )
+
+        // Acquire the owning thread's spinlock and release the chain.
 
         KiAcquireThreadElevated ( owner )
 
@@ -666,23 +658,25 @@ FN KiBlockOnLock (
 
 @UnreferenceAndLeaveChainHeld
 
-    KiAcquireThreadElevated ( thread )
+    IF thread^.BlockedOnTurnstile THEN
+        KiAcquireThreadElevated ( thread )
 
-    // Remove the thread from the turnstile's maxheap.
+        // Remove the thread from the turnstile's maxheap.
 
-    thread^.BlockedOnTurnstile = NULLPTR
+        thread^.BlockedOnTurnstile = NULLPTR
 
-    KiAcquireTurnstileElevated ( turnstile )
+        KiAcquireTurnstileElevated ( turnstile )
 
-    RtlRemoveFromHeap (
-        &KiCompareThreads, // comparisonfunc
-        &turnstile^.WaiterHeapRoot, // rootptr
-        &thread^.TurnstileEntry, // entry
-    )
+        RtlRemoveFromHeap (
+            &KiCompareThreads, // comparisonfunc
+            &turnstile^.WaiterHeapRoot, // rootptr
+            &thread^.TurnstileEntry, // entry
+        )
 
-    KiReleaseTurnstileElevated ( turnstile )
+        KiReleaseTurnstileElevated ( turnstile )
 
-    KiReleaseThreadElevated ( thread )
+        KiReleaseThreadElevated ( thread )
+    END
 
 #IF BLD_CHK
     IF thread^.Turnstile != NULLPTR THEN
