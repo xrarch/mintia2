@@ -200,12 +200,28 @@ FN (KiHighLevelHandlerF) KiHandleBreakpoint (
     END
 END
 
+EXTERN KiStartAbortCasRegion : UBYTE
+EXTERN KiEndAbortCasRegion : UBYTE
+EXTERN KiAbortCas : UBYTE
+
 FN (KiHighLevelHandlerF) KiHandlePageFault (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
 )
 
     // Enable interrupts and dispatch the page fault to Mm.
+
+    IF context^.Epc >= &KiStartAbortCasRegion AND
+        context^.Epc < &KiEndAbortCasRegion THEN
+
+        // We cannot handle this page fault because the current thread's
+        // turnstile is in use; it can't usefully take locks. Abort the CAS
+        // operation.
+
+        context^.Epc = &KiAbortCas
+
+        LEAVE
+    END
 
     KiEnableInterrupts ()
 

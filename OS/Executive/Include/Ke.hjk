@@ -58,6 +58,12 @@ EXTERN FN KeCompareSwapUlong (
     IN expectedvalue : ULONG,
 ) : ULONG
 
+EXTERN FN KeCompareSwapUlongAbortOnFault (
+    IN ptr : ^ULONG,
+    IN newvalue : ULONG,
+    IN expectedvalue : ULONG,
+) : ULONG
+
 EXTERN FN KeMaskUlong (
     IN ptr : ^ULONG,
     IN mask : ULONG,
@@ -77,6 +83,14 @@ EXTERN FN KeFetchAndSetUlong (
 
 #MACRO KeIncrementPtr ( ptr, inc ) [
     KeIncrementUquad ( CAST (ptr) TO ^VOID, inc )
+]
+
+#MACRO KeCompareSwapPtrAbortOnFault ( ptr, newvalue, expectedvalue ) [
+    KeCompareSwapUquadAbortOnFault (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO UQUAD,
+        CAST (expectedvalue) TO UQUAD,
+    )
 ]
 
 #MACRO KeCompareSwapPtr ( ptr, newvalue, expectedvalue ) [
@@ -106,6 +120,14 @@ EXTERN FN KeFetchAndSetUlong (
 
 #MACRO KeIncrementPtr ( ptr, inc ) [
     KeIncrementUlong ( CAST (ptr) TO ^VOID, inc )
+]
+
+#MACRO KeCompareSwapPtrAbortOnFault ( ptr, newvalue, expectedvalue ) [
+    KeCompareSwapUlongAbortOnFault (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO ULONG,
+        CAST (expectedvalue) TO ULONG,
+    )
 ]
 
 #MACRO KeCompareSwapPtr ( ptr, newvalue, expectedvalue ) [
@@ -416,8 +438,6 @@ STRUCT KiTurnstile
     Spinlock : KiSpinlock,
 #END
 
-    Awoken : UBYTE,
-    Committed : UBYTE,
 END
 
 EXTERN FN KeSignalProcess (

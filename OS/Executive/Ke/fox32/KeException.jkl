@@ -699,6 +699,8 @@ EXTERN KiOrUlongEnd : UBYTE
 EXTERN KiMaskUlongEnd : UBYTE
 EXTERN KiFetchAndSetUlongEnd : UBYTE
 EXTERN KiCompareSwapUlongEnd : UBYTE
+EXTERN KiCompareSwapUlongAbortEnd : UBYTE
+EXTERN KiCompareSwapUlongAbort : UBYTE
 
 EXTERN KiAcquireLockSharedEnd : UBYTE
 EXTERN KiAcquireLockExclusiveStart : UBYTE
@@ -760,6 +762,14 @@ FN KiResetPc (
         epc < &KiCompareSwapUlongEnd THEN
 
         context^.Epc = &KeCompareSwapUlong
+
+        LEAVE
+    END
+
+    IF epc >= &KeCompareSwapUlongAbortOnFault AND
+        epc < &KiCompareSwapUlongAbortEnd THEN
+
+        context^.Epc = &KeCompareSwapUlongAbortOnFault
 
         LEAVE
     END
@@ -862,6 +872,18 @@ FN (KiExceptionHandlerF) KiPageFault (
 )
 
     // Enable interrupts and dispatch the page fault to Mm.
+
+    IF context^.Epc >= &KeCompareSwapUlongAbortOnFault AND
+        context^.Epc < &KiCompareSwapUlongAbortEnd THEN
+
+        // We cannot handle this page fault because the current thread's
+        // turnstile is in use; it can't usefully take locks. Abort the CAS
+        // operation.
+
+        context^.Epc = &KiCompareSwapUlongAbort
+
+        LEAVE
+    END
 
     KiEnableInterrupts ()
 

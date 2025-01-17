@@ -246,6 +246,49 @@ KeCompareSwapUlong:
     ret
 
 // a0 - ptr
+// a1 - newvalue
+// a2 - expectedvalue
+// outputs:
+// a3 - origvalue
+KeCompareSwapUlongAbortOnFault:
+.export KeCompareSwapUlongAbortOnFault
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+KiStartAbortCasRegion:
+.global KiStartAbortCasRegion
+
+.retry:
+    ll   a3, a0                     // Load-locked the location.
+    sub  t0, a3, a2                 // Compare equality with expected value.
+    bne  t0, KiExitAbortCas         // Not equal, leave.
+    sc   t0, a0, a1                 // Conditionally store the new value.
+    beq  t0, .retry                 // If store failed, retry.
+
+KiEndAbortCasRegion:
+.global KiEndAbortCasRegion
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+KiExitAbortCas:
+
+    ret
+
+KiAbortCas:
+.global KiAbortCas
+
+    // We took a page fault while attempting the CAS. Return something that
+    // is guaranteed not to be equal to the expectedvalue, thereby making the
+    // CAS look like a failure.
+
+    addi a3, a2, 1
+    ret
+
+// a0 - ptr
 // a1 - mask
 // outputs:
 // a3 - origvalue

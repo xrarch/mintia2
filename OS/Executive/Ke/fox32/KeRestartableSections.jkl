@@ -92,6 +92,35 @@ KiCompareSwapUlongEnd:
 
     ret
 
+// a0 - ptr
+// a1 - newvalue
+// a2 - expectedvalue
+// outputs:
+// a3 - origvalue
+KeCompareSwapUlongAbortOnFault:
+.export KeCompareSwapUlongAbortOnFault
+    
+    mov  a3, [a0]
+    cmp  a3, a2
+    ifnz rjmp KiCompareSwapUlongAbortEnd
+    mov  [a0], a1
+
+KiCompareSwapUlongAbortEnd:
+.global KiCompareSwapUlongAbortEnd
+
+    ret
+
+KiCompareSwapUlongAbort:
+.global KiCompareSwapUlongAbort
+
+    // We took a page fault while attempting the CAS. Return something that
+    // is guaranteed not to be equal to the expectedvalue, thereby making the
+    // CAS look like a failure.
+
+    mov  a3, a2
+    add  a3, 1
+    ret
+
 #MACRO KiAcquireLockSharedLoop ( slow ) [
     mov  t0, [a0]
     and  t0, KI_LOCK_C_BITS
