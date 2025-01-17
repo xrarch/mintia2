@@ -355,7 +355,11 @@ FN MiFindDynamicSpaceNode (
 
     node : ^MiDynamicSpaceNode
 
-    ipl := KeAcquireApcLockShared ( &MiDynamicSpaceTreeLock )
+    // We could hold this lock exclusive but that would violate our codebase
+    // policy that a shared lock is never taken subordinate to an exclusive
+    // lock. There are many imaginable situations where that could occur here.
+
+    ipl := KeAcquireApcLockExclusive ( &MiDynamicSpaceTreeLock )
 
     avlnode := MiDynamicSpaceRoot.Right
 
