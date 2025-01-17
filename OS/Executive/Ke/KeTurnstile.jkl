@@ -521,12 +521,13 @@ FN KiBlockOnLock (
     // Set that there are waiters now. This will cause releasing threads to
     // signal the turnstile event.
 
-    // We do this CAS unconditionally because we want to also make sure that, in
-    // the event it is held exclusively, the owner did not change before we were
-    // able to set the WAITERS bit. This is because we need to be absolutely
-    // sure that whatever owner we see in our "current" variable (which captures
-    // the lock word during a certain timeframe) will be the exact thread to
-    // awaken this turnstile at some point *after* this CAS is performed.
+    // We do this CAS even if the waiters bit is already set because we want to
+    // also make sure that the owner (or the state of not having one; i.e.
+    // being held shared) did not change before we were able to set the WAITERS
+    // bit. This is because we need to be absolutely sure that whatever owner we
+    // see in our "current" variable (which captures the lock word during a
+    // certain timeframe) will be the exact thread to awaken this turnstile at
+    // some point *after* this CAS is performed.
 
     IF KeCompareSwapPtr (
         &lock^.Ptr, // ptr
