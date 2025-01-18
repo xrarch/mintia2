@@ -250,6 +250,7 @@ KeCompareSwapUlong:
 // a2 - expectedvalue
 // outputs:
 // a3 - origvalue
+// a2 - aborted
 KeCompareSwapUlongAbortOnFault:
 .export KeCompareSwapUlongAbortOnFault
 
@@ -276,6 +277,8 @@ KiEndAbortCasRegion:
 
 KiExitAbortCas:
 
+    li   a2, 0
+
     ret
 
 KiAbortCas:
@@ -286,6 +289,8 @@ KiAbortCas:
     // CAS look like a failure.
 
     addi a3, a2, 1
+    li   a2, 1
+
     ret
 
 // a0 - ptr

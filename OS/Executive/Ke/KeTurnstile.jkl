@@ -378,6 +378,10 @@ FN KiBoostPriority (
     RETURN FALSE
 END
 
+EXTERN FN MmWriteFaultOnLockWord (
+    IN lockptr : ^VOID,
+)
+
 FN KiBlockOnLock (
     IN lock : ^KeLock,
     IN current : UWORD,
@@ -414,10 +418,13 @@ FN KiBlockOnLock (
     // certain timeframe) will be the exact thread to awaken this turnstile at
     // some point *after* this CAS is performed.
 
+    aborted : UWORD
+
     IF KeCompareSwapPtrAbortOnFault (
         &lock^.Ptr, // ptr
         current | KI_LOCK_WAITERS, // newvalue
         current, // expectedvalue
+        OUT aborted, // aborted
     ) != current THEN
 
         // Something changed.
@@ -430,6 +437,15 @@ FN KiBlockOnLock (
         // reason.
 
         KiReleaseChain ( chain, ipl )
+
+        IF aborted THEN
+            // We were aborted because we faulted on the lock word.
+            // Call Mm directly to try to satisfy this page fault.
+            // This is technically a layering violation but there's no other
+            // decent way to accomplish this.
+
+            MmWriteFaultOnLockWord ( lock )
+        END
 
         LEAVE
     END

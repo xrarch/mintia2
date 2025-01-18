@@ -97,6 +97,7 @@ KiCompareSwapUlongEnd:
 // a2 - expectedvalue
 // outputs:
 // a3 - origvalue
+// a2 - aborted
 KeCompareSwapUlongAbortOnFault:
 .export KeCompareSwapUlongAbortOnFault
     
@@ -107,6 +108,8 @@ KeCompareSwapUlongAbortOnFault:
 
 KiCompareSwapUlongAbortEnd:
 .global KiCompareSwapUlongAbortEnd
+
+    mov  a2, 0
 
     ret
 
@@ -119,6 +122,9 @@ KiCompareSwapUlongAbort:
 
     mov  a3, a2
     add  a3, 1
+
+    mov  a2, 1
+
     ret
 
 #MACRO KiAcquireLockSharedLoop ( slow ) [
