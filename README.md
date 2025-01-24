@@ -15,8 +15,9 @@ a pretty strong system at the time. It is also intended to be very portable.
 The scheduler design is inspired by FreeBSD's ULE. The overall system structure,
 particularly the usage of a hierarchical interrupt structure and the usage of
 software interrupts for deferred events, is inspired by the Windows NT kernel.
-The memory manager is inspired by VMS, NT, and Mach (via UVM). The IO system,
-particularly its fundamentally asynchronous nature, is inspired by VMS and NT.
+The memory manager is inspired by VMS, NT, and UVM. The IO system, particularly
+its fundamentally asynchronous nature, is inspired by VMS and NT. The locking
+design (usage of turnstiles and priority inheritance) is inspired by Solaris.
 
 ## Supported Architectures
 
