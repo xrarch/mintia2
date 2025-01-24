@@ -462,3 +462,19 @@ FN ObCheckAccess (
 
     RETURN cred^.Gid == OS_SYSTEM_GID
 END
+
+#SECTION "PAGEtext"
+FN ObCheckAccessForCurrent (
+    IN object : ^VOID,
+    IN access : UWORD,
+) : UWORD
+
+    // Check the requested access against the object's permissions, with respect
+    // to the current process's credentials.
+
+    RETURN ObCheckAccess (
+        &ObFindHeader ( object )^.Permissions, // permissions
+        &PsCurrentProcess()^.Paged^.Cred, // cred
+        access, // access
+    )
+END

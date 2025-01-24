@@ -784,3 +784,60 @@ FN OsCreateProcess (
 
     RETURN status
 END
+
+#SECTION "PAGEtext"
+FN OsOpenProcessByPid (
+    IN pid : UWORD,
+    IN access : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+    // Open a process object by PID, system service.
+
+    process : ^PsProcess
+
+    // Get a referenced pointer to the process object.
+
+    status := PspReferenceById (
+        pid, // pid
+        &PsProcessType, // type
+        OUT process, // object
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Check for appropriate access rights to the process.
+
+    IF NOT ObCheckAccessForCurrent (
+        process, // object
+        access, // access
+    ) THEN
+
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    // Insert the process object into the handle table.
+
+    status = ObInsertObject (
+        PsCurrentProcess (), // process
+        object, // object
+        params^.Captured.Access, // access
+        OUT handle, // handle
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    RETURN status
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
