@@ -18,6 +18,7 @@ STRUCT PsProcessGroup
     ProcessListHead : RtlListEntry,
 
     LeaderPid : ULONG,
+    LeaderSid : ULONG,
 
     Lock : KeLock,
 END
@@ -42,11 +43,10 @@ STRUCT PsPagedProcess
     Job : ^PsJob,
 
     ProcessGroup : ^PsProcessGroup,
+    SessionGroup : ^PsProcessGroup,
 
     RootLock : KeLock,
-
     ActivationLock : KeLock,
-
     HandleTableLock : KeLock,
 
     Pid : ULONG,
@@ -66,6 +66,9 @@ STRUCT PsProcess
     Partition : ^MiPartition,
 
     TerminationEvent : KeEvent,
+
+    WorkingSetSize : ULONG,
+    PageFaultCount : ULONG,
 END
 
 STRUCT PsPagedThread

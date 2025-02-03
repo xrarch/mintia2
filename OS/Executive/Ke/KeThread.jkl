@@ -834,6 +834,10 @@ FN KeExitThread (
 
     KiDisassociateFromBalancedQueue ( thread )
 
+    // Make sure the thread is set terminated.
+
+    thread^.Terminated = TRUE
+
     // Raise IPL.
 
     ipl := KiRaiseIpl ( KI_IPL_DPC )

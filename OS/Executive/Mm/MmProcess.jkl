@@ -4,6 +4,8 @@
 
 #INCLUDE "Mi.hjk"
 
+#INCLUDE "<ll>/System/OsProcess.hjk"
+
 #SECTION "PAGEtext"
 FN MmInitializeProcess (
     IN parentprocess : ^PsProcess,
@@ -22,6 +24,9 @@ FN MmInitializeProcess (
     IF partition != &MiSystemPartition THEN
         ObReferenceObject ( partition )
     END
+
+    process^.WorkingSetSize = 0
+    process^.PageFaultCount = 0
 
     // Set the partition object.
 
@@ -99,4 +104,16 @@ FN MmUninitializeThread (
     // Free the thread's TEB and user stack.
 
     // NYI
+END
+
+#SECTION "PAGEtext"
+FN MmQueryProcess (
+    IN process : ^PsProcess,
+    IN query : ^OsProcessQuery,
+)
+
+    // Fill in the memory management specific parts of the process query.
+
+    query^.WorkingSetSize = process^.WorkingSetSize
+    query^.PageFaultCount = process^.PageFaultCount
 END

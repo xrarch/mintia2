@@ -824,8 +824,8 @@ FN OsOpenProcessByPid (
 
     status = ObInsertObject (
         PsCurrentProcess (), // process
-        object, // object
-        params^.Captured.Access, // access
+        process, // process
+        access, // access
         OUT handle, // handle
     )
 
@@ -840,4 +840,247 @@ FN OsOpenProcessByPid (
     ObUnreferenceObject ( process )
 
     RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsReadStatusProcessObject (
+    IN process : ^PsProcess,
+) : OsStatus
+
+    // Read the termination status of a process.
+
+    IF NOT process^.Pcb.Terminated THEN
+        RETURN OS_STATUS_PROCESS_IS_ALIVE
+    END
+
+    RETURN process^.Paged^.TerminationStatus
+END
+
+#SECTION "PAGEtext"
+FN OsReadStatusProcess (
+    IN handle : UWORD,
+) : OsStatus
+
+    // Read the termination status of a process, system service.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_READ != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    status = PsReadStatusProcessObject ( process )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsQueryProcessObject (
+    IN process : ^PsProcess,
+    IN query : ^OsProcessQuery,
+)
+
+    // Query information about a process object.
+
+    RtlFillMemoryWithUlong (
+        query, // dest
+        SIZEOF OsProcessQuery, // sz
+        0, // ulong
+    )
+
+    paged := process^.Paged
+
+    query^.Pid = paged^.Pid
+    query^.ParentPid = paged^.ParentPid
+
+    query^.OwningUid = paged^.Cred.Uid
+    query^.OwningGid = paged^.Cred.Gid
+
+    IF PsBlockRundownProcess ( process ) THEN
+        // If we successfully blocked process rundown then it definitely has at
+        // least one thread, and therefore there must be a signal thread.
+
+        query^.Status = process^.Pcb.SignalThread^.Status
+        query^.Priority = process^.Pcb.SignalThread^.Priority
+
+        PsUnblockRundownProcess ( process )
+    END
+
+    query^.ThreadCount = process^.Pcb.ThreadCount
+    query^.TerminationStatus = paged^.TerminationStatus
+
+    MmQueryProcess (
+        process, // process
+        query, // query
+    )
+
+    RtlCopyString (
+        &query^.Name[0], // dest
+        ExNameToString ( paged^.Name ), // src
+        OS_NAME_MAX + 1, // bufsize
+    )
+
+    // TODO copy name of controlling tty
+END
+
+#SECTION "PAGEtext"
+FN PsQueryProcess (
+    IN handle : UWORD,
+    IN query : ^OsProcessQuery,
+) : OsStatus
+
+    // Query information about a process handle.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_READ != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    PsQueryProcessObject (
+        process, // process
+        query, // query
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsQueryProcess (
+    IN handle : UWORD,
+    IN query : ^OsProcessQuery,
+) : OsStatus
+
+    // Query information about a process, system service.
+
+    sysquery : OsProcessQuery
+
+    status := PsQueryProcess (
+        handle, // handle
+        &sysquery, // query
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Copy the information to userspace.
+
+    RETURN MmSafeCopyOut (
+        query, // dest
+        &sysquery, // src
+        SIZEOF OsProcessQuery, // size
+    )
+END
+
+#SECTION "PAGEtext"
+FN PsQueryProcessByPid (
+    IN pid : UWORD,
+    IN query : ^OsProcessQuery,
+) : OsStatus
+
+    // Open a process object by PID, system service.
+
+    process : ^PsProcess
+
+    // Get a referenced pointer to the process object.
+
+    status := PspReferenceById (
+        pid, // pid
+        &PsProcessType, // type
+        OUT process, // object
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Check for appropriate access rights to the process.
+
+    IF NOT ObCheckAccessForCurrent (
+        process, // object
+        OS_ACCESS_READ, // access
+    ) THEN
+
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    // Query the process object.
+
+    PsQueryProcessObject (
+        process, // process
+        query, // query
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsQueryProcessByPid (
+    IN pid : UWORD,
+    IN query : ^OsProcessQuery,
+) : OsStatus
+
+    // Query information about a process by PID, system service.
+
+    sysquery : OsProcessQuery
+
+    status := PsQueryProcessByPid (
+        pid, // pid
+        &sysquery, // query
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Copy the information to userspace.
+
+    RETURN MmSafeCopyOut (
+        query, // dest
+        &sysquery, // src
+        SIZEOF OsProcessQuery, // size
+    )
 END
