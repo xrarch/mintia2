@@ -36,7 +36,7 @@ FN (RtlAvlLessThanF) ExpCompareNameNodes (
 
     // Return whether A < B, lexicographically.
 
-    RETURN CAST RtlCompareString (
+    RETURN CAST RtlCompareRtlString (
         ExNameToString ( CONTAINEROF a TO ExName.Entry ), // str1
         ExNameToString ( CONTAINEROF b TO ExName.Entry ), // str2
     ) TO WORD < 0
@@ -45,13 +45,11 @@ END
 #SECTION "PAGEtext"
 FN ExpHash (
     IN str : ^UBYTE,
-    OUT len : UWORD,
 ) : UWORD
 
     // Simple hash for a string.
 
     hash := 0
-    len = 0
 
     WHILE str^ DO
         hash += str^
@@ -59,7 +57,6 @@ FN ExpHash (
         hash $= hash >> 6
 
         str += 1
-        len += 1
     END
 
     hash += hash << 3
@@ -71,7 +68,7 @@ END
 
 #SECTION "PAGEtext"
 FN ExFindName (
-    IN str : ^UBYTE,
+    IN str : ^RtlString,
 ) : ^ExName
 
     // Find a name in the string internment buckets.
@@ -80,12 +77,9 @@ FN ExFindName (
 
     // Hash the name.
 
-    len : UWORD
+    len := str^.Length
 
-    hash := ExpHash (
-        str, // name
-        OUT len, // len
-    )
+    hash := ExpHash ( str^.Data )
 
     // Get the hash bucket.
 
@@ -109,7 +103,7 @@ FN ExFindName (
 
         node = CONTAINEROF avlnode TO ExName.Entry
 
-        res := CAST RtlCompareString (
+        res := CAST RtlCompareRtlString (
             str, // str1
             ExNameToString ( node ), // str2
         ) TO WORD
@@ -131,19 +125,11 @@ FN ExFindName (
         END
     END
 
-    // Add space for a null terminator.
-
-    len += 1
-
-    // Round up name length.
-
-    len = (len + RTL_MACHINE_WORD_SIZE - 1) & ~(RTL_MACHINE_WORD_SIZE - 1)
-
     // Create a node.
 
     node = MmAllocatePool (
         MM_PAGED_POOL, // poolindex
-        SIZEOF ExName + len, // bytes
+        SIZEOF ExName + SIZEOF RtlString + len + 1, // bytes
         'Name', // tag
         TRUE, // wait
     )
@@ -161,10 +147,15 @@ FN ExFindName (
     node^.References = 1
     node^.BucketIndex = hash & (EXP_NAME_BUCKETS - 1)
 
-    RtlCopyString (
-        ExNameToString ( node ), // dest
-        str, // src
-        -1, // bufsize
+    newstr := ExNameToString ( node )
+
+    newstr^.Length = len
+    newstr^.Data = CAST newstr + SIZEOF RtlString TO ^UBYTE
+
+    RtlCopyBytes (
+        newstr + SIZEOF RtlString, // dest
+        str^.Data, // src
+        len + 1, // sz
     )
 
     // Insert into the tree.
@@ -236,8 +227,7 @@ FN ExReferenceName (
 
     // Increment the reference count.
 
-    oldcount := name^.References
-    name^.References = oldcount + 1
+    name^.References += 1
 
     // Unlock the bucket.
 

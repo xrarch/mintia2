@@ -25,8 +25,8 @@ FN NsCaptureOpenParameters (
         RETURN status
     END
 
-    IF NOT sysparams^.Captured.Path THEN
-        sysparams^.Path = NULLPTR
+    IF NOT sysparams^.Captured.Path.Data THEN
+        sysparams^.Path.Data = NULLPTR
 
         RETURN OS_STATUS_SUCCESS
     END
@@ -34,8 +34,8 @@ FN NsCaptureOpenParameters (
     // Copy in the path.
 
     status = MmCaptureString (
-        sysparams^.Captured.Path, // string
-        OUT sysparams^.Path, // output
+        &sysparams^.Captured.Path, // string
+        &sysparams^.Path, // output
     )
 
     IF OsError ( status ) THEN
@@ -65,7 +65,7 @@ FN NsCaptureOpenParameters (
     )
 
     IF OsError ( status ) THEN
-        MmFreeString ( sysparams^.Path )
+        MmFreeCapturedString ( &sysparams^.Path )
 
         RETURN status
     END
@@ -89,8 +89,8 @@ FN NsFreeOpenParameters (
 
     // Free open parameters that were previously copied in from userspace.
 
-    IF params^.Path THEN
-        MmFreeString ( params^.Path )
+    IF params^.Path.Data THEN
+        MmFreeCapturedString ( &params^.Path )
 
         IF params^.InitialHandle.Entry THEN
             // Unreference the initial handle.
@@ -129,7 +129,7 @@ FN NsCreateObject (
 
     obparams^.Flags = params^.Captured.ObFlags
 
-    IF params^.Path THEN
+    IF params^.Path.Data THEN
         // We are atomically creating the object within the namespace.
 
         params^.Captured.Flags |= OS_OPEN_CREATE
@@ -175,7 +175,7 @@ FN NsLookupObject (
 
     // This is a helper routine for looking up an object within the namespace.
 
-    IF NOT params^.Path THEN
+    IF NOT params^.Path.Data THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 

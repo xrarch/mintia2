@@ -229,16 +229,20 @@ FN PsInitializeStage1 ()
 
     params : NsOpenParameters
 
-    params.Path = NULLPTR
+    params.Path.Data = NULLPTR
 
     params.Captured.Flags = 0
     params.Captured.ObFlags = 0
     params.Captured.Permissions = OS_ACCESS_OWNER_ALL
 
+    name : RtlString
+
+    RtlInitializeString ( &name, "System" )
+
     status := PsCreateProcessObject (
         &params, // params
         NULLPTR, // partition
-        "System", // name
+        &name, // name
         -1, // quotauid
         0, // flags
         OUT PsSystemProcess, // process
@@ -252,8 +256,10 @@ FN PsInitializeStage1 ()
     // Create the reaper thread, which performs the final unreferencing of
     // terminated threads.
 
+    RtlInitializeString ( &name, "Reaper" )
+
     status = PsCreateExecutiveThread (
-        "Reaper", // name
+        &name, // name
         &PspReaperThread, // startfunc
         0, // context1
         0, // context2
@@ -269,8 +275,10 @@ FN PsInitializeStage1 ()
     // Create the balance manager thread, which will perform stage 2
     // initialization of the system.
 
+    RtlInitializeString ( &name, "Balance Manager" )
+
     status = PsCreateExecutiveThread (
-        "Balance Manager", // name
+        &name, // name
         &ExStartSystemProcess, // startfunc
         0, // context1
         0, // context2

@@ -5,7 +5,7 @@
 #INCLUDE "Psp.hjk"
 
 STRUCT PspProcessContext
-    Name : ^UBYTE,
+    Name : ^RtlString,
     Partition : ^MiPartition,
     QuotaUid : ULONG,
     Flags : ULONG,
@@ -323,7 +323,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     KeInitializeProcess (
         &process^.Pcb, // process
-        ctx^.Name, // name
+        ctx^.Name^.Data, // name
     )
 
     // Initialize the process for usage by Ob.
@@ -620,7 +620,7 @@ PUBLIC PsProcessType : ObType = {
 FN PsCreateProcessObject (
     IN params : ^NsOpenParameters,
     IN partition : ^MiPartition,
-    IN name : ^UBYTE,
+    IN name : ^RtlString,
     IN quotauid : UWORD,
     IN flags : UWORD,
     OUT process : ^PsProcess,
@@ -665,7 +665,7 @@ EXTERN MmPartitionType : ObType
 FN PsCreateProcess (
     IN params : ^NsOpenParameters,
     IN partitionhandle : UWORD,
-    IN name : ^UBYTE,
+    IN name : ^RtlString,
     IN quotauid : UWORD,
     IN flags : UWORD,
     OUT handle : UWORD,
@@ -737,7 +737,7 @@ END
 FN OsCreateProcess (
     IN params : ^OsOpenParameters,
     IN partitionhandle : UWORD,
-    IN name : ^UBYTE,
+    IN name : ^RtlString,
     IN quotauid : UWORD,
     IN flags : UWORD,
     OUT handle : UWORD,
@@ -745,11 +745,11 @@ FN OsCreateProcess (
 
     // Create a thread object, system service.
 
-    sysname : ^UBYTE
+    sysname : RtlString
 
     status := MmCaptureString (
         name, // string
-        OUT sysname, // output
+        &sysname, // output
     )
 
     IF OsError ( status ) THEN
@@ -770,7 +770,7 @@ FN OsCreateProcess (
     status = PsCreateProcess (
         &sysparams, // params
         partitionhandle, // partitionhandle
-        sysname, // name
+        &sysname, // name
         quotauid, // quotauid
         flags, // flags
         OUT handle, // handle
@@ -780,7 +780,7 @@ FN OsCreateProcess (
 
 @Exit
 
-    MmFreeString ( sysname )
+    MmFreeCapturedString ( &sysname )
 
     RETURN status
 END
@@ -934,7 +934,7 @@ FN PsQueryProcessObject (
 
     RtlCopyString (
         &query^.Name[0], // dest
-        ExNameToString ( paged^.Name ), // src
+        ExNameToString ( paged^.Name )^.Data, // src
         OS_NAME_MAX + 1, // bufsize
     )
 

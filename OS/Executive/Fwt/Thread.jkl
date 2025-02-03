@@ -1,11 +1,16 @@
 #INCLUDE "Fwt.hjk"
+#INCLUDE "<ll>/System/OsProcess.hjk"
 
 FN CreateThread(IN StartRoutine : KeStartThreadF, IN Fwd : ^FireworkData) : UWORD
 
     Thrd : ^PsThread
     
+    name : RtlString
+
+    RtlInitializeString ( &name, "FireworksPart" )
+
     status := PsCreateExecutiveThread (
-        "FireworksPart",   // name
+        &name,             // name
         StartRoutine,      // startfunc
         CAST Fwd TO UWORD, // context1
         NULLPTR,           // context2
@@ -16,6 +21,12 @@ FN CreateThread(IN StartRoutine : KeStartThreadF, IN Fwd : ^FireworkData) : UWOR
     IF OsError ( status ) THEN
         RETURN 0
     END
+
+    KeSetBasePriorityThread (
+        &Thrd^.Tcb, // thread
+        OS_PRIORITY_DEFAULT + ((KeSharedUserPage^.Uptime.Low / 10) & 3), // pri
+        TRUE, // setcurrentpriority
+    )
     
     ObUnreferenceObject(Thrd)
     RETURN 1

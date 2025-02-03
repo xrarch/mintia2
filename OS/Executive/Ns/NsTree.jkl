@@ -26,7 +26,7 @@ NspMountList : RtlListEntry
 FN NspInitializeEntry (
     IN entry : ^NsEntry,
     IN flags : UWORD,
-    IN name : ^UBYTE,
+    IN name : ^RtlString,
 ) : UWORD
 
     // Initialize an entry. Returns FALSE on failure.
@@ -76,7 +76,7 @@ FN (RtlAvlLessThanF) NspCompareEntries (
     str1 := ExNameToString ( (CONTAINEROF a TO NsEntry.LookupEntry)^.Name )
     str2 := ExNameToString ( (CONTAINEROF b TO NsEntry.LookupEntry)^.Name )
 
-    RETURN CAST RtlCompareString (
+    RETURN CAST RtlCompareRtlString (
         str1, // str1
         str2, // str2
     ) TO WORD < 0
@@ -246,7 +246,7 @@ END
 
 #SECTION "PAGEtext"
 FN NspCreateEntry (
-    IN name : ^UBYTE,
+    IN name : ^RtlString,
     IN parent : ^NsEntry,
     IN flags : UWORD,
 ) : ^NsEntry
@@ -484,7 +484,7 @@ END
 #SECTION "PAGEtext"
 FN NspLookupChild (
     IN entry : ^NsEntry,
-    IN name : ^UBYTE,
+    IN name : ^RtlString,
 ) : ^NsEntry
 
     // Look up a child of this entry by name. Return the entry or NULLPTR if not
@@ -503,7 +503,7 @@ FN NspLookupChild (
 
         child = CONTAINEROF avlnode TO NsEntry.LookupEntry
 
-        res := CAST RtlCompareString (
+        res := CAST RtlCompareRtlString (
             name, // str1
             ExNameToString ( child^.Name ), // str2
         ) TO WORD
@@ -591,13 +591,16 @@ FN NsLookupEntryByPath (
 
     component : UBYTE[OS_NAME_MAX + 1]
 
+    componentstring : RtlString
+    componentstring.Data = &component[0]
+
     lookupcontext : NsLookupContext
 
     event : ^ExEventCounter
 
     // Capture some stuff from the params structure.
 
-    path := params^.Path
+    path := params^.Path.Data
     flags := params^.Captured.Flags
 
     // Initialize symlink following state.
@@ -738,6 +741,10 @@ FN NsLookupEntryByPath (
 
         component[status] = 0
 
+        // Store length.
+
+        componentstring.Length = status
+
         IF component[0] == '.' THEN
             IF component[1] == 0 THEN
                 // The path component was dot, the current directory.
@@ -790,7 +797,7 @@ FN NsLookupEntryByPath (
 
         child := NspLookupChild (
             currententry, // entry
-            &component[0], // name
+            &componentstring, // name
         )
 
         IF child THEN
@@ -856,7 +863,7 @@ FN NsLookupEntryByPath (
 
                 // Set the lookup path to the symlink path.
 
-                path = ExNameToString ( symstate.SymlinkCookie )
+                path = ExNameToString ( symstate.SymlinkCookie )^.Data
 
                 // We're changing the initial handle, so unreference the current
                 // one.
@@ -997,7 +1004,7 @@ FN NsLookupEntryByPath (
             // Create a new entry.
 
             child = NspCreateEntry (
-                &component[0], // name
+                &componentstring, // name
                 currententry, // parent
                 NS_ENTRY_TRANSITION, // flags
             )

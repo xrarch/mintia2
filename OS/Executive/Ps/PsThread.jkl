@@ -5,7 +5,7 @@
 #INCLUDE "Psp.hjk"
 
 STRUCT PspThreadContext
-    Name : ^UBYTE,
+    Name : ^RtlString,
     StartFunc : KeStartThreadF,
     Context1 : UWORD,
     Context2 : UWORD,
@@ -324,7 +324,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     IF NOT KeInitializeThread (
         &process^.Pcb, // process
         &thread^.Tcb, // thread
-        ctx^.Name, // name
+        ctx^.Name^.Data, // name
         kstack, // kstack
         KE_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
         turnstile, // turnstile
@@ -991,7 +991,7 @@ PUBLIC PsThreadType : ObType = {
 #SECTION "PAGEtext"
 FN PsCreateThreadObject (
     IN params : ^NsOpenParameters,
-    IN name : ^UBYTE,
+    IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -1030,7 +1030,7 @@ END
 
 #SECTION "PAGEtext"
 FN PsCreateExecutiveThread (
-    IN name : ^UBYTE,
+    IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -1043,7 +1043,7 @@ FN PsCreateExecutiveThread (
 
     params : NsOpenParameters
 
-    params.Path = NULLPTR
+    params.Path.Data = NULLPTR
 
     params.Captured.Flags = 0
     params.Captured.ObFlags = 0
@@ -1074,7 +1074,7 @@ END
 #SECTION "PAGEtext"
 FN PsCreateThread (
     IN params : ^NsOpenParameters,
-    IN name : ^UBYTE,
+    IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -1169,7 +1169,7 @@ END
 #SECTION "PAGEtext"
 FN OsCreateThread (
     IN params : ^OsOpenParameters,
-    IN name : ^UBYTE,
+    IN name : ^RtlString,
     IN startfunc : OsStartThreadF,
     IN context : UWORD,
     IN processhandle : UWORD,
@@ -1179,11 +1179,11 @@ FN OsCreateThread (
 
     // Create a thread object, system service.
 
-    sysname : ^UBYTE
+    sysname : RtlString
 
     status := MmCaptureString (
         name, // string
-        OUT sysname, // output
+        &sysname, // output
     )
 
     IF OsError ( status ) THEN
@@ -1203,7 +1203,7 @@ FN OsCreateThread (
 
     status = PsCreateThread (
         &sysparams, // params
-        sysname, // name
+        &sysname, // name
         &PspUserThreadEntry, // startfunc
         CAST startfunc TO UWORD, // context1
         context, // context2
@@ -1216,7 +1216,7 @@ FN OsCreateThread (
 
 @Exit
 
-    MmFreeString ( sysname )
+    MmFreeCapturedString ( &sysname )
 
     RETURN status
 END

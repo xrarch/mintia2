@@ -15,8 +15,8 @@ STRUCT MiCopyContext
 END
 
 STRUCT MiStringCopyContext
-    Buffer : ^VOID,
-    Source : ^VOID,
+    Output : ^RtlString,
+    Source : ^RtlString,
     Charged : UWORD,
 END
 
@@ -119,10 +119,25 @@ FN (KeAbortableF) MiSafeCaptureString (
 
     ctx := CAST context TO ^MiStringCopyContext
 
-    // Measure the length of the string. This can take an exception if we got a
-    // bad user pointer.
+    // Validate the string pointer.
 
-    len := RtlMeasureString ( ctx^.Source )
+    src := ctx^.Source
+
+    IF src >= MI_USER_SPACE_END THEN
+        RETURN OS_STATUS_READ_FAULT
+    END
+
+    // Capture the data and length fields.
+    // This can take an exception if we got a bad string pointer.
+
+    data := src^.Data
+    len := src^.Length
+
+    IF data >= MI_USER_SPACE_END THEN
+        RETURN OS_STATUS_READ_FAULT
+    END
+
+    output := ctx^.Output
 
     // Charge quota.
 
@@ -158,11 +173,14 @@ FN (KeAbortableF) MiSafeCaptureString (
     // Set the buffer field of the context so it gets freed if the copy throws
     // an exception.
 
-    ctx^.Buffer = buf
+    output^.Data = buf
+    output^.Length = len
+
+    // Copy the string into the buffer.
 
     RtlCopyBytes (
         buf, // dest
-        ctx^.Source, // src
+        data, // src
         len, // sz
     )
 
@@ -175,26 +193,21 @@ END
 
 #SECTION "PAGEtext"
 EXPORT FN MmCaptureString (
-    IN string : ^UBYTE,
-    OUT output : ^UBYTE,
+    IN string : ^RtlString,
+    IN output : ^RtlString,
 ) : OsStatus
 
     // Safely capture a null-terminated string from userspace.
     // The "string" pointer is supplied by usermode.
 
-    IF string >= MI_USER_SPACE_END THEN
-        RETURN OS_STATUS_READ_FAULT
-    END
-
-    // Measure the length of the string, allocate an appropriately sized pool
-    // block, and copy it in, all inside an exception wrapper.
+    output^.Data = NULLPTR
 
     ab : KeAbortBlock
 
     ctx : MiStringCopyContext
 
     ctx.Source = string
-    ctx.Buffer = NULLPTR
+    ctx.Output = output
     ctx.Charged = 0
 
     status := KeExceptionJacket (
@@ -206,11 +219,11 @@ EXPORT FN MmCaptureString (
     IF OsError ( status ) THEN
         // The call aborted due to a bad exception.
 
-        IF ctx.Buffer THEN
+        IF output^.Data THEN
             // It allocated a buffer before it aborted, so free the buffer.
 
             MmFreePool (
-                ctx.Buffer, // ptr
+                output^.Data, // ptr
                 'CpSt', // tag
             )
         END
@@ -230,18 +243,22 @@ EXPORT FN MmCaptureString (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmFreeString (
-    IN string : ^UBYTE,
+EXPORT FN MmFreeCapturedString (
+    IN string : ^RtlString,
 )
 
     // Free a previously captured string.
 
-    charge := MmGetOverheadOfBlock ( string )
+    charge := MmGetOverheadOfBlock ( string^.Data )
 
     MmFreePool (
-        string, // ptr
-        'ExSt', // tag
+        string^.Data, // ptr
+        'CpSt', // tag
     )
+
+#IF BLD_CHK
+    string^.Data = NULLPTR
+#END
 
     // Uncharge pool quota.
 
