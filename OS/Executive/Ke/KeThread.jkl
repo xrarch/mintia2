@@ -176,6 +176,8 @@ FN KeInitializeThread (
     RtlInitializeList ( &thread^.LapcListHead )
     RtlInitializeList ( &thread^.UapcListHead )
 
+    thread^.ExecutingKapc = FALSE
+
     // Initialize the time counters.
 
     RtlSetUquadToUlong ( &thread^.UserTimeMs, 0 )
@@ -245,7 +247,8 @@ FN KeInitializeThread (
 
     // Initialize abort state.
 
-    thread^.AbortListHead = NULLPTR
+    thread^.AbortListHead[0] = NULLPTR
+    thread^.AbortListHead[1] = NULLPTR
 
     thread^.LastFaultStatus = 0
 

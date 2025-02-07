@@ -610,6 +610,7 @@ STRUCT KeThread
 
     BestowedPriority : UBYTE,
     BestowedInteractivity : UBYTE,
+    ExecutingKapc : UBYTE,
 
     // Put large fields at the end to increase odds that the commonly accessed
     // ones are within range of immediate offsets on various architectures.
@@ -643,7 +644,10 @@ STRUCT KeThread
 
     PanicStackPointer : ^VOID,
 
-    AbortListHead : ^KeAbortBlock,
+    // The list head array is indexed by the current value of the ExecutingKapc
+    // field.
+
+    AbortListHead : ^KeAbortBlock[2],
 
     UserTimeMs : RtlUquad,
     DpcTimeMs : RtlUquad,
@@ -1023,14 +1027,19 @@ FNPTR KeAbortableF (
     IN context : ^VOID,
 ) : OsStatus
 
+#DEFINE KE_ABORT_CATCH_SYSTEM_SPACE 1
+#DEFINE KE_ABORT_CATCH_USER_SPACE 2
+
 STRUCT KeAbortBlock
     Next : ^KeAbortBlock,
     Context : OsContext,
     Status : ULONG,
+    Flags : ULONG,
 END
 
 EXTERN FN KeExceptionJacket (
     IN abortblock : ^KeAbortBlock,
     IN func : KeAbortableF,
     IN context : ^VOID,
+    IN flags : UWORD,
 ) : OsStatus

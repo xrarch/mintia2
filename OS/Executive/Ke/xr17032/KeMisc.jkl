@@ -10,6 +10,7 @@
 // a0 - abortblock
 // a1 - func
 // a2 - context
+// a3 - flags
 // outputs:
 // a3 - status
 KeExceptionJacket:
@@ -29,9 +30,17 @@ KeExceptionJacket:
     subi t0, zero, 4096
     mov  s1, long [t0 + KiPrb_CurrentThread]
 
+    // Bias the current thread pointer by 4 * ExecutingKapc.
+    // This makes it so when we add the offset KeThread_AbortListHead later,
+    // we point to the right list head.
+
+    mov  t0, byte [s1 + KeThread_ExecutingKapc]
+    add  s1, s1, t0 LSH 2
+
     // Initialize the abort block.
 
     mov  long [s0 + (KeAbortBlock_Context + OsContext_Sp)], sp
+    mov  long [s0 + KeAbortBlock_Flags], a3
 
     // Save all the non-volatile (callee-saved) registers that we didn't already
     // save on our stack frame.

@@ -12,6 +12,7 @@ PUBLIC KiInterruptsDisabled := TRUE
 // a0 - abortblock
 // a1 - func
 // a2 - context
+// a3 - flags
 // outputs:
 // a3 - status
 KeExceptionJacket:
@@ -31,6 +32,7 @@ KeExceptionJacket:
 
     mov  [s0 + (KeAbortBlock_Context + OsContext_Sp)], sp
     mov  [s0 + (KeAbortBlock_Context + OsContext_Fp)], fp
+    mov  [s0 + KeAbortBlock_Flags], a3
 
     // Save all the non-volatile (callee-saved) registers that we didn't already
     // save on our stack frame.
@@ -62,6 +64,10 @@ KeExceptionJacket:
     // The AbortListHead field is out of range of the fox32 offsets.
 
     add  s1, KeThread_AbortListHead
+    movz.8 t0, [s1 + KeThread_ExecutingKapc]
+    sla  t0, 2
+    add  s1, t0
+
     mov  [s0 + KeAbortBlock_Next], [s1]
     mov  [s1], s0
 

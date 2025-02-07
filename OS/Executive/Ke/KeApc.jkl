@@ -456,10 +456,14 @@ FN KiDispatchKernelApcQueue (
 
     // Dispatch the APCs.
 
+    current^.ExecutingKapc = TRUE
+
     KiDispatchKernelModeApcs (
         current, // thread
         &current^.KapcListHead, // head
     )
+
+    current^.ExecutingKapc = FALSE
 END
 
 FN KiDispatchLazyApcQueue (

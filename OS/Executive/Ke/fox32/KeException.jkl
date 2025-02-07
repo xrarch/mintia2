@@ -670,10 +670,21 @@ FN KiAbort (
 
     // Abort the current operation of the thread.
 
-    abortblock := thread^.AbortListHead
+    IF NOT OsStatusIsAddressError ( status ) THEN
+        // Not an address error status, so aborting is nonsense.
 
-    IF NOT abortblock THEN
-        // No abortable operation was in progress, this is just a kernel bug.
+        KiFaultCrash ( context, ecause )
+    END
+
+    abortblock := thread^.AbortListHead[thread^.ExecutingKapc]
+
+    IF NOT abortblock OR MmShouldAccessCrash (
+        abortblock, // abortblock
+        CAST context^.BadAddr TO ^VOID, // badaddr
+        status, // status
+    ) THEN
+        // No abortable operation was in progress, or this abort block isn't
+        // catching this type of error. This is just a kernel bug.
 
         KiFaultCrash ( context, ecause )
     END
@@ -685,7 +696,7 @@ FN KiAbort (
     // Redirect the trap frame to return to the abort vector.
 
     context^.S0 = abortblock
-    context^.S1 = &thread^.AbortListHead
+    context^.S1 = &thread^.AbortListHead[thread^.ExecutingKapc]
     context^.Epc = &KiAbortVector
 END
 
