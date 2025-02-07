@@ -36,6 +36,7 @@ FN NsCaptureOpenParameters (
     status = MmCaptureString (
         &sysparams^.Captured.Path, // string
         &sysparams^.Path, // output
+        OS_PATH_MAX, // maxlen
     )
 
     IF OsError ( status ) THEN
@@ -72,8 +73,10 @@ FN NsCaptureOpenParameters (
 
     // Capture the namespace handle stored in the file object.
 
-    sysparams^.InitialHandle.Entry = file^.Handle.Entry
-    sysparams^.InitialHandle.Subspace = file^.Handle.Subspace
+    NsCopyHandle (
+        &sysparams^.InitialHandle, // dest
+        &file^.Handle, // src
+    )
 
     NsReferenceHandle ( &sysparams^.InitialHandle )
 

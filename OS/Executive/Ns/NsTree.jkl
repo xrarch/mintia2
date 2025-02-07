@@ -219,32 +219,6 @@ FN NspUnreferenceEntry (
 END
 
 #SECTION "PAGEtext"
-FN NspReferenceSubspace (
-    IN subspace : ^NsSubspace,
-)
-
-    // Increment the reference count of the subspace.
-
-    KeIncrementUlong (
-        &subspace^.References, // ptr
-        1, // inc
-    )
-END
-
-#SECTION "PAGEtext"
-FN NspUnreferenceSubspace (
-    IN subspace : ^NsSubspace,
-)
-
-    // Decrement the reference count of the subspace.
-
-    KeIncrementUlong (
-        &subspace^.References, // ptr
-        0xFFFFFFFF, // inc
-    )
-END
-
-#SECTION "PAGEtext"
 FN NspCreateEntry (
     IN name : ^RtlString,
     IN parent : ^NsEntry,
@@ -534,8 +508,10 @@ FN NspCaptureRootHandle (
 
     KeAcquireLockShared ( &processpaged^.RootLock )
 
-    roothandle^.Entry = processpaged^.RootHandle.Entry
-    roothandle^.Subspace = processpaged^.RootHandle.Subspace
+    NsCopyHandle (
+        roothandle, // dest
+        &processpaged^.RootHandle, // src
+    )
 
     NsReferenceHandle ( roothandle )
 

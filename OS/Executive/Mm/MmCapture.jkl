@@ -18,6 +18,7 @@ STRUCT MiStringCopyContext
     Output : ^RtlString,
     Source : ^RtlString,
     Charged : UWORD,
+    MaximumLength : UWORD,
 END
 
 #SECTION "PAGEtext"
@@ -131,10 +132,15 @@ FN (KeAbortableF) MiSafeCaptureString (
     // This can take an exception if we got a bad string pointer.
 
     data := src^.Data
-    len := src^.Length
 
     IF data >= MI_USER_SPACE_END THEN
         RETURN OS_STATUS_READ_FAULT
+    END
+
+    len := src^.Length
+
+    IF len >= ctx^.MaximumLength THEN
+        RETURN OS_STATUS_STRING_TOO_LONG
     END
 
     output := ctx^.Output
@@ -195,6 +201,7 @@ END
 EXPORT FN MmCaptureString (
     IN string : ^RtlString,
     IN output : ^RtlString,
+    IN maxlen : UWORD,
 ) : OsStatus
 
     // Safely capture a null-terminated string from userspace.
@@ -209,6 +216,7 @@ EXPORT FN MmCaptureString (
     ctx.Source = string
     ctx.Output = output
     ctx.Charged = 0
+    ctx.MaximumLength = maxlen
 
     status := KeExceptionJacket (
         &ab, // abortblock

@@ -148,15 +148,20 @@ EXTERN FN NspUnreferenceEntry (
     IN entry : ^NsEntry,
 )
 
-EXTERN FN NspReferenceSubspace (
-    IN subspace : ^NsSubspace,
-)
-
-EXTERN FN NspUnreferenceSubspace (
-    IN subspace : ^NsSubspace,
-)
-
 EXTERN FN NsInitialize ()
+
+#MACRO NsCopyHandle ( dest, src ) [
+    NOTHING (dest)^.Entry = (src)^.Entry
+    NOTHING (dest)^.Subspace = (src)^.Subspace
+]
+
+#MACRO NspReferenceSubspace ( subspace ) [
+    KeIncrementUlong ( &(subspace)^.References, 1 )
+]
+
+#MACRO NspUnreferenceSubspace ( subspace ) [
+    KeIncrementUlong ( &(subspace)^.References, 0xFFFFFFFF )
+]
 
 #MACRO NsUnreferenceHandle ( handle ) [
     NspUnreferenceEntry ( (handle)^.Entry )
