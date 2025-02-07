@@ -949,32 +949,14 @@ FN KiInterruptUsermode (
 
     IF OsError ( status ) THEN
         // Failed to copy out the context frame.
+        // This is fatal to the entire process.
 
-        usp = thread^.PanicStackPointer
+        KeSignalProcess (
+            thread^.Process, // process
+            OS_SIGNAL_KILL, // signal
+        )
 
-        IF usp THEN
-            // Thread has a panic stack, switch to it.
-
-            usp -= SIZEOF OsContext
-
-            status = MmSafeCopyOut (
-                CAST usp TO ^VOID, // dest
-                trapframe, // src
-                SIZEOF OsContext, // sz
-            )
-        END
-
-        IF OsError ( status ) THEN
-            // No panic stack or failed to copy out to it. This is fatal to the
-            // entire process.
-
-            KeSignalProcess (
-                thread^.Process, // process
-                OS_SIGNAL_KILL, // signal
-            )
-
-            LEAVE
-        END
+        LEAVE
     END
 
     // Redirect the trapframe to the usermode interrupt handler.

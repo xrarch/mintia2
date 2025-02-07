@@ -937,43 +937,6 @@ FN OsSleepThread (
 END
 
 #SECTION "PAGEtext"
-FN OsSetPanicStackThread (
-    IN handle : UWORD,
-    IN panicstacktop : ^VOID,
-) : OsStatus
-
-    // Set the panic stack for a thread.
-
-    thread : ^PsThread
-    access : UWORD
-
-    status := ObReferenceByHandle (
-        handle, // handle
-        &PsThreadType, // type
-        OUT thread, // object
-        OUT access, // access
-    )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    IF access | OS_ACCESS_WRITE != access THEN
-        status = OS_STATUS_ACCESS_DENIED
-
-        GOTO Exit
-    END
-
-    thread^.Tcb.PanicStackPointer = panicstacktop
-
-@Exit
-
-    ObUnreferenceObject ( thread )
-
-    RETURN status
-END
-
-#SECTION "PAGEtext"
 PUBLIC PsThreadType : ObType = {
     [Name] = "Thread",
 
