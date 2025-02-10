@@ -12,7 +12,41 @@ FN PspInheritProcessGroup (
 
     // Inherit the process group of the parent into the child.
 
-    // NYI
+    parentpaged := parent^.Paged
+    childpaged := child^.Paged
+
+    KeAcquireLockExclusive ( &parentpaged^.GroupLock )
+
+    IF parentpaged^.SessionGroup THEN
+        // If there's a session group then there's a process group too.
+        // Reference both and inherit in the child.
+
+        group := parentpaged^.ProcessGroup
+        sidgroup := parentpaged^.SessionGroup
+
+        ObReferenceObject ( sidgroup )
+        ObReferenceObject ( group )
+
+        childpaged^.SessionGroup = sidgroup
+        childpaged^.ProcessGroup = group
+
+        // Add the child to the process group's list.
+
+        KeAcquireLockExclusive ( &group^.Lock )
+
+        RtlInsertAtTailList (
+            &group^.ProcessListHead, // head
+            &childpaged^.GroupEntry, // entry
+        )
+
+        KeReleaseLock ( &group^.Lock )
+
+    ELSE
+        childpaged^.SessionGroup = NULLPTR
+        childpaged^.ProcessGroup = NULLPTR
+    END
+
+    KeReleaseLock ( &parentpaged^.GroupLock )
 END
 
 #SECTION "PAGEtext"
@@ -20,13 +54,55 @@ FN PspRemoveProcessGroup (
     IN process : ^PsProcess,
 )
 
-    // Remove the process from its process group, if it's in one.
+    // Remove the process from its process group.
+    // Synchronization is taken care of by the caller.
 
-    // If this is the group leader, and there are other processes in the group,
-    // then atomically exchange our pointer in the PID table with that of the
-    // group object. This prevents the PID from being reused until the group is
-    // gone from the system, otherwise a process could inadvertently (or
-    // maliciously) become a group leader.
+    paged := process^.Paged
+    group := paged^.ProcessGroup
 
-    // NYI
+    // Remove the child from the group list.
+
+    KeAcquireLockExclusive ( &group^.Lock )
+
+    RtlRemoveEntryList ( &paged^.GroupEntry )
+
+    KeReleaseLock ( &group^.Lock )
+
+    // Unreference the group.
+
+    ObUnreferenceObject ( group )
+
+    // Unreference the session.
+
+    ObUnreferenceObject ( paged^.SessionGroup )
 END
+
+#SECTION "PAGEtext"
+FN (ObTypeDeleteF) PspDeleteGroupObject (
+    IN object : ^VOID,
+) : UWORD
+
+    // Delete a group object.
+
+    group := CAST object TO ^PsProcessGroup
+
+    IF group^.LeaderDied THEN
+        // If the leader died then we're currently occupying a position in the
+        // PID table, which we need to get rid of now.
+
+        PspDeleteId ( group^.LeaderPid )
+    END
+END
+
+#SECTION "PAGEtext"
+PUBLIC PsGroupType : ObType = {
+    [Name] = "Group",
+
+    [Delete] = &PspDeleteGroupObject,
+
+    [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
+    [TypeIdentifier] = OS_GROUP_TYPE,
+    [Tag] = 'Grup',
+
+    [IsPaged] = TRUE,
+}

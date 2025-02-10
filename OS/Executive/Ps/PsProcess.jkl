@@ -235,7 +235,29 @@ FN (ObTypeDeleteF) PspDeleteProcessObject (
 
     // Delete the PID.
 
-    PspDeleteId ( paged^.Pid )
+    group := paged^.ProcessGroup
+
+    IF group AND group^.LeaderPid == paged^.Pid THEN
+        // We were the process group leader, so we need to exchange the PID
+        // table entry with a pointer to the process group, to reserve it
+        // until the last process group member has died. A process group ID not
+        // being reused as a PID until all members are gone is a requirement of
+        // POSIX.
+
+        group^.LeaderDied = TRUE
+
+        PspExchangeId (
+            paged^.Pid, // id
+            group, // object
+        )
+
+    ELSE
+        PspDeleteId ( paged^.Pid )
+    END
+
+    IF group THEN
+        PspRemoveProcessGroup ( process )
+    END
 
     // Uninitialize the root and current directory of the process.
 
@@ -356,6 +378,10 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     // Initialize the process for usage by Ps.
 
+    // Initialize the group lock.
+
+    KeInitializeLock ( &paged^.GroupLock )
+
     // Intern the name.
 
     paged^.Name = ExFindName ( ctx^.Name )
@@ -400,7 +426,6 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     paged^.TerminationStatus = 0
 
     paged^.Job = NULLPTR
-    paged^.ProcessGroup = NULLPTR
 
     IF flags & OS_PROCESS_DETACH_JOB == 0 THEN
         // Inherit the parent process's job object.
@@ -417,14 +442,12 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
         END
     END
 
-    IF flags & OS_PROCESS_DETACH_CONSOLE == 0 THEN
-        // Inherit the parent process's console group.
+    // Inherit the parent process's group and session.
 
-        PspInheritProcessGroup (
-            process, // child
-            currentprocess, // parent
-        )
-    END
+    PspInheritProcessGroup (
+        process, // child
+        currentprocess, // parent
+    )
 
     // Put on the global process list.
 
@@ -927,6 +950,18 @@ FN PsQueryProcessObject (
 
     query^.ThreadCount = process^.Pcb.ThreadCount
     query^.TerminationStatus = paged^.TerminationStatus
+
+    KeAcquireLockExclusive ( &paged^.GroupLock )
+
+    IF paged^.SessionGroup THEN
+        query^.Sid = paged^.SessionGroup^.LeaderPid
+        query^.Pgid = paged^.ProcessGroup^.LeaderPid
+    ELSE
+        query^.Sid = 0
+        query^.Pgid = 0
+    END
+
+    KeReleaseLock ( &paged^.GroupLock )
 
     MmQueryProcess (
         process, // process

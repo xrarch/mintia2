@@ -17,16 +17,19 @@ EXTERN PsGroupType : ObType
 STRUCT PsProcessGroup
     ProcessListHead : RtlListEntry,
 
-    LeaderPid : ULONG,
-    LeaderSid : ULONG,
-
     Lock : KeLock,
+
+    LeaderPid : ULONG,
+
+    LeaderDied : UBYTE,
 END
 
 STRUCT PsPagedProcess
     GlobalEntry : RtlListEntry,
 
     JobEntry : RtlListEntry,
+
+    GroupEntry : RtlListEntry,
 
     Process : ^PsProcess,
 
@@ -48,6 +51,7 @@ STRUCT PsPagedProcess
     RootLock : KeLock,
     ActivationLock : KeLock,
     HandleTableLock : KeLock,
+    GroupLock : KeLock,
 
     Pid : ULONG,
     ParentPid : ULONG,

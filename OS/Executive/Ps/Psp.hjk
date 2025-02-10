@@ -18,23 +18,9 @@
 
 EXTERN PspTurnstileZone : MmZoneHeader
 
-EXTERN PspLookupLock : KeLock
-
 EXTERN PspProcessListLock : KeLock
 
 EXTERN PspProcessListHead : RtlListEntry
-
-#MACRO PspLockLookupExclusive () [
-    KeAcquireLockExclusive ( &PspLookupLock )
-]
-
-#MACRO PspLockLookupShared () [
-    KeAcquireLockShared ( &PspLookupLock )
-]
-
-#MACRO PspUnlockLookup () [
-    KeReleaseLock ( &PspLookupLock )
-]
 
 EXTERN FN (KeStartThreadF) PspReaperThread (
     IN context1 : UWORD,
@@ -59,6 +45,11 @@ EXTERN FN PspCreateId (
     IN object : ^VOID,
     OUT id : UWORD,
 ) : OsStatus
+
+EXTERN FN PspExchangeId (
+    IN id : UWORD,
+    IN object : ^VOID,
+)
 
 EXTERN FN PspDeleteId (
     IN id : UWORD,

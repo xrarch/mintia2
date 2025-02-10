@@ -26,7 +26,6 @@ PspIdleProcessPaged : PsPagedProcess
 PspIdTable : ExHandleTable
 
 PspIdLock : KeLock = KE_INITIAL_LOCK
-PUBLIC PspLookupLock : KeLock = KE_INITIAL_LOCK
 
 #DEFINE PSP_ID_INDEX_SHIFT 5
 #DEFINE PSP_ID_SEQUENCE_MASK 31
@@ -110,6 +109,32 @@ FN PspDeleteId (
 END
 
 #SECTION "PAGEtext"
+FN PspExchangeId (
+    IN id : UWORD,
+    IN object : ^VOID,
+)
+
+    // Exchange an ID with a new object pointer.
+
+    PspLockIdExclusive ()
+
+    entry := CAST ExLookupHandle (
+        &PspIdTable, // handletable
+        id >> PSP_ID_INDEX_SHIFT, // handle
+    ) TO ^PspIdEntry
+
+#IF BLD_CHK
+    IF NOT entry THEN
+        KeCrash ( "PspExchangeId: no such ID\n" )
+    END
+#END
+
+    entry^.Object = object
+
+    PspUnlockId ()
+END
+
+#SECTION "PAGEtext"
 FN PspReferenceById (
     IN pid : UWORD,
     IN type : ^ObType,
@@ -118,26 +143,14 @@ FN PspReferenceById (
 
     // Reference an object by its PID or TID.
 
-    entry : ^PspIdEntry
-
     status := OS_STATUS_SUCCESS
-
-    lookuplocked := type == &PsThreadType
-
-    IF lookuplocked THEN
-        // We lock the lookup lock exclusive because it is anticipated that
-        // looking up threads by ID will be much less common than creation of
-        // threads. The creation codepath locks this shared.
-
-        PspLockLookupExclusive ()
-    END
 
     PspLockIdShared ()
 
-    entry = ExLookupHandle (
+    entry := CAST ExLookupHandle (
         &PspIdTable, // handletable
         pid >> PSP_ID_INDEX_SHIFT, // handle
-    )
+    ) TO ^PspIdEntry
 
     IF NOT entry THEN
         // No such ID.
@@ -162,6 +175,35 @@ FN PspReferenceById (
     IF ObFindHeader ( object )^.Type != type THEN
         // Not the correct object type.
 
+        IF ObFindHeader ( object )^.Type == &PsProcessType AND
+            type == &PsGroupType THEN
+
+            // We're looking for a process group and this is a process.
+            // If it's the group leader then we can find the process group
+            // through it.
+
+            paged := (CAST object TO ^PsProcess)^.Paged
+
+            KeAcquireLockExclusive ( &paged^.GroupLock )
+
+            IF paged^.ProcessGroup AND
+                paged^.ProcessGroup^.LeaderPid == pid THEN
+
+                // What we were *really* looking for was the process group.
+                // Since we found the leader, we can return the group object.
+
+                object = paged^.ProcessGroup
+
+                ObReferenceObject ( object )
+
+                KeReleaseLock ( &paged^.GroupLock )
+
+                GOTO Exit
+            END
+
+            KeReleaseLock ( &paged^.GroupLock )
+        END
+
         status = OS_STATUS_INVALID_OBJECT_TYPE
 
         GOTO Exit
@@ -176,10 +218,6 @@ FN PspReferenceById (
 @Exit
 
     PspUnlockId ()
-
-    IF lookuplocked THEN
-        PspUnlockLookup ()
-    END
 
     RETURN status
 END

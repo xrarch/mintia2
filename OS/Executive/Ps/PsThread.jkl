@@ -255,10 +255,6 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     END
 
     // Create a TID.
-    // Keep the lookup lock held so that the thread can't be looked up until it
-    // is fully initialized.
-
-    PspLockLookupShared ()
 
     status = PspCreateId (
         thread, // object
@@ -360,10 +356,6 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     ObReferenceObject ( process )
 
-    // Unlock lookup to allow the thread to be looked up by TID.
-
-    PspUnlockLookup ()
-
     IF flags & OS_THREAD_SUSPENDED THEN
         // Suspend the thread. It will block on the suspension event upon return
         // to usermode.
@@ -399,8 +391,6 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     PspDeleteId ( paged^.Tid )
 
 @Error3
-
-    PspUnlockLookup ()
 
     MmFreeKernelStack (
         process, // process
