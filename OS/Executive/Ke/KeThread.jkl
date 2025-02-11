@@ -6,6 +6,11 @@
 #INCLUDE "<ll>/System/OsStatus.hjk"
 #INCLUDE "<ll>/System/OsSignal.hjk"
 
+EXTERN FN PsExitThread ()
+
+PUBLIC KeUexecApcDispatcher : ^VOID
+PUBLIC KeUexecSignalDispatcher : ^VOID
+
 PUBLIC KeReaperEvent : KeEvent
 
 PUBLIC KiReaperListHead : ^KeThread = NULLPTR
@@ -941,7 +946,7 @@ FN KiDispatchSignal (
     // Dispatch the signal in usermode.
 
     KiInterruptUsermode (
-        PsUexecSignalDispatcher, // dispatchfunc
+        KeUexecSignalDispatcher, // dispatchfunc
         thread^.UserFrame, // trapframe
         0, // userfunc
         signal, // context
