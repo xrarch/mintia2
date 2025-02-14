@@ -92,6 +92,27 @@ FN (ObTypeDeleteF) PspDeleteGroupObject (
 
         PspDeleteId ( group^.LeaderPid )
     END
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeInitializeF) PspInitializeGroupObject (
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+    // Initialize a group object.
+
+    group := CAST object TO ^PsProcessGroup
+
+    KeInitializeLock ( &group^.Lock )
+
+    group^.LeaderDied = FALSE
+
+    RtlInitializeList ( &group^.ProcessListHead )
+
+    RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
@@ -99,6 +120,7 @@ PUBLIC PsGroupType : ObType = {
     [Name] = "Group",
 
     [Delete] = &PspDeleteGroupObject,
+    [Initialize] = &PspInitializeGroupObject,
 
     [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
     [TypeIdentifier] = OS_GROUP_TYPE,
@@ -106,3 +128,212 @@ PUBLIC PsGroupType : ObType = {
 
     [IsPaged] = TRUE,
 }
+
+#SECTION "PAGEtext"
+FN PspCreateGroup (
+    IN leader : ^PsProcess,
+    OUT group : ^PsProcessGroup,
+) : OsStatus
+
+    // Create a new group object.
+
+    obparams : ObParameters
+
+    mycred := &PsCurrentProcess()^.Paged^.Cred
+
+    ObMoveCredentials (
+        &obparams.Permissions.Cred, // dest
+        mycred, // src
+    )
+
+    obparams.Permissions.Access = OS_ACCESS_OWNER_ALL
+    obparams.Flags = 0
+    obparams.Type = &PsGroupType
+    obparams.BodySize = SIZEOF PsProcessGroup
+    obparams.NpQuotaBias = 0
+    obparams.PgQuotaBias = 0
+
+    RETURN ObAllocateObject (
+        &obparams, // obparams
+        OUT group, // object
+    )
+END
+
+#SECTION "PAGEtext"
+FN PsSetGroupProcess (
+    IN process : ^PsProcess,
+    IN group : ^PsProcessGroup,
+) : OsStatus
+
+    // Set the group of the process to the specified group.
+
+    status := OS_STATUS_SUCCESS
+
+    paged := process^.Paged
+
+    newgroup := NOT group
+
+    IF newgroup THEN
+        // No group was supplied, so make one.
+
+        status = PspCreateGroup (
+            process, // leader
+            OUT group, // group
+        )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+    END
+
+    // Acquire the process's group lock.
+
+    KeAcquireLockExclusive ( &paged^.GroupLock )
+
+    sessiongroup := paged^.SessionGroup
+
+    IF NOT sessiongroup THEN
+        // Doesn't even have a session group yet!
+        // This must be an early system process doing something strange.
+        // It should call OsSetSessionProcess.
+
+        status = OS_STATUS_INVALID_ARGUMENT
+
+        GOTO Error
+    END
+
+    oldgroup := paged^.ProcessGroup
+
+    IF oldgroup^.LeaderPid == paged^.Pid THEN
+        // This is a group leader. Group leaders can't switch groups.
+
+        status = OS_STATUS_IS_GROUP_LEADER
+
+        GOTO Error
+    END
+
+    IF oldgroup == group THEN
+        // No change.
+
+        status = OS_STATUS_SUCCESS
+
+        GOTO Error
+    END
+
+    IF newgroup THEN
+        // Initialize the new group.
+
+        group^.LeaderSid = sessiongroup^.LeaderPid
+        group^.LeaderPid = paged^.Pid
+
+    ELSEIF sessiongroup^.LeaderPid != group^.LeaderSid THEN
+        // Can't switch to a group outside our session.
+
+        status = OS_STATUS_NOT_IN_SESSION
+
+        GOTO Error
+    END
+
+    // Remove the process from the old group's list.
+
+    KeAcquireLockExclusive ( &oldgroup^.Lock )
+
+    RtlRemoveEntryList ( &paged^.GroupEntry )
+
+    KeReleaseLock ( &oldgroup^.Lock )
+
+    // Add the process to the new group's list.
+
+    paged^.ProcessGroup = group
+
+    KeAcquireLockExclusive ( &group^.Lock )
+
+    RtlInsertAtTailList (
+        &group^.ProcessListHead, // head
+        &paged^.GroupEntry, // entry
+    )
+
+    KeReleaseLock ( &group^.Lock )
+
+    // Unreference the old group; leave the new group referenced by this new
+    // member.
+
+    group = oldgroup
+
+@Error
+
+    // Release the process's group lock, unreference the group, and return.
+
+    KeReleaseLock ( &paged^.GroupLock )
+
+    ObUnreferenceObject ( group )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsSetGroupProcess (
+    IN processhandle : UWORD,
+    IN grouphandle : UWORD,
+) : OsStatus
+
+    // Set the group of a process.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit1
+    END
+
+    group : ^PsProcessGroup = NULLPTR
+
+    IF grouphandle != OS_NULL_HANDLE THEN
+        status = ObReferenceByHandle (
+            grouphandle, // handle
+            &PsGroupType, // type
+            OUT group, // object
+            OUT access, // access
+        )
+
+        IF OsError ( status ) THEN
+            GOTO Exit1
+        END
+
+        IF access | OS_ACCESS_WRITE != access THEN
+            status = OS_STATUS_ACCESS_DENIED
+
+            GOTO Exit2
+        END
+    END
+
+    status = PsSetGroupProcess (
+        process, // process
+        group, // group
+    )
+
+@Exit2
+
+    IF group THEN
+        ObUnreferenceObject ( group )
+    END
+
+@Exit1
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
