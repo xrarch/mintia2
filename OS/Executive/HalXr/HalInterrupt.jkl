@@ -50,25 +50,38 @@ FN HalRaiseHardwareIpl (
     // optimized manner around the most common usage (changing between software
     // IPLs, which need not reprogram the hardware interrupt masks).
 
-    // Block out preemption to make sure we don't switch to another processor.
-
-#IF BLD_MP
-    oldstate := KiDisableInterrupts ()
-#END
-
     prb := KI_CURRENT_PRB_LOCAL
 
-    lsic := CAST prb^.LsicBase TO ^HalpLsic
+    // Disable interrupts so that changes to the software IPL and the LSIC's
+    // view of IPL are atomic from the perspective of ISRs, to stop them from
+    // getting confused.
 
-    lsic^.Ipl = HalpIplToLsicIpl[ipl]
-    BARRIER
+    ints := KiDisableInterrupts ()
+
+    // Set the new IPL in the Prb.
 
     oldipl := prb^.Ipl
     prb^.Ipl = ipl
 
-#IF BLD_MP
-    KiRestoreInterrupts ( oldstate )
+#IF BLD_CHK
+    IF ipl <= KI_IPL_DPC THEN
+        KeCrash ( "HalRaiseHardwareIpl: raising to software IPL\n" )
+    END
+
+    IF ipl < oldipl THEN
+        KeCrash ( "HalRaiseHardwareIpl: lowered IPL\n" )
+    END
 #END
+
+    // Write the corresponding hardware IPL into the LSIC.
+
+    lsic := CAST prb^.LsicBase TO ^HalpLsic
+
+    lsic^.Ipl = HalpIplToLsicIpl[ipl]
+
+    // Restore interrupts.
+
+    KiRestoreInterrupts ( ints )
 
     RETURN oldipl
 END
@@ -82,24 +95,37 @@ FN HalLowerHardwareIpl (
     // optimized manner around the most common usage (changing between software
     // IPLs, which need not reprogram the hardware interrupt masks).
 
-    // Block out preemption to make sure we don't switch to another processor.
+    prb := KI_CURRENT_PRB_LOCAL
 
-#IF BLD_MP
-    oldstate := KiDisableInterrupts ()
+    // Disable interrupts so that changes to the software IPL and the LSIC's
+    // view of IPL are atomic from the perspective of ISRs, to stop them from
+    // getting confused.
+
+    ints := KiDisableInterrupts ()
+
+#IF BLD_CHK
+    IF ipl > prb^.Ipl THEN
+        KeCrash ( "HalLowerHardwareIpl: raised IPL\n" )
+    END
+
+    IF prb^.Ipl <= KI_IPL_DPC THEN
+        KeCrash ( "HalLowerHardwareIpl: lowering from software IPL\n" )
+    END
 #END
 
-    prb := KI_CURRENT_PRB_LOCAL
+    // Write the corresponding hardware IPL into the LSIC.
 
     lsic := CAST prb^.LsicBase TO ^HalpLsic
 
     lsic^.Ipl = HalpIplToLsicIpl[ipl]
-    BARRIER
+
+    // Set the new IPL in the Prb.
 
     prb^.Ipl = ipl
 
-#IF BLD_MP
-    KiRestoreInterrupts ( oldstate )
-#END
+    // Restore interrupts.
+
+    KiRestoreInterrupts ( ints )
 
     // We don't need to check this in the disabled interrupts section because if
     // we get a stale PendingSoftwareInterrupts value from another processor, we
