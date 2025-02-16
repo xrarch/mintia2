@@ -70,6 +70,14 @@
 
 #DEFINE KI_TICK_SHIFT 10
 
+// These are the different events that can be posted to an idle processor that
+// would normally cause a source processor to spin-wait, but that wait can be
+// avoided in the case the target is idle.
+
+#DEFINE KI_DEFERRED_IDLE_TB_SHOOTDOWN 1
+#DEFINE KI_DEFERRED_IDLE_ICACHE_SHOOTDOWN 2
+#DEFINE KI_DEFERRED_IDLE_DCACHE_SHOOTDOWN 4
+
 // Note that we subtract 1 from the IPL shift so that we can do a right
 // shift by IPL to check for pending bits later (which is the hotter path).
 
@@ -173,7 +181,7 @@ STRUCT KiPrb
 
     Load : ULONG,
 
-    SetIplPending : ULONG,
+    IdleDeferredIpiEvents : ULONG,
 #END
 
     Id : UINT,
@@ -191,6 +199,7 @@ STRUCT KiPrb
     Idle : UBYTE,
     WakeStackSwapper : UBYTE,
     StealWork : UBYTE,
+    InIdleLoop : UBYTE,
 #END
 
     // Put big stuff at the end to make sure the common fields are readily in
@@ -474,7 +483,10 @@ EXTERN FN KiSoftInterruptSelfSet (
 )
 
 #MACRO KiSoftInterruptSelf ( prb, ipl ) [
-    KiSoftInterruptSelfSet ( prb, KiPendingIpl ( ipl ) )
+    KeOrUlong (
+        &(prb)^.PendingSoftwareInterrupts, // ptr
+        KiPendingIpl ( ipl ), // ulong
+    )
 ]
 
 #IF BLD_MP
@@ -510,13 +522,14 @@ EXTERN FN KiExecuteOnEveryoneElse (
     IN function : KiIpiF,
     IN context1 : UWORD,
     IN context2 : UWORD,
+    IN deferred : UWORD,
 )
 
 #MACRO KiSoftInterruptOther ( targetprb, ipl ) [
     // Cause a software interrupt on another processor.
 
     oldvalue := KeOrUlong (
-        &(targetprb)^.SetIplPending, // ptr
+        &(targetprb)^.PendingSoftwareInterrupts, // ptr
         KiPendingIpl ( ipl ), // bitset
     )
 

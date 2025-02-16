@@ -118,18 +118,69 @@ FN (KiHighLevelHandlerF) KiSpuriousException (
     )
 END
 
+#IF BLD_MP
+
+FN KiProcessIdleDeferredIpiEvents ()
+
+    // There were idle deferred events we need to process.
+
+    prb := KI_CURRENT_PRB_LOCAL
+
+    events := KeFetchAndSetUlong (
+        &prb^.IdleDeferredIpiEvents, // ptr
+        0, // ulong
+    )
+
+    IF events & KI_DEFERRED_IDLE_TB_SHOOTDOWN THEN
+        // Dump the entire TB right now.
+
+        KeSweepMyTb ( FALSE )
+    END
+
+    IF events & KI_DEFERRED_IDLE_ICACHE_SHOOTDOWN THEN
+        // Dump the entire Icache.
+
+        KiFlushMyIcache ()
+    END
+
+    IF events & KI_DEFERRED_IDLE_DCACHE_SHOOTDOWN THEN
+        // Dump my entire Dcache.
+
+        KiFlushMyDcache ()
+    END
+END
+
+#END
+
 FN (KiHighLevelHandlerF) KiHandleInterrupt (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
 )
 
-    HalInterrupt ( context )
-
     prb := KI_CURRENT_PRB_LOCAL
+
+#IF BLD_MP
+    idle := prb^.InIdleLoop
+
+    IF idle THEN
+        prb^.InIdleLoop = FALSE
+
+        IF prb^.IdleDeferredIpiEvents THEN
+            KiProcessIdleDeferredIpiEvents ()
+        END
+    END
+#END
+
+    HalInterrupt ( context )
 
     IF prb^.PendingSoftwareInterrupts >> prb^.Ipl THEN
         KiDispatchSoftwareInterrupts ( prb^.Ipl )
     END
+
+#IF BLD_MP
+    prb^.InIdleLoop = idle
+#END
+
 END
 
 KiExceptionToSignal : UBYTE[16] = {
@@ -621,9 +672,9 @@ LoadContext:
 
     // Trigger.
 
-    subi a0, zero, 4096
+    subi a0, zero, (4096 - KiPrb_PendingSoftwareInterrupts)
     li   a1, (1 << ((KI_IPL_APC) - 1))
-    jal  KiSoftInterruptSelfSet
+    jal  KeOrUlong
 
 .none:
 
@@ -694,34 +745,6 @@ KiSwitchMapCode:
     ret
 
 KiSwitchMapCodeEnd:
-
-// a0 - prb
-// a1 - set
-KiSoftInterruptSelfSet:
-.global KiSoftInterruptSelfSet
-
-    // Soft interrupt the current processor.
-
-    // Disable interrupts to block out IPIs and other modifying events.
-
-    mfcr a3, rs                     // Load current value of RS.
-    subi t0, zero, 3                // t0 = 0xFFFFFFFD
-    and  t0, a3, t0                 // Mask out the INT bit.
-    mtcr rs, t0                     // Write new RS.
-
-    // OR the set into the pending ints.
-
-    mov  t0, long [a0 + KiPrb_PendingSoftwareInterrupts]
-    or   t0, t0, a1
-    mov  long [a0 + KiPrb_PendingSoftwareInterrupts], t0
-
-    // Restore interrupts.
-
-    mtcr rs, a3
-    
-    // Return.
-
-    ret
 
 KiThreadTrampoline:
 

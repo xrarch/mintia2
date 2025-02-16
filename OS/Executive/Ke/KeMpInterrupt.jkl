@@ -239,6 +239,7 @@ FN KiExecuteOnEveryoneElse (
     IN function : KiIpiF,
     IN context1 : UWORD,
     IN context2 : UWORD,
+    IN deferred : UWORD,
 )
 
     // Execute the specified function on every other processor.
@@ -319,21 +320,54 @@ FN KiExecuteOnEveryoneElse (
 
     WHILE i < count DO
         IF targetprb != prb THEN
+            IF deferred AND targetprb^.InIdleLoop THEN
+                // This is an idle-deferrable IPI and the target is in his idle
+                // loop. Just set the idle deferred event flag. This lets us
+                // avoid spin-waiting for idle processors to come out of their
+                // low-power state (which can take forever) and makes idle
+                // processors less of a burden to their active brethren.
+
+                KeOrUlong (
+                    &targetprb^.IdleDeferredIpiEvents, // ptr
+                    deferred, // set
+                )
+
+                // Language-level BARRIER to stop the read from InIdleLoop being
+                // smushed together.
+
+                BARRIER
+
+                IF targetprb^.InIdleLoop THEN
+                    // It's still in the idle loop, which means we can avoid
+                    // waiting for this guy. It doesn't really matter if it left
+                    // the idle loop and returned, all that matters is that it's
+                    // in the quiescent state at some point *after* we set the
+                    // event bit.
+
+                    KeIncrementUlong (
+                        &prb^.IpiSpin, // ptr
+                        0xFFFFFFFF, // inc
+                    )
+
+                    GOTO Next
+                END
+            END
+
             // Mark pending.
 
             KeOrUlong (
                 &targetprb^.IpiPendingSet, // ptr
                 1 << index, // bitset
             )
+
+            HalTriggerIpi ( targetprb )
         END
+
+@Next
 
         i += 1
         targetprb += BL_PRB_SIZE
     END
-
-    // Broadcast IPI to all except me.
-
-    HalBroadcastIpi ( prb )
 
     // Spin-wait for execution of our callback.
 
@@ -443,21 +477,6 @@ FN KiServiceIpi (
         )
 
         prb^.FrozenContext = NULLPTR
-    END
-
-    IF prb^.SetIplPending THEN
-        pendingset = KeFetchAndSetUlong (
-            &prb^.SetIplPending, // ptr
-            0, // newvalue
-        )
-
-        // OR this set of pending soft ints into our bit set.
-
-        // We don't use an atomic OR because an IPI is at the highest IPL, so
-        // this R-M-W will work fine. All other accesses of this bit set are
-        // accessed with interrupts disabled or otherwise blocking out IPIs.
-
-        prb^.PendingSoftwareInterrupts |= pendingset
     END
 END
 

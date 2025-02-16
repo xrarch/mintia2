@@ -1007,6 +1007,12 @@ FN KiPreemptThread (
         // Make sure to set the idle thread ready, though it's not in a queue.
 
         current^.Status = KI_THREAD_READY
+
+#IF BLD_MP
+        // No longer in the idle loop.
+
+        prb^.InIdleLoop = FALSE
+#END
     END
 
     // Switch into the thread.
@@ -1453,6 +1459,7 @@ FN KiYield (
 #IF BLD_MP
         prb^.StealWork = TRUE
         prb^.Idle = TRUE
+        prb^.InIdleLoop = TRUE
 #END
 
         // Switch to the idle thread. KiSwitchThread returns with the thread

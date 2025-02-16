@@ -564,8 +564,7 @@ KiJumpIntoThread:
     sub  t0, t1
     ifz  rjmp .none
 
-    mov  a1, (1 << ((KI_IPL_APC) - 1))
-    call KiSoftInterruptSelfSet
+    or   [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)], (1 << ((KI_IPL_APC) - 1))
 
 .none:
 
@@ -593,21 +592,6 @@ KiJumpIntoThread:
     pop  r31
     pop  fp
     add  sp, 17 // Skip Eflags, BadAddr, Epc, Sp, Fp
-
-    ret
-
-// a0 - prb
-// a1 - set
-KiSoftInterruptSelfSet:
-.global KiSoftInterruptSelfSet
-
-    // Soft interrupt the current processor.
-
-    // This is real easy on fox32:
-
-    or   [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)], a1
-    
-    // Return.
 
     ret
 

@@ -184,6 +184,11 @@ FN PsSetGroupProcess (
         IF OsError ( status ) THEN
             RETURN status
         END
+
+    ELSE
+        // Add a reference to the group to reflect the new member.
+
+        ObReferenceObject ( group )
     END
 
     // Acquire the process's group lock.
@@ -277,7 +282,7 @@ FN OsSetGroupProcess (
     IN grouphandle : UWORD,
 ) : OsStatus
 
-    // Set the group of a process.
+    // Set the group of a process, system service.
 
     process : ^PsProcess
     access : UWORD
