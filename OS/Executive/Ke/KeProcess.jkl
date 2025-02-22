@@ -85,7 +85,7 @@ FN KeSignalProcess (
     END
 #END
 
-    KeAcquireLockShared ( &process^.Lock )
+    KeAcquireLockExclusive ( &process^.Lock )
 
     IF NOT process^.SignalThread THEN
         // This process has no threads.
@@ -122,6 +122,48 @@ FN KeSignalProcess (
             process^.SignalThread, // thread
             signal, // signal
         )
+    END
+
+    KeReleaseLock ( &process^.Lock )
+END
+
+#SECTION "PAGEtext"
+FN KeSetBasePriorityProcess (
+    IN process : ^KeProcess,
+    IN priority : UWORD,
+)
+
+    // Set the base priority of the process.
+    // Raise the priority of any thread whose base priority is lower than the
+    // new base priority.
+
+#IF BLD_CHK
+    IF priority >= OS_PRIORITY_MAX THEN
+        KeCrash ( "KeSetBasePriorityProcess: priority >= OS_PRIORITY_MAX\n" )
+    END
+#END
+
+    KeAcquireLockExclusive ( &process^.Lock )
+
+    process^.BasePriority = priority
+
+    // Iterate each thread and raise base priority if necessary.
+
+    head := &process^.ThreadListHead
+    listentry := head^.Next
+
+    WHILE listentry != head DO
+        thread := CONTAINEROF listentry TO KeThread.ProcessListEntry
+
+        IF priority > thread^.BasePriority THEN
+            KeSetBasePriorityThread (
+                thread, // thread
+                priority, // priority
+                FALSE, // setcurrentpriority
+            )
+        END
+
+        listentry = listentry^.Next
     END
 
     KeReleaseLock ( &process^.Lock )

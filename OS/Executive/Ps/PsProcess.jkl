@@ -295,13 +295,16 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     flags := ctx^.Flags
 
-    IF flags & (OS_PROCESS_DETACH_JOB | OS_PROCESS_NEW_SESSION) THEN
-        // If either of these flags were specified, we can only do this if we
-        // are an admin.
+    IF flags & OS_PROCESS_DETACH_JOB AND
+        NOT PsCheckPrivilege ( currentprocess, OS_PRIVILEGE_DETACH_JOB ) THEN
 
-        IF currentprocess^.Paged^.Cred.Gid != OS_SYSTEM_GID THEN
-            RETURN OS_STATUS_ACCESS_DENIED
-        END
+        RETURN OS_STATUS_PRIVILEGE_NOT_HELD
+    END
+
+    IF flags & OS_PROCESS_NEW_SESSION AND
+        NOT PsCheckPrivilege ( currentprocess, OS_PRIVILEGE_NEW_SESSION ) THEN
+
+        RETURN OS_STATUS_PRIVILEGE_NOT_HELD
     END
 
     // Set the paged part.
@@ -377,6 +380,26 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     END
 
     // Initialize the process for usage by Ps.
+
+    // Initialize the privilege lock.
+
+    KeInitializeLock ( &process^.Paged^.PrivilegeLock )
+
+    // Inherit the granted privileges from the parent process.
+
+    RtlCopyBytes (
+        &process^.Paged^.GrantedPrivileges[0], // dest
+        &currentprocess^.Paged^.GrantedPrivileges[0], // src
+        SIZEOFVALUE process^.Paged^.GrantedPrivileges, // sz
+    )
+
+    // Zero out the enabled privileges.
+
+    RtlFillMemoryWithUlong (
+        &process^.Paged^.EnabledPrivileges[0], // ptr
+        SIZEOFVALUE process^.Paged^.EnabledPrivileges, // sz
+        0, // ulong
+    )
 
     // Initialize the group lock.
 
@@ -515,6 +538,299 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     ObUninitializeProcess ( process )
 
     MmUnreferenceQuotaBlock ( quotablock )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsEnablePrivilegeProcessObject (
+    IN process : ^PsProcess,
+    IN privilege : UWORD,
+) : OsStatus
+
+    // Attempt to enable the privilege for the provided process.
+
+    paged := process^.Paged
+
+    status := OS_STATUS_SUCCESS
+
+    // Acquire the privilege lock.
+
+    KeAcquireLockExclusive ( &paged^.PrivilegeLock )
+
+    IF paged^.GrantedPrivileges[privilege / 8] &
+        (1 << (privilege & 7)) == 0 THEN
+
+        // The privilege isn't granted.
+
+        status = OS_STATUS_PRIVILEGE_NOT_GRANTED
+
+        GOTO Exit
+    END
+
+    // Set the enabled bit.
+
+    paged^.EnabledPrivileges[privilege / 8] |= (1 << (privilege & 7))
+
+@Exit
+
+    KeReleaseLock ( &paged^.PrivilegeLock )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsEnablePrivilegeProcess (
+    IN processhandle : UWORD,
+    IN privilege : UWORD,
+) : OsStatus
+
+    // Enable a privilege in the specified process, system service.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    status = PsEnablePrivilegeProcessObject (
+        process, // process
+        privilege, // privilege
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsDisablePrivilegeProcessObject (
+    IN process : ^PsProcess,
+    IN privilege : UWORD,
+) : OsStatus
+
+    // Disable the privilege for the provided process.
+
+    paged := process^.Paged
+
+    status := OS_STATUS_SUCCESS
+
+    // Acquire the privilege lock.
+
+    KeAcquireLockExclusive ( &paged^.PrivilegeLock )
+
+    IF paged^.EnabledPrivileges[privilege / 8] &
+        (1 << (privilege & 7)) == 0 THEN
+
+        // The privilege isn't enabled.
+        // Strictly speaking we don't really need to check this but it
+        // maximizes usefulness if we tell the caller whether we really disabled
+        // it or not.
+
+        status = OS_STATUS_PRIVILEGE_NOT_HELD
+
+        GOTO Exit
+    END
+
+    // Clear the enabled bit.
+
+    paged^.EnabledPrivileges[privilege / 8] &= ~(1 << (privilege & 7))
+
+@Exit
+
+    KeReleaseLock ( &paged^.PrivilegeLock )
+
+    RETURN status
+END
+
+
+#SECTION "PAGEtext"
+FN OsDisablePrivilegeProcess (
+    IN processhandle : UWORD,
+    IN privilege : UWORD,
+) : OsStatus
+
+    // Disable a privilege in the specified process, system service.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    status = PsDisablePrivilegeProcessObject (
+        process, // process
+        privilege, // privilege
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsGrantPrivilegeProcessObject (
+    IN process : ^PsProcess,
+    IN privilege : UWORD,
+) : OsStatus
+
+    // Grant a privilege to the specified process.
+
+    currentprocess := PsCurrentProcess ()
+
+    // We can only grant this privilege if we either already have it or are an
+    // admin.
+
+    IF NOT PsCheckPrivilege ( currentprocess, privilege ) AND
+        NOT PsCheckPrivilege ( currentprocess, OS_PRIVILEGE_ADMIN ) THEN
+
+        RETURN OS_STATUS_PRIVILEGE_NOT_HELD
+    END
+
+    // Set the granted bit under the privilege lock.
+
+    paged := process^.Paged
+
+    KeAcquireLockExclusive ( &paged^.PrivilegeLock )
+
+    paged^.GrantedPrivileges[privilege / 8] |= (1 << (privilege & 7))
+
+    KeReleaseLock ( &paged^.PrivilegeLock )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+
+#SECTION "PAGEtext"
+FN OsGrantPrivilegeProcess (
+    IN processhandle : UWORD,
+    IN privilege : UWORD,
+) : OsStatus
+
+    // Grant a privilege to the specified process, system service.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    status = PsGrantPrivilegeProcessObject (
+        process, // process
+        privilege, // privilege
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsRevokePrivilegeProcessObject (
+    IN process : ^PsProcess,
+    IN privilege : UWORD,
+) : OsStatus
+
+    // Revoke a privilege from the specified process.
+
+    // Clear the granted and enable bits under the privilege lock.
+
+    paged := process^.Paged
+
+    KeAcquireLockExclusive ( &paged^.PrivilegeLock )
+
+    paged^.GrantedPrivileges[privilege / 8] &= ~(1 << (privilege & 7))
+    paged^.EnabledPrivileges[privilege / 8] &= ~(1 << (privilege & 7))
+
+    KeReleaseLock ( &paged^.PrivilegeLock )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN OsRevokePrivilegeProcess (
+    IN processhandle : UWORD,
+    IN privilege : UWORD,
+) : OsStatus
+
+    // Revoke a privilege from the specified process, system service.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    status = PsRevokePrivilegeProcessObject (
+        process, // process
+        privilege, // privilege
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
 
     RETURN status
 END
@@ -1119,4 +1435,71 @@ FN OsQueryProcessByPid (
         &sysquery, // src
         SIZEOF OsProcessQuery, // size
     )
+END
+
+#SECTION "PAGEtext"
+FN OsSetBasePriorityProcess (
+    IN processhandle : UWORD,
+    IN priority : UWORD,
+) : OsStatus
+
+    // Set the base priority of a process, system service.
+
+    IF priority >= OS_PRIORITY_MAX THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    IF priority >= process^.Pcb.BasePriority THEN
+        // Raising base priority requires special privileges.
+
+        currentprocess := PsCurrentProcess ()
+
+        IF priority >= OS_PRIORITY_LOW_REALTIME THEN
+            IF NOT PsCheckPrivilege ( currentprocess,
+                OS_PRIVILEGE_RAISE_PRIORITY_REALTIME ) THEN
+
+                status = OS_STATUS_PRIVILEGE_NOT_HELD
+
+                GOTO Exit
+            END
+
+        ELSEIF NOT PsCheckPrivilege ( currentprocess,
+            OS_PRIVILEGE_RAISE_PRIORITY ) THEN
+
+            status = OS_STATUS_PRIVILEGE_NOT_HELD
+
+            GOTO Exit
+        END
+    END
+
+    KeSetBasePriorityProcess (
+        &process^.Pcb, // process
+        priority, // priority
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
 END

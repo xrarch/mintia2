@@ -8,6 +8,8 @@
 #INCLUDE "<inc>/Ob.hjk"
 #INCLUDE "<inc>/Ns.hjk"
 
+#INCLUDE "<ll>/System/OsProcess.hjk"
+
 EXTERN PsProcessType : ObType
 
 EXTERN PsThreadType : ObType
@@ -51,6 +53,7 @@ STRUCT PsPagedProcess
     ActivationLock : KeLock,
     HandleTableLock : KeLock,
     GroupLock : KeLock,
+    PrivilegeLock : KeLock,
 
     Pid : ULONG,
     ParentPid : ULONG,
@@ -59,7 +62,15 @@ STRUCT PsPagedProcess
     TerminationStatus : OsStatus,
 
     CleanedUp : UBYTE,
+
+    GrantedPrivileges : UBYTE[(OS_PRIVILEGE_MAX + 7) / 8],
+    EnabledPrivileges : UBYTE[(OS_PRIVILEGE_MAX + 7) / 8],
 END
+
+#MACRO PsCheckPrivilege ( process, privilege ) [
+    ((process)^.Paged^.EnabledPrivileges[(privilege) / 8] &
+        (1 << ((privilege) & 7)))
+]
 
 STRUCT PsProcess
     Pcb : KeProcess,
