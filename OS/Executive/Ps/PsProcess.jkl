@@ -587,6 +587,10 @@ FN OsEnablePrivilegeProcess (
 
     // Enable a privilege in the specified process, system service.
 
+    IF privilege >= OS_PRIVILEGE_MAX THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
     process : ^PsProcess
     access : UWORD
 
@@ -668,6 +672,10 @@ FN OsDisablePrivilegeProcess (
 
     // Disable a privilege in the specified process, system service.
 
+    IF privilege >= OS_PRIVILEGE_MAX THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
     process : ^PsProcess
     access : UWORD
 
@@ -741,6 +749,10 @@ FN OsGrantPrivilegeProcess (
 
     // Grant a privilege to the specified process, system service.
 
+    IF privilege >= OS_PRIVILEGE_MAX THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
     process : ^PsProcess
     access : UWORD
 
@@ -803,6 +815,10 @@ FN OsRevokePrivilegeProcess (
 
     // Revoke a privilege from the specified process, system service.
 
+    IF privilege >= OS_PRIVILEGE_MAX THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
     process : ^PsProcess
     access : UWORD
 
@@ -842,6 +858,10 @@ FN OsSignalProcess (
 ) : OsStatus
 
     // Signal a process, system service.
+
+    IF KeInvalidSignal ( signal ) THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
 
     process : ^PsProcess
     access : UWORD
@@ -1500,6 +1520,133 @@ FN OsSetBasePriorityProcess (
 @Exit
 
     ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsExitProcess (
+    IN status : OsStatus,
+)
+
+    // Exit the current process.
+    // Basically just killing it and setting the termination status.
+    // We'll funnel into the thread termination codepath after this.
+
+    process := PsCurrentProcess ()
+
+    process^.Paged^.TerminationStatus = status
+
+    KeSignalProcess (
+        &process^.Pcb, // process
+        OS_SIGNAL_KILL, // signal
+    )
+END
+
+#SECTION "PAGEtext"
+FN OsQueryProcessCount () : UWORD
+
+    // Return the number of processes in the system.
+
+    RETURN PsActiveProcessCount
+END
+
+#SECTION "PAGEtext"
+FN OsQueryProcesses (
+    IN query : ^OsProcessQuery,
+    IN maxcount : UWORD,
+    OUT count : UWORD,
+) : OsStatus
+
+    // Query all of the processes on the system into an array of query
+    // structures.
+
+    // Allocate a buffer in paged pool.
+    // We don't copy directly out to the user buffer while holding the process
+    // list lock because it could be backed by literally anything, so we can't
+    // trust page faults on it, and we don't want any chances of being able to
+    // engineer a denial-of-service against process creation (e.g. an
+    // intentional network failure causing an excessively long timeout on a page
+    // fault on a memory mapped network file while holding the process list
+    // lock).
+
+    IF maxcount == 0 THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
+    bufsize := maxcount * SIZEOF OsProcessQuery
+
+    IF bufsize / maxcount != SIZEOF OsProcessQuery THEN
+        // The buffer size overflowed.
+
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
+    buf : ^VOID
+
+    status := MmAllocateAndChargeSysBuffer (
+        bufsize, // bytes
+        MM_PAGED_POOL, // poolindex
+        'PsQu', // tag
+        OUT buf, // ptr
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    sysquery := buf
+
+    KeAcquireLockExclusive ( &PspProcessListLock )
+
+    IF maxcount != PsActiveProcessCount THEN
+        // Caller should re-query the process count and try again.
+
+        status = OS_STATUS_TRY_AGAIN
+
+        GOTO Exit
+    END
+
+    // Query all of the processes in the system.
+
+    listhead := &PspProcessListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        process :=
+            (CONTAINEROF listentry TO PsPagedProcess.GlobalEntry)^.Process
+
+        PsQueryProcessObject (
+            process, // process
+            sysquery, // query
+        )
+
+        sysquery += SIZEOF OsProcessQuery
+        listentry = listentry^.Next
+    END
+
+@Exit
+
+    KeReleaseLock ( &PspProcessListLock )
+
+    IF NOT OsError ( status ) THEN
+        // Copy out to the user buffer outside of the process list lock.
+
+        status = MmSafeCopyOut (
+            query, // dest
+            buf, // src
+            bufsize, // sz
+        )
+    END
+
+    // Deallocate the system buffer.
+
+    MmDeallocateAndUnchargeSysBuffer (
+        buf, // ptr
+        'PsQu', // tag
+        bufsize, // bytes
+        MM_PAGED_POOL, // poolindex
+    )
 
     RETURN status
 END

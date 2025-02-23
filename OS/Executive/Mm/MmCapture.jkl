@@ -279,3 +279,68 @@ EXPORT FN MmFreeCapturedString (
         MM_PAGED_POOL, // poolindex
     )
 END
+
+#SECTION "PAGEtext"
+FN MmAllocateAndChargeSysBuffer (
+    IN bytes : UWORD,
+    IN poolindex : UWORD,
+    IN tag : UWORD,
+    OUT ptr : ^VOID,
+) : OsStatus
+
+    // Charge the size of a buffer and allocate it from kernel pool.
+    // Intended as a utility function for system services.
+
+    quota := MmGetOverheadOfBytes ( bytes )
+
+    status := MmChargePoolQuota (
+        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+        quota, // charge
+        poolindex, // poolindex
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    ptr = MmAllocatePool (
+        poolindex, // poolindex
+        bytes, // bytes
+        tag, // tag
+        TRUE, // wait
+    )
+
+    IF NOT ptr THEN
+        MmUnchargePoolQuota (
+            PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+            quota, // charge
+            poolindex, // poolindex
+        )
+
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN MmDeallocateAndUnchargeSysBuffer (
+    IN ptr : ^VOID,
+    IN tag : UWORD,
+    IN bytes : UWORD,
+    IN poolindex : UWORD,
+)
+
+    // Uncharge the size of a buffer and free it to kernel pool.
+
+    MmFreePool (
+        ptr, // ptr
+        tag, // tag
+    )
+
+    MmUnchargePoolQuota (
+        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+        MmGetOverheadOfBytes ( bytes ), // charge
+        poolindex, // poolindex
+    )
+END

@@ -743,6 +743,10 @@ FN OsSignalThread (
 
     // Signal a thread, system service.
 
+    IF KeInvalidSignal ( signal ) THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
     thread : ^PsThread
     access : UWORD
 
@@ -783,6 +787,10 @@ FN OsMaskSignalThread (
 ) : OsStatus
 
     // Mask a signal in a thread, system service.
+
+    IF KeInvalidSignal ( signal ) THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
 
     thread : ^PsThread
     access : UWORD
@@ -825,6 +833,10 @@ FN OsDeliverOnWaitSignalThread (
 ) : OsStatus
 
     // Deliver-on-wait a signal in a thread, system service.
+
+    IF KeInvalidSignal ( signal ) THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
 
     thread : ^PsThread
     access : UWORD

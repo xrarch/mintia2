@@ -632,6 +632,10 @@ FN OsSignalJob (
 
     // Signal a job tree.
 
+    IF KeInvalidSignal ( signal ) THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
     job : ^PsJob
     access : UWORD
 
@@ -755,6 +759,10 @@ FN OsCreateJob (
 ) : OsStatus
 
     // Create a job object, system service.
+
+    IF KeInvalidSignal ( signalonclose ) THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
 
     sysparams : NsOpenParameters
 
