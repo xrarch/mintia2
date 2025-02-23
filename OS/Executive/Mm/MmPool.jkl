@@ -93,36 +93,34 @@ FN MiAllocateExtensionSpace () : ^MiPoolExtension
 
     printed := FALSE
 
-@Retry
+    WHILE TRUE DO
+        ext := CAST MiAllocateChunkSpace (
+            &MiPoolSpace, // chunkspace
+        ) TO ^MiPoolExtension
 
-    ext := CAST MiAllocateChunkSpace (
-        &MiPoolSpace, // chunkspace
-    ) TO ^MiPoolExtension
+        IF ext THEN
+            RETURN ext
+        END
 
-    IF ext THEN
-        RETURN ext
+        // Uh-oh! If we're out of pool space there isn't much good to be done.
+        // Sleep for 500ms and retry.
+
+        IF NOT printed THEN
+            RtlPrint ( "Out of pool space!\n" )
+
+            printed = TRUE
+        END
+
+        interval : RtlUquad
+        
+        RtlSetUquadToUlong ( &interval, 500 )
+
+        KeSleep (
+            &interval, // interval
+            KE_KERNEL_MODE, // waitmode
+            KE_UNALERTABLE, // alertable
+        )
     END
-
-    // Uh-oh! If we're out of pool space there isn't much good to be done.
-    // Sleep for 500ms and retry.
-
-    IF NOT printed THEN
-        RtlPrint ( "Out of pool space!\n" )
-
-        printed = TRUE
-    END
-
-    interval : RtlUquad
-    
-    RtlSetUquadToUlong ( &interval, 500 )
-
-    KeSleep (
-        &interval, // interval
-        KE_KERNEL_MODE, // waitmode
-        KE_UNALERTABLE, // alertable
-    )
-
-    GOTO Retry
 END
 
 FN MiFreeExtensionSpace (
