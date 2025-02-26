@@ -4,7 +4,11 @@
 
 #INCLUDE "Ki.hjk"
 
+#IF BLD_MP
+
 KiInterruptAssignmentCounter : ULONG = 0
+
+#END
 
 FN (KeInterruptF) KiUnexpectedInterrupt (
     IN interrupt : ^KeInterrupt,
@@ -36,6 +40,7 @@ EXPORT FN KeInitializeInterrupt (
 
     // Initialize an interrupt object.
 
+#IF BLD_MP
     IF procid == KE_AUTOMATIC_INTERRUPT_PROCESSOR THEN
         // Automatically choose the processor ID that should service this
         // interrupt. Use an incrementing counter to spread the load.
@@ -47,6 +52,10 @@ EXPORT FN KeInitializeInterrupt (
 
         procid %= KeLoaderBlock.ProcessorCount
     END
+
+#ELSE
+    procid = 0
+#END
 
     interrupt^.Routine = routine
     interrupt^.Context = context
