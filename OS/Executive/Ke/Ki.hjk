@@ -722,7 +722,9 @@ EXTERN KiWorkBalanceDpc : KeDpc
         sup := KeSharedUserPage
 
         NOTHING (uquad)^.High = (sup)^.Uptime.High
+        BARRIER
         NOTHING (uquad)^.Low = (sup)^.Uptime.Low
+        BARRIER
 
         IF (uquad)^.High == (sup)^.UptimeCheckHigh THEN
             // Didn't change while collecting.
@@ -755,11 +757,15 @@ EXTERN KiWorkBalanceDpc : KeDpc
 #END
 
     sup^.RealTimeCheckHigh = realtime.High
+    BARRIER
     sup^.RealTime.Low = realtime.Low
+    BARRIER
     sup^.RealTime.High = realtime.High
 
     sup^.UptimeCheckHigh = (prb)^.ClockTicks.High
+    BARRIER
     sup^.Uptime.Low = (prb)^.ClockTicks.Low
+    BARRIER
     sup^.Uptime.High = (prb)^.ClockTicks.High
 ]
 
