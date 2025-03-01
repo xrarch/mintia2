@@ -192,11 +192,11 @@ FN MmChargePoolQuota (
     WHILE TRUE DO
         old := limit^.Used
 
-#IF BLD_CHK
         IF old + charge < charge THEN
-            KeCrash ( "quota overflow\n" )
+            // Overflows the pool quota.
+
+            RETURN OS_STATUS_QUOTA_EXCEEDED
         END
-#END
 
         IF old + charge > limit^.Limit THEN
             RETURN OS_STATUS_QUOTA_EXCEEDED
@@ -247,11 +247,11 @@ FN MmChargeVmQuota (
     WHILE TRUE DO
         old := quotablock^.VmPages.Used
 
-#IF BLD_CHK
         IF old + pages < pages THEN
-            KeCrash ( "quota overflow\n" )
+            // Overflows the VM quota.
+
+            RETURN OS_STATUS_QUOTA_EXCEEDED
         END
-#END
 
         IF old + pages > quotablock^.VmPages.Limit THEN
             RETURN OS_STATUS_QUOTA_EXCEEDED

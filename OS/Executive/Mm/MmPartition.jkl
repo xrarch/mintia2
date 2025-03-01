@@ -637,16 +637,20 @@ FN MmChargeCommit (
     // It would be unwise to page this routine as it can be called during
     // nonpaged pool allocation.
 
-#IF BLD_CHK
-    IF partition^.CommitUsage + pages < pages THEN
-        KeCrash ( "commit overflow\n" )
-    END
-#END
+    status := OS_STATUS_SUCCESS
 
     // Acquire the commit lock to block out pagefile contraction that
     // might lower the commit limit and cause us to proceed erroneously.
 
     ipl := KeAcquireApcLockExclusive ( &partition^.CommitLock )
+
+    IF partition^.CommitUsage + pages < pages THEN
+        // Overflows the commit usage.
+
+        status = OS_STATUS_COMMIT_EXCEEDED
+
+        GOTO Exit
+    END
 
     IF partition^.CommitUsage + pages > partition^.TheoreticalCommitLimit THEN
         // Don't even bother trying, there's no way to extend the pagefiles to
@@ -654,9 +658,9 @@ FN MmChargeCommit (
         // we could theoretically increase the commit limit to if we were to
         // extend all of the pagefiles to their maximum size.
 
-        KeReleaseApcLock ( &partition^.CommitLock, ipl )
+        status = OS_STATUS_COMMIT_EXCEEDED
 
-        RETURN OS_STATUS_COMMIT_EXCEEDED
+        GOTO Exit
     END
 
     // Increase the commit usage.
@@ -694,15 +698,15 @@ FN MmChargeCommit (
                 -pages, // inc
             )
 
-            KeReleaseApcLock ( &partition^.CommitLock, ipl )
-
-            RETURN status
+            GOTO Exit
         END
     END
 
+@Exit
+
     KeReleaseApcLock ( &partition^.CommitLock, ipl )
 
-    RETURN OS_STATUS_SUCCESS
+    RETURN status
 END
 
 FN MmUnchargeCommit (
