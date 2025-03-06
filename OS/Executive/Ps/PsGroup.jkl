@@ -342,3 +342,194 @@ FN OsSetGroupProcess (
 
     RETURN status
 END
+
+#SECTION "PAGEtext"
+FN OsOpenGroupByPid (
+    IN pid : UWORD,
+    IN access : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+    // Open a group object by PID, system service.
+
+    group : ^PsProcessGroup
+
+    // Get a referenced pointer to the group object.
+
+    status := PspReferenceById (
+        pid, // pid
+        &PsGroupType, // type
+        OUT group, // object
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Check for appropriate access rights to the group.
+
+    IF NOT ObCheckAccessForCurrent (
+        group, // object
+        access, // access
+    ) THEN
+
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    // Insert the group object into the handle table.
+
+    status = ObInsertObject (
+        PsCurrentProcess (), // process
+        group, // object
+        access, // access
+        OUT handle, // handle
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    RETURN status
+
+@Exit
+
+    ObUnreferenceObject ( group )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsOpenSelfGroup (
+    IN access : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+    // Open my own group object, system service.
+
+    // Get a referenced pointer to my group object.
+
+    currentpaged := PsCurrentProcess()^.Paged
+
+    KeAcquireLockExclusive ( &currentpaged^.GroupLock )
+
+    group := currentpaged^.ProcessGroup
+
+    IF NOT group THEN
+        KeReleaseLock ( &currentpaged^.GroupLock )
+
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
+    ObReferenceObject ( group )
+
+    KeReleaseLock ( &currentpaged^.GroupLock )
+
+    status : OsStatus
+
+    // Check for appropriate access rights to the group.
+
+    IF NOT ObCheckAccessForCurrent (
+        group, // object
+        access, // access
+    ) THEN
+
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    // Insert the group object into the handle table.
+
+    status = ObInsertObject (
+        PsCurrentProcess (), // process
+        group, // object
+        access, // access
+        OUT handle, // handle
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    RETURN status
+
+@Exit
+
+    ObUnreferenceObject ( group )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsSignalGroup (
+    IN group : ^PsProcessGroup,
+    IN signal : UWORD,
+)
+
+    // Signal all the processes in the group.
+
+    listhead := &group^.ProcessListHead
+
+    KeAcquireLockExclusive ( &group^.Lock )
+
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        process := (CONTAINEROF listentry TO PsPagedProcess.GroupEntry)^.Process
+
+        KeSignalProcess (
+            &process^.Pcb, // process
+            signal, // signal
+        )
+
+        listentry = listentry^.Next
+    END
+
+    KeReleaseLock ( &group^.Lock )
+END
+
+#SECTION "PAGEtext"
+FN OsSignalGroup (
+    IN handle : UWORD,
+    IN signal : UWORD,
+) : OsStatus
+
+    // Signal a group, system service.
+
+    IF KeInvalidSignal ( signal ) THEN
+        RETURN OS_STATUS_INVALID_ARGUMENT
+    END
+
+    group : ^PsProcessGroup
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        handle, // handle
+        &PsGroupType, // type
+        OUT group, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_EXEC != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    PsSignalGroup (
+        group, // group
+        signal, // signal
+    )
+
+@Exit
+
+    ObUnreferenceObject ( group )
+
+    RETURN status
+END

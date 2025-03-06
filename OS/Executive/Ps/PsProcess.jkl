@@ -3,6 +3,7 @@
 //
 
 #INCLUDE "Psp.hjk"
+#INCLUDE "<ll>/System/OsQuota.hjk"
 
 STRUCT PspProcessContext
     Name : ^RtlString,
@@ -1648,4 +1649,144 @@ FN OsQueryProcesses (
     )
 
     RETURN status
+END
+
+#SECTION "PAGEtext"
+FN PsSetQuotaProcess (
+    IN processhandle : UWORD,
+    IN quota : ^OsQuotaQuery,
+) : OsStatus
+
+    // Set the quota for a process, handle interface.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    MmSetQuotaLimits (
+        PsQuotaBlock ( process ), // quotablock
+        quota, // quota
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsSetQuotaProcess (
+    IN processhandle : UWORD,
+    IN quota : ^OsQuotaQuery,
+) : OsStatus
+
+    // Set the quota for a process, system service.
+
+    IF NOT PsCheckPrivilege ( PsCurrentProcess (), OS_PRIVILEGE_SET_QUOTA ) THEN
+        RETURN OS_STATUS_PRIVILEGE_NOT_HELD
+    END
+
+    sysquota : OsQuotaQuery
+
+    // Copy the userspace quota buffer into system space.
+
+    status := MmSafeCopyIn (
+        &sysquota, // dest
+        quota, // src
+        SIZEOF OsQuotaQuery, // sz
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Call the handle oriented interface.
+
+    RETURN PsSetQuotaProcess (
+        processhandle, // processhandle
+        &sysquota, // quota
+    )
+END
+
+#SECTION "PAGEtext"
+FN PsQueryQuotaProcess (
+    IN processhandle : UWORD,
+    IN quota : ^OsQuotaQuery,
+) : OsStatus
+
+    // Query the quota for a process, handle interface.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_READ != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    MmQueryQuota (
+        PsQuotaBlock ( process ), // quotablock
+        quota, // query
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsQueryQuotaProcess (
+    IN processhandle : UWORD,
+    IN quota : ^OsQuotaQuery,
+) : OsStatus
+
+    // Query the quota for a process, system service.
+
+    sysquota : OsQuotaQuery
+
+    status := PsQueryQuotaProcess (
+        processhandle, // processhandle
+        &sysquota, // query
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    RETURN MmSafeCopyOut (
+        quota, // dest
+        &sysquota, // src
+        SIZEOF OsQuotaQuery, // sz
+    )
 END
