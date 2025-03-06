@@ -163,6 +163,7 @@ END
 FN PsSetGroupProcess (
     IN process : ^PsProcess,
     IN group : ^PsProcessGroup,
+    IN newsession : UWORD,
 ) : OsStatus
 
     // Set the group of the process to the specified group.
@@ -195,61 +196,83 @@ FN PsSetGroupProcess (
 
     KeAcquireLockExclusive ( &paged^.GroupLock )
 
-    sessiongroup := paged^.SessionGroup
-
-    IF NOT sessiongroup THEN
-        // Doesn't even have a session group yet!
-        // This must be an early system process doing something strange.
-        // It should call OsSetSessionProcess.
-
-        status = OS_STATUS_INVALID_ARGUMENT
-
-        GOTO Error
-    END
-
     oldgroup := paged^.ProcessGroup
 
-    IF oldgroup^.LeaderPid == paged^.Pid THEN
-        // This is a group leader. Group leaders can't switch groups.
+#IF BLD_CHK
+    IF NOT oldgroup AND process != PsSystemProcess THEN
+        // We should only encounter a process without a group one time ever,
+        // which is when the system session is being created.
 
-        status = OS_STATUS_IS_GROUP_LEADER
+        KeCrash ( "PsSetGroupProcess: no group but not system process\n" )
+    END
+#END
 
-        GOTO Error
+    IF oldgroup THEN
+        // We already belong to a group and session, so check that this is a
+        // valid operation.
+
+        IF oldgroup^.LeaderPid == paged^.Pid THEN
+            // This is a group leader. Group leaders can't switch groups.
+
+            status = OS_STATUS_IS_GROUP_LEADER
+
+            GOTO Exit
+        END
+
+        IF oldgroup == group THEN
+            // No change.
+
+            status = OS_STATUS_SUCCESS
+
+            GOTO Exit
+        END
     END
 
-    IF oldgroup == group THEN
-        // No change.
-
-        status = OS_STATUS_SUCCESS
-
-        GOTO Error
-    END
+    sessiongroup := paged^.SessionGroup
 
     IF newgroup THEN
         // Initialize the new group.
 
-        group^.LeaderSid = sessiongroup^.LeaderPid
+        IF newsession THEN
+            group^.LeaderSid = paged^.Pid
+        ELSE
+            group^.LeaderSid = oldgroup^.LeaderSid
+        END
+
         group^.LeaderPid = paged^.Pid
 
-    ELSEIF sessiongroup^.LeaderPid != group^.LeaderSid THEN
+    ELSEIF oldgroup^.LeaderSid != group^.LeaderSid THEN
         // Can't switch to a group outside our session.
 
         status = OS_STATUS_NOT_IN_SESSION
 
-        GOTO Error
+        GOTO Exit
     END
 
-    // Remove the process from the old group's list.
+    IF oldgroup THEN
+        // Remove the process from the old group's list.
 
-    KeAcquireLockExclusive ( &oldgroup^.Lock )
+        KeAcquireLockExclusive ( &oldgroup^.Lock )
 
-    RtlRemoveEntryList ( &paged^.GroupEntry )
+        RtlRemoveEntryList ( &paged^.GroupEntry )
 
-    KeReleaseLock ( &oldgroup^.Lock )
+        KeReleaseLock ( &oldgroup^.Lock )
+    END
 
     // Add the process to the new group's list.
 
     paged^.ProcessGroup = group
+
+    IF newsession THEN
+        // Set our session group as well.
+
+        paged^.SessionGroup = group
+
+        // Apply an extra reference to the new session group to reflect the fact
+        // we are a member of the session.
+
+        ObReferenceObject ( group )
+    END
 
     KeAcquireLockExclusive ( &group^.Lock )
 
@@ -260,12 +283,22 @@ FN PsSetGroupProcess (
 
     KeReleaseLock ( &group^.Lock )
 
-    // Unreference the old group; leave the new group referenced by this new
-    // member.
+    KeReleaseLock ( &paged^.GroupLock )
 
-    group = oldgroup
+    IF oldgroup THEN
+        // Unreference the old group, and the session group if we switched out
+        // of it.
 
-@Error
+        ObUnreferenceObject ( oldgroup )
+
+        IF newsession THEN
+            ObUnreferenceObject ( sessiongroup )
+        END
+    END
+
+    RETURN OS_STATUS_SUCCESS
+
+@Exit
 
     // Release the process's group lock, unreference the group, and return.
 
@@ -328,6 +361,7 @@ FN OsSetGroupProcess (
     status = PsSetGroupProcess (
         process, // process
         group, // group
+        FALSE, // newsession
     )
 
 @Exit2
@@ -401,7 +435,7 @@ FN OsOpenGroupByPid (
 END
 
 #SECTION "PAGEtext"
-FN OsOpenSelfGroup (
+FN OsOpenMyGroup (
     IN access : UWORD,
     OUT handle : UWORD,
 ) : OsStatus
@@ -530,6 +564,46 @@ FN OsSignalGroup (
 @Exit
 
     ObUnreferenceObject ( group )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN OsNewSessionProcess (
+    IN processhandle : UWORD,
+) : OsStatus
+
+    // Put a process into a new session, system service.
+
+    process : ^PsProcess
+    access : UWORD
+
+    status := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    IF access | OS_ACCESS_WRITE != access THEN
+        status = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    status = PsSetGroupProcess (
+        process, // process
+        NULLPTR, // group
+        TRUE, // newsession
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
 
     RETURN status
 END
