@@ -1,0 +1,200 @@
+//
+// Implements IO packet management.
+//
+
+#INCLUDE "Iop.hjk"
+
+#DEFINE IO_SMALL_STACK 1
+#DEFINE IO_LARGE_STACK 3
+
+IopUserAsyncPacketZone : MmZoneHeader
+IopNormalPacketZone : MmZoneHeader
+
+IopSmallUserAsyncPacketZone : MmZoneHeader
+IopSmallNormalPacketZone : MmZoneHeader
+
+IopZoneLock : KeLock = KE_INITIAL_LOCK
+
+IopLargePacketZones : ^MmZoneHeader[IO_PACKET_TYPE_MAX] = {
+    [IO_PACKET_TYPE_NORMAL] = &IopNormalPacketZone,
+    [IO_PACKET_TYPE_USERASYNC] = &IopUserAsyncPacketZone,
+}
+
+IopSmallPacketZones : ^MmZoneHeader[IO_PACKET_TYPE_MAX] = {
+    [IO_PACKET_TYPE_NORMAL] = &IopSmallNormalPacketZone,
+    [IO_PACKET_TYPE_USERASYNC] = &IopSmallUserAsyncPacketZone,
+}
+
+IopPacketHeaderSize : UBYTE[IO_PACKET_TYPE_MAX] = {
+    [IO_PACKET_TYPE_NORMAL] = SIZEOF IoPacketHeader,
+    [IO_PACKET_TYPE_USERASYNC] = SIZEOF IoUserAsyncPacketHeader,
+}
+
+#ENTERSECTION "INITtext"
+
+FN IopInitPacketZone (
+    IN zone : ^MmZoneHeader,
+    IN headersize : UWORD,
+    IN stacksize : UWORD,
+    IN count : UWORD,
+)
+
+    // Initialize a packet zone and populate it with packets.
+
+    packetsize := headersize + (stacksize * SIZEOF IoPacketLocation)
+
+    RtlPrint ( "IopInitPacketZone: zonesize %u\n",
+        packetsize * count + MM_ZONE_OVERHEAD )
+
+    hunk := MmAllocatePool (
+        MM_NONPAGED_POOL, // poolindex
+        packetsize * count + MM_ZONE_OVERHEAD, // bytes
+        'IOPz', // tag
+        FALSE, // wait
+    )
+
+    IF NOT hunk THEN
+        KeCrash ( "IopInitPacketZone: failed to create zones\n" )
+    END
+
+    MmInitializeZone (
+        zone, // zone
+        packetsize, // blocksize
+    )
+
+    MmExtendZone (
+        zone, // zone
+        hunk, // hunk
+        packetsize * count + MM_ZONE_OVERHEAD, // bytes
+    )
+END
+
+FN IopInitPacketZones ()
+
+    // Initialize the packet zones, for fast allocation of common packet sizes
+    // without hitting pool.
+
+    largenormalcount : UWORD
+    largeasynccount : UWORD
+
+    smallnormalcount : UWORD
+    smallasynccount : UWORD
+
+    systemsize := MmGetSystemSize ()
+
+    IF systemsize <= MM_TINY_SYSTEM THEN
+        smallasynccount = 3
+        largeasynccount = 2
+
+        smallnormalcount = 4
+        largenormalcount = 5
+
+    ELSEIF systemsize <= MM_MEDIUM_SYSTEM THEN
+        smallasynccount = 8
+        largeasynccount = 5
+
+        smallnormalcount = 8
+        largenormalcount = 10
+
+    ELSE
+        smallasynccount = 16
+        largeasynccount = 24
+
+        smallnormalcount = 50
+        largenormalcount = 64
+    END
+
+    // Create large normal zone.
+
+    IopInitPacketZone (
+        &IopNormalPacketZone, // zone
+        SIZEOF IoPacketHeader, // headersize
+        IO_LARGE_STACK, // stacksize
+        largenormalcount, // count
+    )
+
+    // Create large user async zone.
+
+    IopInitPacketZone (
+        &IopUserAsyncPacketZone, // zone
+        SIZEOF IoUserAsyncPacketHeader, // headersize
+        IO_LARGE_STACK, // stacksize
+        largeasynccount, // count
+    )
+
+    // Create small normal zone.
+
+    IopInitPacketZone (
+        &IopNormalPacketZone, // zone
+        SIZEOF IoPacketHeader, // headersize
+        IO_SMALL_STACK, // stacksize
+        smallnormalcount, // count
+    )
+
+    // Create small user async zone.
+
+    IopInitPacketZone (
+        &IopSmallUserAsyncPacketZone, // zone
+        SIZEOF IoUserAsyncPacketHeader, // headersize
+        IO_SMALL_STACK, // stacksize
+        smallasynccount, // count
+    )
+END
+
+#LEAVESECTION
+
+FN IoFreePacket (
+    IN iop : ^IoPacketHeader,
+)
+
+    // Free a packet back to the appropriate zone or pool.
+
+    charge : UWORD
+
+    quotablock := iop^.QuotaBlock
+
+    IF quotablock THEN
+        charge = MmGetOverheadOfBytes (
+            iop^.HeaderSize + iop^.StackDepth * SIZEOF IoPacketLocation
+        )
+    END
+
+    IF iop^.IopFlags & IO_PACKET_FROM_ZONE THEN
+        // Release to zone.
+
+        ipl := KeAcquireApcLockExclusive ( &IopZoneLock )
+
+        IF iop^.StackDepth <= IO_SMALL_STACK THEN
+            MmFreeZone (
+                IopSmallPacketZones[iop^.Type], // zone
+                iop, // ptr
+            )
+
+        ELSE
+            MmFreeZone (
+                IopLargePacketZones[iop^.Type], // zone
+                iop, // ptr
+            )
+        END
+
+        KeReleaseApcLock ( &IopZoneLock, ipl )
+
+    ELSE
+        // Release to pool.
+
+        MmFreePool (
+            iop, // ptr
+            'Iop ', // tag
+        )
+    END
+
+    IF quotablock THEN
+        // Uncharge for the IO packet.
+
+        MmUnchargePoolQuota (
+            quotablock, // quotablock
+            charge, // charge
+            MM_NONPAGED_POOL, // poolindex
+        )
+    END
+END

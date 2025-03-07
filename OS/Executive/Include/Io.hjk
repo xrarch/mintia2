@@ -4,6 +4,8 @@
 
 #INCLUDE "<inc>/Ns.hjk"
 
+EXTERN FN IoInitialize ()
+
 FNPTR IoOpenFileObjectF (
     IN process : ^PsProcess,
     IN file : ^IoFile,
@@ -34,13 +36,13 @@ FNPTR IoNamespaceLookupF (
 ) : OsStatus
 
 STRUCT IoDispatchTable
-    OpenFileObject : IoOpenFileObjectF,
-    CloseFileObject : IoCloseFileObjectF,
-    DeleteFileObject : IoDeleteFileObjectF,
+    OpenFileObject : IoOpenFileObjectF, // 0
+    CloseFileObject : IoCloseFileObjectF, // 1
+    DeleteFileObject : IoDeleteFileObjectF, // 2
 
-    DeleteFcb : IoDeleteFcbF,
-    SetSecurityFcb : IoSetSecurityFcbF,
-    NamespaceLookup : IoNamespaceLookupF,
+    DeleteFcb : IoDeleteFcbF, // 3
+    SetSecurityFcb : IoSetSecurityFcbF, // 4
+    NamespaceLookup : IoNamespaceLookupF, // 5
 END
 
 STRUCT IoFcb
@@ -58,3 +60,206 @@ END
 EXTERN FN IoRundownThread (
     IN thread : ^PsThread,
 )
+
+ENUM IoPacketType : UBYTE
+    IO_PACKET_TYPE_NORMAL,
+    IO_PACKET_TYPE_USERASYNC,
+
+    IO_PACKET_TYPE_MAX,
+END
+
+// The IOP was taken from one of the zones.
+
+#DEFINE IO_PACKET_FROM_ZONE 1
+
+// The IOP should be freed upon completion.
+
+#DEFINE IO_PACKET_AUTO_FREE 2
+
+// The associated MDL should be completed (unpinned etc) with the IOP.
+
+#DEFINE IO_PACKET_AUTO_COMPLETE_MDL 4
+
+// Quota has been charged for the IOP.
+
+#DEFINE IO_PACKET_QUOTA 8
+
+// The request is on behalf of usermode.
+
+#DEFINE IO_PACKET_USERMODE 16
+
+// The packet has been completed.
+
+#DEFINE IO_PACKET_COMPLETED 32
+
+// Indicates whether the packet was enqueued by a device.
+// Essentially tells completion code whether full completion reporting should be
+// performed - it should not, for instance, if enqueue fails and an error status
+// is reported back to the original caller.
+
+#DEFINE IO_PACKET_ENQUEUED_BY_DEVICE 64
+
+// N.B. Changing the offsets of the fields within the following structs will
+//      break practically every driver. Extending the overall size of the
+//      structs, however, is designed to be fine.
+
+STRUCT IoPacketHeader // aka "IOPH"
+    // Timeout (if any).
+
+    Timeout : RtlUquad,
+
+    // If quota is charged for this packet, it is charged to this quotablock.
+
+    QuotaBlock : ^MiQuotaBlock,
+
+    // If this is an associated (fragment) packet, this contains the pointer to
+    // the parent IOP.
+
+    ParentIop : ^IoPacketHeader,
+
+    // Pointer to a ref'd event object if user async I/O. Otherwise, just some
+    // KeEvent. In either case, signal upon completion if non-null.
+
+    CompletionEvent : ^KeEvent,
+
+    // Pointer to an MDL that describes the buffer this operation is
+    // transferring to/from, if relevant. If the flag
+    // IO_PACKET_AUTO_COMPLETE_MDL is set, the MDL will be unmapped, unpinned,
+    // and freed when the IOP completes.
+
+    Mdl : ^MmMdlHeader,
+
+    // Links for generic device-specific queue of pending IOPs.
+    // This is in the IOPH instead of the IOPL because it is anticipated that
+    // only bottom-level IOPLs will be enqueued by a driver, and the IOP
+    // therefore requires only one set of links.
+    //
+    // Doubles as the list links for the per-thread list of associated IOPs
+    // whose enqueuing has been deferred.
+
+    EnqueueEntry : RtlListEntry,
+
+    // An APC is required to write out the IO status block and/or enqueue the
+    // completion message and/or enqueue the completion APC. Will be reused as
+    // the user completion APC if required.
+
+    CompletionApc : KeApc,
+
+    // Status block that will be copied out upon completion.
+    // Contains space for a 32-bit status and 32-bit informational (i.e.
+    // length). Must be the same size as OsStatusBlock defined in OsFile.hjk
+
+    StatusBlock : ULONG[2],
+
+    // Multipurpose kernel-reserved IO flags.
+
+    KernelFlags : ULONG,
+
+    // Number of associated packets depended upon by this one for completion.
+    // It is also biased by one just because this IOP exists, since completion
+    // occurs when IoCount drops to zero and otherwise that count is simply
+    // decremented.
+
+    IoCount : UINT,
+
+    // Indicates the current stack location in the iterative enqueuing
+    // process. after enqueue time, it will be the final stack location.
+
+    CurrentStackIndex : UBYTE,
+
+    // Indicates the number of stack locations in the packet.
+
+    StackDepth : UBYTE,
+
+    // Saved priority boost.
+
+    PriorityBoost : UBYTE,
+
+    // Packet type:
+    //  o NORMAL: Synchronous user IO, page-in IO, associated (fragment) IO, etc
+    //  o USERASYNC: Asynchronous user IO (needs special completion).
+
+    Type : IoPacketType,
+
+    // Flags pertaining to things like whether the IOP is zone-allocated or
+    // pool-allocated, whether the MDL should be freed, etc.
+
+    IopFlags : UBYTE,
+
+    // Indicates the header size; the offset to get from the IOP base to the
+    // first IOPL.
+
+    HeaderSize : UBYTE,
+END
+
+STRUCT IoUserAsyncPacketHeader
+    Header : IoPacketHeader,
+
+    // Things required for user async IO completion.
+
+    // A file object pointer is required in order to unreference the target
+    // file.
+
+    FileObject : ^IoFile,
+
+    // Pointer to the userspace IO status block.
+
+    UserStatusBlock : ^VOID,
+
+    // Pointer to the user-supplied completion APC routine.
+
+    UserApcRoutine : ^VOID,
+
+    // Links for the per-thread list of pending IOPs.
+
+    ThreadEntry : RtlListEntry,
+END
+
+STRUCT IoPacketReadWriteParameters
+    ByteOffset : RtlUquad,
+    Length : ULONG,
+    Flags : ULONG,
+END
+
+STRUCT IoPacketIoctlParameters
+    InputBuffer : ^VOID,
+    InputLength : ULONG,
+    Code : ULONG,
+    OutputLength : ULONG,
+END
+
+UNION IoPacketParameters
+    Rw : IoPacketReadWriteParameters,
+    Ioctl : IoPacketIoctlParameters,
+END
+
+STRUCT IoPacketLocation // IOPL
+    // Pointer to the IOPH.
+
+    Ioph : ^IoPacketHeader,
+
+    // Offset from the virtual base of the MDL in the IOPH, at which the
+    // transfer should be done.
+
+    OffsetInMdl : UWORD,
+
+    // The file control block that this IOPL is targeted towards.
+
+    Fcb : ^IoFcb,
+
+    // Driver-specific context word.
+
+    Context : UWORD,
+
+    // Function-specific parameters.
+
+    P : IoPacketParameters,
+
+    // Indicates the index of this stack location within the packet.
+
+    StackIndex : UBYTE,
+
+    // Indicates the function code of the operation.
+
+    FunctionCode : UBYTE,
+END
