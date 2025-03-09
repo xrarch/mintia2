@@ -3,6 +3,7 @@
 //
 
 #INCLUDE "<inc>/Ns.hjk"
+#INCLUDE "<ll>/System/OsFile.hjk"
 
 EXTERN FN IoInitialize ()
 
@@ -35,14 +36,42 @@ FNPTR IoNamespaceLookupF (
     IN context : ^NsLookupContext,
 ) : OsStatus
 
-STRUCT IoDispatchTable
-    OpenFileObject : IoOpenFileObjectF, // 0
-    CloseFileObject : IoCloseFileObjectF, // 1
-    DeleteFileObject : IoDeleteFileObjectF, // 2
+ENUM IoPacketDirection : UBYTE
+    IO_DIRECTION_NEXT,
+    IO_DIRECTION_SAME,
+    IO_DIRECTION_DONE,
+END
 
-    DeleteFcb : IoDeleteFcbF, // 3
-    SetSecurityFcb : IoSetSecurityFcbF, // 4
-    NamespaceLookup : IoNamespaceLookupF, // 5
+FNPTR IoPacketBasedCallF (
+    IN iopl : ^IoPacketLocation,
+    OUT direction : IoPacketDirection,
+) : OsStatus
+
+ENUM IoFunctionCode : UBYTE
+    IO_FUNCTION_READ,
+    IO_FUNCTION_WRITE,
+    IO_FUNCTION_IOCTL,
+
+    IO_FUNCTION_MAX,
+END
+
+STRUCT IoDispatchTableCalls
+    Read : IoPacketBasedCallF, // 0
+    Write : IoPacketBasedCallF, // 1
+    Ioctl : IoPacketBasedCallF, // 2
+
+    OpenFileObject : IoOpenFileObjectF,
+    CloseFileObject : IoCloseFileObjectF,
+    DeleteFileObject : IoDeleteFileObjectF,
+
+    DeleteFcb : IoDeleteFcbF,
+    SetSecurityFcb : IoSetSecurityFcbF,
+    NamespaceLookup : IoNamespaceLookupF,
+END
+
+UNION IoDispatchTable
+    F : IoDispatchTableCalls,
+    A : IoPacketBasedCallF[IO_FUNCTION_MAX],
 END
 
 STRUCT IoFcb
@@ -92,6 +121,10 @@ END
 
 #DEFINE IO_PACKET_COMPLETED 32
 
+// The packet has a timeout.
+
+#DEFINE IO_PACKET_TIMEOUT 64
+
 // Indicates whether the packet was enqueued by a device.
 // Essentially tells completion code whether full completion reporting should be
 // performed - it should not, for instance, if enqueue fails and an error status
@@ -139,17 +172,11 @@ STRUCT IoPacketHeader // aka "IOPH"
 
     EnqueueEntry : RtlListEntry,
 
-    // An APC is required to write out the IO status block and/or enqueue the
-    // completion message and/or enqueue the completion APC. Will be reused as
-    // the user completion APC if required.
-
-    CompletionApc : KeApc,
-
     // Status block that will be copied out upon completion.
     // Contains space for a 32-bit status and 32-bit informational (i.e.
-    // length). Must be the same size as OsStatusBlock defined in OsFile.hjk
+    // length).
 
-    StatusBlock : ULONG[2],
+    StatusBlock : OsIoStatusBlock,
 
     // Multipurpose kernel-reserved IO flags.
 
@@ -160,7 +187,7 @@ STRUCT IoPacketHeader // aka "IOPH"
     // occurs when IoCount drops to zero and otherwise that count is simply
     // decremented.
 
-    IoCount : UINT,
+    IoCount : ULONG,
 
     // Indicates the current stack location in the iterative enqueuing
     // process. after enqueue time, it will be the final stack location.
@@ -197,6 +224,12 @@ STRUCT IoUserAsyncPacketHeader
 
     // Things required for user async IO completion.
 
+    // An APC is required to write out the IO status block and/or enqueue the
+    // completion message and/or enqueue the completion APC. Will be reused as
+    // the user completion APC if required.
+
+    CompletionApc : KeApc,
+
     // A file object pointer is required in order to unreference the target
     // file.
 
@@ -214,6 +247,10 @@ STRUCT IoUserAsyncPacketHeader
 
     ThreadEntry : RtlListEntry,
 END
+
+FNPTR IoLocationCompletionF (
+    IN iopl : ^IoPacketLocation,
+) : OsStatus
 
 STRUCT IoPacketReadWriteParameters
     ByteOffset : RtlUquad,
@@ -251,6 +288,10 @@ STRUCT IoPacketLocation // IOPL
 
     Context : UWORD,
 
+    // Optional routine to run in completion context.
+
+    CompletionRoutine : IoLocationCompletionF,
+
     // Function-specific parameters.
 
     P : IoPacketParameters,
@@ -261,5 +302,21 @@ STRUCT IoPacketLocation // IOPL
 
     // Indicates the function code of the operation.
 
-    FunctionCode : UBYTE,
+    FunctionCode : IoFunctionCode,
 END
+
+#MACRO IoPacketFromLocation ( iopl ) [
+    ((iopl)^.Ioph)
+]
+
+#MACRO IoPacketLocationMappedBuffer ( iopl ) [
+    ((iopl)^.Ioph^.Mdl^.MappedAddress + (iopl)^.OffsetInMdl)
+]
+
+#MACRO IoPacketLocationVirtualBuffer ( iopl ) [
+    ((iopl)^.Ioph^.Mdl^.VirtualAddress + (iopl)^.OffsetInMdl)
+]
+
+#MACRO IoPacketWasEnqueued ( iop ) [
+    NOTHING (iop)^.IopFlags |= IO_PACKET_ENQUEUED_BY_DEVICE
+]

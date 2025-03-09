@@ -4,8 +4,8 @@
 
 #INCLUDE "Iop.hjk"
 
-#DEFINE IO_SMALL_STACK 1
-#DEFINE IO_LARGE_STACK 3
+IopLargePacketDepth : UWORD
+IopSmallPacketDepth : UWORD
 
 IopUserAsyncPacketZone : MmZoneHeader
 IopNormalPacketZone : MmZoneHeader
@@ -13,7 +13,7 @@ IopNormalPacketZone : MmZoneHeader
 IopSmallUserAsyncPacketZone : MmZoneHeader
 IopSmallNormalPacketZone : MmZoneHeader
 
-IopZoneLock : KeLock = KE_INITIAL_LOCK
+IopPacketZoneLock : KeLock = KE_INITIAL_LOCK
 
 IopLargePacketZones : ^MmZoneHeader[IO_PACKET_TYPE_MAX] = {
     [IO_PACKET_TYPE_NORMAL] = &IopNormalPacketZone,
@@ -29,6 +29,26 @@ IopPacketHeaderSize : UBYTE[IO_PACKET_TYPE_MAX] = {
     [IO_PACKET_TYPE_NORMAL] = SIZEOF IoPacketHeader,
     [IO_PACKET_TYPE_USERASYNC] = SIZEOF IoUserAsyncPacketHeader,
 }
+
+FN IoInitializePacketLevels (
+    IN iop : ^IoPacketHeader,
+    IN stackdepth : UWORD,
+)
+
+    // Initialize the unchanging parts of a packet's levels.
+
+    iopl := CAST iop + iop^.HeaderSize TO ^IoPacketLocation
+
+    i := 0
+
+    WHILE i < stackdepth DO
+        iopl^.StackIndex = i
+        iopl^.Ioph = iop
+
+        i += 1
+        iopl += SIZEOF IoPacketLocation
+    END
+END
 
 #ENTERSECTION "INITtext"
 
@@ -55,6 +75,23 @@ FN IopInitPacketZone (
 
     IF NOT hunk THEN
         KeCrash ( "IopInitPacketZone: failed to create zones\n" )
+    END
+
+    // Pre-initialize the packets within the zone.
+
+    i := 0
+    iop := CAST hunk + MM_ZONE_OVERHEAD TO ^IoPacketHeader
+
+    WHILE i < count DO
+        iop^.HeaderSize = headersize
+
+        IoInitializePacketLevels (
+            iop, // iop
+            stacksize, // stackdepth
+        )
+
+        i += 1
+        iop += packetsize
     END
 
     MmInitializeZone (
@@ -89,6 +126,9 @@ FN IopInitPacketZones ()
         smallnormalcount = 4
         largenormalcount = 5
 
+        IopSmallPacketDepth = 1
+        IopLargePacketDepth = 3
+
     ELSEIF systemsize <= MM_MEDIUM_SYSTEM THEN
         smallasynccount = 8
         largeasynccount = 5
@@ -96,12 +136,18 @@ FN IopInitPacketZones ()
         smallnormalcount = 8
         largenormalcount = 10
 
+        IopSmallPacketDepth = 1
+        IopLargePacketDepth = 4
+
     ELSE
         smallasynccount = 16
         largeasynccount = 24
 
         smallnormalcount = 50
         largenormalcount = 64
+
+        IopSmallPacketDepth = 2
+        IopLargePacketDepth = 5
     END
 
     // Create large normal zone.
@@ -109,7 +155,7 @@ FN IopInitPacketZones ()
     IopInitPacketZone (
         &IopNormalPacketZone, // zone
         SIZEOF IoPacketHeader, // headersize
-        IO_LARGE_STACK, // stacksize
+        IopLargePacketDepth, // stacksize
         largenormalcount, // count
     )
 
@@ -118,7 +164,7 @@ FN IopInitPacketZones ()
     IopInitPacketZone (
         &IopUserAsyncPacketZone, // zone
         SIZEOF IoUserAsyncPacketHeader, // headersize
-        IO_LARGE_STACK, // stacksize
+        IopLargePacketDepth, // stacksize
         largeasynccount, // count
     )
 
@@ -127,7 +173,7 @@ FN IopInitPacketZones ()
     IopInitPacketZone (
         &IopNormalPacketZone, // zone
         SIZEOF IoPacketHeader, // headersize
-        IO_SMALL_STACK, // stacksize
+        IopSmallPacketDepth, // stacksize
         smallnormalcount, // count
     )
 
@@ -136,7 +182,7 @@ FN IopInitPacketZones ()
     IopInitPacketZone (
         &IopSmallUserAsyncPacketZone, // zone
         SIZEOF IoUserAsyncPacketHeader, // headersize
-        IO_SMALL_STACK, // stacksize
+        IopSmallPacketDepth, // stacksize
         smallasynccount, // count
     )
 END
@@ -154,6 +200,8 @@ FN IoFreePacket (
     quotablock := iop^.QuotaBlock
 
     IF quotablock THEN
+        // Determine the quota that was previously charged for the packet.
+
         charge = MmGetOverheadOfBytes (
             iop^.HeaderSize + iop^.StackDepth * SIZEOF IoPacketLocation
         )
@@ -162,9 +210,9 @@ FN IoFreePacket (
     IF iop^.IopFlags & IO_PACKET_FROM_ZONE THEN
         // Release to zone.
 
-        ipl := KeAcquireApcLockExclusive ( &IopZoneLock )
+        ipl := KeAcquireApcLockExclusive ( &IopPacketZoneLock )
 
-        IF iop^.StackDepth <= IO_SMALL_STACK THEN
+        IF iop^.StackDepth <= IopSmallPacketDepth THEN
             MmFreeZone (
                 IopSmallPacketZones[iop^.Type], // zone
                 iop, // ptr
@@ -177,7 +225,7 @@ FN IoFreePacket (
             )
         END
 
-        KeReleaseApcLock ( &IopZoneLock, ipl )
+        KeReleaseApcLock ( &IopPacketZoneLock, ipl )
 
     ELSE
         // Release to pool.
@@ -197,4 +245,466 @@ FN IoFreePacket (
             MM_NONPAGED_POOL, // poolindex
         )
     END
+END
+
+FN IoAllocatePacket (
+    IN iopflags : UWORD,
+    IN stacksize : UWORD,
+    IN kflags : UWORD,
+    IN type : UWORD,
+    OUT iop : ^IoPacketHeader,
+) : OsStatus
+
+    // Allocate an I/O packet.
+
+    packetsize := stacksize * SIZEOF IoPacketLocation +
+        IopPacketHeaderSize[type]
+
+    quotablock : ^MiQuotaBlock = NULLPTR
+
+    status : OsStatus
+
+    IF iopflags & IO_PACKET_QUOTA THEN
+        quotablock = PsQuotaBlock ( PsCurrentProcess () )
+
+        // Charge for the packet.
+
+        status = MmChargePoolQuota (
+            quotablock, // quotablock
+            MmGetOverheadOfBytes ( packetsize ), // charge
+            MM_NONPAGED_POOL, // poolindex
+        )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+    END
+
+    zone : ^MmZoneHeader = NULLPTR
+    iop = NULLPTR
+
+    IF stacksize <= IopSmallPacketDepth THEN
+        zone = IopSmallPacketZones[type]
+    ELSEIF stacksize <= IopLargePacketDepth THEN
+        zone = IopLargePacketZones[type]
+    END
+
+    IF zone THEN
+        ipl := KeAcquireApcLockExclusive ( &IopPacketZoneLock )
+
+        iop = MmAllocateZone ( zone )
+
+        KeReleaseApcLock ( &IopPacketZoneLock, ipl )
+
+        IF iop THEN
+            // Got it from the zone.
+
+            iopflags |= IO_PACKET_FROM_ZONE
+        END
+    END
+
+    IF NOT iop THEN
+        // Allocate the packet from nonpaged pool.
+
+        iop = MmAllocatePool (
+            MM_NONPAGED_POOL, // poolindex
+            packetsize, // bytes
+            'Iop ', // tag
+            TRUE, // wait
+        )
+
+        IF NOT iop THEN
+            // Failed to allocate the packet.
+
+            IF quotablock THEN
+                // Uncharge the quotablock.
+
+                MmUnchargePoolQuota (
+                    quotablock, // quotablock
+                    MmGetOverheadOfBytes ( packetsize ), // charge
+                    MM_NONPAGED_POOL, // poolindex
+                )
+            END
+
+            RETURN OS_STATUS_NO_MEMORY
+        END
+
+        // Initialize stuff that wasn't pre-initialized in the zone.
+
+        iop^.HeaderSize = IopPacketHeaderSize[type]
+
+        IoInitializePacketLevels (
+            iop, // iop
+            stacksize, // stackdepth
+        ) 
+    END
+
+    iop^.StackDepth = stacksize
+    iop^.Type = type
+    iop^.IopFlags = iopflags
+    iop^.IoCount = 1
+    iop^.KernelFlags = kflags
+    iop^.QuotaBlock = quotablock
+    iop^.ParentIop = NULLPTR
+    iop^.CurrentStackIndex = stacksize
+    iop^.PriorityBoost = 0
+    iop^.StatusBlock.Status = OS_STATUS_SUCCESS
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+FN IoIndexPacket (
+    IN iop : ^IoPacketHeader,
+    IN index : UWORD,
+) : ^IoPacketLocation
+
+    // Index the packet's stack.
+
+    RETURN CAST (iop + iop^.HeaderSize +
+        index * SIZEOF IoPacketLocation) TO ^IoPacketLocation
+END
+
+FN IoCurrentLocationPacket (
+    IN iop : ^IoPacketHeader,
+) : ^IoPacketLocation
+
+    // Return the current packet location.
+
+    RETURN CAST (iop + iop^.HeaderSize +
+        iop^.CurrentStackIndex * SIZEOF IoPacketLocation) TO ^IoPacketLocation
+END
+
+FN IoNextLocationPacket (
+    IN iopl : ^IoPacketLocation,
+) : ^IoPacketLocation
+
+    // Return the next location in a packet.
+
+    RETURN iopl - SIZEOF IoPacketLocation
+END
+
+FN IoAllocateAssociatedPacket (
+    IN parentiop : ^IoPacketHeader,
+    IN iopflags : UWORD,
+    IN stacksize : UWORD,
+    IN kflags : UWORD,
+    OUT iop : ^IoPacketHeader,
+) : OsStatus
+
+    // Allocate an IOP to later associate with the master IOP. It does not
+    // associate it yet because the driver may still fail, and there is no good
+    // way to clean up associated IOPs. Useful for when you want to target this
+    // IOP to another driver stack, laterally.
+
+    // Make sure to inherit the user request bit.
+
+    RETURN IoAllocatePacket (
+        iopflags | (parentiop^.IopFlags & IO_PACKET_USERMODE), // iopflags
+        stacksize, // stacksize
+        kflags, // kflags
+        IO_PACKET_TYPE_NORMAL, // type
+        OUT iop, // iop
+    )
+END
+
+FN IoAllocateStackAssociatedPacket (
+    IN iopl : ^IoPacketLocation,
+    IN iopflags : UWORD,
+    IN kflags : UWORD,
+    OUT iop : ^IoPacketHeader,
+) : OsStatus
+
+    // Allocate an IOP to later associate with the master IOP. It does not
+    // associate it yet because the driver may still fail, and there is no good
+    // way to clean up associated IOPs. Gives it as many stack locations as
+    // needed for the given IOPL minus one. Useful for when you want to give
+    // this IOP directly to the lower level driver.
+
+    parentiop := iopl^.Ioph
+
+    RETURN IoAllocatePacket (
+        iopflags | (parentiop^.IopFlags & IO_PACKET_USERMODE), // iopflags
+        parentiop^.StackDepth - iopl^.StackIndex - 1, // stacksize
+        kflags, // kflags
+        IO_PACKET_TYPE_NORMAL, // type
+        OUT iop, // iop
+    )
+END
+
+FN IoAssociatePacket (
+    IN parentiop : ^IoPacketHeader,
+    IN associop : ^IoPacketHeader,
+)
+
+    // Associates the given IOP with the master IOP. This biases the IoCount on
+    // the master IOP and adds the associated IOP to the current thread's
+    // deferred enqueue list.
+
+    // This increment requires no interlocks since IOP enqueue is
+    // single-threaded and the master IOP is still in our exclusive custody.
+
+    parentiop^.IoCount += 1
+
+    associop^.ParentIop = parentiop
+    associop^.KernelFlags |= parentiop^.KernelFlags
+
+    current := PsCurrentThread ()
+
+    // Add the associated IOP to the tail of the deferred enqueue list.
+    // This requires no synchronization since we only access it from the
+    // context of the thread it belongs to, and never from a KAPC (from which IO
+    // enqueue is forbidden - use a LAPC instead).
+
+    RtlInsertAtTailList (
+        &current^.DeferredIopListHead, // head
+        &associop^.EnqueueEntry, // entry
+    )
+END
+
+FN IopRundownPacket (
+    IN iop : ^IoPacketHeader,
+)
+
+    // Perform final rundown of the IOP upon completion.
+    // This can be done either from APC context or from original completion
+    // context.
+
+    event := iop^.CompletionEvent
+
+    IF event THEN
+        KeSignalEvent (
+            event, // event
+            iop^.PriorityBoost, // priorityboost
+        )
+
+        IF iop^.Type == IO_PACKET_TYPE_USERASYNC THEN
+            ObUnreferenceObject ( event )
+        END
+    END
+
+    IF iop^.IopFlags & IO_PACKET_AUTO_FREE THEN
+        IoFreePacket ( iop )
+    END
+END
+
+FN IoCompletePacket (
+    IN iop : ^IoPacketHeader,
+    IN status : OsStatus,
+    IN priorityboost : UWORD,
+)
+
+    // Complete an IO packet along with any parents that may arise.
+    // This MUST be called from thread context - if you want to complete a
+    // packet directly from a DPC, call IoCompletePacketFromDpc which will
+    // helpfully enqueue a work item to do it for you.
+
+@NextPacket
+
+    IF OsError ( status ) THEN
+        // Save the error status.
+
+        // This is racey on purpose - there's no reason for a lock here since we
+        // can only return one error status back up anyway. The user will see
+        // "one of them".
+
+        iop^.StatusBlock.Status = status
+    END
+
+    IF priorityboost > iop^.PriorityBoost THEN
+        iop^.PriorityBoost = priorityboost
+    END
+
+    oldcount := KeIncrementUlong (
+        &iop^.IoCount, // ptr
+        0xFFFFFFFF, // inc
+    )
+
+    IF oldcount != 1 THEN
+        // There are still dependents upon this packet.
+
+        LEAVE
+    END
+
+    IF status == OS_STATUS_SUCCESS THEN
+        // Try to propagate an existing error status.
+        // Have to do this after we're sure we're the last completer or an
+        // error status may get lost.
+
+        status = iop^.StatusBlock.Status
+    END
+
+    // Reset the IoCount to 1 just in case we pass the packet on to someone who
+    // wants to take custody of it and retry completion later. We can't do this
+    // after we know that, because they'll have custody, and we can't touch this
+    // field at that time.
+
+    iop^.IoCount = 1
+
+    // Call the completion routines starting from the last level encountered
+    // during enqueue, which should still be in the CurrentStackIndex field.
+
+    stackindex : UWORD = iop^.CurrentStackIndex
+
+    iopl := CAST iop + iop^.HeaderSize +
+        stackindex * SIZEOF IoPacketLocation TO ^IoPacketLocation
+
+    depth := iop^.StackDepth
+
+    WHILE stackindex < depth DO
+        stackindex += 1
+        iop^.CurrentStackIndex = stackindex
+
+        IF iopl^.CompletionRoutine THEN
+            IF iopl^.CompletionRoutine ( iopl )
+                == OS_STATUS_MORE_PROCESSING_REQUIRED THEN
+
+                // The driver would like us not to continue completing the
+                // packet. It will call us back later when it's done with
+                // whatever it's doing. Note that the IOP is now in its sole
+                // custody; it can free it or do whatever at any time and we
+                // cannot touch it anymore.
+
+                LEAVE
+            END
+        END
+
+        iopl += SIZEOF IoPacketLocation
+    END
+
+    IF iop^.IopFlags & IO_PACKET_AUTO_COMPLETE_MDL THEN
+        // Unlock the pages ASAP.
+
+        MmCompleteMdl ( iop^.Mdl )
+    END
+
+    iop^.IopFlags |= IO_PACKET_COMPLETED
+
+    parentiop := iop^.ParentIop
+
+    // If this is a user async IOP, we have to enqueue an APC to do the rest of
+    // the completion processing. Otherwise, rundown the packet now.
+
+    IF iop^.Type == IO_PACKET_TYPE_USERASYNC THEN
+        useriop := CONTAINEROF iop TO IoUserAsyncPacketHeader.Header
+
+        KeEnqueueKapc (
+            &useriop^.CompletionApc, // apc
+            iop^.PriorityBoost, // priorityboost
+            CAST iop TO UWORD, // context1
+            useriop^.CompletionApc.Context2, // context2
+        )
+
+    ELSE
+        IopRundownPacket ( iop )
+    END
+
+    IF NOT parentiop THEN
+        LEAVE
+    END
+
+    iop = parentiop
+
+    GOTO NextPacket
+END
+
+FN IoEnqueuePacket (
+    IN iop : ^IoPacketHeader,
+) : OsStatus
+
+    // Enqueue the provided master IOP, along with any associated IOPs that
+    // appear in our deferred enqueue list in the process.
+
+#IF BLD_CHK
+    IF NOT KeAreApcsDeliverable () THEN
+        KeCrash ( "IoEnqueuePacket: called from KAPC context\n" )
+    END
+#END
+
+    status := OS_STATUS_PENDING
+
+    masteriop := TRUE
+
+    current := PsCurrentThread ()
+
+@NextPacket
+
+    stackindex := iop^.CurrentStackIndex
+
+    iopl := CAST iop + iop^.HeaderSize +
+        (stackindex - 1) * SIZEOF IoPacketLocation TO ^IoPacketLocation
+
+    WHILE TRUE DO
+        // Call through the dispatch table pointed to by the current IOPL.
+
+#IF BLD_CHK
+        IF stackindex == 0 THEN
+            KeCrash ( "IoEnqueuePacket: stack overflow\n" )
+        END
+#END
+
+        direction : UWORD
+
+        fragstatus := iopl^.Fcb^.Dispatch^.A[iopl^.FunctionCode] (
+            iopl, // iopl
+            OUT direction, // direction
+        )
+
+        IF fragstatus != OS_STATUS_PENDING THEN
+            // Any status other than PENDING indicates an early completion
+            // should be performed.
+
+            // NOTE: If a driver returns some other status, it CANNOT have
+            //       associated any IOPs with this one, or bad things will
+            //       happen. It must only associate IOPs after all of its own
+            //       error cases have been ruled out.
+
+            IF masteriop THEN
+                status = fragstatus
+            END
+
+            IoCompletePacket (
+                iop, // iop
+                fragstatus, // status
+                0, // priorityboost
+            )
+
+            BREAK
+        END
+
+        IF direction != IO_DIRECTION_SAME THEN
+            // Update the current stack index such that it contains the index of
+            // the last fully completed level (that is, the one we just did).
+            // Update the IOPL pointer to point to the next level to complete.
+
+            stackindex -= 1
+            iop^.CurrentStackIndex = stackindex
+            iopl -= SIZEOF IoPacketLocation
+        END
+
+        IF direction == IO_DIRECTION_DONE THEN
+            // This level has taken custody of the packet.
+            // We should break out and go process other packets.
+
+            BREAK
+        END
+    END
+
+    // We processed a packet. Now we need to see if there are any others
+    // hanging around.
+
+    IF NOT RtlEmptyList ( &current^.DeferredIopListHead ) THEN
+        // Pop the next one off the list. This requires no synchronization
+        // since we only access this list from our own context.
+
+        masteriop = FALSE
+
+        iop = CONTAINEROF current^.DeferredIopListHead.Next
+            TO IoPacketHeader.EnqueueEntry
+
+        RtlRemoveEntryList ( &iop^.EnqueueEntry )
+
+        GOTO NextPacket
+    END
+
+    RETURN status
 END

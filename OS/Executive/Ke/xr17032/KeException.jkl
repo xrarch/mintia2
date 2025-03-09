@@ -505,6 +505,15 @@ KiExceptionHandler:
 DbgExcEnd:
 .export DbgExcEnd
 
+// outputs:
+// a3 - oldipl
+KeMaskApcs:
+.global KeMaskApcs
+
+    li   a0, KI_IPL_APC             // Set argument to KiRaiseIpl.
+
+    // Fall through.
+
 // a0 - newipl
 // outputs:
 // a3 - oldipl
@@ -540,6 +549,12 @@ KiRaiseIpl:
     jal  KeCrash
 
 #END
+
+// a0 - newipl
+KeUnmaskApcs:
+.global KeUnmaskApcs
+
+    // Fall through.
 
 // a0 - newipl
 KiLowerIpl:

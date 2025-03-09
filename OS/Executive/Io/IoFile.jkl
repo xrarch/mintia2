@@ -24,7 +24,7 @@ FN (ObTypeOpenF) IoOpenFileType (
         RETURN OS_STATUS_SUCCESS
     END
 
-    openfunc := fcb^.Dispatch^.OpenFileObject
+    openfunc := fcb^.Dispatch^.F.OpenFileObject
 
     IF NOT openfunc THEN
         RETURN OS_STATUS_SUCCESS
@@ -56,7 +56,7 @@ FN (ObTypeCloseF) IoCloseFileType (
         LEAVE
     END
 
-    closefunc := fcb^.Dispatch^.CloseFileObject
+    closefunc := fcb^.Dispatch^.F.CloseFileObject
 
     IF NOT closefunc THEN
         LEAVE
@@ -83,7 +83,7 @@ FN (ObTypeDeleteF) IoDeleteFileType (
     fcb := file^.Fcb
 
     IF fcb THEN
-        deletefunc := fcb^.Dispatch^.DeleteFileObject
+        deletefunc := fcb^.Dispatch^.F.DeleteFileObject
 
         IF deletefunc THEN
             deletefunc ( file )
@@ -116,7 +116,7 @@ FN (ObTypeSetSecurityF) IoSetSecurityFileType (
         RETURN OS_STATUS_SUCCESS
     END
 
-    func := fcb^.Dispatch^.SetSecurityFcb
+    func := fcb^.Dispatch^.F.SetSecurityFcb
 
     IF NOT func THEN
         RETURN OS_STATUS_SUCCESS
@@ -139,7 +139,7 @@ FN (ObTypeDeleteF) IoDeleteFcbType (
 
     // Call the driver's FCB deletion function, if present.
 
-    deletefunc := fcb^.Dispatch^.DeleteFcb
+    deletefunc := fcb^.Dispatch^.F.DeleteFcb
 
     IF deletefunc THEN
         RETURN deletefunc ( fcb )
@@ -157,7 +157,7 @@ FN (ObTypeNamespaceLookupF) IoNamespaceLookupFcbType (
 
     fcb := CAST context^.Object TO ^IoFcb
 
-    lookupfunc := fcb^.Dispatch^.NamespaceLookup
+    lookupfunc := fcb^.Dispatch^.F.NamespaceLookup
 
     IF NOT lookupfunc THEN
         RETURN OS_STATUS_NOT_SUPPORTED
