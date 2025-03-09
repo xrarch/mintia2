@@ -457,7 +457,7 @@ FN IoAssociatePacket (
 
     RtlInsertAtTailList (
         &current^.DeferredIopListHead, // head
-        &associop^.EnqueueEntry, // entry
+        &associop^.RequestEntry.Entry.List, // entry
     )
 END
 
@@ -545,8 +545,8 @@ FN IoCompletePacket (
 
     stackindex : UWORD = iop^.CurrentStackIndex
 
-    iopl := CAST iop + iop^.HeaderSize +
-        stackindex * SIZEOF IoPacketLocation TO ^IoPacketLocation
+    iopl := CAST (iop + iop^.HeaderSize +
+        stackindex * SIZEOF IoPacketLocation) TO ^IoPacketLocation
 
     depth := iop^.StackDepth
 
@@ -572,7 +572,9 @@ FN IoCompletePacket (
     END
 
     IF iop^.IopFlags & IO_PACKET_AUTO_COMPLETE_MDL THEN
-        // Unlock the pages ASAP.
+        // Unlock the pages ASAP. We could do this at packet rundown instead but
+        // that might take however long it takes a user thread to get scheduled
+        // in to run its completion APC, which is suboptimal.
 
         MmCompleteMdl ( iop^.Mdl )
     END
@@ -630,8 +632,8 @@ FN IoEnqueuePacket (
 
     stackindex := iop^.CurrentStackIndex
 
-    iopl := CAST iop + iop^.HeaderSize +
-        (stackindex - 1) * SIZEOF IoPacketLocation TO ^IoPacketLocation
+    iopl := CAST (iop + iop^.HeaderSize +
+        (stackindex - 1) * SIZEOF IoPacketLocation) TO ^IoPacketLocation
 
     WHILE TRUE DO
         // Call through the dispatch table pointed to by the current IOPL.
@@ -699,9 +701,9 @@ FN IoEnqueuePacket (
         masteriop = FALSE
 
         iop = CONTAINEROF current^.DeferredIopListHead.Next
-            TO IoPacketHeader.EnqueueEntry
+            TO IoPacketHeader.RequestEntry.Entry.List
 
-        RtlRemoveEntryList ( &iop^.EnqueueEntry )
+        RtlRemoveEntryList ( &iop^.RequestEntry.Entry.List )
 
         GOTO NextPacket
     END
