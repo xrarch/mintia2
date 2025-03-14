@@ -995,6 +995,11 @@ FN KiDispatchUserInterrupts ()
             // Dispatch a pending signal.
 
             KiDispatchSignal ( thread )
+
+            // Set UserInterrupt to go around the loop again in case there are
+            // multiple signals to dispatch.
+
+            thread^.UserInterrupt = TRUE
         END
 
         IF NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
