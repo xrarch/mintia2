@@ -1053,6 +1053,9 @@ FN MiFreePageAligned (
     // Uninitialize the allocation.
 
 #IF BLD_CHK
+    // Fill with easily recognizable garbage to crash anybody who improperly
+    // uses this memory.
+
     RtlFillMemoryWithUlong (
         ptr, // ptr
         node^.EndVa - node^.StartVa, // sz
@@ -1132,24 +1135,27 @@ FN MmAllocatePool (
         )
     END
 
-    IF NOT ptr THEN
-        IF thread THEN
-            // This was a VM-privileged thread allocating nonpaged pool, and it
-            // just failed to get a block from normal pool. Try again from
-            // privileged pool (which will take from the reserved final page
-            // frames if necessary).
+    IF NOT ptr AND thread THEN
+        // This was a VM-privileged thread allocating nonpaged pool, and it
+        // just failed to get a block from normal pool. Try again from
+        // privileged pool (which will take from the reserved final page
+        // frames if necessary).
 
-            poolindex = MM_PRIVILEGED_POOL
-            thread = NULLPTR
-            wait = savewait
+        poolindex = MM_PRIVILEGED_POOL
+        thread = NULLPTR
+        wait = savewait
 
-            GOTO Retry
-        END
-
-        RETURN NULLPTR
+        GOTO Retry
     END
 
 #IF BLD_CHK
+    IF NOT ptr THEN
+        RETURN NULLPTR
+    END
+
+    // Make sure it gets initialized by filling it with garbage.
+    // Garbage is chosen to be easily recognizable on a hex dump.
+
     RtlFillMemoryWithUlong (
         ptr, // ptr
         bytes, // sz
