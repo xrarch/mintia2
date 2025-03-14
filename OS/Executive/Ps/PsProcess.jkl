@@ -154,7 +154,7 @@ FN PspExitProcess (
 
     paged := process^.Paged
 
-    IF NOT paged^.TerminationStatus THEN
+    IF status != OS_STATUS_SUCCESS THEN
         paged^.TerminationStatus = status
     END
 
@@ -179,12 +179,6 @@ FN PspExitProcess (
     // Uninitialize the process's virtual memory structures.
 
     MmUninitializeProcess ( process )
-
-    // Remove from process group.
-
-    IF paged^.ProcessGroup THEN
-        PspRemoveProcessGroup ( process )
-    END
 
     // If activation hasn't been signaled, do so now in order to get rid of the
     // activation event counter.
@@ -220,7 +214,7 @@ FN (ObTypeDeleteF) PspDeleteProcessObject (
 
         PspExitProcess (
             process, // process
-            0, // status
+            OS_STATUS_SUCCESS, // status
         )
     END
 
@@ -315,7 +309,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     process^.Paged = paged
     paged^.Process = process
 
-    quotablock := PsQuotaBlock ( currentprocess )
+    quotablock : ^MiQuotaBlock = NULLPTR
 
     IF flags & (OS_PROCESS_NEW_SESSION | OS_PROCESS_DETACH_QUOTA) ==
         (OS_PROCESS_NEW_SESSION | OS_PROCESS_DETACH_QUOTA) THEN
@@ -333,6 +327,8 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     ELSE
         // Inherit the current process's quota block.
+
+        quotablock = PsQuotaBlock ( currentprocess )
 
         MmReferenceQuotaBlock ( quotablock )
     END
@@ -447,7 +443,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     KeInitializeLock ( &paged^.ActivationLock )
 
     paged^.ActivationStatus = 0
-    paged^.TerminationStatus = 0
+    paged^.TerminationStatus = OS_STATUS_SUCCESS
 
     paged^.Job = NULLPTR
 
