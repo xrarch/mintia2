@@ -67,6 +67,8 @@ FNPTR MiPoolReturnMemoryF (
     IN pages : UWORD,
 )
 
+#DEFINE MI_POOL_FLAG_USE_PRIVILEGED_MEM 1
+
 STRUCT MiPool
     Lock : KeLock,
 
@@ -79,6 +81,8 @@ STRUCT MiPool
 
     LogListHeads : RtlListEntry[MI_BLOCK_LOG_BUCKETS],
     SizeListHeads : RtlListEntry[MI_BLOCK_SIZE_BUCKETS],
+
+    Flags : UBYTE,
 END
 
 MiNonpagedPoolColor : ULONG = 0
@@ -125,6 +129,7 @@ END
 
 FN MiFreeExtensionSpace (
     IN ext : ^MiPoolExtension,
+    IN flush : UWORD,
 )
 
     // Free the virtual space for the pool extension.
@@ -146,7 +151,7 @@ FN MiFreeExtensionSpace (
     MiFreeChunkSpace (
         &MiPoolSpace, // chunkspace
         ext, // ptr
-        TRUE, // flush
+        flush, // flush
     )
 END
 
@@ -287,6 +292,7 @@ FN MiInitializePool (
     pool^.BytesUsedInternally = 0
     pool^.BytesUsedExternally = 0
     pool^.BytesUsedPeak = 0
+    pool^.Flags = 0
 
     i := 0
 
@@ -337,12 +343,18 @@ FN MiInitializePools ()
     // Initialize the system pools as part of stage 1 Mm init.
 
     MiInitializeNonpagedPool ( &MiPoolRecords[MM_NONPAGED_POOL] )
+    MiInitializeNonpagedPool ( &MiPoolRecords[MM_PRIVILEGED_POOL] )
+
+    // Allow privileged pool to use privileged memory.
+
+    MiPoolRecords[MM_PRIVILEGED_POOL].Flags |= MI_POOL_FLAG_USE_PRIVILEGED_MEM
 
     // Set paged pool to point to nonpaged pool for now, since we don't have
     // enough initialized to deal with faults on paged pool yet.
 
     MiPoolTable[MM_NONPAGED_POOL] = &MiPoolRecords[MM_NONPAGED_POOL]
     MiPoolTable[MM_PAGED_POOL] = &MiPoolRecords[MM_NONPAGED_POOL]
+    MiPoolTable[MM_PRIVILEGED_POOL] = &MiPoolRecords[MM_PRIVILEGED_POOL]
 END
 
 #SECTION "INITtext"
@@ -486,12 +498,15 @@ FN MiAllocateFromPool (
     IF NOT pool^.GetMemory (
         ext, // ptr
         1, // pages
-        wait == FALSE, // low
+        pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
     ) THEN
 
         // Failed to allocate a pool extension.
 
-        MiFreeExtensionSpace ( ext )
+        MiFreeExtensionSpace (
+            ext, // extension
+            FALSE, // flush
+        )
 
         MiReleasePool ( pool, ipl )
 
@@ -505,7 +520,7 @@ FN MiAllocateFromPool (
 
         MiWaitForPages (
             &MiSystemPartition, // partition
-            FALSE, // low
+            pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
         )
 
         GOTO Retry
@@ -894,7 +909,10 @@ FN MiFreeToPool (
             1, // pages
         )
 
-        MiFreeExtensionSpace ( ext )
+        MiFreeExtensionSpace (
+            ext, // extension
+            TRUE, // flush
+        )
 
         // Unlock pool.
 
@@ -976,9 +994,15 @@ FN MiAllocatePageAligned (
     IF NOT pool^.GetMemory (
         node^.StartVa, // ptr
         bytes, // pages
-        wait == FALSE, // low
+        pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
     ) THEN
         IF NOT wait THEN
+            // Caller told us not to wait and we didn't get the page frames we
+            // wanted, so just return.
+
+            // No need to flush the dynamic space since we didn't map anything
+            // into it.
+
             MiReleaseDynamicSpace (
                 node, // node
                 FALSE, // flush
@@ -987,9 +1011,11 @@ FN MiAllocatePageAligned (
             RETURN NULLPTR
         END
 
+        // Wait for page frames and retry.
+
         MiWaitForPages (
             &MiSystemPartition, // partition
-            FALSE, // low
+            pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
         )
 
         GOTO Retry
@@ -1054,13 +1080,32 @@ FN MmAllocatePool (
     IN wait : UWORD,
 ) : ^VOID
 
+    // Allocate a block of memory from the specified pool.
+
 #IF BLD_CHK
     IF bytes == 0 THEN
         KeCrash ( "MmAllocatePool: 0 byte allocation\n" )
     END
 #END
 
-    // Allocate a block of memory from the specified pool.
+    thread : ^PsThread = NULLPTR
+    savewait := wait
+
+    IF poolindex == MM_NONPAGED_POOL THEN
+        thread = PsCurrentThread ()
+
+        // If this is a VM-privileged thread allocating nonpaged pool, override
+        // the wait parameter to FALSE, so that we don't deadlock waiting for
+        // page frames.
+
+        IF thread^.VmPrivileged THEN
+            wait = FALSE
+        ELSE
+            thread = NULLPTR
+        END
+    END
+
+@Retry
 
     pool := MiPoolTable[poolindex]
 
@@ -1087,11 +1132,24 @@ FN MmAllocatePool (
         )
     END
 
-#IF BLD_CHK
     IF NOT ptr THEN
+        IF thread THEN
+            // This was a VM-privileged thread allocating nonpaged pool, and it
+            // just failed to get a block from normal pool. Try again from
+            // privileged pool (which will take from the reserved final page
+            // frames if necessary).
+
+            poolindex = MM_PRIVILEGED_POOL
+            thread = NULLPTR
+            wait = savewait
+
+            GOTO Retry
+        END
+
         RETURN NULLPTR
     END
 
+#IF BLD_CHK
     RtlFillMemoryWithUlong (
         ptr, // ptr
         bytes, // sz

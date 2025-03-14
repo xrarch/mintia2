@@ -159,15 +159,12 @@ FN PsExitThread ()
         IoRundownThread ( thread )
     END
 
-    IF thread^.Paged^.Mode == KE_USER_MODE THEN
-        // This was a usermode thread, so uninitialize the userspace structures
-        // created previously for it.
+    // Uninitialize the thread with respect to Mm.
 
-        MmUninitializeThread (
-            process, // process
-            thread, // thread
-        )
-    END
+    MmUninitializeThread (
+        process, // process
+        thread, // thread
+    )
 
     // Uninitialize the thread with respect to Ke.
 
@@ -277,23 +274,25 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
         GOTO Error4
     END
 
+    // Use the start function to determine whether this is a usermode or kernel
+    // thread.
+
     IF ctx^.StartFunc == &PspUserThreadEntry THEN
-        // This is a user thread, so it should get userspace virtual memory
-        // structures.
-
-        status = MmInitializeThread (
-            process, // process
-            thread, // thread
-        )
-
-        IF OsError ( status ) THEN
-            GOTO Error5
-        END
-
         paged^.Mode = KE_USER_MODE
-
     ELSE
         paged^.Mode = KE_KERNEL_MODE
+    END
+
+    // Initialize the thread for usage by Mm.
+
+    status = MmInitializeThread (
+        process, // process
+        thread, // thread
+        paged^.Mode, // mode
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Error5
     END
 
     // Initialize the thread for usage by Io.
@@ -375,12 +374,10 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
 @Error6
 
-    IF paged^.Mode == KE_USER_MODE THEN
-        MmUninitializeThread (
-            process, // process
-            thread, // thread
-        )
-    END
+    MmUninitializeThread (
+        process, // process
+        thread, // thread
+    )
 
 @Error5
 
