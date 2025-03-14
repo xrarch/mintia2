@@ -514,6 +514,11 @@ FN IoCompletePacket (
         iop^.PriorityBoost = priorityboost
     END
 
+    // Decrement the IoCount to reflect a dependent upon this packet being
+    // removed. If we drop it to zero, then we should perform full packet
+    // completion and potentially complete the parent as well if this is
+    // another associated IOP.
+
     oldcount := KeIncrementUlong (
         &iop^.IoCount, // ptr
         0xFFFFFFFF, // inc
