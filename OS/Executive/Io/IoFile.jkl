@@ -24,13 +24,7 @@ FN (ObTypeOpenF) IoOpenFileType (
         RETURN OS_STATUS_SUCCESS
     END
 
-    openfunc := fcb^.Dispatch^.F.OpenFileObject
-
-    IF NOT openfunc THEN
-        RETURN OS_STATUS_SUCCESS
-    END
-
-    RETURN openfunc (
+    RETURN fcb^.Dispatch^.F.OpenFileObject (
         process, // process
         file, // file
         access, // access
@@ -56,13 +50,7 @@ FN (ObTypeCloseF) IoCloseFileType (
         LEAVE
     END
 
-    closefunc := fcb^.Dispatch^.F.CloseFileObject
-
-    IF NOT closefunc THEN
-        LEAVE
-    END
-
-    closefunc (
+    fcb^.Dispatch^.F.CloseFileObject (
         file, // file
         access, // access
         lasthandlecount, // lasthandlecount
@@ -83,11 +71,7 @@ FN (ObTypeDeleteF) IoDeleteFileType (
     fcb := file^.Fcb
 
     IF fcb THEN
-        deletefunc := fcb^.Dispatch^.F.DeleteFileObject
-
-        IF deletefunc THEN
-            deletefunc ( file )
-        END
+        fcb^.Dispatch^.F.DeleteFileObject ( file )
     END
 
     // Unreference the namespace handle tracked by the file object.
@@ -116,13 +100,7 @@ FN (ObTypeSetSecurityF) IoSetSecurityFileType (
         RETURN OS_STATUS_SUCCESS
     END
 
-    func := fcb^.Dispatch^.F.SetSecurityFcb
-
-    IF NOT func THEN
-        RETURN OS_STATUS_SUCCESS
-    END
-
-    RETURN func (
+    RETURN fcb^.Dispatch^.F.SetSecurityFcb (
         fcb, // fcb
         permissions, // permissions
     )
@@ -139,13 +117,7 @@ FN (ObTypeDeleteF) IoDeleteFcbType (
 
     // Call the driver's FCB deletion function, if present.
 
-    deletefunc := fcb^.Dispatch^.F.DeleteFcb
-
-    IF deletefunc THEN
-        RETURN deletefunc ( fcb )
-    END
-
-    RETURN TRUE
+    RETURN fcb^.Dispatch^.F.DeleteFcb ( fcb )
 END
 
 #SECTION "PAGEtext"
@@ -157,13 +129,7 @@ FN (ObTypeNamespaceLookupF) IoNamespaceLookupFcbType (
 
     fcb := CAST context^.Object TO ^IoFcb
 
-    lookupfunc := fcb^.Dispatch^.F.NamespaceLookup
-
-    IF NOT lookupfunc THEN
-        RETURN OS_STATUS_NOT_SUPPORTED
-    END
-
-    RETURN lookupfunc ( context )
+    RETURN fcb^.Dispatch^.F.NamespaceLookup ( context )
 END
 
 #SECTION "PAGEtext"
