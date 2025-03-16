@@ -16,7 +16,7 @@ PUBLIC PsSystemProcess : ^PsProcess
 
 PUBLIC PsInitialThread : ^PsThread
 
-PUBLIC PsReaperThread : ^PsThread
+PUBLIC PspReaperWorkItem : ExWorkItem
 
 PspIdleProcessPaged : PsPagedProcess
 
@@ -304,23 +304,10 @@ FN PsInitializeStage1 ()
     // Create the reaper thread, which performs the final unreferencing of
     // terminated threads.
 
-    RtlInitializeString ( &name, "Reaper" )
-
-    status = PsCreateExecutiveThread (
-        &name, // name
-        &PspReaperThread, // startfunc
-        0, // context1
-        0, // context2
-        0, // flags
-        OUT PsReaperThread, // thread
+    ExInitializeWorkItem (
+        &PspReaperWorkItem, // item
+        &PspReaperWorker, // routine
     )
-
-    IF OsError ( status ) THEN
-        KeCrash ( "PsInitializeStage1: failed to create reaper (%x)\n",
-            status )
-    END
-
-    ObUnreferenceObject ( PsReaperThread )
 
     // Create the balance manager thread, which will perform stage 2
     // initialization of the system.

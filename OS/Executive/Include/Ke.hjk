@@ -977,13 +977,19 @@ EXTERN FN KeReadyInswappedProcess (
     IN process : ^KeProcess,
 )
 
-EXTERN KeReaperEvent : KeEvent
-
 EXTERN FN KeExitThread (
     IN thread : ^KeThread,
 )
 
-EXTERN FN KePopReaperList () : ^KeThread
+#IF BLD_MP
+
+EXTERN FN KeReaperBarrier (
+    IN thread : ^KeThread,
+)
+
+#END
+
+EXTERN KeReaperListHead : ^KeThread
 
 EXTERN FN KeSweepMyTb (
     IN keepglobal : UWORD,

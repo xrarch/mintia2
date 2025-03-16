@@ -7,49 +7,12 @@
 #INCLUDE "<ll>/System/OsSignal.hjk"
 
 EXTERN FN PsExitThread ()
+EXTERN FN PsActivateReaper ()
 
 PUBLIC KeUexecApcDispatcher : ^VOID
 PUBLIC KeUexecSignalDispatcher : ^VOID
 
-PUBLIC KeReaperEvent : KeEvent
-
-PUBLIC KiReaperListHead : ^KeThread = NULLPTR
-
-#IF BLD_MP
-
-KiReaperListLock : KiSpinlock = KI_INITIAL_SPINLOCK
-
-#MACRO KiAcquireReaperList () [
-    KiAcquireSpinlockRaise ( &KiReaperListLock )
-]
-
-#MACRO KiReleaseReaperList ( ipl ) [
-    KiReleaseSpinlockLower ( &KiReaperListLock, ipl )
-]
-
-#MACRO KiAcquireReaperListElevated () [
-    KiAcquireSpinlock ( &KiReaperListLock )
-]
-
-#MACRO KiReleaseReaperListElevated () [
-    KiReleaseSpinlock ( &KiReaperListLock )
-]
-
-#ELSE
-
-#MACRO KiAcquireReaperList () [
-    KiRaiseIpl ( KI_IPL_DPC )
-]
-
-#MACRO KiReleaseReaperList ( ipl ) [
-    KiLowerIpl ( ipl )
-]
-
-#MACRO KiAcquireReaperListElevated () []
-
-#MACRO KiReleaseReaperListElevated () []
-
-#END
+PUBLIC KeReaperListHead : ^KeThread
 
 #SECTION "PAGEtext"
 FN (KeApcF) KiSuspendThreadApc (
@@ -776,35 +739,20 @@ FN KiRundownApcQueue (
     END
 END
 
-FN KePopReaperList () : ^KeThread
-
-    // Pop a thread off the reaper list. The thread is guaranteed to have
-    // switched off its stack for the final time, and can be deleted.
-
-    ipl := KiAcquireReaperList ()
-
-    // Pop the item off the singly linked list.
-
-    thread := KiReaperListHead
-
-    IF thread THEN
-        KiReaperListHead = thread^.SwapNext
-    END
-
-    KiReleaseReaperList ( ipl )
-
 #IF BLD_MP
-    IF thread THEN
-        // Acquire and release the thread's spinlock as a barrier to ensure it
-        // isn't currently context switching and has fully died.
 
-        ipl = KiAcquireThread ( thread )
-        KiReleaseThread ( thread, ipl )
-    END
-#END
+FN KeReaperBarrier (
+    IN thread : ^KeThread,
+)
 
-    RETURN thread
+    // Acquire and release the thread's spinlock as a barrier to ensure it
+    // isn't currently context switching and has fully died.
+
+    ipl := KiAcquireThread ( thread )
+    KiReleaseThread ( thread, ipl )
 END
+
+#END
 
 FN KeExitThread (
     IN thread : ^KeThread,
@@ -851,37 +799,43 @@ FN KeExitThread (
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
     // Signal our termination event with raised IPL to ensure we make it out of
-    // here quickly.
+    // here quickly (not immediately preempted by a higher priority waiter).
 
     KeSignalEvent (
         &thread^.TerminationEvent, // event
         0, // priorityboost
     )
 
-    // Add to reaper list.
-
-    KiAcquireReaperListElevated ()
-
-    // Reuse SwapNext link (safely, as it can never be used again).
-
-    thread^.SwapNext = KiReaperListHead
-    KiReaperListHead = thread
-
-    // Signal the reaper event before acquiring my thread spinlock or we will
-    // violate the lock ordering.
-
-    KeSignalEvent (
-        &KeReaperEvent, // event
-        0, // priorityboost
-    )
-
-    // Acquire my thread spinlock before releasing the reaper list.
+    // Take thread spinlock.
 
     KiAcquireThreadElevated ( thread )
 
-    // Release the reaper list.
+    // Atomically enqueue to reaper list.
 
-    KiReleaseReaperListElevated ()
+    head : ^KeThread
+
+    WHILE TRUE DO
+        head = KeReaperListHead
+        thread^.SwapNext = head
+
+        IF KeCompareSwapPtr (
+            &KeReaperListHead, // ptr
+            thread, // newvalue
+            head, // expectedvalue
+        ) == head THEN
+
+            // Inserted.
+
+            BREAK
+        END
+    END
+
+    IF head == NULLPTR THEN
+        // The list was previously empty, so we should up-call into Ps to
+        // activate the reaper.
+
+        PsActivateReaper ()
+    END
 
     // Set to terminated status.
 

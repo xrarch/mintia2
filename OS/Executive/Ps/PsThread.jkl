@@ -401,48 +401,82 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     RETURN status
 END
 
+FN PsActivateReaper ()
+
+    // Enqueue the reaper work item. Called by Ke when the reaper list
+    // transitions to non-empty.
+
+    ExEnqueueWorkItem (
+        &PspReaperWorkItem, // item
+        EX_HIGH_WORK_PRIORITY, // priority
+        0, // context1
+        0, // context2
+    )
+END
+
 #SECTION "PAGEtext"
-FN (KeStartThreadF) PspReaperThread (
+FN (ExWorkItemF) PspReaperWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
     // Implements the thread reaper.
 
-    KeSetBasePriorityThread (
-        KeCurrentThread (), // thread
-        OS_PRIORITY_HIGH_REALTIME, // priority
-        TRUE, // setcurrentpriority
-    )
+@Loop
 
-    WHILE TRUE DO
-        // Wait for a thread to reap.
+    // Atomically pop the entire thread list.
+    //
+    // Set the list head to a busy bit that stops people from re-enqueuing the
+    // reaper work item while we're in this loop. There's nothing functionally
+    // illegal about doing that, it's just an inefficient use of limited worker
+    // threads.
 
-        KeWaitForSingleObject (
-            KE_KERNEL_MODE, // waitmode
-            KE_UNALERTABLE, // alertable
-            NULLPTR, // timeout
-            &KeReaperEvent.Header, // object
-        )
+    thread := CAST KeFetchAndSetPtr (
+        &KeReaperListHead, // ptr
+        1, // newvalue
+    ) TO ^KeThread
 
-        WHILE TRUE DO
-            thread := KePopReaperList ()
+    WHILE thread DO
+        psthrd := CONTAINEROF thread TO PsThread.Tcb
 
-            IF NOT thread THEN
-                // No more threads to reap.
+#IF BLD_MP
+        // Execute the reaper barrier to make sure the thread has fully switched
+        // off its stack.
 
-                BREAK
-            END
+        KeReaperBarrier ( thread )
+#END
 
-            psthrd := CONTAINEROF thread TO PsThread.Tcb
+        // Ke places the next link for the reaper list in the SwapNext field
+        // since it is otherwise unused at this point in the thread's lifetime.
 
-            // Remove the reference from the thread object, which signified that
-            // there was an active execution context that depended on it. There
-            // no longer is (and its last act was to place itself on our reaper
-            // list), so unreference it.
+        thread = thread^.SwapNext
 
-            ObUnreferenceObject ( psthrd )
+        IF thread == 1 THEN
+            // Someone grabbed our busy bit and put it as their next link.
+            // This is harmless, just treat it as no next thread.
+
+            thread = 0
         END
+
+        // Remove the reference from the thread object, which signified that
+        // there was an active execution context that depended on it. There
+        // no longer is (and its last act was to place itself on our reaper
+        // list), so unreference it.
+
+        ObUnreferenceObject ( psthrd )
+    END
+
+    // Clear our busy bit.
+
+    IF KeCompareSwapPtr (
+        &KeReaperListHead, // ptr
+        NULLPTR, // newvalue
+        1, // expectedvalue
+    ) != 1 THEN
+
+        // More threads were added while we were busy, so go delete them.
+
+        GOTO Loop
     END
 END
 
