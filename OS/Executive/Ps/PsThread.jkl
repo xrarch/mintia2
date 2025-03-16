@@ -295,6 +295,11 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
         GOTO Error5
     END
 
+    // Initialize the thread for usage by Ob.
+
+    paged^.DeletingObject = FALSE
+    paged^.DeferredObjectHead = NULLPTR
+
     // Initialize the thread for usage by Io.
 
     RtlInitializeList ( &thread^.IopListHead )
