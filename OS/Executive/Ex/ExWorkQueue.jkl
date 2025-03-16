@@ -1,0 +1,174 @@
+//
+// Implements system work queue threads.
+//
+
+#INCLUDE "Exp.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
+
+ExpWorkQueues : KeBalancedQueue[EX_MAX_WORK_PRIORITY]
+
+ExpWorkThreads : UBYTE[EX_MAX_WORK_PRIORITY]
+
+#DEFINE EXP_MIN_THREADS 2
+#DEFINE EXP_MAX_THREADS 6
+
+FN (KeStartThreadF) ExpWorkQueueLoop (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // This is the main loop for all of the worker threads.
+    // My priority was already set by ExpInitializeWorkQueues.
+    // I will spin waiting for work forever.
+
+    queue := CAST context1 TO ^KeBalancedQueue
+
+    WHILE TRUE DO
+        entry : ^RtlListEntry
+
+        status := KeRemoveFromBalancedQueue (
+            queue, // queue
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+            NULLPTR, // timeout
+            OUT entry, // item
+        )
+
+#IF BLD_CHK
+        IF OsError ( status ) THEN
+            KeCrash ( "ExpWorkQueueLoop (%x)\n", status )
+        END
+#END
+
+        item := CONTAINEROF entry TO ExWorkItem.QueueEntry
+
+        // Got a work item. Call the routine.
+
+        item^.Routine (
+            item^.Context1, // context1
+            item^.Context2, // context2
+        )
+    END
+END
+
+FN ExEnqueueWorkItem (
+    IN item : ^ExWorkItem,
+    IN priority : ExWorkQueuePriority,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Enqueue a work item to the appropriate thread.
+
+    KeInsertIntoBalancedQueue (
+        &ExpWorkQueues[priority], // queue
+        &item^.QueueEntry, // item
+        FALSE, // head
+        0, // priorityboost
+    )
+END
+
+#ENTERSECTION "INITtext"
+
+ExpWorkPriorities : UBYTE[EX_MAX_WORK_PRIORITY] = {
+    [EX_LOW_WORK_PRIORITY] = OS_PRIORITY_LOW_REALTIME,
+    [EX_HIGH_WORK_PRIORITY] = OS_PRIORITY_MED_REALTIME,
+}
+
+FN ExpInitializeWorkQueues ()
+
+    // Initialize the system work queues.
+
+    i := 0
+
+    WHILE i < EX_MAX_WORK_PRIORITY DO
+        // Initialize the work queue for this priority.
+        // maxthreads == 0 causes it to be equal to the number of processors in
+        // the system.
+
+        KeInitializeBalancedQueue (
+            &ExpWorkQueues[i], // queue
+            "SysQ", // name
+            0, // maxthreads
+        )
+
+        i += 1
+    END
+
+    // Compute how many threads of each priority there should be.
+    // We base this off the system size.
+    
+    systemsize := MmGetSystemSize ()
+
+    IF systemsize <= MM_TINY_SYSTEM THEN
+        ExpWorkThreads[EX_HIGH_WORK_PRIORITY] = 1
+        ExpWorkThreads[EX_LOW_WORK_PRIORITY] = 1
+
+    ELSEIF systemsize <= MM_SMALL_SYSTEM THEN
+        ExpWorkThreads[EX_HIGH_WORK_PRIORITY] = 2
+        ExpWorkThreads[EX_LOW_WORK_PRIORITY] = 3
+
+    ELSEIF systemsize <= MM_MEDIUM_SYSTEM THEN
+        ExpWorkThreads[EX_HIGH_WORK_PRIORITY] = 3
+        ExpWorkThreads[EX_LOW_WORK_PRIORITY] = 5
+
+    ELSE
+        ExpWorkThreads[EX_HIGH_WORK_PRIORITY] = 4
+        ExpWorkThreads[EX_LOW_WORK_PRIORITY] = 7
+    END
+
+    // Initialize a name string for the threads.
+
+    name : RtlString
+    RtlInitializeString ( &name, "WorkerThread" )
+
+    // Create the worker threads.
+
+    j := 0
+
+    WHILE j < EX_MAX_WORK_PRIORITY DO
+        i = 0
+
+        threads := ExpWorkThreads[j]
+
+        WHILE i < threads DO
+            thread : ^PsThread
+
+            status := PsCreateExecutiveThread (
+                &name, // name
+                &ExpWorkQueueLoop, // startfunc
+                &ExpWorkQueues[j], // context1
+                0, // context2
+                0, // flags
+                OUT thread, // thread
+            )
+
+            IF OsError ( status ) THEN
+                KeCrash ( "Failed to create workers (%x)\n", status )
+            END
+
+            // Set priority here instead of in the context of the thread itself
+            // so that we have a guarantee that the worker threads have their
+            // correct priority by the time we leave this function. Otherwise
+            // there could be a window of time where user programs could perform
+            // priority-based DOS attacks if these threads don't happen to get
+            // scheduled in by the time we initialize usermode.
+
+            KeSetBasePriorityThread (
+                &thread^.Tcb, // thread
+                ExpWorkPriorities[j], // priority
+                TRUE, // setcurrentpriority
+            )
+
+            // Remove the reference we got by virtue of creating the thread.
+
+            ObUnreferenceObject ( thread )
+
+            i += 1
+        END
+
+        j += 1
+    END
+END
+
+#LEAVESECTION

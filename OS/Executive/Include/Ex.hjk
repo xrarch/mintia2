@@ -113,3 +113,33 @@ EXTERN FN ExReferenceName (
 STRUCT ExEvent
     Event : KeEvent,
 END
+
+#MACRO ExInitializeWorkItem ( item, routine ) [
+    NOTHING (item)^.Routine = (routine)
+]
+
+FNPTR ExWorkItemF (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+STRUCT ExWorkItem
+    QueueEntry : RtlListEntry,
+    Routine : ExWorkItemF,
+    Context1 : UWORD,
+    Context2 : UWORD,
+END
+
+ENUM ExWorkQueuePriority : UBYTE
+    EX_LOW_WORK_PRIORITY,
+    EX_HIGH_WORK_PRIORITY,
+
+    EX_MAX_WORK_PRIORITY,
+END
+
+EXTERN FN ExEnqueueWorkItem (
+    IN item : ^ExWorkItem,
+    IN priority : ExWorkQueuePriority,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
