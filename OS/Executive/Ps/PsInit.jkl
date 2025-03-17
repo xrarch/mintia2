@@ -301,8 +301,14 @@ FN PsInitializeStage1 ()
             status )
     END
 
-    // Create the reaper thread, which performs the final unreferencing of
-    // terminated threads.
+    // Initialize the reaper custody list. Threads are placed on this list when
+    // they terminate, to transfer custody to the reaper thread.
+
+    KeInitializeCustodyList (
+        &KeReaperCustodyList, // list
+        &PspActivateReaper, // activateroutine
+        0, // context
+    )
 
     ExInitializeWorkItem (
         &PspReaperWorkItem, // item

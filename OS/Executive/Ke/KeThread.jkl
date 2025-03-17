@@ -7,12 +7,11 @@
 #INCLUDE "<ll>/System/OsSignal.hjk"
 
 EXTERN FN PsExitThread ()
-EXTERN FN PsActivateReaper ()
 
 PUBLIC KeUexecApcDispatcher : ^VOID
 PUBLIC KeUexecSignalDispatcher : ^VOID
 
-PUBLIC KeReaperListHead : ^KeThread
+PUBLIC KeReaperCustodyList : KeCustodyList
 
 #SECTION "PAGEtext"
 FN (KeApcF) KiSuspendThreadApc (
@@ -812,30 +811,10 @@ FN KeExitThread (
 
     // Atomically enqueue to reaper list.
 
-    head : ^KeThread
-
-    WHILE TRUE DO
-        head = KeReaperListHead
-        thread^.SwapNext = head
-
-        IF KeCompareSwapPtr (
-            &KeReaperListHead, // ptr
-            thread, // newvalue
-            head, // expectedvalue
-        ) == head THEN
-
-            // Inserted.
-
-            BREAK
-        END
-    END
-
-    IF head == NULLPTR THEN
-        // The list was previously empty, so we should up-call into Ps to
-        // activate the reaper.
-
-        PsActivateReaper ()
-    END
+    KeInsertCustodyList (
+        &KeReaperCustodyList, // list
+        &thread^.SwapNext, // link
+    )
 
     // Set to terminated status.
 

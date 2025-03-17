@@ -981,16 +981,6 @@ EXTERN FN KeExitThread (
     IN thread : ^KeThread,
 )
 
-#IF BLD_MP
-
-EXTERN FN KeReaperBarrier (
-    IN thread : ^KeThread,
-)
-
-#END
-
-EXTERN KeReaperListHead : ^KeThread
-
 EXTERN FN KeSweepMyTb (
     IN keepglobal : UWORD,
 )
@@ -1091,3 +1081,13 @@ EXTERN FN KeProcessCustodyList (
     NOTHING (list)^.ActivateRoutine = (activateroutine)
     NOTHING (list)^.Context = (context)
 ]
+
+#IF BLD_MP
+
+EXTERN FN KeReaperBarrier (
+    IN thread : ^KeThread,
+)
+
+#END
+
+EXTERN KeReaperCustodyList : KeCustodyList
