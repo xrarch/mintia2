@@ -58,7 +58,9 @@ FN KeProcessCustodyList (
     //
     // Set the list head to a busy bit that stops people from calling the
     // activation routine while we're in this loop. There's nothing functionally
-    // illegal about doing that, it's just inefficient since we're already here.
+    // illegal about doing that, it's just inefficient since we're already here;
+    // it could cause wastage of the limited worker thread pool or some other
+    // inefficiency.
 
     object := CAST KeFetchAndSetPtr (
         headptr, // ptr
