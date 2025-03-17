@@ -4,7 +4,7 @@
 
 #INCLUDE "Obp.hjk"
 
-ObpDeferredDeletionListHead : ^ObHeader
+PUBLIC ObpDeferredDeletionList : KeCustodyList
 
 PUBLIC ObpDeferredDeletionWorkItem : ExWorkItem
 
@@ -299,21 +299,6 @@ FN ObReferenceObject (
 END
 
 #SECTION "PAGEtext"
-FN ObpDeleteObjectChain (
-    IN header : ^ObHeader,
-)
-
-    // Delete a chain of objects enqueued for reaping.
-
-    WHILE header DO
-        object := header^.U.Reaper.Object
-        header = header^.U.Reaper.Next
-
-        ObDeleteObject ( object )
-    END
-END
-
-#SECTION "PAGEtext"
 FN ObpEmptyDeferredList (
     IN paged : ^PsPagedThread,
 )
@@ -337,8 +322,26 @@ FN ObpEmptyDeferredList (
 
         // Free every object in the chain.
 
-        ObpDeleteObjectChain ( header )
+        WHILE header DO
+            object := header^.U.Reaper.Object
+            header = header^.U.Reaper.Next
+
+            ObDeleteObject ( object )
+        END
     END
+END
+
+#SECTION "PAGEtext"
+FN (KeProcessCustodyListF) ObpDeferredDeleteObject (
+    IN list : ^KeCustodyList,
+    IN object : ^VOID,
+)
+
+    // Called to delete an object as a KeProcessCustodyList callback.
+
+    header := CONTAINEROF object TO ObHeader.U.Reaper.Next
+
+    ObDeleteObject ( header^.U.Reaper.Object )
 END
 
 #SECTION "PAGEtext"
@@ -350,43 +353,37 @@ FN (ExWorkItemF) ObpDeferredDeletionWorker (
     // An object deletion was deferred to worker thread context and WE are that
     // worker thread.
 
-    // Pop the entire list off the list head.
-    //
-    // Set the list head to a busy bit that stops people from re-enqueuing the
-    // work item while we're in this loop. There's nothing functionally illegal
-    // about doing that, it's just an inefficient use of limited worker threads.
-
-@Loop
-
-    header := CAST KeFetchAndSetPtr (
-        &ObpDeferredDeletionListHead, // ptr
-        1, // newvalue
-    ) TO ^ObHeader
-
     paged := PsCurrentThread ()^.Paged
 
     paged^.DeletingObject = TRUE
 
-    ObpDeleteObjectChain ( header )
+    KeProcessCustodyList (
+        &ObpDeferredDeletionList, // list
+        &ObpDeferredDeleteObject, // callback
+    )
 
     IF paged^.DeferredObjectHead THEN
         ObpEmptyDeferredList ( paged )
     END
 
     paged^.DeletingObject = FALSE
+END
 
-    // Clear our busy bit.
+#SECTION "PAGEtext"
+FN (KeCustodyListActivateF) ObpActivateDeletionWorker (
+    IN list : ^KeCustodyList,
+)
 
-    IF KeCompareSwapPtr (
-        &KeReaperListHead, // ptr
-        NULLPTR, // newvalue
-        1, // expectedvalue
-    ) != 1 THEN
+    // The list was previously empty, so we should enqueue the work item.
+    // Note that this guarantees that the work item is not actively in the
+    // queue, because the list is only emptied by the worker itself.
 
-        // More objects were added while we were busy, so go delete them.
-
-        GOTO Loop
-    END
+    ExEnqueueWorkItem (
+        &ObpDeferredDeletionWorkItem, // item
+        EX_LOW_WORK_PRIORITY, // priority
+        0, // context1
+        0, // context2
+    )
 END
 
 #SECTION "PAGEtext"
@@ -402,36 +399,10 @@ FN ObpDeferDeletion (
 
     // Atomically add it to the list.
 
-    head : ^ObHeader
-
-    WHILE TRUE DO
-        head = ObpDeferredDeletionListHead
-        header^.U.Reaper.Next = head
-
-        IF KeCompareSwapPtr (
-            &ObpDeferredDeletionListHead, // ptr
-            header, // newvalue
-            head, // expectedvalue
-        ) == head THEN
-
-            // Inserted.
-
-            BREAK
-        END
-    END
-
-    IF head == NULLPTR THEN
-        // The list was previously empty, so we should enqueue the work item.
-        // Note that this guarantees that the work item is not actively in the
-        // queue, because the list is only emptied by the worker itself.
-
-        ExEnqueueWorkItem (
-            &ObpDeferredDeletionWorkItem, // item
-            EX_LOW_WORK_PRIORITY, // priority
-            0, // context1
-            0, // context2
-        )
-    END
+    KeInsertCustodyList (
+        &ObpDeferredDeletionList, // list
+        &header^.U.Reaper.Next, // link
+    )
 END
 
 #SECTION "PAGEtext"
