@@ -98,7 +98,11 @@ EXPORT FN KeEnqueueDpc (
 
     // Set the DPC interrupt pending.
 
+#IF BLD_MP
+    KiSoftInterruptSelf ( prb, KI_IPL_DPC )
+#ELSE
     prb^.PendingSoftwareInterrupts |= KiPendingIpl ( KI_IPL_DPC )
+#END
 
     // Release the DPC queue lock.
     

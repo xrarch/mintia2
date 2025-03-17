@@ -11,7 +11,14 @@
     END
 #END
 
+#IF BLD_MP
+    KeMaskUlong (
+        &(prb)^.PendingSoftwareInterrupts, // ptr
+        ~(KiPendingIpl ( ipl )), // mask
+    )
+#ELSE
     NOTHING (prb)^.PendingSoftwareInterrupts &= ~(KiPendingIpl ( ipl ))
+#END
 ]
 
 FNPTR KiSoftwareInterruptHandlerF (
