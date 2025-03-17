@@ -56,9 +56,9 @@ FN KeProcessCustodyList (
 
     // Atomically pop the entire object list.
     //
-    // Set the list head to a busy bit that stops people from re-enqueuing the
-    // work item while we're in this loop. There's nothing functionally illegal
-    // about doing that, it's just an inefficient use of limited worker threads.
+    // Set the list head to a busy bit that stops people from calling the
+    // activation routine while we're in this loop. There's nothing functionally
+    // illegal about doing that, it's just inefficient since we're already here.
 
     object := CAST KeFetchAndSetPtr (
         headptr, // ptr
