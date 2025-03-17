@@ -1,0 +1,106 @@
+//
+// Implements an interlocked custody-passing list.
+//
+// Intended for use whenever asynchronous work needs to be done with some set of
+// objects whose custody must be passed to the async work context. For example,
+// dead thread reaping.
+//
+
+#INCLUDE "Ki.hjk"
+
+FN KeInsertCustodyList (
+    IN list : ^KeCustodyList,
+    IN link : ^^VOID,
+)
+
+    // Atomically insert the item in the list.
+    // Called from arbitrary context.
+
+    headptr := &list^.Head
+    head : ^VOID
+
+    WHILE TRUE DO
+        head = headptr^
+        link^ = head
+
+        IF KeCompareSwapPtr (
+            headptr, // ptr
+            link, // newvalue
+            head, // expectedvalue
+        ) == head THEN
+
+            // Inserted.
+
+            BREAK
+        END
+    END
+
+    IF head == NULLPTR THEN
+        // The list was previously empty.
+
+        list^.ActivateRoutine ( list )
+    END
+END
+
+FN KeProcessCustodyList (
+    IN list : ^KeCustodyList,
+    IN callback : KeProcessCustodyListF,
+)
+
+    // Process the items in the custody list.
+    // Called from worker context.
+
+    headptr := &list^.Head
+
+@Loop
+
+    // Atomically pop the entire object list.
+    //
+    // Set the list head to a busy bit that stops people from re-enqueuing the
+    // work item while we're in this loop. There's nothing functionally illegal
+    // about doing that, it's just an inefficient use of limited worker threads.
+
+    object := CAST KeFetchAndSetPtr (
+        headptr, // ptr
+        1, // newvalue
+    ) TO ^VOID
+
+#IF BLD_CHK
+    IF object == 1 OR object == NULLPTR THEN
+        KeCrash ( "KeProcessCustodyList: messed up synch\n" )
+    END
+#END
+
+    WHILE object DO
+        nextobject := (CAST object TO ^^VOID)^
+
+        IF nextobject == 1 THEN
+            // Someone grabbed our busy bit and put it as their next link.
+            // This is harmless, just treat it as no next object.
+
+            nextobject = NULLPTR
+        END
+
+        // Do the callback.
+
+        callback (
+            list, // list
+            object, // object
+        )
+
+        object = nextobject
+    END
+
+    // Clear our busy bit.
+
+    IF KeCompareSwapPtr (
+        headptr, // ptr
+        NULLPTR, // newvalue
+        1, // expectedvalue
+    ) != 1 THEN
+
+        // More objects were added while we were busy, so go process them.
+
+        GOTO Loop
+    END
+END

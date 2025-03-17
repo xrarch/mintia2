@@ -1060,3 +1060,34 @@ EXTERN FN KeExceptionJacket (
 
 EXTERN KeUexecApcDispatcher : ^VOID
 EXTERN KeUexecSignalDispatcher : ^VOID
+
+FNPTR KeCustodyListActivateF (
+    IN list : ^KeCustodyList,
+)
+
+FNPTR KeProcessCustodyListF (
+    IN list : ^KeCustodyList,
+    IN object : ^VOID,
+)
+
+STRUCT KeCustodyList
+    Head : ^VOID,
+    ActivateRoutine : KeCustodyListActivateF,
+    Context : UWORD,
+END
+
+EXTERN FN KeInsertCustodyList (
+    IN list : ^KeCustodyList,
+    IN link : ^^VOID,
+)
+
+EXTERN FN KeProcessCustodyList (
+    IN list : ^KeCustodyList,
+    IN callback : KeProcessCustodyListF,
+)
+
+#MACRO KeInitializeCustodyList ( list, activateroutine, context ) [
+    NOTHING (list)^.Head = NULLPTR
+    NOTHING (list)^.ActivateRoutine = (activateroutine)
+    NOTHING (list)^.Context = (context)
+]
