@@ -1091,3 +1091,28 @@ EXTERN FN KeReaperBarrier (
 #END
 
 EXTERN KeReaperCustodyList : KeCustodyList
+
+#IF BLD_CHK
+
+EXTERN KiAssertionMessage : UBYTE[32]
+
+#MACRO KeAssert ( expression ) [
+    #DEFINE EXPR_STRING ( STRCAT ( STRCAT "\"" expression ) "\"" )
+    #DEFINE FN_STRING ( STRCAT ( STRCAT "\"" JKL_FILE_NAME ) "\"" )
+    #DEFINE LN_STRING ( STRCAT "" JKL_LINE_NUMBER )
+
+    IF NOT (expression) THEN
+        KeCrash (
+            &KiAssertionMessage[0], // fmt
+            FN_STRING,
+            LN_STRING,
+            EXPR_STRING,
+        )
+    END
+]
+
+#ELSE
+
+#MACRO KeAssert ( expression ) []
+
+#END

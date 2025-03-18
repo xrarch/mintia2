@@ -71,15 +71,8 @@ FN KeReadyInswappedThread (
     // Called by the stack swapper thread when it has inswapped a kernel stack
     // and wants to re-ready the thread.
 
-#IF BLD_CHK
-    IF NOT thread^.InSwapList THEN
-        KeCrash ( "KeReadyInswappedThread: wasn't in swap list\n" )
-    END
-
-    IF thread^.Process^.MemoryState != KI_PROCESS_RESIDENT THEN
-        KeCrash ( "KeReadyInswappedThread: process not resident\n" )
-    END
-#END
+    KeAssert ( thread^.InSwapList != FALSE )
+    KeAssert ( thread^.Process^.MemoryState == KI_PROCESS_RESIDENT )
 
     ipl := KiAcquireThread ( thread )
 
@@ -99,11 +92,7 @@ FN KeReadyInswappedProcess (
 
     ipl := KiAcquireSwapState ( process )
 
-#IF BLD_CHK
-    IF process^.MemoryState != KI_PROCESS_TRANSITION THEN
-        KeCrash ( "KeReadyInswappedProcess: not in transition\n" )
-    END
-#END
+    KeAssert ( process^.MemoryState == KI_PROCESS_TRANSITION )
 
     process^.MemoryState = KI_PROCESS_RESIDENT
 
@@ -235,11 +224,7 @@ FN KeHarvestSwapCandidates (
             // The thread is WAITING which means we may be able to outswap its
             // stack.
 
-#IF BLD_CHK
-            IF thread^.WaitMode != KE_USER_MODE THEN
-                KeCrash ( "KeHarvestSwapCandidates: found kernelmode waiter\n" )
-            END
-#END
+            KeAssert ( thread^.WaitMode == KE_USER_MODE )
 
             IF tick - thread^.StateMs < KI_STACK_SWAP_INTERVAL_MS THEN
                 // This thread has been waiting for less time than the required
@@ -285,15 +270,8 @@ FN KeHarvestSwapCandidates (
 
                 oldcount := process^.ResidentThreadCount
 
-#IF BLD_CHK
-                IF oldcount == 0 THEN
-                    KeCrash ( "KeHarvestSwapCandidates: underflow\n" )
-                END
-
-                IF process^.MemoryState != KI_PROCESS_RESIDENT THEN
-                    KeCrash ( "KeHarvestSwapCandidates: not resident\n" )
-                END
-#END
+                KeAssert ( oldcount != 0)
+                KeAssert ( process^.MemoryState == KI_PROCESS_RESIDENT )
 
                 process^.ResidentThreadCount = oldcount - 1
 
@@ -358,11 +336,7 @@ FN KiReadyThreadOutswappedProcess (
     // The thread was readied while its process was outswapped, so we have to
     // enqueue it to the process's deferred ready list. Thread lock is held.
 
-#IF BLD_CHK
-    IF thread^.InSwapList THEN
-        KeCrash ( "KiReadyOutswappedThread: already in swap list\n" )
-    END
-#END
+    KeAssert ( NOT thread^.InSwapList )
 
     // Acquire a pointer to the thread's process.
 
@@ -430,11 +404,7 @@ FN KiReadyOutswappedThread (
     // Returns TRUE if we found the process in a non-resident state while
     // attempting to increment its resident stack count.
 
-#IF BLD_CHK
-    IF thread^.InSwapList THEN
-        KeCrash ( "KiReadyOutswappedThread: already in swap list\n" )
-    END
-#END
+    KeAssert ( NOT thread^.InSwapList )
 
     // Acquire a pointer to the thread's process.
 
@@ -486,15 +456,8 @@ FN KiInsertSwapCandidateListFunc (
     IN thread : ^KeThread,
 )
 
-#IF BLD_CHK
-    IF KeCurrentThread () != thread THEN
-        KeCrash ( "KiInsertSwapCandidateListFunc: not current\n" )
-    END
-
-    IF thread^.SwapCandidatePrb THEN
-        KeCrash ( "KiInsertSwapCandidateListFunc: already in list\n" )
-    END
-#END
+    KeAssert ( KeCurrentThread () == thread )
+    KeAssert ( thread^.SwapCandidatePrb != NULLPTR )
 
     // Insert the thread in the swap candidate list for the current processor.
 
@@ -525,15 +488,8 @@ FN KiRemoveSwapCandidateListFunc (
     IN thread : ^KeThread,
 )
 
-#IF BLD_CHK
-    IF KeCurrentThread () != thread THEN
-        KeCrash ( "KiRemoveSwapCandidateListFunc: not current\n" )
-    END
-
-    IF NOT thread^.SwapCandidatePrb THEN
-        KeCrash ( "KiRemoveSwapCandidateListFunc: not in list\n" )
-    END
-#END
+    KeAssert ( KeCurrentThread () == thread )
+    KeAssert ( thread^.SwapCandidatePrb != NULLPTR )
 
     // Remove the thread from the swap candidate list.
     // We don't have to re-check that the thread wasn't removed from the
@@ -564,11 +520,7 @@ FN KeAttachProcess (
 
     thread := KeCurrentThread ()
 
-#IF BLD_CHK
-    IF thread^.Process != thread^.ActualProcess THEN
-        KeCrash ( "KeAttachProcess: nested attachment\n" )
-    END
-#END
+    KeAssert ( thread^.Process == thread^.ActualProcess )
 
     IF thread^.Process == process THEN
         // Already in the correct address space.
@@ -660,11 +612,7 @@ FN KeDetachProcess (
 
     thread := KeCurrentThread ()
 
-#IF BLD_CHK
-    IF thread^.Process != process THEN
-        KeCrash ( "KeDetachProcess: wrong process\n" )
-    END
-#END
+    KeAssert ( thread^.Process == process )
 
     oldprocess := thread^.Process
 
@@ -682,25 +630,14 @@ FN KeDetachProcess (
 
     KiAcquireSwapStateElevated ( oldprocess )
 
-#IF BLD_CHK
-    IF oldprocess^.MemoryState != KI_PROCESS_RESIDENT THEN
-        KeCrash ( "KeDetachProcess: old not resident\n" )
-    END
-
-    IF thread^.ActualProcess^.MemoryState != KI_PROCESS_RESIDENT THEN
-        KeCrash ( "KeDetachProcess: new not resident\n" )
-    END
-#END
+    KeAssert ( oldprocess^.MemoryState == KI_PROCESS_RESIDENT )
+    KeAssert ( thread^.ActualProcess^.MemoryState == KI_PROCESS_RESIDENT )
 
     // Decrement the resident stack count, since we're leaving.
 
     oldcount := oldprocess^.ResidentThreadCount
 
-#IF BLD_CHK
-    IF oldcount == 0 THEN
-        KeCrash ( "KeDetachProcess: underflow\n" )
-    END
-#END
+    KeAssert ( oldcount != 0 )
 
     oldprocess^.ResidentThreadCount = oldcount - 1
 

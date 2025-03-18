@@ -33,11 +33,7 @@ FN ExAllocateEventCounter (
     IF NOT RtlEmptyList ( &ExpEventCounterList ) THEN
         counter = CONTAINEROF ExpEventCounterList.Next TO ExEventCounter.Free
 
-#IF BLD_CHK
-        IF counter^.Used.References != 0 THEN
-            KeCrash ( "ExAllocateEventCounter\n" )
-        END
-#END
+        KeAssert ( counter^.Used.References == 0 )
 
         RtlRemoveEntryList ( &counter^.Free )
 
@@ -88,12 +84,7 @@ FN ExReferenceEventCounter (
         1, // inc
     )
 
-#IF BLD_CHK
-    IF oldcount == 0 THEN
-        KeCrash ( "ExReferenceEventCounter\n" )
-    END
-#END
-
+    KeAssert ( oldcount != 0 )
 END
 
 FN ExUnreferenceEventCounter (
@@ -107,11 +98,7 @@ FN ExUnreferenceEventCounter (
         0xFFFFFFFF, // inc
     )
 
-#IF BLD_CHK
-    IF oldcount == 0 THEN
-        KeCrash ( "ExUnreferenceEventCounter\n" )
-    END
-#END
+    KeAssert ( oldcount != 0 )
 
     IF oldcount == 1 THEN
         // This was the last user of this event counter. Put it on the list.

@@ -63,15 +63,8 @@ FN HalRaiseHardwareIpl (
     oldipl := prb^.Ipl
     prb^.Ipl = ipl
 
-#IF BLD_CHK
-    IF ipl <= KI_IPL_DPC THEN
-        KeCrash ( "HalRaiseHardwareIpl: raising to software IPL\n" )
-    END
-
-    IF ipl < oldipl THEN
-        KeCrash ( "HalRaiseHardwareIpl: lowered IPL\n" )
-    END
-#END
+    KeAssert ( ipl > KI_IPL_DPC )
+    KeAssert ( ipl >= oldipl )
 
     // Write the corresponding hardware IPL into the LSIC.
 
@@ -103,15 +96,8 @@ FN HalLowerHardwareIpl (
 
     ints := KiDisableInterrupts ()
 
-#IF BLD_CHK
-    IF ipl > prb^.Ipl THEN
-        KeCrash ( "HalLowerHardwareIpl: raised IPL\n" )
-    END
-
-    IF prb^.Ipl <= KI_IPL_DPC THEN
-        KeCrash ( "HalLowerHardwareIpl: lowering from software IPL\n" )
-    END
-#END
+    KeAssert ( ipl <= prb^.Ipl )
+    KeAssert ( prb^.Ipl > KI_IPL_DPC )
 
     // Write the corresponding hardware IPL into the LSIC.
 

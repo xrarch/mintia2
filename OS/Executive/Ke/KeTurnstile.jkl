@@ -127,11 +127,7 @@ FN KeAllocateInitialTurnstile () : ^KiTurnstile
         1, // inc
     )
 
-#IF BLD_CHK
-    IF index >= KI_INITIAL_TURNSTILES THEN
-        KeCrash ( "KeAllocateInitialTurnstile: no more turnstiles\n" )
-    END
-#END
+    KeAssert ( index < KI_INITIAL_TURNSTILES )
 
     RETURN &KiInitialTurnstiles[index]
 END
@@ -462,10 +458,7 @@ FN KiBlockOnLock (
             turnstile = thread^.Turnstile
 
 #IF BLD_CHK
-            IF NOT turnstile THEN
-                KeCrash ( "KiBlockOnLock: no turnstile\n" )
-            END
-
+            KeAssert ( turnstile != NULLPTR )
             thread^.Turnstile = NULLPTR
 #END
 
@@ -694,11 +687,9 @@ FN KiBlockOnLock (
         KiReleaseThreadElevated ( thread )
     END
 
-#IF BLD_CHK
-    IF thread^.Turnstile != NULLPTR THEN
-        KeCrash ( "KiBlockOnLock: magically got a turnstile back\n" )
-    END
-#END
+    // Make sure we didn't magically get a turnstile back.
+
+    KeAssert ( thread^.Turnstile == NULLPTR )
 
     IF turnstile^.Free THEN
         // Take a turnstile from the free list anchored in the lock turnstile.
@@ -916,13 +907,10 @@ FN KiAcquireLockShared (
             CONTINUE
         END
 
-#IF BLD_CHK
-        IF current & KI_LOCK_WRITE_LOCKED AND
-            current & KI_LOCK_BITS == KeCurrentThread () THEN
+        // Make sure this isn't a recursive lock which is prohibited.
 
-            KeCrash ( "KiAcquireLockShared: recursive lock\n" )
-        END
-#END
+        KeAssert ( (current & KI_LOCK_WRITE_LOCKED == 0) OR
+            (current & KI_LOCK_BITS != KeCurrentThread () ) )
 
         // If any of the control bits are set, one of the following is true:
         //
@@ -975,13 +963,10 @@ FN KiAcquireLockExclusive (
             CONTINUE
         END
 
-#IF BLD_CHK
-        IF current & KI_LOCK_WRITE_LOCKED AND
-            current & KI_LOCK_BITS == thread THEN
+        // Make sure this isn't a recursive lock which is prohibited.
 
-            KeCrash ( "KiAcquireLockExclusive: recursive lock\n" )
-        END
-#END
+        KeAssert ( (current & KI_LOCK_WRITE_LOCKED == 0) OR
+            (current & KI_LOCK_BITS != KeCurrentThread () ) )
 
         // If the lock is nonzero, one of the following is true:
         //
@@ -1014,11 +999,7 @@ FN KiReleaseLock (
         IF current & KI_LOCK_WRITE_LOCKED THEN
             // Locked exclusively.
 
-#IF BLD_CHK
-            IF current & KI_LOCK_BITS != KeCurrentThread () THEN
-                KeCrash ( "KiReleaseLock: not held by me\n" )
-            END
-#END
+            KeAssert ( current & KI_LOCK_BITS == KeCurrentThread () )
             
             // Try to zero out the lock.
 
@@ -1050,11 +1031,7 @@ FN KiReleaseLock (
 
         // Locked shared.
 
-#IF BLD_CHK
-        IF current & KI_LOCK_BITS == 0 THEN
-            KeCrash ( "KiReleaseLock: not held\n" )
-        END
-#END
+        KeAssert ( current & KI_LOCK_BITS != 0 )
 
         IF current & KI_LOCK_BITS == KI_LOCK_SHARE_INC THEN
             // Only I have it locked shared. Try to zero out the lock.
@@ -1113,15 +1090,8 @@ EXPORT FN KeConvertLockToShared (
     new : UWORD
 
     WHILE TRUE DO
-#IF BLD_CHK
-        IF current & KI_LOCK_WRITE_LOCKED == 0 THEN
-            KeCrash ( "KeConvertLockToShared: not held\n" )
-        END
-
-        IF current & KI_LOCK_BITS != KeCurrentThread () THEN
-            KeCrash ( "KeConvertLockToShared: not held by me\n" )
-        END
-#END
+        KeAssert ( current & KI_LOCK_WRITE_LOCKED != 0 )
+        KeAssert ( current & KI_LOCK_BITS == KeCurrentThread () )
 
         // Try to set held shared with a single owner.
 
@@ -1166,11 +1136,7 @@ EXPORT FN KeTryConvertLockToExclusive (
         IF current & KI_LOCK_WRITE_LOCKED THEN
             // Already exclusive.
 
-#IF BLD_CHK
-            IF current & KI_LOCK_BITS != thread THEN
-                KeCrash ( "KeTryConvertLockToExclusive: not held by me\n" )
-            END
-#END
+            KeAssert ( current & KI_LOCK_BITS == thread )
 
             RETURN TRUE
         END

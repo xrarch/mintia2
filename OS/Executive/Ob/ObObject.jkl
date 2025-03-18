@@ -194,16 +194,12 @@ FN ObFreeObject (
 
     header := ObFindHeader ( object )
 
-#IF BLD_CHK
-    IF header^.NamespaceEntry THEN
-        // Shouldn't be possible because temporary objects are removed from the
-        // namespace when their handle count reaches zero, which happened before
-        // now. Permanent objects have their refcount biased when inserted into
-        // the namespace.
+    // Shouldn't be possible because temporary objects are removed from the
+    // namespace when their handle count reaches zero, which happened before
+    // now. Permanent objects have their refcount biased when inserted into
+    // the namespace.
 
-        KeCrash ( "ObFreeObject: has namespace entry\n" )
-    END
-#END
+    KeAssert ( header^.NamespaceEntry == NULLPTR )
 
     quotablock := header^.QuotaBlock
 
@@ -290,12 +286,7 @@ FN ObReferenceObject (
         1, // inc
     )
 
-#IF BLD_CHK
-    IF oldcount == 0 THEN
-        KeCrash ( "ObReferenceObject: zero refcount\n" )
-    END
-#END
-
+    KeAssert ( oldcount != 0 )
 END
 
 #SECTION "PAGEtext"
@@ -305,11 +296,7 @@ FN ObpEmptyDeferredList (
 
     // Empty the deferred object deletion list of the thread.
 
-#IF BLD_CHK
-    IF NOT paged^.DeletingObject THEN
-        KeCrash ( "ObpEmptyDeferredList: DeletingObject not set\n" )
-    END
-#END
+    KeAssert ( paged^.DeletingObject != FALSE )
 
     // Loop this whole process because we might enqueue even more objects while
     // deleting the objects we have.
@@ -419,11 +406,7 @@ FN ObUnreferenceObject (
         -1, // inc
     )
 
-#IF BLD_CHK
-    IF oldcount == 0 THEN
-        KeCrash ( "ObUnreferenceObject: underflow\n" )
-    END
-#END
+    KeAssert ( oldcount != 0 )
 
     IF oldcount == 1 THEN
         // Delete it.
@@ -496,11 +479,7 @@ FN ObUnreferenceObjectDeferDelete (
         -1, // inc
     )
 
-#IF BLD_CHK
-    IF oldcount == 0 THEN
-        KeCrash ( "ObUnreferenceObject: underflow\n" )
-    END
-#END
+    KeAssert ( oldcount != 0 )
 
     IF oldcount == 1 THEN
         // Delete it.

@@ -67,11 +67,8 @@ FN KeProcessCustodyList (
         1, // newvalue
     ) TO ^VOID
 
-#IF BLD_CHK
-    IF object == 1 OR object == NULLPTR THEN
-        KeCrash ( "KeProcessCustodyList: messed up synch\n" )
-    END
-#END
+    KeAssert ( object != 1 )
+    KeAssert ( object != NULLPTR )
 
     WHILE object DO
         nextobject := (CAST object TO ^^VOID)^

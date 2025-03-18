@@ -5,11 +5,7 @@
 #INCLUDE "Ki.hjk"
 
 #MACRO KiAcknowledgeSoftwareInterrupt ( prb, ipl ) [
-#IF BLD_CHK
-    IF NOT ipl THEN
-        KeCrash ( "KiASI IPL = 0\n" )
-    END
-#END
+    KeAssert ( ipl != KI_IPL_LOW )
 
 #IF BLD_MP
     KeMaskUlong (

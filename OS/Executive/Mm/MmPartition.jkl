@@ -237,13 +237,7 @@ FN MiAllocatePageFromList (
 #IF ( == MI_COLOR_COUNT 1 )
     entry := list^.Heads[0].Next
 
-#IF BLD_CHK
-    IF entry == &list^.Heads[0] THEN
-        // Shouldn't be reachable - caller saw there were items in this list.
-
-        KeCrash ( "MiAllocatePageFromList\n" )
-    END
-#END
+    KeAssert ( entry != &list^.Heads[0] )
 
     RtlRemoveEntryList ( entry )
 
@@ -322,11 +316,7 @@ FN MiAllocatePageFromStandbyList (
 
     ELSE
 
-#IF BLD_CHK
-        IF pfe^.Type != MI_ANON_PFE_TYPE THEN
-            KeCrash ( "Not anonymous\n" )
-        END
-#END
+        KeAssert ( pfe^.Type == MI_ANON_PFE_TYPE )
 
         // Reset the tracking table entry for this anonymous page.
 
@@ -355,22 +345,16 @@ FN MiAllocatePageFromStandbyList (
                 )
             )
 
-#IF BLD_CHK
             // Tracking pool should consist of anonymous pages.
 
-            IF poolpfe^.Type != MI_ANON_PFE_TYPE THEN
-                KeCrash ( "poolpfe not anonymous\n" )
-            END
+            KeAssert ( poolpfe^.Type == MI_ANON_PFE_TYPE )
 
             // This page of tracking pool should have at least 2
             // references: one for being pinned (due to having this tracking
             // entry resident), and another for being in the system working
             // set.
 
-            IF poolpfe^.References < 2 THEN
-                KeCrash ( "poolpfe not referenced\n" )
-            END
-#END
+            KeAssert ( poolpfe^.References >= 2 )
 
             poolpfe^.References -= 1
         END
@@ -723,12 +707,7 @@ FN MmUnchargeCommit (
         -pages, // inc
     )
 
-#IF BLD_CHK
-    IF pages > old THEN
-        KeCrash ( "commit underflow\n" )
-    END
-#END
-
+    KeAssert ( pages <= old )
 END
 
 FN MmGetSystemSize () : UWORD

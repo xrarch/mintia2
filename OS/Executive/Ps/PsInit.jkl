@@ -120,11 +120,7 @@ FN PspExchangeId (
         id >> PSP_ID_INDEX_SHIFT, // handle
     ) TO ^PspIdEntry
 
-#IF BLD_CHK
-    IF NOT entry THEN
-        KeCrash ( "PspExchangeId: no such ID\n" )
-    END
-#END
+    KeAssert ( entry != NULLPTR )
 
     entry^.Object = object
 

@@ -69,11 +69,7 @@ FN MmJettisonUnusedResources ()
             WHILE i < pages DO
                 ptecontents := pte[i]
 
-#IF BLD_CHK
-                IF NOT MiIsPteValid ( ptecontents ) THEN
-                    KeCrash ( "MmJettisonUnusedResources: invalid pte %p\n", ptecontents )
-                END
-#END
+                KeAssert ( MiIsPteValid ( ptecontents ) )
 
                 // Clear the PTE, makes it more likely we'll see it if a bad
                 // pointer within this space is used later. Due to the TB it's
@@ -352,11 +348,7 @@ FN MmInitializeStage1 ()
     // the system memory partition enough to get physical memory allocation
     // working.
 
-#IF BLD_CHK
-    IF SIZEOF MiPfe > MI_PFE_SIZE THEN
-        KeCrash ( "MmInitializeStage1: bad PFE size\n" )
-    END
-#END
+    KeAssert ( SIZEOF MiPfe <= MI_PFE_SIZE )
 
     sys := &MiSystemPartition
 

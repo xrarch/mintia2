@@ -25,11 +25,7 @@ FN KiWakeBalancedQueue (
     // going to sleep. See if we should wake up another thread. Queue removal
     // lock and object lock are held.
 
-#IF BLD_CHK
-    IF NOT queue^.ActiveThreadCount THEN
-        KeCrash ( "KiWakeBalancedQueue: zero active threads\n" )
-    END
-#END
+    KeAssert ( queue^.ActiveThreadCount != 0 )
 
     queue^.ActiveThreadCount -= 1
 
@@ -62,13 +58,7 @@ FN KiDisassociateFromBalancedQueue (
     // Disassociate the thread from any balanced queue it is part of.
     // The thread must be the current thread.
 
-#IF BLD_CHK
-    current := KeCurrentThread ()
-
-    IF current != thread THEN
-        KeCrash ( "KiDisassociateFromBalancedQueue: not current\n" )
-    END
-#END
+    KeAssert ( KeCurrentThread () == thread )
 
     oldqueue := thread^.BalancedQueue
 
@@ -185,14 +175,10 @@ EXPORT FN KeRemoveFromBalancedQueue (
     // Remove an item from the balanced queue. If there are too many threads, or
     // there are no items to remove, we block.
 
-#IF BLD_CHK
     // Not allowed at >= KI_IPL_APC because the QueueItem field of the thread
     // struct could get corrupted if this happens in an APC.
 
-    IF KiCurrentIpl () >= KI_IPL_APC THEN
-        KeCrash ( "KeRemoveFromBalancedQueue: IPL >= KI_IPL_APC\n" )
-    END
-#END
+    KeAssert ( KiCurrentIpl () < KI_IPL_APC )
 
     item = NULLPTR
 
@@ -271,11 +257,7 @@ EXPORT FN KeRemoveFromBalancedQueue (
     IF status == 0 THEN
         // Got an item.
 
-#IF BLD_CHK
-        IF NOT thread^.QueueItem THEN
-            KeCrash ( "KeRemoveFromBalancedQueue: status of 0 but no item\n" )
-        END
-#END
+        KeAssert ( thread^.QueueItem != NULLPTR )
 
         item = thread^.QueueItem
 

@@ -44,16 +44,12 @@ FN KiAddSwappableThreadToProcess (
 
     ipl := KiAcquireSwapState ( process )
 
-#IF BLD_CHK
     // We should be attached to the process right now, meaning there is at least
     // one thread whose stack is not swapped out, and therefore the process
     // cannot be either as we only outswap processes after their threads are all
     // gone.
 
-    IF process^.MemoryState != KI_PROCESS_RESIDENT THEN
-        KeCrash ( "KeInitializeThread: outswapped process\n" )
-    END
-#END
+    KeAssert ( process^.MemoryState == KI_PROCESS_RESIDENT )
 
     process^.ResidentThreadCount += 1
 
@@ -265,11 +261,7 @@ FN KeUninitializeThread (
     // NOTE: This is not part of KeExitThread because it returns whether the
     //       process should be terminated, and only Ps knows what to do then.
 
-#IF BLD_CHK
-    IF NOT thread^.KernelStackResident THEN
-        KeCrash ( "KeUninitializeThread: stack not resident\n" )
-    END
-#END
+    KeAssert ( thread^.KernelStackResident != FALSE )
 
     terminated := FALSE
 
@@ -281,11 +273,7 @@ FN KeUninitializeThread (
 
     RtlRemoveEntryList ( &thread^.ProcessListEntry )
 
-#IF BLD_CHK
-    IF process^.ThreadCount == 0 THEN
-        KeCrash ( "KeUninitializeThread: thread count underflow\n" )
-    END
-#END
+    KeAssert ( process^.ThreadCount != 0 )
 
     // Decrement the thread count.
 
@@ -296,11 +284,7 @@ FN KeUninitializeThread (
         // We just decremented the thread count to zero, so mark the process
         // terminated.
 
-#IF BLD_CHK
-        IF process^.SignalThread != thread THEN
-            KeCrash ( "KeUninitializeThread: last wasn't signal thread\n" )
-        END
-#END
+        KeAssert ( process^.SignalThread == thread )
 
         terminated = TRUE
 
@@ -310,11 +294,7 @@ FN KeUninitializeThread (
     ELSEIF process^.SignalThread == thread THEN
         // Pick another thread to handle the signals.
 
-#IF BLD_CHK
-        IF RtlEmptyList ( &process^.ThreadListHead ) THEN
-            KeCrash ( "KeUninitializeThread: no threads to replace with\n" )
-        END
-#END
+        KeAssert ( NOT RtlEmptyList ( &process^.ThreadListHead ) )
 
         // Replace it with the thread on the head of the process's list.
 
@@ -334,11 +314,7 @@ FN KeUninitializeThread (
 
     ipl := KiAcquireSwapState ( process )
 
-#IF BLD_CHK
-    IF process^.ResidentThreadCount == 0 THEN
-        KeCrash ( "KeUninitializeThread: resident count underflow\n" )
-    END
-#END
+    KeAssert ( process^.ResidentThreadCount != 0 )
 
     process^.ResidentThreadCount -= 1
 
@@ -532,15 +508,8 @@ FN KeDeliverOnWaitSignalThread (
     // pending until the next usermode alertable wait.
     // Returns TRUE if it was previously enabled, FALSE otherwise.
 
-#IF BLD_CHK
-    IF signal == 0 THEN
-        KeCrash ( "KeDeliverOnWaitSignalThread: signal == 0\n" )
-    END
-
-    IF signal >= 32 THEN
-        KeCrash ( "KeDeliverOnWaitSignalThread: signal >= 32\n" )
-    END
-#END
+    KeAssert ( signal != 0 )
+    KeAssert ( signal < 32 )
 
     IF signal == OS_SIGNAL_KILL THEN
         // Can't mask off KILL.
@@ -586,15 +555,8 @@ FN KeMaskSignalThread (
     // Mask the given signal from being delivered to the thread.
     // Returns TRUE if it was previously enabled, FALSE otherwise.
 
-#IF BLD_CHK
-    IF signal == 0 THEN
-        KeCrash ( "KeMaskSignalThread: signal == 0\n" )
-    END
-
-    IF signal >= 32 THEN
-        KeCrash ( "KeMaskSignalThread: signal >= 32\n" )
-    END
-#END
+    KeAssert ( signal != 0 )
+    KeAssert ( signal < 32 )
 
     IF signal == OS_SIGNAL_KILL THEN
         // Can't mask off KILL.
@@ -638,15 +600,8 @@ FN KeSignalThread (
 
     // Send a signal to the thread.
 
-#IF BLD_CHK
-    IF signal == 0 THEN
-        KeCrash ( "KeSignalThread: signal == 0\n" )
-    END
-
-    IF signal >= 32 THEN
-        KeCrash ( "KeSignalThread: signal >= 32\n" )
-    END
-#END
+    KeAssert ( signal != 0 )
+    KeAssert ( signal < 32 )
 
     // If this is a KILL signal, unsuspend the thread.
 
@@ -685,11 +640,7 @@ EXPORT FN KeIgnoreEvents ()
 
     thread := KeCurrentThread ()
 
-#IF BLD_CHK
-    IF thread^.IgnoreEventCount == 255 THEN
-        KeCrash ( "KeIgnoreEvents: overflow\n" )
-    END
-#END
+    KeAssert ( thread^.IgnoreEventCount != 255 )
 
     thread^.IgnoreEventCount += 1
 END
@@ -700,11 +651,7 @@ EXPORT FN KeAcceptEvents ()
 
     thread := KeCurrentThread ()
 
-#IF BLD_CHK
-    IF thread^.IgnoreEventCount == 0 THEN
-        KeCrash ( "KeAcceptEvents: underflow\n" )
-    END
-#END
+    KeAssert ( thread^.IgnoreEventCount != 0 )
 
     thread^.IgnoreEventCount -= 1
 END
@@ -761,15 +708,13 @@ FN KeExitThread (
     // We have to rundown the thread, add it to the reaper list, and signal the
     // reaper event. This function does not return.
 
-#IF BLD_CHK
-    IF NOT RtlEmptyList ( &thread^.KapcListHead ) THEN
-        KeCrash ( "KeExitThread: pending KAPCs\n" )
-    END
+    // KAPCs must not be pending by now.
 
-    IF thread^.Process != thread^.ActualProcess THEN
-        KeCrash ( "KeExitThread: exited while attached to other process\n" )
-    END
-#END
+    KeAssert ( RtlEmptyList ( &thread^.KapcListHead ) )
+
+    // The thread must not be attached to another process.
+
+    KeAssert ( thread^.Process == thread^.ActualProcess )
 
     // Rundown the lazy APC queue.
 

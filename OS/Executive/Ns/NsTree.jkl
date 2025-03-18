@@ -89,14 +89,10 @@ FN NspDeleteEntry (
 
     // Delete the entry.
 
-#IF BLD_CHK
-    IF entry^.References == 0 THEN
-        // If it has zero references, it's on one of the reclaimable node lists.
-        // We don't remove it from those here, so that's a bug.
+    // If it has zero references, it's on one of the reclaimable node lists.
+    // We don't remove it from those here, so that's a bug.
 
-        KeCrash ( "NspDeleteEntry: zero refs\n" )
-    END
-#END
+    KeAssert ( entry^.References != 0 )
 
     // First unreference the interned name.
 
@@ -733,11 +729,7 @@ FN NsLookupEntryByPath (
                 // The path component was dotdot, the parent directory.
 
                 IF currententry != currentspace^.Root THEN
-#IF BLD_CHK
-                    IF NOT currententry^.Parent THEN
-                        KeCrash ( "NsReferenceEntryByPath: stacked 1\n" )
-                    END
-#END
+                    KeAssert ( currententry^.Parent != NULLPTR )
 
                     currententry = currententry^.Parent
 
@@ -754,15 +746,11 @@ FN NsLookupEntryByPath (
                     currententry = currentspace^.MountedUpon.Entry^.Parent
                     currentspace = currentspace^.MountedUpon.Subspace
 
-#IF BLD_CHK
-                    IF NOT currententry THEN
-                        // The subspace was mounted on a root directory.
-                        // We don't allow directly stacking mountpoints like
-                        // this because it's annoying, so this is a bug.
+                    // If the subspace was mounted on a root directory,
+                    // we don't allow directly stacking mountpoints like
+                    // this because it's annoying, so this is a bug.
 
-                        KeCrash ( "NsReferenceEntryByPath: stacked 2\n" )
-                    END
-#END
+                    KeAssert ( currententry != NULLPTR )
                 END
 
                 CONTINUE
@@ -999,11 +987,7 @@ FN NsLookupEntryByPath (
             // We already have an entry, and we came here because it was a
             // negative entry and we're trying to create a new file.
 
-#IF BLD_CHK
-            IF child^.Flags & NS_ENTRY_NEGATIVE == 0 THEN
-                KeCrash ( "NsReferenceEntryByPath: not negative\n" )
-            END
-#END
+            KeAssert ( child^.Flags & NS_ENTRY_NEGATIVE != 0 )
 
             // Reference it to make sure it's no longer on the negative entry
             // list.
@@ -1068,11 +1052,7 @@ FN NsLookupEntryByPath (
 
 @CreateObject
 
-#IF BLD_CHK
-            IF NOT obparams THEN
-                KeCrash ( "NsReferenceEntryByPath: no creationfunc\n" )
-            END
-#END
+            KeAssert ( obparams != NULLPTR )
 
             // Check for write access to the parent.
 

@@ -118,11 +118,7 @@ FN PspDecrementActiveCountJob (
 
     oldcount := job^.ActiveCount
 
-#IF BLD_CHK
-    IF oldcount == 0 THEN
-        KeCrash ( "PspDecrementActiveCountJob: underflow\n" )
-    END
-#END
+    KeAssert ( oldcount != 0 )
 
     job^.ActiveCount = oldcount - 1
 

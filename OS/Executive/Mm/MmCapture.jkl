@@ -54,11 +54,7 @@ EXPORT FN MmSafeCopyIn (
         RETURN OS_STATUS_READ_FAULT
     END
 
-#IF BLD_CHK
-    IF dest < MI_SYSTEM_SPACE THEN
-        KeCrash ( "MmSafeCopyIn: dest < MI_SYSTEM_SPACE\n" )
-    END
-#END
+    KeAssert ( dest >= MI_SYSTEM_SPACE )
 
     ab : KeAbortBlock
 
@@ -90,11 +86,7 @@ EXPORT FN MmSafeCopyOut (
         RETURN OS_STATUS_WRITE_FAULT
     END
 
-#IF BLD_CHK
-    IF src < MI_SYSTEM_SPACE THEN
-        KeCrash ( "MmSafeCopyOut: src < MI_SYSTEM_SPACE\n" )
-    END
-#END
+    KeAssert ( src >= MI_SYSTEM_SPACE )
 
     ab : KeAbortBlock
 

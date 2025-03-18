@@ -85,11 +85,7 @@ EXPORT FN KeEnqueueKapc (
     // Enqueue the kernel APC to its thread.
     // Return TRUE if enqueued, FALSE otherwise.
 
-#IF BLD_CHK
-    IF apc^.Type != KE_APC_KERNEL THEN
-        KeCrash ( "KeEnqueueKapc: wrong type %u\n", apc^.Type )
-    END
-#END
+    KeAssert ( apc^.Type == KE_APC_KERNEL )
 
     thread := apc^.Thread
 
@@ -198,11 +194,7 @@ EXPORT FN KeEnqueueUapc (
 
     thread := apc^.Thread
 
-#IF BLD_CHK
-    IF apc^.Type != KE_APC_USER THEN
-        KeCrash ( "KeEnqueueUapc: wrong type %u\n", apc^.Type )
-    END
-#END
+    KeAssert ( apc^.Type == KE_APC_USER )
 
     // Acquire the thread.
 
@@ -277,11 +269,7 @@ EXPORT FN KeEnqueueLapc (
     // Enqueue the lazy APC to its thread.
     // Return TRUE if enqueued, FALSE otherwise.
 
-#IF BLD_CHK
-    IF apc^.Type != KE_APC_LAZY THEN
-        KeCrash ( "KeEnqueueLapc: wrong type %u\n", apc^.Type )
-    END
-#END
+    KeAssert ( apc^.Type == KE_APC_LAZY )
 
     thread := apc^.Thread
 
@@ -448,11 +436,7 @@ FN KiDispatchKernelApcQueue (
     // Here we have to dispatch kernel APCs. We are in the context of the
     // current thread at KI_IPL_APC.
 
-#IF BLD_CHK
-    IF KiCurrentIpl () != KI_IPL_APC THEN
-        KeCrash ( "KiDispatchKernelApcQueue: not KI_IPL_APC\n" )
-    END
-#END
+    KeAssert ( KiCurrentIpl () == KI_IPL_APC )
 
     // Dispatch the APCs.
 
@@ -474,11 +458,7 @@ FN KiDispatchLazyApcQueue (
     // KE_USER_MODE wait, and upon a return to userspace with pending lazy APCs.
     // We are in the context of the current thread at KI_IPL_LOW.
 
-#IF BLD_CHK
-    IF KiCurrentIpl () != KI_IPL_LOW THEN
-        KeCrash ( "KiDispatchLazyApcQueue: not KI_IPL_LOW\n" )
-    END
-#END
+    KeAssert ( KiCurrentIpl () == KI_IPL_LOW )
 
     KiDispatchKernelModeApcs (
         current, // thread

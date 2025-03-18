@@ -15,6 +15,12 @@ FNPTR DbgMainF ()
 
 PUBLIC KeSharedUserPage : ^OsSharedUserPage
 
+#IF BLD_CHK
+
+PUBLIC KiAssertionMessage : UBYTE[32]
+
+#END
+
 #IF BLD_MP
 
 KiInitializeCount : ULONG
@@ -327,6 +333,16 @@ EXPORT FN KeMain (
     // first usermode process in order to guarantee its safe to touch. Plus, we
     // are going to reclaim all of the Loader's physical memory during Mm init.
 
+#IF BLD_CHK
+    // Set this up so that we don't waste space on repeated strings.
+
+    RtlCopyString (
+        &KiAssertionMessage[0], // dest
+        "ASSERTION FAILED\n%s:%d: %s\n", // src
+        32, // bufsize
+    )
+#END
+
     // Initialize the KeCrash module.
 
     KiInitializeCrashing ()
@@ -384,11 +400,7 @@ EXPORT FN KeMain (
 
     HalEarlyInitialize ()
 
-#IF BLD_CHK
-    IF SIZEOF KiPrb > BL_PRB_SIZE THEN
-        KeCrash ( "KiPrb > BL_PRB_SIZE\n" )
-    END
-#END
+    KeAssert ( SIZEOF KiPrb <= BL_PRB_SIZE )
 
     // Perform platform-specific initialization for the boot processor.
 

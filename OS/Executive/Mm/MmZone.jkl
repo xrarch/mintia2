@@ -15,15 +15,8 @@ EXPORT FN MmInitializeZone (
 
     // Initialize a zone header.
 
-#IF BLD_CHK
-    IF blocksize & (RTL_MACHINE_WORD_SIZE - 1) THEN
-        KeCrash ( "MmInitializeZone: unaligned block size\n" )
-    END
-
-    IF blocksize < SIZEOF MiFreeZoneBlock THEN
-        KeCrash ( "MmInitializeZone: small block size\n" )
-    END
-#END
+    KeAssert ( blocksize & (RTL_MACHINE_WORD_SIZE - 1) == 0 )
+    KeAssert ( blocksize >= SIZEOF MiFreeZoneBlock )
 
     zone^.BlockSize = blocksize
     zone^.ChunkListHead = NULLPTR
@@ -38,15 +31,8 @@ EXPORT FN MmExtendZone (
 
     // Add more blocks to the zone.
 
-#IF BLD_CHK
-    IF bytes & (RTL_MACHINE_WORD_SIZE - 1) THEN
-        KeCrash ( "MmExtendZone: unaligned chunk size\n" )
-    END
-
-    IF bytes < SIZEOF MiFreeZoneBlock + MM_ZONE_OVERHEAD THEN
-        KeCrash ( "MmExtendZone: small chunk\n" )
-    END
-#END
+    KeAssert ( bytes & (RTL_MACHINE_WORD_SIZE - 1) == 0 )
+    KeAssert ( bytes >= SIZEOF MiFreeZoneBlock + MM_ZONE_OVERHEAD )
 
     blocksize := zone^.BlockSize
 

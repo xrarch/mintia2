@@ -145,11 +145,7 @@ FN MmFreeKernelStack (
 
         ptecontents := pte[i]
 
-#IF BLD_CHK
-        IF NOT MiIsPteValid ( ptecontents ) THEN
-            KeCrash ( "MmFreeKernelStack: invalid stack pte %p\n", ptecontents )
-        END
-#END
+        KeAssert ( MiIsPteValid ( ptecontents ) )
 
         // Clear the PTE, makes it more likely we'll see it if a bad pointer
         // within this space is used later. Due to the TB it's not 100% though.

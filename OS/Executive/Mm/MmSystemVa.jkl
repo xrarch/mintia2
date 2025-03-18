@@ -241,11 +241,7 @@ FN MiInitializeSystemVa ()
 
     size := MiSystemPartition.SizeLevel
 
-#IF BLD_CHK
-    IF SIZEOF MiChunkEntry > SIZEOF MiPte THEN
-        KeCrash ( "MiChunkEntry > MiPte\n" )
-    END
-#END
+    KeAssert ( SIZEOF MiChunkEntry <= SIZEOF MiPte )
 
     // Initialize nonpaged space.
 

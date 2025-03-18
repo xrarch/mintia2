@@ -411,11 +411,7 @@ FN MiAllocateFromPool (
     bytes += MI_BLOCK_SIZE_MASK
     bytes >>= MI_BLOCK_SIZE_SHIFT
 
-#IF BLD_CHK
-    IF bytes > MI_BLOCK_MAX_REQUEST_UNITS THEN
-        KeCrash ( "MiAllocateFromPool: too large %u\n", bytes )
-    END
-#END
+    KeAssert ( bytes <= MI_BLOCK_MAX_REQUEST_UNITS )
 
     // Bytes now stores size units rather than real bytes.
 
@@ -454,11 +450,7 @@ FN MiAllocateFromPool (
 
             block = CONTAINEROF listhead^.Next TO MiFreeBlock.SizeEntry
 
-#IF BLD_CHK
-            IF block^.Block.Size != i THEN
-                KeCrash ( "MiAllocateFromPool: bad 2 %p %u\n", block, i )
-            END
-#END
+            KeAssert ( block^.Block.Size == i )
 
             GOTO FoundBlock
         END
@@ -478,11 +470,7 @@ FN MiAllocateFromPool (
 
             block = CONTAINEROF listhead^.Next TO MiFreeBlock.LogEntry
 
-#IF BLD_CHK
-            IF block^.Block.BucketIndex != i THEN
-                KeCrash ( "MiAllocateFromPool: bad 3 %p %u\n", block, i )
-            END
-#END
+            KeAssert ( block^.Block.BucketIndex == i )
 
             GOTO FoundBlock
         END
@@ -569,14 +557,7 @@ FN MiAllocateFromPool (
 
     newblocksize := (1 << MI_BLOCK_MAX_UNITS_SHIFT) - 1
 
-#IF BLD_CHK
-    IF bytes > newblocksize THEN
-        // If the allocation request was this large, it should have been
-        // dispatched to the page aligned allocator.
-
-        KeCrash ( "MiAllocateFromPool: large allocation %u\n", bytes )
-    END
-#END
+    KeAssert ( bytes <= newblocksize )
 
     newblocksize -= bytes
 
@@ -637,11 +618,7 @@ FN MiAllocateFromPool (
 
 @FoundBlock
 
-#IF BLD_CHK
-    IF block^.Block.Magic != MI_BLOCK_FREE_MAGIC THEN
-        KeCrash ( "MiAllocateFromPool: bad %p\n", block )
-    END
-#END
+    KeAssert ( block^.Block.Magic == MI_BLOCK_FREE_MAGIC )
 
     // This block is either perfectly sized, or at least big enough to
     // satisfy the allocation request. In either case, we want to
@@ -682,11 +659,7 @@ FN MiAllocateFromPool (
     IF newblocksize != bytes THEN
         // The block is too big and must be split.
 
-#IF BLD_CHK
-        IF newblocksize < bytes THEN
-            KeCrash ( "MiAllocateFromPool: smaller block\n" )
-        END
-#END
+        KeAssert ( newblocksize >= bytes )
 
         // Set new bucketindex and size in old block header.
 
@@ -784,11 +757,7 @@ FN MiFreeToPool (
 
         otherblock = block - (block^.Block.LastSize << MI_BLOCK_SIZE_SHIFT)
 
-#IF BLD_CHK
-        IF otherblock^.Block.Size != block^.Block.LastSize THEN
-            KeCrash ( "MiFreeBlock: bad block left %p %p\n", otherblock, block )
-        END
-#END
+        KeAssert ( otherblock^.Block.Size == block^.Block.LastSize )
 
         IF otherblock^.Block.Magic == MI_BLOCK_FREE_MAGIC THEN
             // Free! Merge left.
@@ -866,11 +835,7 @@ FN MiFreeToPool (
         otherblock = CAST ext + MI_BLOCK_MIN_SIZE TO ^MiFreeBlock
 
         IF otherblock != block THEN
-#IF BLD_CHK
-            IF otherblock^.Block.Magic != MI_BLOCK_FREE_MAGIC THEN
-                KeCrash ( "MiFreeToPool: not free 1 %p\n", otherblock )
-            END
-#END
+            KeAssert ( otherblock^.Block.Magic == MI_BLOCK_FREE_MAGIC )
 
             RtlRemoveEntryList ( &otherblock^.LogEntry )
 
@@ -885,11 +850,7 @@ FN MiFreeToPool (
 
         WHILE i < MI_FULL_BLOCKS_PER_EXTENSION DO
             IF otherblock != block THEN
-#IF BLD_CHK
-                IF otherblock^.Block.Magic != MI_BLOCK_FREE_MAGIC THEN
-                    KeCrash ( "MiFreeToPool: not free 2 %p\n", otherblock )
-                END
-#END
+                KeAssert ( otherblock^.Block.Magic == MI_BLOCK_FREE_MAGIC )
 
                 RtlRemoveEntryList ( &otherblock^.LogEntry )
 
@@ -1035,15 +996,8 @@ FN MiFreePageAligned (
 
     node := MiFindDynamicSpaceNode ( ptr )
 
-#IF BLD_CHK
-    IF NOT node THEN
-        KeCrash ( "MiFreePageAligned: no allocation\n" )
-    END
-
-    IF node^.StartVa != ptr THEN
-        KeCrash ( "MiFreePageAligned: middle of allocation\n" )
-    END
-#END
+    KeAssert ( node != NULLPTR )
+    KeAssert ( node^.StartVa == ptr )
 
     IF node^.U.Pool.Tag != tag THEN
         KeCrash ( "MiFreePageAligned: wrong tag %x on %p, expected %x\n",
@@ -1085,11 +1039,7 @@ FN MmAllocatePool (
 
     // Allocate a block of memory from the specified pool.
 
-#IF BLD_CHK
-    IF bytes == 0 THEN
-        KeCrash ( "MmAllocatePool: 0 byte allocation\n" )
-    END
-#END
+    KeAssert ( bytes != 0 )
 
     thread : ^PsThread = NULLPTR
     savewait := wait
@@ -1211,15 +1161,8 @@ FN MmGetOverheadOfBlock (
 
     node := MiFindDynamicSpaceNode ( ptr )
 
-#IF BLD_CHK
-    IF NOT node THEN
-        KeCrash ( "MmGetChargeFromBlock: no allocation\n" )
-    END
-
-    IF node^.StartVa != ptr THEN
-        KeCrash ( "MmGetChargeFromBlock: middle of allocation\n" )
-    END
-#END
+    KeAssert ( node != NULLPTR )
+    KeAssert ( node^.StartVa == ptr )
 
     RETURN node^.EndVa - node^.StartVa
 END

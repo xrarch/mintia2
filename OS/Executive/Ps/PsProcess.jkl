@@ -158,11 +158,7 @@ FN PspExitProcess (
         paged^.TerminationStatus = status
     END
 
-#IF BLD_CHK
-    IF paged^.CleanedUp THEN
-        KeCrash ( "PspExitProcess: already exited\n" )
-    END
-#END
+    KeAssert ( NOT paged^.CleanedUp )
 
     paged^.CleanedUp = TRUE
 

@@ -621,11 +621,7 @@ FN IoEnqueuePacket (
     // Enqueue the provided master IOP, along with any associated IOPs that
     // appear in our deferred enqueue list in the process.
 
-#IF BLD_CHK
-    IF NOT KeAreApcsDeliverable () THEN
-        KeCrash ( "IoEnqueuePacket: called from KAPC context\n" )
-    END
-#END
+    KeAssert ( KeAreApcsDeliverable () )
 
     status := OS_STATUS_PENDING
 
@@ -643,11 +639,7 @@ FN IoEnqueuePacket (
     WHILE TRUE DO
         // Call through the dispatch table pointed to by the current IOPL.
 
-#IF BLD_CHK
-        IF stackindex == 0 THEN
-            KeCrash ( "IoEnqueuePacket: stack overflow\n" )
-        END
-#END
+        KeAssert ( stackindex != 0 )
 
         direction : UWORD
 

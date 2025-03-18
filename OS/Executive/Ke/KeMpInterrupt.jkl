@@ -139,11 +139,7 @@ FN KiExecuteOnOtherProcessor (
     // Actually this works even for self-IPIs but hopefully we aren't taking any
     // of those because that is not very efficient.
 
-#IF BLD_CHK
-    IF KiCurrentIpl () != KI_IPL_DPC THEN
-        KeCrash ( "KiExecuteOnOtherProcessor: IPL != KI_IPL_DPC\n" )
-    END
-#END
+    KeAssert ( KiCurrentIpl () == KI_IPL_DPC )
 
     prb := KI_CURRENT_PRB
 
@@ -244,11 +240,7 @@ FN KiExecuteOnEveryoneElse (
 
     // Execute the specified function on every other processor.
 
-#IF BLD_CHK
-    IF KiCurrentIpl () != KI_IPL_DPC THEN
-        KeCrash ( "KiExecuteOnEveryoneElse: IPL != KI_IPL_DPC\n" )
-    END
-#END
+    KeAssert ( KiCurrentIpl () == KI_IPL_DPC )
 
     count := KeLoaderBlock.ProcessorCount
 

@@ -206,23 +206,10 @@ FN KiSwitchThread (
     // The target thread is not locked as it has been removed from the ready
     // queue and is in our custody.
 
-#IF BLD_CHK
-    IF KiCurrentIpl () != KI_IPL_DPC THEN
-        KeCrash ( "KiSwitchThread: IPL != KI_IPL_DPC\n" )
-    END
-
-    IF current == thread THEN
-        KeCrash ( "KiSwitchThread: same thread %p\n", current )
-    END
-
-    IF NOT current THEN
-        KeCrash ( "KiSwitchThread: current == 0\n" )
-    END
-
-    IF NOT thread THEN
-        KeCrash ( "KiSwitchThread: thread == 0\n" )
-    END
-#END
+    KeAssert ( KiCurrentIpl () == KI_IPL_DPC )
+    KeAssert ( current != thread )
+    KeAssert ( current != NULLPTR )
+    KeAssert ( thread != NULLPTR )
 
     // Set affinity to this processor.
 
@@ -264,12 +251,7 @@ FN KiSwitchThread (
         current, // oldthread
     )
 
-#IF BLD_CHK
-    IF current != KeCurrentThread () THEN
-        KeCrash ( "KiSwitchThread: current isn't current (%p %p)\n",
-            current, KeCurrentThread () )
-    END
-#END
+    KeAssert ( current == KeCurrentThread () )
 
     // We're back in the context of the "current" thread. This is always where
     // the hole that the gopher pops back out of is, except in the case of a
@@ -629,11 +611,7 @@ FN KiReadyThread (
 
     prb = KiFindProcessor ( thread )
 
-#IF BLD_CHK
-    IF NOT prb THEN
-        KeCrash ( "KiFindProcessor returned NULLPTR\n" )
-    END
-#END
+    KeAssert ( prb != NULLPTR )
 
 @Found
 
@@ -1035,11 +1013,7 @@ FN KiReinsertThread (
     // Remove and re-insert the thread into a ready queue.
     // Thread and ready queue lock are held.
 
-#IF BLD_CHK
-    IF thread^.Status != KI_THREAD_READY THEN
-        KeCrash ( "KiReinsertThread: not READY\n" )
-    END
-#END
+    KeAssert ( thread^.Status == KI_THREAD_READY )
 
     IF thread^.InSwapList THEN
         // It's in a stack swapper list, no need to do anything here.
@@ -1082,11 +1056,7 @@ FN KiSetPriorityThread (
 
     // Set the new priority for a thread. The thread lock is held.
 
-#IF BLD_CHK
-    IF KiCurrentIpl () != KI_IPL_DPC THEN
-        KeCrash ( "KiSetPriorityThread: IPL != KI_IPL_DPC\n" )
-    END
-#END
+    KeAssert ( KiCurrentIpl () == KI_IPL_DPC )
 
     IF priority < thread^.PriorityFloor THEN
         // This thread is a subject of priority inheritance. Ensure its priority
@@ -1119,16 +1089,12 @@ FN KiSetPriorityThread (
     other := FALSE
 #END
 
-#IF BLD_CHK
-    IF thread == &prb^.IdleThread THEN
-        // The idle thread is often READY without being in a queue.
-        // Rather than special casing this, we just forbid setting its priority.
-        // This operation cannot be initiated by a user anyway since there's no
-        // way to get a handle to an idle thread.
+    // The idle thread is often READY without being in a queue.
+    // Rather than special casing this, we just forbid setting its priority.
+    // This operation cannot be initiated by a user anyway since there's no
+    // way to get a handle to an idle thread.
 
-        KeCrash ( "KiSetPriorityThread: can't set priority of idle thread\n" )
-    END
-#END
+    KeAssert ( thread != &prb^.IdleThread )
 
     thread^.Priority = priority
 
@@ -1647,15 +1613,8 @@ FN KiPinThread (
 
     current := myprb^.CurrentThread
 
-#IF BLD_CHK
-    IF KiCurrentIpl () != KI_IPL_DPC THEN
-        KeCrash ( "KiPinThread: IPL != KI_IPL_DPC\n" )
-    END
-
-    IF current == &myprb^.IdleThread THEN
-        KeCrash ( "KiPinThread: can't pin idle thread\n" )
-    END
-#END
+    KeAssert ( KiCurrentIpl () == KI_IPL_DPC )
+    KeAssert ( current != &myprb^.IdleThread )
 
     KiAcquireThreadElevated ( current )
 
@@ -1710,15 +1669,8 @@ FN KiUnpinThread ()
 
     current := myprb^.CurrentThread
 
-#IF BLD_CHK
-    IF KiCurrentIpl () != KI_IPL_DPC THEN
-        KeCrash ( "KiUnpinThread: IPL != KI_IPL_DPC\n" )
-    END
-
-    IF current == &myprb^.IdleThread THEN
-        KeCrash ( "KiUnpinThread: can't unpin idle thread\n" )
-    END
-#END
+    KeAssert ( KiCurrentIpl () == KI_IPL_DPC )
+    KeAssert ( current != &myprb^.IdleThread )
 
     // Acquire the thread lock so that nobody sees the value of Pinned change
     // partway through an operation.

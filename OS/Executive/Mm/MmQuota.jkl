@@ -60,15 +60,8 @@ FN MmReferenceQuotaBlock (
     // the caller having a pointer to the quotablock, since otherwise that
     // pointer could become meaningless at any moment.
 
-#IF BLD_CHK
-    IF quotablock^.References == 0xFFFFFFFF THEN
-        KeCrash ( "quota ref overflow\n" )
-    END
-
-    IF quotablock^.References == 0 THEN
-        KeCrash ( "quota ref zero\n" )
-    END
-#END
+    KeAssert ( quotablock^.References != 0xFFFFFFFF )
+    KeAssert ( quotablock^.References != 0 )
 
     KeIncrementUlong (
         &quotablock^.References, // ptr
@@ -227,12 +220,7 @@ FN MmUnchargePoolQuota (
         -charge, // inc
     )
 
-#IF BLD_CHK
-    IF charge > old THEN
-        KeCrash ( "quota underflow\n" )
-    END
-#END
-
+    KeAssert ( charge <= old )
 END
 
 #SECTION "PAGEtext"
@@ -301,11 +289,7 @@ FN MmUnchargeVmQuota (
         -pages, // inc
     )
 
-#IF BLD_CHK
-    IF old < pages THEN
-        KeCrash ( "vm quota underflow\n" )
-    END
-#END
+    KeAssert ( old >= pages )
 
     // Remove the commit charge.
 

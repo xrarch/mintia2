@@ -34,11 +34,7 @@
         // Decrement waiter count, since this wait block wasn't
         // satisfied yet.
 
-#IF BLD_CHK
-        IF object^.WaiterCount == 0 THEN
-            KeCrash ( "Waiter count underflow\n" )
-        END
-#END
+        KeAssert ( object^.WaiterCount != 0 )
 
         object^.WaiterCount -= 1
     END
@@ -107,11 +103,7 @@ FN KiWaitThread (
 
     prb := KI_CURRENT_PRB
 
-#IF BLD_CHK
-    IF thread == &prb^.IdleThread THEN
-        KeCrash ( "KiWaitThread: idle wait\n" )
-    END
-#END
+    KeAssert ( thread != &prb^.IdleThread )
 
     // Set the thread status to WAITING.
 
@@ -352,11 +344,7 @@ END
 
 #MACRO KiWaitHead ( thread, ipl, alertable, waitmode, waitblocktable, waitcount, starttime, timeout ) [
 
-#IF BLD_CHK
-    IF KiCurrentIpl () >= KI_IPL_DPC THEN
-        KeCrash ( "Attempt to wait at IPL >= KI_IPL_DPC\n" )
-    END
-#END
+    KeAssert ( KiCurrentIpl () < KI_IPL_DPC )
 
     // Raise IPL to stop APCs from corrupting our wait state if they come in
     // and try to wait in our context.
@@ -527,27 +515,16 @@ EXPORT FN KeWaitForObjects (
     // interval in milliseconds can be supplied. If it is NULLPTR, the timeout
     // is infinite.
 
-#IF BLD_CHK
     // The following parameters should never be given by executive callers and
     // should have been rejected by the object manager.
 
-    IF objectcount == 0 THEN
-        KeCrash ( "KeWaitForObjects: objectcount == 0\n" )
-    END
-
-    IF objectcount > 0xFF THEN
-        KeCrash ( "KeWaitForObjects: objectcount > UBYTE size\n" )
-    END
-#END
+    KeAssert ( objectcount != 0 )
+    KeAssert ( objectcount <= 0xFF )
 
     thread := KeCurrentThread ()
 
     IF NOT waitblocktable THEN
-#IF BLD_CHK
-        IF objectcount > KI_THREAD_WAIT_BLOCKS THEN
-            KeCrash ( "objectcount > KI_THREAD_WAIT_BLOCKS\n" )
-        END
-#END
+        KeAssert ( objectcount <= KI_THREAD_WAIT_BLOCKS )
 
         // Use the integral wait blocks of the thread.
         // This mechanism exists to remove dependency on allocation.
@@ -672,14 +649,7 @@ EXPORT FN KeWaitForObjects (
 
         // Increment waiter count.
 
-#IF BLD_CHK
-        IF object^.WaiterCount == 0xFFFFFFFF THEN
-            // This shouldn't be possible as it would require 4 billion
-            // concurrently active threads.
-
-            KeCrash ( "Waiter count overflow\n" )
-        END
-#END
+        KeAssert ( object^.WaiterCount != 0xFFFFFFFF )
 
         object^.WaiterCount += 1
 
@@ -1097,14 +1067,7 @@ EXPORT FN KeWaitForSingleObject (
 
     // Increment waiter count.
 
-#IF BLD_CHK
-    IF object^.WaiterCount == 0xFFFFFFFF THEN
-        // This shouldn't be possible as it would require 4 billion concurrently
-        // active threads.
-
-        KeCrash ( "Waiter count overflow\n" )
-    END
-#END
+    KeAssert ( object^.WaiterCount != 0xFFFFFFFF )
 
     object^.WaiterCount += 1
 

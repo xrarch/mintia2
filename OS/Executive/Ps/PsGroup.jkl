@@ -198,14 +198,10 @@ FN PsSetGroupProcess (
 
     oldgroup := paged^.ProcessGroup
 
-#IF BLD_CHK
-    IF NOT oldgroup AND process != PsSystemProcess THEN
-        // We should only encounter a process without a group one time ever,
-        // which is when the system session is being created.
+    // We should only encounter a process without a group one time ever,
+    // which is when the system session is being created.
 
-        KeCrash ( "PsSetGroupProcess: no group but not system process\n" )
-    END
-#END
+    KeAssert ( (oldgroup != NULLPTR) OR (process == PsSystemProcess) )
 
     IF oldgroup THEN
         // We already belong to a group and session, so check that this is a

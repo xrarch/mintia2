@@ -233,13 +233,8 @@ EXPORT FN KeCompleteRequestQueue (
 
     ipl := KiAcquireRequestQueue ( queue )
 
-#IF BLD_CHK
-    IF request^.Status != KI_REQUEST_CURRENT AND
-        request^.Status != KI_REQUEST_CANCELLED THEN
-
-        KeCrash ( "KeCompleteRequestQueue: weird status %u\n", request^.Status )
-    END
-#END
+    KeAssert ( (request^.Status == KI_REQUEST_CURRENT) OR
+        (request^.Status == KI_REQUEST_CANCELLED) )
 
     IF request^.Status == KI_REQUEST_CURRENT THEN
         completed = TRUE
@@ -281,14 +276,9 @@ EXPORT FN KeCancelRequestQueue (
 
     ipl := KiAcquireRequestQueue ( queue )
 
-#IF BLD_CHK
-    IF request^.Status != KI_REQUEST_ENQUEUED AND
-        request^.Status != KI_REQUEST_CURRENT AND
-        request^.Status != KI_REQUEST_COMPLETED THEN
-
-        KeCrash ( "KeCancelRequestQueue: weird status %u\n", request^.Status )
-    END
-#END
+    KeAssert ( (request^.Status == KI_REQUEST_ENQUEUED) OR
+        (request^.Status == KI_REQUEST_CURRENT) OR
+        (request^.Status == KI_REQUEST_COMPLETED) )
 
     status := request^.Status
 
@@ -362,11 +352,7 @@ EXPORT FN KeFinishCancelRequestQueue (
 
     ipl := KiAcquireRequestQueue ( queue )
 
-#IF BLD_CHK
-    IF request^.Status != KI_REQUEST_CANCELLED THEN
-        KeCrash ( "KeFinishCancelRequestQueue: status %u\n", request^.Status )
-    END
-#END
+    KeAssert ( request^.Status == KI_REQUEST_CANCELLED )
 
     // Decrement the cost.
 

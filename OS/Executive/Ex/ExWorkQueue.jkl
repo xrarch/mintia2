@@ -34,11 +34,7 @@ FN (KeStartThreadF) ExpWorkQueueLoop (
             OUT entry, // item
         )
 
-#IF BLD_CHK
-        IF OsError ( status ) THEN
-            KeCrash ( "ExpWorkQueueLoop (%x)\n", status )
-        END
-#END
+        KeAssert ( NOT OsError ( status ) )
 
         item := CONTAINEROF entry TO ExWorkItem.QueueEntry
 

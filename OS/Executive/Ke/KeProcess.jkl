@@ -75,15 +75,8 @@ FN KeSignalProcess (
     // it to all of the threads of the process. Otherwise, we send it to the
     // signal thread of the process.
 
-#IF BLD_CHK
-    IF signal == 0 THEN
-        KeCrash ( "KeSignalProcess: signal == 0\n" )
-    END
-
-    IF signal >= 32 THEN
-        KeCrash ( "KeSignalProcess: signal >= 32\n" )
-    END
-#END
+    KeAssert ( signal != 0 )
+    KeAssert ( signal < 32 )
 
     KeAcquireLockExclusive ( &process^.Lock )
 
@@ -137,11 +130,7 @@ FN KeSetBasePriorityProcess (
     // Raise the priority of any thread whose base priority is lower than the
     // new base priority.
 
-#IF BLD_CHK
-    IF priority >= OS_PRIORITY_MAX THEN
-        KeCrash ( "KeSetBasePriorityProcess: priority >= OS_PRIORITY_MAX\n" )
-    END
-#END
+    KeAssert ( priority < OS_PRIORITY_MAX )
 
     KeAcquireLockExclusive ( &process^.Lock )
 
