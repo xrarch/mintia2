@@ -101,13 +101,13 @@ FN RtljLockStream (
     lockcontext := KiDisableInterrupts ()
 
 #IF BLD_MP
-    // Only try 5000 times to acquire the spinlock in case it's jammed shut.
+    // Only try 50000 times to acquire the spinlock in case it's jammed shut.
     // Note that KiTryAcquireSpinlock is already written to spin for a while
-    // before giving up, so this is really 5000 * 128 attempts or however many.
+    // before giving up, so this is really 50000 * 128 attempts or however many.
 
 @Retry
 
-    i := 5000
+    i := 50000
 
     WHILE i DO
         IF KiTryAcquireSpinlock ( &KiLinePrintSpinlock ) THEN
