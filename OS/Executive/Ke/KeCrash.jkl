@@ -101,7 +101,36 @@ FN RtljLockStream (
     lockcontext := KiDisableInterrupts ()
 
 #IF BLD_MP
-    KiAcquireSpinlock ( &KiLinePrintSpinlock )
+    // Only try 5000 times to acquire the spinlock in case it's jammed shut.
+    // Note that KiTryAcquireSpinlock is already written to spin for a while
+    // before giving up, so this is really 5000 * 128 attempts or however many.
+
+@Retry
+
+    i := 5000
+
+    WHILE i DO
+        IF KiTryAcquireSpinlock ( &KiLinePrintSpinlock ) THEN
+            BREAK
+        END
+
+        i -= 1
+    END
+
+    IF NOT i THEN
+        // Force it open.
+        //
+        // The HAL console should have its own, smaller locks that guard the
+        // mechanisms of its console implementation. This spinlock is just to
+        // guarantee atomicity of line printing. So this (by itself) should be
+        // harmless.
+
+        KiForceReleaseSpinlock ( &KiLinePrintSpinlock )
+
+        // Retry.
+
+        GOTO Retry
+    END
 #END
 
     RETURN lockcontext
