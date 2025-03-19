@@ -4,6 +4,12 @@
 
 #INCLUDE "Ki.hjk"
 
+#IF BLD_MP
+
+KiLinePrintSpinlock : KiSpinlock = KI_INITIAL_SPINLOCK
+
+#END
+
 EXPORT KeDebuggerEntry : KeDebuggerEntryF
 
 KiCrashVerticalListHead : RtlListEntry
@@ -84,6 +90,35 @@ FN (RtlPrintCallbackF) RtljPrintCallback (
     ELSE
         HalPutCharacter ( byte )
     END
+END
+
+FN RtljLockStream (
+    IN handle : ^VOID,
+) : UWORD
+
+    // Called by RTL before it prints a line.
+
+    lockcontext := KiDisableInterrupts ()
+
+#IF BLD_MP
+    KiAcquireSpinlock ( &KiLinePrintSpinlock )
+#END
+
+    RETURN lockcontext
+END
+
+FN RtljUnlockStream (
+    IN handle : ^VOID,
+    IN lockcontext : UWORD,
+)
+
+    // Called by RTL after it prints a line.
+
+#IF BLD_MP
+    KiReleaseSpinlock ( &KiLinePrintSpinlock )
+#END
+
+    KiRestoreInterrupts ( lockcontext )
 END
 
 FN (KeCrashCallbackF) KiCrashModuleListFunc (
