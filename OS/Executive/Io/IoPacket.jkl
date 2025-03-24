@@ -405,7 +405,7 @@ FN IopBounceOnTrampoline (
                 0, // priorityboost
             )
 
-            RETURN status
+            GOTO Exit
         END
     END
 
@@ -447,6 +447,8 @@ FN IopBounceOnTrampoline (
 
         trampoline^.InternalFlags &= ~IOP_TRAMPOLINE_LOC_ALLOCED
     END
+
+@Exit
 
     IF trampoline^.InternalFlags & IOP_TRAMPOLINE_DONT_FREE == 0 THEN
         // Free the trampoline.
