@@ -261,12 +261,12 @@ FN ObDeleteObject (
 
     header := ObFindHeader ( object )
 
-    IF header^.Type^.Delete THEN
-        IF NOT header^.Type^.Delete ( object ) THEN
-            // Type routine said nevermind, don't delete.
+    IF header^.Type^.Delete AND
+        NOT header^.Type^.Delete ( object ) THEN
 
-            LEAVE
-        END
+        // Type routine said nevermind, don't delete.
+
+        LEAVE
     END
 
     ObFreeObject ( object )
@@ -413,7 +413,9 @@ FN ObUnreferenceObject (
 
         IF NOT KeAreApcsDeliverable () THEN
             // APCs are not deliverable so we're gonna defer this deletion to
-            // worker thread context.
+            // worker thread context. This is to avoid illegally trying to
+            // recursively acquire locks inside deletion routines that are not
+            // APC-safe.
 
             ObpDeferDeletion ( object )
 
