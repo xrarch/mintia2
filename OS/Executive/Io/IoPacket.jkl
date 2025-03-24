@@ -412,13 +412,19 @@ FN IopBounceOnTrampoline (
     WHILE TRUE DO
         // Call through trampoline.
 
-        direction : UWORD
-
         status = trampoline^.Fcb^.Dispatch^.A[trampoline^.FunctionCode] (
             packet, // packet
             trampoline, // trampoline
-            OUT direction, // direction
         )
+
+        IF status == OS_STATUS_MORE_PROCESSING_REQUIRED THEN
+            // This level has taken custody of the packet.
+            // We should break out now.
+
+            status = OS_STATUS_PENDING
+
+            BREAK
+        END
 
         IF status != OS_STATUS_PENDING THEN
             // Any status other than PENDING indicates an early completion
@@ -431,13 +437,6 @@ FN IopBounceOnTrampoline (
                 status, // status
                 0, // priorityboost
             )
-
-            BREAK
-        END
-
-        IF direction == IO_DIRECTION_DONE THEN
-            // This level has taken custody of the packet.
-            // We should break out now.
 
             BREAK
         END
