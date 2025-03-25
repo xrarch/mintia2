@@ -252,11 +252,14 @@ FN IoAllocatePacket (
 
     ipl := KeAcquireApcLockExclusive ( &IopPacketZoneLock )
 
-    packet := CAST MmAllocateZone ( &IopPacketZones[ioptype] ) TO ^IoPacket
+    packet : ^IoPacket = MmAllocateZone ( &IopPacketZones[ioptype] )
 
     KeReleaseApcLock ( &IopPacketZoneLock, ipl )
 
-    IF NOT packet THEN
+    IF packet THEN
+        iopflags |= IO_PACKET_FROM_ZONE
+
+    ELSE
         // Try to pool-allocate the packet.
 
         packet = MmAllocatePool (
@@ -273,11 +276,8 @@ FN IoAllocatePacket (
 
     // Initialize the packet.
 
-    packet^.IopFlags = iopflags
-    packet^.Type = ioptype
-
     IF timeout THEN
-        packet^.IopFlags |= IO_PACKET_TIMEOUT
+        iopflags |= IO_PACKET_TIMEOUT
 
         RtlMoveUquad (
             &packet^.Timeout, // destquad
@@ -285,6 +285,8 @@ FN IoAllocatePacket (
         )
     END
 
+    packet^.Type = ioptype
+    packet^.IopFlags = iopflags
     packet^.ParentPacket = NULLPTR
     packet^.CompletionRoutine = completionroutine
     packet^.CompletionEvent = event
@@ -362,6 +364,8 @@ FN IopRundownPacket (
     // context.
 
     // The location list must be empty or we will leak memory here.
+    // It has already been emptied by a full packet completion by the time we
+    // got here.
 
     KeAssert ( RtlEmptyList ( &packet^.LocationListHead ) )
 
@@ -397,7 +401,7 @@ FN IopBounceOnTrampoline (
 
         IF status != OS_STATUS_PENDING THEN
             // The parent packet was already completed early, so don't start this
-            // new one.
+            // child one.
 
             IoCompletePacket (
                 packet, // packet
@@ -417,7 +421,7 @@ FN IopBounceOnTrampoline (
             trampoline, // trampoline
         )
 
-        IF status == OS_STATUS_MORE_PROCESSING_REQUIRED THEN
+        IF status == OS_STATUS_CUSTODY_TAKEN THEN
             // This level has taken custody of the packet.
             // We should break out now.
 
@@ -494,8 +498,11 @@ EXPORT FN IoCompletePacket (
         // Save the error status.
 
         // This is racey on purpose - there's no reason for a lock here since we
-        // can only return one error status back up anyway. The user will see
-        // "one of them".
+        // can only return one error status back up anyway. If there are
+        // several, the user will definitely see "one of them", because we never
+        // overwrite this status with a successful status. So the important
+        // information (some error occurred, the request failed) is always
+        // conveyed.
 
         packet^.StatusBlock.Status = status
     END
@@ -553,7 +560,7 @@ EXPORT FN IoCompletePacket (
 
         IF location^.CompletionRoutine THEN
             IF location^.CompletionRoutine ( location )
-                == OS_STATUS_MORE_PROCESSING_REQUIRED THEN
+                == OS_STATUS_CUSTODY_TAKEN THEN
 
                 // The driver would like us not to continue completing the
                 // packet. It will call us back later when it's done with
@@ -590,10 +597,10 @@ EXPORT FN IoCompletePacket (
 
     IF NOT packet^.CompletionRoutine OR
         packet^.CompletionRoutine ( packet )
-        != OS_STATUS_MORE_PROCESSING_REQUIRED THEN
+        != OS_STATUS_CUSTODY_TAKEN THEN
 
-        // General completion routine didn't request that we not free the
-        // packet.
+        // General completion routine didn't take custody of the packet, so we
+        // can go ahead and run it down.
 
         IopRundownPacket ( packet )
     END
