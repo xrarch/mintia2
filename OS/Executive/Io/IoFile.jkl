@@ -24,7 +24,7 @@ FN (ObTypeOpenF) IoOpenFileType (
         RETURN OS_STATUS_SUCCESS
     END
 
-    RETURN fcb^.Dispatch^.F.OpenFileObject (
+    RETURN fcb^.Dispatch^.OpenFileObject (
         process, // process
         file, // file
         access, // access
@@ -50,7 +50,7 @@ FN (ObTypeCloseF) IoCloseFileType (
         LEAVE
     END
 
-    fcb^.Dispatch^.F.CloseFileObject (
+    fcb^.Dispatch^.CloseFileObject (
         file, // file
         access, // access
         lasthandlecount, // lasthandlecount
@@ -71,7 +71,7 @@ FN (ObTypeDeleteF) IoDeleteFileType (
     fcb := file^.Fcb
 
     IF fcb THEN
-        fcb^.Dispatch^.F.DeleteFileObject ( file )
+        fcb^.Dispatch^.DeleteFileObject ( file )
     END
 
     // Unreference the namespace handle tracked by the file object.
@@ -100,7 +100,7 @@ FN (ObTypeSetSecurityF) IoSetSecurityFileType (
         RETURN OS_STATUS_SUCCESS
     END
 
-    RETURN fcb^.Dispatch^.F.SetSecurityFcb (
+    RETURN fcb^.Dispatch^.SetSecurityFcb (
         fcb, // fcb
         permissions, // permissions
     )
@@ -117,7 +117,7 @@ FN (ObTypeDeleteF) IoDeleteFcbType (
 
     // Call the driver's FCB deletion function, if present.
 
-    RETURN fcb^.Dispatch^.F.DeleteFcb ( fcb )
+    RETURN fcb^.Dispatch^.DeleteFcb ( fcb )
 END
 
 #SECTION "PAGEtext"
@@ -129,7 +129,7 @@ FN (ObTypeNamespaceLookupF) IoNamespaceLookupFcbType (
 
     fcb := CAST context^.Object TO ^IoFcb
 
-    RETURN fcb^.Dispatch^.F.NamespaceLookup ( context )
+    RETURN fcb^.Dispatch^.NamespaceLookup ( context )
 END
 
 #SECTION "PAGEtext"

@@ -53,11 +53,7 @@ ENUM IoFunctionCode : UBYTE
     IO_FUNCTION_MAX,
 END
 
-STRUCT IoDispatchTableCalls
-    Read : IoPacketBasedCallF, // 0
-    Write : IoPacketBasedCallF, // 1
-    Ioctl : IoPacketBasedCallF, // 2
-
+STRUCT IoRecursiveDispatchTable
     OpenFileObject : IoOpenFileObjectF,
     CloseFileObject : IoCloseFileObjectF,
     DeleteFileObject : IoDeleteFileObjectF,
@@ -67,13 +63,17 @@ STRUCT IoDispatchTableCalls
     NamespaceLookup : IoNamespaceLookupF,
 END
 
-UNION IoDispatchTable
-    F : IoDispatchTableCalls,
-    A : IoPacketBasedCallF[IO_FUNCTION_MAX],
+// IoTarget is the common stuff between FCBs and device objects, which can both
+// have I/O targeted to them.
+
+STRUCT IoTarget
+    Dispatch : IoPacketBasedCallF[IO_FUNCTION_MAX],
 END
 
 STRUCT IoFcb
-    Dispatch : ^IoDispatchTable,
+    Target : IoTarget,
+
+    Dispatch : ^IoRecursiveDispatchTable,
 END
 
 STRUCT IoFile
@@ -342,9 +342,10 @@ END
 #DEFINE IOP_TRAMPOLINE_DONT_FREE 8
 
 STRUCT IoTrampoline
-    // Target FCB of the IO operation.
+    // Target of the IO operation.
+    // This is either an FCB or a device object.
 
-    Fcb : ^IoFcb,
+    Target : ^IoTarget,
 
     // Function-specific parameters.
 
