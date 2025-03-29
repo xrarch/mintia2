@@ -306,7 +306,10 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     RtlInitializeList ( &thread^.DeferredRequestListHead )
 
-    thread^.InIoRequest = FALSE
+    RtlInitializeList ( &thread^.DeferredCompletionListHead )
+
+    thread^.CurrentTrampoline = NULLPTR
+    thread^.UpwardFlowingPacket = FALSE
 
     // Initialize for usage by Ipc.
 

@@ -156,11 +156,14 @@ FN IopFreeLocation (
 END
 
 EXPORT FN IoGetCurrentLocation (
-    IN trampoline : ^IoTrampoline,
     IN contextsize : UWORD,
 ) : ^IoLocation
 
     // Allocate a packet location with the given context size.
+
+    trampoline := PsCurrentThread()^.CurrentTrampoline
+
+    KeAssert ( trampoline != NULLPTR )
 
     packet := trampoline^.Packet
 
@@ -516,10 +519,42 @@ EXPORT FN IoCompletePacket (
         priorityboost = packet^.PriorityBoost
     END
 
+    thread := PsCurrentThread ()
+
+    IF thread^.UpwardFlowingPacket THEN
+        // If we're enqueuing an upward flowing packet, then we're holding the
+        // IO registry lock. Completion routines and stuff expect not to be
+        // holding any locks, so defer the completion until the enqueue is done.
+        //
+        // An example of an upward flowing packet is the plug-n-play packet sent
+        // up a device stack when a physical device disappears, which causes all
+        // ongoing requests to be cancelled (and new ones to be rejected). With
+        // a normal downward flowing packet (like a typical read or write), the
+        // consistency of the device stack is ensured by the top-of-stack
+        // driver which takes out a reference on the next level of the device
+        // stack for the duration of the operation. By contrast, an upward
+        // flowing packet can't do anything other than take the big IO registry
+        // lock for the entirety of enqueue. Since the typical response to
+        // receiving the aforementioned plug-n-play packet is to cancel requests
+        // (which goes through this normal completion codepath), we have to take
+        // this measure to ensure that random completion routines aren't invoked
+        // while holding the IO registry lock.
+        //
+        // Note that we don't need to save anything into the packet because
+        // we've already updated the packet status and priority boost above.
+
+        RtlInsertAtTailList (
+            &thread^.DeferredCompletionListHead, // head
+            &packet^.RequestEntry.Entry.List, // entry
+        )
+
+        LEAVE
+    END
+
     // Decrement the IoCount to reflect a dependent upon this packet being
     // removed. If we drop it to zero, then we should perform full packet
     // completion and potentially complete the parent as well if this is
-    // another associated IOP.
+    // a child packet.
 
     oldcount := KeIncrementUlong (
         &packet^.IoCount, // ptr
@@ -633,7 +668,7 @@ EXPORT FN IoEnqueuePacket (
 
     thread := PsCurrentThread ()
 
-    IF thread^.InIoRequest THEN
+    IF thread^.CurrentTrampoline THEN
         // Nested I/O request.
         // Allocate a trampoline.
 
@@ -691,7 +726,7 @@ EXPORT FN IoEnqueuePacket (
         packet^.KernelFlags |= parentpacket^.KernelFlags
     END
 
-    IF thread^.InIoRequest THEN
+    IF thread^.CurrentTrampoline THEN
         // Already dispatching a request, this is a recursive enqueue (probably
         // for I/O that fragmented on disk but it could be a number of things).
 
@@ -707,7 +742,7 @@ EXPORT FN IoEnqueuePacket (
 
     // Not already dispatching a request, so do it now.
 
-    thread^.InIoRequest = TRUE
+    thread^.CurrentTrampoline = trampoline
 
     status = IopBounceOnTrampoline (
         trampoline, // trampoline
@@ -722,13 +757,15 @@ EXPORT FN IoEnqueuePacket (
 
         RtlRemoveEntryList ( &trampoline^.DeferredEntry )
 
+        thread^.CurrentTrampoline = trampoline
+
         IopBounceOnTrampoline (
             trampoline, // trampoline
             trampoline^.Packet, // packet
         )
     END
 
-    thread^.InIoRequest = FALSE
+    thread^.CurrentTrampoline = NULLPTR
 
     RETURN status
 END
