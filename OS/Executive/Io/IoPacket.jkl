@@ -155,24 +155,13 @@ FN IopFreeLocation (
     )
 END
 
-EXPORT FN IoGetCurrentLocation (
+EXPORT FN IoCreateLocation (
+    IN packet : ^IoPacket,
     IN contextsize : UWORD,
 ) : ^IoLocation
 
-    // Allocate a packet location with the given context size.
-
-    trampoline := PsCurrentThread()^.CurrentTrampoline
-
-    KeAssert ( trampoline != NULLPTR )
-
-    packet := trampoline^.Packet
-
-    IF trampoline^.InternalFlags & IOP_TRAMPOLINE_LOC_ALLOCED THEN
-        // Already allocated one for this device stack location.
-        // Return the tail of the packet's location list.
-
-        RETURN CONTAINEROF packet^.LocationListHead.Prev TO IoLocation.Entry
-    END
+    // Allocate a packet location with the given context size and append it to
+    // the provided packet.
 
     location : ^IoLocation = NULLPTR
 
@@ -180,10 +169,10 @@ EXPORT FN IoGetCurrentLocation (
         // The context size is less or equal to the expected average so we can
         // allocate the location from the inlined one or the zone.
 
-        IF trampoline^.InternalFlags & IOP_TRAMPOLINE_INLINE_LOC_USED == 0 THEN
+        IF packet^.IopFlags & IO_PACKET_INLINE_LOC_USED == 0 THEN
             // The inline location is still available, so allocate it.
 
-            trampoline^.InternalFlags |= IOP_TRAMPOLINE_INLINE_LOC_USED
+            packet^.IopFlags |= IO_PACKET_INLINE_LOC_USED
 
             location = &packet^.Inlined.Location
 
@@ -221,12 +210,6 @@ EXPORT FN IoGetCurrentLocation (
 
         location^.Flags = 0
     END
-
-    // Set the flag indicating that this stack level has a packet location;
-    // further requests for it should return the same location until we move
-    // on to the next level.
-
-    trampoline^.InternalFlags |= IOP_TRAMPOLINE_LOC_ALLOCED
 
     // Initialize the location.
 
@@ -451,11 +434,6 @@ FN IopBounceOnTrampoline (
 
             BREAK
         END
-
-        // Clear the flag indicating that a location has been allocated for the
-        // current level, so that the next level gets a new one.
-
-        trampoline^.InternalFlags &= ~IOP_TRAMPOLINE_LOC_ALLOCED
     END
 
 @Exit
