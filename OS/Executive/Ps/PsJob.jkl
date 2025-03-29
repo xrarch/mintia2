@@ -14,7 +14,7 @@ PUBLIC PspJobHierarchyLock : KeLock = KE_INITIAL_LOCK
     KeReleaseLock ( &PspJobHierarchyLock )
 ]
 
-#DEFINE PSP_MAX_JOB_DEPTH 8
+#DEFINE PSP_MAX_JOB_DEPTH 50
 
 STRUCT PspJobContext
     Flags : UWORD,
@@ -23,13 +23,12 @@ STRUCT PspJobContext
 END
 
 #SECTION "PAGEtext"
-FN PspSignalJobObject (
+FN PspSignalJobObjectWork (
     IN job : ^PsJob,
     IN signal : UWORD,
-    IN propagate : UWORD,
 )
 
-    // Job hierarchy lock is held.
+    // Perform the work of signalling a single job object.
 
     IF signal == OS_SIGNAL_KILL THEN
         // It's a kill signal, so mark the job object terminated. No more
@@ -52,23 +51,70 @@ FN PspSignalJobObject (
 
         listentry = listentry^.Next
     END
+END
 
-    IF propagate THEN
-        // Propagate the signal recursively to each sub-job.
-        // Infinite recursion is disallowed because of the PSP_MAX_JOB_DEPTH.
+#SECTION "PAGEtext"
+FN PspSignalJobObject (
+    IN job : ^PsJob,
+    IN signal : UWORD,
+    IN propagate : UWORD,
+)
 
-        listhead = &job^.SubJobListHead
-        listentry = listhead^.Next
+    // Job hierarchy lock is held.
+
+    IF NOT propagate THEN
+        // No propagation to children, so just signal the one job.
+
+        PspSignalJobObjectWork (
+            job, // job
+            signal, // signal
+        )
+
+        LEAVE
+    END
+
+    // We have to recurse down the job tree. In kernel code, that's pretty bad,
+    // since our stack is small. So instead we'll build a work list of jobs and
+    // iterate that until its empty.
+
+    worklisthead : RtlListEntry
+
+    RtlInitializeList ( &worklisthead )
+
+    RtlInsertAtHeadList (
+        &worklisthead, // head
+        &job^.WorkListEntry, // entry
+    )
+
+    WHILE NOT RtlEmptyList ( &worklisthead ) DO
+        // Pop a job object from the list.
+
+        job = CONTAINEROF worklisthead.Next TO PsJob.WorkListEntry
+
+        RtlRemoveEntryList ( &job^.WorkListEntry )
+
+        // Add all of its children to the work list.
+
+        listhead := &job^.SubJobListHead
+        listentry := listhead^.Next
 
         WHILE listentry != listhead DO
-            PspSignalJobObject (
-                CONTAINEROF listentry TO PsJob.Entry, // job
-                signal, // signal
-                TRUE, // propagate
+            subjob := CONTAINEROF listentry TO PsJob.Entry
+
+            RtlInsertAtTailList (
+                &worklisthead, // head
+                &subjob^.WorkListEntry, // entry
             )
 
             listentry = listentry^.Next
         END
+
+        // Signal the job.
+
+        PspSignalJobObjectWork (
+            job, // job
+            signal, // signal
+        )
     END
 END
 
