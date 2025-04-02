@@ -143,3 +143,32 @@ EXTERN FN ExEnqueueWorkItem (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
+
+STRUCT ExObjectSet
+    Buffer : ^^VOID,
+    Index : ULONG,
+    Capacity : ULONG,
+    Tag : ULONG,
+    PoolIndex : UBYTE,
+END
+
+EXTERN FN ExRemoveObjectFromSetByIndex (
+    IN set : ^ExObjectSet,
+    IN index : UWORD,
+)
+
+EXTERN FN ExFindObjectInSet (
+    IN set : ^ExObjectSet,
+    IN object : ^VOID,
+) : UWORD
+
+EXTERN FN ExAppendSet (
+    IN set : ^ExObjectSet,
+    IN object : ^VOID,
+) : OsStatus
+
+EXTERN FN ExInitializeSet (
+    IN set : ^ExObjectSet,
+    IN tag : UWORD,
+    IN poolindex : UWORD,
+)

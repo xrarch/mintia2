@@ -1,0 +1,186 @@
+//
+// An implementation of a dynamic array of pointers.
+//
+
+#INCLUDE "Exp.hjk"
+
+#DEFINE EXP_ARRAY_EXTENSION 6
+
+#SECTION "PAGEtext"
+FN ExInitializeSet (
+    IN set : ^ExObjectSet,
+    IN tag : UWORD,
+    IN poolindex : UWORD,
+)
+
+    // Initialize a set.
+
+    set^.Index = 0
+    set^.Capacity = 0
+    set^.Buffer = NULLPTR
+    set^.Tag = tag
+    set^.PoolIndex = poolindex
+END
+
+FN ExAppendSet (
+    IN set : ^ExObjectSet,
+    IN object : ^VOID,
+) : OsStatus
+
+    // Append an object to the set.
+
+    index := set^.Index
+
+    IF index < set^.Capacity THEN
+@Insert
+
+        set^.Buffer[index] = object
+
+        set^.Index = index + 1
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    // Have to extend.
+
+    // XXX Doubling the size is optimal - unfortunately in kernel land we can't
+    //     be that casual with memory. I'm also aware that a realloc would be
+    //     cleaner. Unfortunately I don't have one.
+
+    newcapacity := set^.Capacity + EXP_ARRAY_EXTENSION
+
+    newbuffer := MmAllocatePool (
+        set^.PoolIndex, // poolindex
+        newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
+        set^.Tag, // tag
+        TRUE, // wait
+    )
+
+    IF NOT newbuffer THEN
+        // Failed.
+
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    // Copy the old buffer into the new.
+
+    RtlCopyBytes (
+        newbuffer, // dest
+        set^.Buffer, // src
+        index * RTL_MACHINE_WORD_SIZE, // sz
+    )
+
+    // Free the old buffer.
+
+    MmFreePool (
+        set^.Buffer, // ptr
+        set^.Tag, // tag
+    )
+
+    // Set the new buffer and capacity.
+
+    set^.Buffer = newbuffer
+    set^.Capacity = newcapacity
+
+    // Insert the object.
+
+    GOTO Insert
+END
+
+FN ExFindObjectInSet (
+    IN set : ^ExObjectSet,
+    IN object : ^VOID,
+) : UWORD
+
+    // Find an object in the set and return its index. Returns -1 if not found.
+
+    i := 0
+    index := set^.Index
+    buf := set^.Buffer
+
+    WHILE i < index DO
+        IF buf[i] == object THEN
+            RETURN i
+        END
+
+        i += 1
+    END
+
+    RETURN -1
+END
+
+FN ExRemoveObjectFromSetByIndex (
+    IN set : ^ExObjectSet,
+    IN index : UWORD,
+)
+
+    // Remove an object from the set by index.
+
+    KeAssert ( index < set^.Index )
+
+    // Shift the contents of the buffer left by one.
+
+    buf := set^.Buffer
+
+    i := index + 1
+    size := set^.Index
+
+    WHILE i < size DO
+        buf[i - 1] = buf[i]
+
+        i += 1
+    END
+
+    size -= 1
+
+    set^.Index = size
+
+    // If the size of the set is now less than half the capacity, shrink the
+    // buffer.
+
+    newcapacity := set^.Capacity / 2
+
+    IF size >= newcapacity OR
+        newcapacity < EXP_ARRAY_EXTENSION THEN
+
+        // Size not less than half the capacity, or we would shrink to less than
+        // the size of an array extension.
+
+        LEAVE
+    END
+
+    // Allocate a smaller buffer.
+
+    newbuffer := MmAllocatePool (
+        set^.PoolIndex, // poolindex
+        newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
+        set^.Tag, // tag
+        FALSE, // wait
+    )
+
+    IF NOT newbuffer THEN
+        // Nevermind.
+
+        LEAVE
+    END
+
+    // Copy the buffer contents.
+
+    RtlCopyBytes (
+        newbuffer, // dest
+        buf, // src
+        size * RTL_MACHINE_WORD_SIZE, // size
+    )
+
+    // Free the old buffer.
+
+    MmFreePool (
+        buf, // ptr
+        set^.Tag, // tag
+    )
+
+    // Set the new buffer.
+
+    set^.Buffer = newbuffer
+    set^.Capacity = newcapacity
+END
