@@ -1,0 +1,79 @@
+//
+// Implements management for the device tree.
+//
+// This is actually a device DAG. In fact, it's multiple device DAGs.
+// Each independent DAG is called a "plane". A device object can have an
+// independent existence (or lack thereof) as a vertex within each plane.
+//
+
+#INCLUDE "Iop.hjk"
+
+IopTreeLock : KeLock = KE_INITIAL_LOCK
+
+#MACRO IopLockTree () [
+    KeAcquireLockExclusive ( &IopTreeLock )
+]
+
+#MACRO IopUnlockTree () [
+    KeReleaseLock ( &IopTreeLock )
+]
+
+STRUCT IoPlane
+    Name : ^UBYTE,
+
+    NodeListHead : RtlListEntry,
+
+    PlaneListEntry : RtlListEntry,
+END
+
+STRUCT IoPlaneNode
+    Plane : ^IoPlane,
+
+    Device : ^IoDevice,
+
+    ParentSet : ExObjectSet,
+    ChildSet : ExObjectSet,
+
+    DeviceListEntry : RtlListEntry,
+END
+
+EXPORT IoServicePlane : ^IoPlane
+
+IopServicePlane : IoPlane
+
+IopPlaneList : RtlListEntry
+
+#SECTION "PAGEtext"
+FN IoInitializePlane (
+    IN plane : ^IoPlane,
+    IN name : ^UBYTE,
+)
+
+    // Initialize a plane of the device tree.
+
+    plane^.Name = name
+
+    RtlInitializeList ( &plane^.NodeListHead )
+
+    IopLockTree ()
+
+    RtlInsertAtTailList (
+        &IopPlaneList, // head
+        &plane^.PlaneListEntry, // entry
+    )
+
+    IopUnlockTree ()
+END
+
+#SECTION "INITtext"
+FN IopInitializeDeviceTree ()
+
+    // Initialize the device tree.
+
+    IoServicePlane = &IopServicePlane
+
+    IoInitializePlane (
+        IoServicePlane, // plane
+        "IoService", // name
+    )
+END

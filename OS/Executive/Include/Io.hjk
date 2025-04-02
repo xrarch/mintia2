@@ -50,6 +50,8 @@ ENUM IoFunctionCode : UBYTE
     IO_FUNCTION_WRITE,
     IO_FUNCTION_IOCTL,
 
+    IO_FUNCTION_RESERVED = 10,
+
     IO_FUNCTION_MAX,
 END
 
@@ -68,6 +70,20 @@ END
 
 STRUCT IoTarget
     Dispatch : IoPacketBasedCallF[IO_FUNCTION_MAX],
+END
+
+STRUCT IoTreeNode
+    PlaneNodeListHead : RtlListEntry,
+END
+
+#MACRO IoInitializeTreeNode ( node ) [
+    RtlInitializeList ( &(node)^.PlaneNodeListHead )
+]
+
+STRUCT IoDevice
+    Target : IoTarget,
+
+    Node : IoTreeNode,
 END
 
 STRUCT IoFcb
@@ -228,9 +244,6 @@ STRUCT IoPacket // aka "IOP"
 
     StatusBlock : OsIoStatusBlock,
 
-    // An inlined IoLocation, since having at least one (at the physical device
-    // level) is exceedingly common.
-
     // Multipurpose kernel-reserved IO flags.
 
     KernelFlags : ULONG,
@@ -284,6 +297,10 @@ STRUCT IoUserAsyncPacket
 
     UserStatusBlock : ^VOID,
 
+    // User-supplied context word.
+
+    CompletionContext : ^VOID,
+
     // Pointer to the user-supplied completion APC routine.
 
     UserApcRoutine : ^VOID,
@@ -294,10 +311,6 @@ STRUCT IoUserAsyncPacket
 END
 
 #END
-
-#MACRO IoPacketFromLocation ( iopl ) [
-    ((iopl)^.Iop)
-]
 
 #MACRO IoPacketMappedBuffer ( iop ) [
     ((iop)^.Mdl^.MappedAddress + (iop)^.OffsetInMdl)
@@ -372,3 +385,5 @@ EXTERN FN IoCompletePacket (
     IN status : OsStatus,
     IN priorityboost : UWORD,
 )
+
+EXTERN IoServicePlane : ^IoPlane
