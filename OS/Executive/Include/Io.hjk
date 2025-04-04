@@ -55,6 +55,8 @@ ENUM IoFunctionCode : UBYTE
     IO_FUNCTION_MAX,
 END
 
+TYPE IoPacketDispatchTable : IoPacketBasedCallF[IO_FUNCTION_MAX]
+
 STRUCT IoRecursiveDispatchTable
     OpenFileObject : IoOpenFileObjectF,
     CloseFileObject : IoCloseFileObjectF,
@@ -69,7 +71,7 @@ END
 // have I/O targeted to them.
 
 STRUCT IoTarget
-    Dispatch : IoPacketBasedCallF[IO_FUNCTION_MAX],
+    Dispatch : ^IoPacketDispatchTable,
 END
 
 // IoTreeNode MUST be at the start of a structure, specifically an object
@@ -77,8 +79,6 @@ END
 
 STRUCT IoTreeNode
     PlaneEntryListHead : RtlListEntry,
-
-    Target : IoTarget,
 
     Name : ^ExName,
 
@@ -93,6 +93,8 @@ END
 
 STRUCT IoDevice
     Node : IoTreeNode,
+
+    Target : IoTarget,
 END
 
 STRUCT IoFcb
