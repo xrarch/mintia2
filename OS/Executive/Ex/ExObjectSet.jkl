@@ -16,8 +16,8 @@ FN ExInitializeSet (
     // Initialize a set.
 
     set^.Index = 0
-    set^.Capacity = 0
-    set^.Buffer = NULLPTR
+    set^.Capacity = EX_SET_INITIAL_BUFFER
+    set^.Buffer = &set^.InitialBuffer[0]
     set^.Tag = tag
     set^.PoolIndex = poolindex
 END
@@ -45,7 +45,7 @@ FN ExAppendSet (
 
     // XXX Doubling the size is optimal - unfortunately in kernel land we can't
     //     be that casual with memory. I'm also aware that a realloc would be
-    //     cleaner. Unfortunately I don't have one.
+    //     cleaner or faster. Unfortunately I don't have one.
 
     newcapacity := set^.Capacity + EXP_ARRAY_EXTENSION
 
@@ -72,10 +72,12 @@ FN ExAppendSet (
 
     // Free the old buffer.
 
-    MmFreePool (
-        set^.Buffer, // ptr
-        set^.Tag, // tag
-    )
+    IF set^.Buffer != &set^.InitialBuffer[0] THEN
+        MmFreePool (
+            set^.Buffer, // ptr
+            set^.Tag, // tag
+        )
+    END
 
     // Set the new buffer and capacity.
 
@@ -141,27 +143,38 @@ FN ExRemoveObjectFromSetByIndex (
     newcapacity := set^.Capacity / 2
 
     IF size >= newcapacity OR
-        newcapacity < EXP_ARRAY_EXTENSION THEN
+        buf == &set^.InitialBuffer[0] THEN
 
-        // Size not less than half the capacity, or we would shrink to less than
-        // the size of an array extension.
+        // Size not less than half the capacity, or we're still using the
+        // inlined initial buffer.
 
         LEAVE
     END
 
-    // Allocate a smaller buffer.
+    newbuffer : ^^VOID
 
-    newbuffer := MmAllocatePool (
-        set^.PoolIndex, // poolindex
-        newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
-        set^.Tag, // tag
-        FALSE, // wait
-    )
+    IF newcapacity <= EX_SET_INITIAL_BUFFER THEN
+        // Use the inlined initial buffer again.
 
-    IF NOT newbuffer THEN
-        // Nevermind.
+        newcapacity = EX_SET_INITIAL_BUFFER
 
-        LEAVE
+        newbuffer = &set^.InitialBuffer[0]
+
+    ELSE
+        // Allocate a smaller buffer.
+
+        newbuffer = MmAllocatePool (
+            set^.PoolIndex, // poolindex
+            newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
+            set^.Tag, // tag
+            FALSE, // wait
+        )
+
+        IF NOT newbuffer THEN
+            // Nevermind.
+
+            LEAVE
+        END
     END
 
     // Copy the buffer contents.
@@ -173,6 +186,8 @@ FN ExRemoveObjectFromSetByIndex (
     )
 
     // Free the old buffer.
+    // Note we ruled out the case where this is still the initial buffer above,
+    // so we can just free to pool unconditionally.
 
     MmFreePool (
         buf, // ptr
@@ -183,4 +198,82 @@ FN ExRemoveObjectFromSetByIndex (
 
     set^.Buffer = newbuffer
     set^.Capacity = newcapacity
+END
+
+FN ExRemoveObjectFromSet (
+    IN set : ^ExObjectSet,
+    IN object : ^VOID,
+) : UWORD
+
+    // Remove the specified object from the set. Returns TRUE if removed, FALSE
+    // if not found.
+
+    index := ExFindObjectInSet (
+        set, // set
+        object, // object
+    )
+
+    IF index == -1 THEN
+        RETURN FALSE
+    END
+
+    ExRemoveObjectFromSetByIndex (
+        set, // set
+        index, // index
+    )
+
+    RETURN TRUE
+END
+
+FN ExEnumerateSet (
+    IN set : ^ExObjectSet,
+    IN enumfunc : ExEnumerateSetF,
+    IN context : ^VOID,
+) : OsStatus
+
+    // Enumerate an object set and call the function for each object.
+
+    i := 0
+    size := set^.Index
+    buf := set^.Buffer
+
+    WHILE i < size DO
+        status := enumfunc (
+            set, // set
+            buf[i], // object
+            context, // context
+        )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+
+        i += 1
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+FN ExDestroySet (
+    IN set : ^ExObjectSet,
+    IN enumfunc : ExEnumerateSetF,
+    IN context : ^VOID,
+)
+
+    // Destroy an object set.
+
+    IF enumfunc THEN
+        ExEnumerateSet (
+            set, // set
+            enumfunc, // enumfunc
+            context, // context
+        )
+    END
+
+    IF set^.Buffer != &set^.InitialBuffer[0] THEN
+        MmFreePool (
+            set^.Buffer, // ptr
+            set^.Tag, // tag
+        )
+    END
 END

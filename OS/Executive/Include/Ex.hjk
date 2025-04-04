@@ -144,8 +144,11 @@ EXTERN FN ExEnqueueWorkItem (
     IN context2 : UWORD,
 )
 
+#DEFINE EX_SET_INITIAL_BUFFER 4
+
 STRUCT ExObjectSet
     Buffer : ^^VOID,
+    InitialBuffer : ^VOID[EX_SET_INITIAL_BUFFER],
     Index : ULONG,
     Capacity : ULONG,
     Tag : ULONG,
@@ -171,4 +174,27 @@ EXTERN FN ExInitializeSet (
     IN set : ^ExObjectSet,
     IN tag : UWORD,
     IN poolindex : UWORD,
+)
+
+EXTERN FN ExRemoveObjectFromSet (
+    IN set : ^ExObjectSet,
+    IN object : ^VOID,
+) : UWORD
+
+FNPTR ExEnumerateSetF (
+    IN set : ^ExObjectSet,
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+EXTERN FN ExEnumerateSet (
+    IN set : ^ExObjectSet,
+    IN enumfunc : ExEnumerateSetF,
+    IN context : ^VOID,
+) : OsStatus
+
+EXTERN FN ExDestroySet (
+    IN set : ^ExObjectSet,
+    IN enumfunc : ExEnumerateSetF,
+    IN context : ^VOID,
 )
