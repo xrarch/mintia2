@@ -354,10 +354,18 @@ FN IoEnumerateRelations (
     IN relation : IoNodeRelation,
 ) : OsStatus
 
-    // Enumerate the parents of the tree node into the provided object set.
-    // An important detail is that this only captures the set of parents at a
-    // particular moment in time, and it may change after the capture.
-    // The set must be destroyed
+    // Enumerate the relations of the tree node into the provided object set.
+    // The object set must be empty.
+    //
+    // The returned tree nodes are referenced and safe to use. Because they're
+    // referenced, the set must be emptied by a call to IoEmptyRelationSet once
+    // the extra reference is no longer required.
+    //
+    // An important detail is that this only captures the set of relations at a
+    // particular moment in time, and it may change after the capture. If it
+    // returns a successful status, however, it is guaranteed to provide a
+    // *complete* picture of the relations at that moment. If it returns an
+    // error status, the set remains empty.
 
     status := OS_STATUS_SUCCESS
 
@@ -369,7 +377,7 @@ FN IoEnumerateRelations (
     )
 
     IF planeentry == NULLPTR THEN
-        // Failed to get a plane entry, so there can be no parents anyway.
+        // Failed to get a plane entry, so there can be no relations anyway.
         // Just exit.
 
         GOTO Exit
