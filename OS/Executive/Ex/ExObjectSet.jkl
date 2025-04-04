@@ -6,7 +6,6 @@
 
 #DEFINE EXP_ARRAY_EXTENSION 6
 
-#SECTION "PAGEtext"
 FN ExInitializeSet (
     IN set : ^ExObjectSet,
     IN tag : UWORD,
@@ -254,13 +253,13 @@ FN ExEnumerateSet (
     RETURN OS_STATUS_SUCCESS
 END
 
-FN ExDestroySet (
+FN ExEmptySet (
     IN set : ^ExObjectSet,
     IN enumfunc : ExEnumerateSetF,
     IN context : ^VOID,
 )
 
-    // Destroy an object set.
+    // Empty an object set.
 
     IF enumfunc THEN
         ExEnumerateSet (
@@ -276,4 +275,12 @@ FN ExDestroySet (
             set^.Tag, // tag
         )
     END
+
+    // Reinitialize the set.
+
+    ExInitializeSet (
+        set, // set
+        set^.Tag, // tag
+        set^.PoolIndex, // poolindex
+    )
 END

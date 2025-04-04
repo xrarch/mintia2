@@ -333,15 +333,13 @@ FN (ExEnumerateSetF) IopEnumerateDestroyRelationsFunc (
 END
 
 #SECTION "PAGEtext"
-FN IoUninitializeRelationSet (
+FN IoEmptyRelationSet (
     IN set : ^ExObjectSet,
 )
 
     // Uninitialize a set previously filled by a call to IoEnumerateRelations.
-    // Note that this also destroys the set. It must be reinitialized before
-    // the caller reuses it.
 
-    ExDestroySet (
+    ExEmptySet (
         set, // set
         &IopEnumerateDestroyRelationsFunc, // enumfunc
         NULLPTR, // context
@@ -359,6 +357,7 @@ FN IoEnumerateRelations (
     // Enumerate the parents of the tree node into the provided object set.
     // An important detail is that this only captures the set of parents at a
     // particular moment in time, and it may change after the capture.
+    // The set must be destroyed
 
     status := OS_STATUS_SUCCESS
 
@@ -390,7 +389,7 @@ FN IoEnumerateRelations (
         // Failed to capture a complete picture of the relations, so
         // remove whatever items we did get.
 
-        IoUninitializeRelationSet ( set )
+        IoEmptyRelationSet ( set )
     END
 
     RETURN status
