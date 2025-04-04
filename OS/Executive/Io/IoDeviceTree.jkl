@@ -5,17 +5,28 @@
 // Each independent DAG is called a "plane". A device object can have an
 // independent existence (or lack thereof) as a vertex within each plane.
 //
+// This is directly inspired by the IOKit Device Registry from the Apple XNU
+// kernel.
+//
 
 #INCLUDE "Iop.hjk"
 
 IopTreeLock : KeLock = KE_INITIAL_LOCK
 
-#MACRO IopLockTree () [
-    KeAcquireLockExclusive ( &IopTreeLock )
+#MACRO IopLockPlane ( plane ) [
+    KeAcquireLockExclusive ( &(plane)^.Lock )
 ]
 
-#MACRO IopUnlockTree () [
-    KeReleaseLock ( &IopTreeLock )
+#MACRO IopUnlockPlane ( plane ) [
+    KeReleaseLock ( &(plane)^.Lock )
+]
+
+#MACRO IopLockNode ( treenode ) [
+    KeAcquireLockExclusive ( &(treenode)^.Lock )
+]
+
+#MACRO IopUnlockNode ( treenode ) [
+    KeReleaseLock ( &(treenode)^.Lock )
 ]
 
 STRUCT IoPlane
@@ -24,17 +35,18 @@ STRUCT IoPlane
     NodeListHead : RtlListEntry,
 
     PlaneListEntry : RtlListEntry,
+
+    Lock : KeLock,
 END
 
-STRUCT IoPlaneNode
+STRUCT IoPlaneEntry
     Plane : ^IoPlane,
 
-    Device : ^IoDevice,
+    TreeNode : ^IoTreeNode,
 
-    ParentSet : ExObjectSet,
-    ChildSet : ExObjectSet,
+    RelationSets : ExObjectSet[IO_RELATION_MAX],
 
-    DeviceListEntry : RtlListEntry,
+    Entry : RtlListEntry,
 END
 
 EXPORT IoServicePlane : ^IoPlane
@@ -42,6 +54,8 @@ EXPORT IoServicePlane : ^IoPlane
 IopServicePlane : IoPlane
 
 IopPlaneList : RtlListEntry
+
+IopPlaneListLock : KeLock = KE_INITIAL_LOCK
 
 #SECTION "PAGEtext"
 FN IoInitializePlane (
@@ -55,14 +69,16 @@ FN IoInitializePlane (
 
     RtlInitializeList ( &plane^.NodeListHead )
 
-    IopLockTree ()
+    KeInitializeLock ( &plane^.Lock )
+
+    KeAcquireLockExclusive ( &IopPlaneListLock )
 
     RtlInsertAtTailList (
         &IopPlaneList, // head
         &plane^.PlaneListEntry, // entry
     )
 
-    IopUnlockTree ()
+    KeReleaseLock ( &IopPlaneListLock )
 END
 
 #SECTION "INITtext"
@@ -76,4 +92,306 @@ FN IopInitializeDeviceTree ()
         IoServicePlane, // plane
         "IoService", // name
     )
+END
+
+#SECTION "PAGEtext"
+FN IopFindPlaneEntry (
+    IN treenode : ^IoTreeNode,
+    IN plane : ^IoPlane,
+) : ^IoPlaneEntry
+
+    // Find the plane entry associated with the tree node.
+    // If not found, allocate. Returns NULLPTR on failure.
+    // Assumes node lock is held if relevant.
+
+    listhead := &treenode^.PlaneEntryListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        node := CONTAINEROF listentry TO IoPlaneEntry.Entry
+
+        IF node^.Plane == plane THEN
+            // Found it.
+
+            RETURN node
+        END
+    END
+
+    // Create a new one.
+
+    node := CAST MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
+        SIZEOF IoPlaneEntry, // bytes
+        'PlNd', // tag
+        TRUE, // wait
+    ) TO ^IoPlaneEntry
+
+    IF NOT node THEN
+        RETURN NULLPTR
+    END
+
+    // Initialize the plane node.
+
+    node^.Plane = plane
+    node^.TreeNode = treenode
+
+    i := 0
+
+    WHILE i < IO_RELATION_MAX DO
+        ExInitializeSet (
+            &node^.RelationSets[i], // set
+            'IoRs', // tag
+            MM_PAGED_POOL, // poolindex
+        )
+
+        i += 1
+    END
+
+    RtlInsertAtTailList (
+        &treenode^.PlaneEntryListHead, // head
+        &node^.Entry, // entry
+    )
+
+    RETURN node
+END
+
+#SECTION "PAGEtext"
+FN IoAttachNodes (
+    IN plane : ^IoPlane,
+    IN parent : ^IoTreeNode,
+    IN child : ^IoTreeNode,
+) : OsStatus
+
+    // Attach two nodes in the specified plane.
+
+    // A note about error cases: we don't bother cleaning up a newly allocated
+    // plane entry because it will just get cleaned up when the tree node is
+    // deleted.
+
+    status := OS_STATUS_SUCCESS
+
+    IopLockNode ( parent )
+    IopLockNode ( child )
+
+    parentchildren := IopFindPlaneEntry (
+        parent, // treenode
+        plane, // plane
+    )
+
+    IF NOT parentchildren THEN
+        status = OS_STATUS_NO_MEMORY
+
+        GOTO Exit
+    END
+
+    childparents := IopFindPlaneEntry (
+        child, // treenode
+        plane, // plane
+    )
+
+    IF NOT childparents THEN
+        status = OS_STATUS_NO_MEMORY
+
+        GOTO Exit
+    END
+
+    // Insert as a parent of the child.
+
+    status = ExAppendSet (
+        &childparents^.RelationSets[IO_RELATION_PARENTS], // set
+        parent, // object
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    // Insert as a child of the parent.
+
+    status = ExAppendSet (
+        &parentchildren^.RelationSets[IO_RELATION_CHILDREN], // set
+        child, // object
+    )
+
+    IF OsError ( status ) THEN
+        // Undo the parent addition.
+
+        ExRemoveObjectFromSet (
+            &childparents^.RelationSets[IO_RELATION_PARENTS], // set
+            parent, // object
+        )
+
+        GOTO Exit
+    END
+
+    // The link has been made, so reference the parent to reflect the new child.
+
+    ObReferenceObject ( parent )
+
+@Exit
+
+    IopUnlockNode ( child )
+    IopUnlockNode ( parent )
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN IoDetachNodes (
+    IN plane : ^IoPlane,
+    IN parent : ^IoTreeNode,
+    IN child : ^IoTreeNode,
+)
+
+    // Destroy a parent-child relationship in the specified plane.
+
+    IopLockNode ( parent )
+    IopLockNode ( child )
+
+    parentchildren := IopFindPlaneEntry (
+        parent, // treenode
+        plane, // plane
+    )
+
+    KeAssert ( parentchildren != NULLPTR )
+
+    childparents := IopFindPlaneEntry (
+        child, // treenode
+        plane, // plane
+    )
+
+    KeAssert ( childparents != NULLPTR )
+
+    removed := ExRemoveObjectFromSet (
+        &childparents^.RelationSets[IO_RELATION_PARENTS], // set
+        parent, // object
+    )
+
+    KeAssert ( removed != FALSE )
+
+    removed = ExRemoveObjectFromSet (
+        &parentchildren^.RelationSets[IO_RELATION_CHILDREN], // set
+        child, // object
+    )
+
+    KeAssert ( removed != FALSE )
+
+    IopUnlockNode ( child )
+    IopUnlockNode ( parent )
+
+    // Unreference the parent to reflect the loss of a child.
+    // This may cause the parent to go away as well.
+
+    ObUnreferenceObject ( parent )
+END
+
+#SECTION "PAGEtext"
+FN (ExEnumerateSetF) IopEnumerateRelationsFunc (
+    IN set : ^ExObjectSet,
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+    // Add an object to the relation set.
+
+    IF NOT ObConditionallyReferenceObject ( object ) THEN
+        // It's being deleted and just hasn't been removed from the relation set
+        // yet. Pretend it's not here.
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    status := ExAppendSet (
+        CAST context TO ^ExObjectSet, // set
+        object, // object
+    )
+
+    IF OsError ( status ) THEN
+        // Failed to append. Remove the reference.
+        // Use DeferDelete so that we don't call the deletion routine while
+        // holding a node lock.
+
+        ObUnreferenceObjectDeferDelete ( object )
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN (ExEnumerateSetF) IopEnumerateDestroyRelationsFunc (
+    IN set : ^ExObjectSet,
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+    // Remove a reference from an object that was previously in a relations
+    // enumeration set.
+
+    ObUnreferenceObject ( object )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN IoUninitializeRelationSet (
+    IN set : ^ExObjectSet,
+)
+
+    // Uninitialize a set previously filled by a call to IoEnumerateRelations.
+    // Note that this also destroys the set. It must be reinitialized before
+    // the caller reuses it.
+
+    ExDestroySet (
+        set, // set
+        &IopEnumerateDestroyRelationsFunc, // enumfunc
+        NULLPTR, // context
+    )
+END
+
+#SECTION "PAGEtext"
+FN IoEnumerateRelations (
+    IN plane : ^IoPlane,
+    IN treenode : ^IoTreeNode,
+    IN set : ^ExObjectSet,
+    IN relation : IoNodeRelation,
+) : OsStatus
+
+    // Enumerate the parents of the tree node into the provided object set.
+    // An important detail is that this only captures the set of parents at a
+    // particular moment in time, and it may change after the capture.
+
+    status := OS_STATUS_SUCCESS
+
+    IopLockNode ( treenode )
+
+    planeentry := IopFindPlaneEntry (
+        treenode, // treenode
+        plane, // plane
+    )
+
+    IF planeentry == NULLPTR THEN
+        // Failed to get a plane entry, so there can be no parents anyway.
+        // Just exit.
+
+        GOTO Exit
+    END
+
+    status = ExEnumerateSet (
+        &planeentry^.RelationSets[relation], // set
+        &IopEnumerateRelationsFunc, // enumfunc
+        set, // context
+    )
+
+@Exit
+
+    IopUnlockNode ( treenode )
+
+    IF OsError ( status ) THEN
+        // Failed to capture a complete picture of the relations, so
+        // remove whatever items we did get.
+
+        IoUninitializeRelationSet ( set )
+    END
+
+    RETURN status
 END

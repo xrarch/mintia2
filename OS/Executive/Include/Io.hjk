@@ -72,17 +72,26 @@ STRUCT IoTarget
     Dispatch : IoPacketBasedCallF[IO_FUNCTION_MAX],
 END
 
+// IoTreeNode MUST be at the start of a structure, specifically an object
+// manager object.
+
 STRUCT IoTreeNode
-    PlaneNodeListHead : RtlListEntry,
+    PlaneEntryListHead : RtlListEntry,
+
+    Target : IoTarget,
+
+    Name : ^ExName,
+
+    Lock : KeLock,
 END
 
 #MACRO IoInitializeTreeNode ( node ) [
     RtlInitializeList ( &(node)^.PlaneNodeListHead )
+
+    KeInitializeLock ( &(node)^.Lock )
 ]
 
 STRUCT IoDevice
-    Target : IoTarget,
-
     Node : IoTreeNode,
 END
 
@@ -387,3 +396,10 @@ EXTERN FN IoCompletePacket (
 )
 
 EXTERN IoServicePlane : ^IoPlane
+
+ENUM IoNodeRelation : UBYTE
+    IO_RELATION_CHILDREN,
+    IO_RELATION_PARENTS,
+
+    IO_RELATION_MAX,
+END
