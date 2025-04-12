@@ -198,3 +198,20 @@ EXTERN FN ExEmptySet (
     IN enumfunc : ExEnumerateSetF,
     IN context : ^VOID,
 )
+
+#DEFINE EX_MODULE_UNLOADING 1
+#DEFINE EX_MODULE_LOADING 2
+
+STRUCT ExLoadedModule
+    Name : RtlString,
+
+    LoadEvent : KeEvent,
+
+    Flags : ULONG,
+
+    LoadStatus : OsStatus,
+END
+
+EXTERN FN ExWaitForModuleLoad (
+    IN module : ^ExLoadedModule,
+) : OsStatus

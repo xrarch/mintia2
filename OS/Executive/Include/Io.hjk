@@ -45,18 +45,6 @@ FNPTR IoPacketBasedCallF (
     IN trampoline : ^IoTrampoline,
 ) : OsStatus
 
-ENUM IoFunctionCode : UBYTE
-    IO_FUNCTION_READ,
-    IO_FUNCTION_WRITE,
-    IO_FUNCTION_IOCTL,
-
-    IO_FUNCTION_RESERVED = 10,
-
-    IO_FUNCTION_MAX,
-END
-
-TYPE IoPacketDispatchTable : IoPacketBasedCallF[IO_FUNCTION_MAX]
-
 STRUCT IoRecursiveDispatchTable
     OpenFileObject : IoOpenFileObjectF,
     CloseFileObject : IoCloseFileObjectF,
@@ -71,7 +59,7 @@ END
 // have I/O targeted to them.
 
 STRUCT IoTarget
-    Dispatch : ^IoPacketDispatchTable,
+    Dispatch : ^IoPacketBasedCallF,
 END
 
 // IoTreeNode MUST be at the start of a structure, specifically an object
@@ -348,9 +336,17 @@ STRUCT IoIoctlParameters
     OutputLength : ULONG,
 END
 
+STRUCT IoCustomParameters
+    Word1 : ^VOID,
+    Word2 : ^VOID,
+    Word3 : ^VOID,
+    Word4 : ^VOID,
+END
+
 UNION IoParameters
     Rw : IoReadWriteParameters,
     Ioctl : IoIoctlParameters,
+    Custom : IoCustomParameters,
 END
 
 // The trampoline was zone-allocated.
@@ -367,13 +363,13 @@ STRUCT IoTrampoline
 
     Target : ^IoTarget,
 
+    // The function to call next.
+
+    Function : IoPacketBasedCallF,
+
     // Function-specific parameters.
 
     P : IoParameters,
-
-    // Indicates the function code of the operation.
-
-    FunctionCode : IoFunctionCode,
 
 #IF IO_INTERNAL
     // Pointer to the packet related to the IO operation.

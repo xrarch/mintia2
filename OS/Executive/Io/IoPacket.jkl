@@ -409,7 +409,7 @@ FN IopBounceOnTrampoline (
     WHILE TRUE DO
         // Call through trampoline.
 
-        status = trampoline^.Target^.Dispatch^[trampoline^.FunctionCode] (
+        status = trampoline^.Function (
             packet, // packet
             trampoline, // trampoline
         )
@@ -636,7 +636,7 @@ EXPORT FN IoEnqueuePacket (
     IN packet : ^IoPacket,
     IN parentpacket : ^IoPacket,
     IN target : ^IoTarget,
-    IN functioncode : UWORD,
+    IN function : IoPacketBasedCallF,
     IN parameters : ^IoParameters,
 ) : OsStatus
 
@@ -688,7 +688,7 @@ EXPORT FN IoEnqueuePacket (
 
     trampoline^.Target = target
     trampoline^.Packet = packet
-    trampoline^.FunctionCode = functioncode
+    trampoline^.Function = function
 
     RtlCopyBytes (
         &trampoline^.P, // dest

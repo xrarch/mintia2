@@ -1,0 +1,358 @@
+//
+// This is the OOP runtime for the MINTIA driver model.
+// See IOKit for inspiration.
+//
+
+#INCLUDE "Iop.hjk"
+
+STRUCT IoClass
+    Name : RtlString,
+
+    Superclass : ^IoClass,
+
+    Module : ^ExLoadedModule,
+
+    Entry : RtlAvlNode,
+
+    DispatchTable : ^IoPacketBasedCallF,
+
+    InstantiationCount : ULONG,
+    SubclassCount : ULONG,
+
+    DispatchTableSize : UINT,
+END
+
+IopClassLookupTree : RtlAvlNode
+
+IopClassLock : KeLock = KE_INITIAL_LOCK
+
+FN (IoPacketBasedCallF) IopUninitializedDispatch (
+    IN packet : ^IoPacket,
+    IN trampoline : ^IoTrampoline,
+) : OsStatus
+
+    KeCrash ( "Uninitialized dispatch table entry\n" )
+END
+
+#SECTION "PAGEtext"
+FN (RtlAvlLessThanF) IopCompareClassNames (
+    IN a : ^RtlAvlNode,
+    IN b : ^RtlAvlNode,
+) : UWORD
+
+    // Compare the class names.
+
+    RETURN CAST RtlCompareRtlString (
+        &(CONTAINEROF a TO IoClass.Entry)^.Name, // str1
+        &(CONTAINEROF b TO IoClass.Entry)^.Name, // str2
+    ) TO WORD < 0
+END
+
+#SECTION "PAGEtext"
+FN IopLookupClass (
+    IN name : ^RtlString,
+) : ^IoClass
+
+    // Look up an IO class by name. Assumes the global class lock is held.
+
+    // Look up the name in the tree, which is an AVL tree keyed by string and
+    // ordered lexicographically.
+
+    avlnode := IopClassLookupTree.Right
+
+    WHILE TRUE DO
+        IF NOT avlnode THEN
+            // Didn't find it.
+
+            RETURN NULLPTR
+        END
+
+        class := CONTAINEROF avlnode TO IoClass.Entry
+
+        res := CAST RtlCompareRtlString (
+            name, // str1
+            &class^.Name, // str2
+        ) TO WORD
+
+        IF res == 0 THEN
+            // Found it! Unlock the tree and return the class.
+
+            RETURN class
+        END
+
+        IF res < 0 THEN
+            avlnode = avlnode^.Left
+        ELSE
+            avlnode = avlnode^.Right
+        END
+    END
+
+    KeAssert ( FALSE )
+END
+
+STRUCT IopRegisterClassContext
+    Module : ^ExLoadedModule,
+    ClassName : ^RtlString,
+    Superclass : ^IoClass,
+    DispatchTable : ^IoPacketBasedCallF,
+    DispatchTableSize : UWORD,
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeInitializeF) IopInitializeClassObject (
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+    // Initialize an IO class object.
+
+    class := CAST object TO ^IoClass
+    ctx := CAST context TO ^IopRegisterClassContext
+    superclass := ctx^.Superclass
+
+    class^.Name.Data = ctx^.ClassName^.Data
+    class^.Name.Length = ctx^.ClassName^.Length
+
+    class^.Superclass = superclass
+
+    class^.InstantiationCount = 0
+    class^.SubclassCount = 0
+
+    class^.Module = ctx^.Module
+
+    // Enough space was allocated at the end of the class object for the
+    // dispatch table.
+
+    mydispatch := CAST (class + SIZEOF IoClass) TO ^IoPacketBasedCallF
+
+    class^.DispatchTable = mydispatch
+    class^.DispatchTableSize = ctx^.DispatchTableSize
+
+    // Initialize the dispatch table.
+
+    superdispatch := superclass^.DispatchTable
+    dispatchtemplate := ctx^.DispatchTable
+
+    // First fill in the entries that inherit from the superclass.
+
+    endptr := superdispatch + superclass^.DispatchTableSize
+
+    WHILE superdispatch < endptr DO
+        IF dispatchtemplate^ THEN
+            mydispatch^ = dispatchtemplate^
+        ELSE
+            mydispatch^ = superdispatch^
+        END
+
+        superdispatch += SIZEOF IoPacketBasedCallF
+        dispatchtemplate += SIZEOF IoPacketBasedCallF
+        mydispatch += SIZEOF IoPacketBasedCallF
+    END
+
+    // Now fill in the entries that are unique to the subclass.
+
+    endptr = class^.DispatchTable + ctx^.DispatchTableSize
+
+    WHILE mydispatch < endptr DO
+        IF dispatchtemplate^ THEN
+            mydispatch^ = dispatchtemplate^
+        ELSE
+            mydispatch^ = &IopUninitializedDispatch
+        END
+
+        dispatchtemplate += SIZEOF IoPacketBasedCallF
+        mydispatch += SIZEOF IoPacketBasedCallF
+    END
+
+    // Insert into the class lookup tree.
+
+    KeAcquireLockExclusive ( &IopClassLock )
+
+    IF IopLookupClass ( &class^.Name ) THEN
+        // A class by this name already exists.
+
+        KeReleaseLock ( &IopClassLock )
+
+        RETURN OS_STATUS_IOCLASS_ALREADY_EXISTS
+    END
+
+    RtlInsertAvl (
+        &IopClassLookupTree, // root
+        &class^.Entry, // node
+        &IopCompareClassNames, // comparisonfunc
+    )
+
+    // Increment the superclass's subclass count.
+
+    superclass^.SubclassCount += 1
+
+    KeReleaseLock ( &IopClassLock )
+
+    // Increment the reference count of the superclass and of the module.
+
+    ObReferenceObject ( superclass )
+    ObReferenceObject ( ctx^.Module )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeDeleteF) IopDeleteClassObject (
+    IN object : ^VOID,
+) : UWORD
+
+    // Delete a class object.
+
+    class := CAST object TO ^IoClass
+
+    // Make sure there are no instantiations of this class and that any
+    // subclasses have disappeared.
+
+    KeAssert ( class^.InstantiationCount == 0 )
+    KeAssert ( class^.SubclassCount == 0 )
+
+    // Remove from the lookup tree.
+
+    KeAcquireLockExclusive ( &IopClassLock )
+
+    RtlRemoveAvl (
+        &IopClassLookupTree, // root
+        &class^.Entry, // entry
+    )
+
+    class^.Superclass^.SubclassCount -= 1
+
+    KeReleaseLock ( &IopClassLock )
+
+    // Unreference the superclass and the module.
+
+    ObUnreferenceObject ( class^.Superclass )
+    ObUnreferenceObject ( class^.Module )
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+PUBLIC IoClassType : ObType = {
+    [Name] = "IoClass",
+
+    [Delete] = &IopDeleteClassObject,
+    [Initialize] = &IopInitializeClassObject,
+
+    [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
+    [TypeIdentifier] = OS_IOCLASS_TYPE,
+    [Tag] = 'Clas',
+
+    [IsPaged] = FALSE,
+}
+
+#SECTION "PAGEtext"
+FN IoCreateClass (
+    IN module : ^ExLoadedModule,
+    IN classname : ^RtlString,
+    IN superclass : ^IoClass,
+    IN dispatchtable : ^IoPacketBasedCallF,
+    IN dispatchtablesize : UWORD,
+    OUT class : ^IoClass,
+) : OsStatus
+
+    // Register a new IO class.
+    // Returns NULLPTR upon failure.
+
+    ctx : IopRegisterClassContext
+
+    ctx.Module = module
+    ctx.ClassName = classname
+    ctx.Superclass = superclass
+    ctx.DispatchTable = dispatchtable
+    ctx.DispatchTableSize = dispatchtablesize
+
+    obparams : ObParameters
+
+    mycred := &PsSystemProcess^.Paged^.Cred
+
+    ObMoveCredentials (
+        &obparams.Permissions.Cred, // dest
+        mycred, // src
+    )
+
+    obparams.Permissions.Access = OS_ACCESS_OWNER_ALL
+    obparams.Flags = 0
+    obparams.Type = &IoClassType
+    obparams.BodySize = SIZEOF IoClass + dispatchtablesize
+    obparams.NpQuotaBias = 0
+    obparams.PgQuotaBias = 0
+
+    RETURN ObAllocateObject (
+        &obparams, // obparams
+        OUT class, // object
+    )
+END
+
+#SECTION "PAGEtext"
+FN IoLoadClassByName (
+    IN name : ^RtlString,
+) : ^IoClass
+
+    // Load an IO class by name. Returns a referenced pointer to the class or
+    // NULLPTR if we don't know what this class is.
+
+@Retry
+
+    KeAcquireLockShared ( &IopClassLock )
+
+    class := IopLookupClass ( name )
+
+    IF NOT class OR
+        NOT ObConditionallyReferenceObject ( class ) THEN
+
+        // Didn't find the class or failed to reference it. If we failed to
+        // reference it, then it is actively being deleted (that is, the module
+        // that implements it is being unloaded), and we should treat this like
+        // the normal module load case.
+
+        KeReleaseLock ( &IopClassLock )
+
+        // TODO: Check the IO Catalog for a module that implements this
+        //       class, and load it if found. If we find such a module, retry
+        //       the lookup. Otherwise, return NULLPTR.
+
+        KeCrash ( "NYI IoLoadClassByName\n" )
+
+        GOTO Retry
+    END
+
+    KeReleaseLock ( &IopClassLock )
+
+    IF class^.Module^.Flags & EX_MODULE_LOADING THEN
+        // The module is still loading, so wait for that to finish before we use
+        // any of its classes.
+
+        status := ExWaitForModuleLoad ( class^.Module )
+
+        IF OsError ( status ) THEN
+            // The module failed to load, so don't return the class.
+
+            ObUnreferenceObject ( class )
+
+            RETURN NULLPTR
+        END
+    END
+
+    // Return the referenced class.
+
+    RETURN class
+END
+
+#ENTERSECTION "INITtext"
+
+FN IopInitializeObjectRuntime ()
+
+    // Initialize the object runtime.
+
+    // Initialize the class name lookup tree.
+
+    RtlInitializeAvl ( &IopClassLookupTree )
+END
+
+#LEAVESECTION

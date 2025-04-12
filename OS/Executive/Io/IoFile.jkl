@@ -6,7 +6,7 @@
 #INCLUDE "Iop.hjk"
 
 #SECTION "PAGEtext"
-FN (ObTypeOpenF) IoOpenFileType (
+FN (ObTypeOpenF) IopOpenFileObject (
     IN process : ^PsProcess,
     IN object : ^VOID,
     IN access : UWORD,
@@ -32,7 +32,7 @@ FN (ObTypeOpenF) IoOpenFileType (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeCloseF) IoCloseFileType (
+FN (ObTypeCloseF) IopCloseFileObject (
     IN object : ^VOID,
     IN access : UWORD,
     IN lasthandlecount : UWORD,
@@ -58,7 +58,7 @@ FN (ObTypeCloseF) IoCloseFileType (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) IoDeleteFileType (
+FN (ObTypeDeleteF) IopDeleteFileObject (
     IN object : ^VOID,
 ) : UWORD
 
@@ -82,7 +82,7 @@ FN (ObTypeDeleteF) IoDeleteFileType (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeSetSecurityF) IoSetSecurityFileType (
+FN (ObTypeSetSecurityF) IopSetSecurityFileObject (
     IN object : ^VOID,
     IN permissions : ^ObPermissions,
 ) : OsStatus
@@ -107,7 +107,7 @@ FN (ObTypeSetSecurityF) IoSetSecurityFileType (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) IoDeleteFcbType (
+FN (ObTypeDeleteF) IopDeleteFcbObject (
     IN object : ^VOID,
 ) : UWORD
 
@@ -121,7 +121,7 @@ FN (ObTypeDeleteF) IoDeleteFcbType (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeNamespaceLookupF) IoNamespaceLookupFcbType (
+FN (ObTypeNamespaceLookupF) IopNamespaceLookupFcbObject (
     IN context : ^NsLookupContext,
 ) : OsStatus
 
@@ -136,10 +136,10 @@ END
 PUBLIC IoFileType : ObType = {
     [Name] = "File",
 
-    [Open] = &IoOpenFileType,
-    [Close] = &IoCloseFileType,
-    [Delete] = &IoDeleteFileType,
-    [SetSecurity] = &IoSetSecurityFileType,
+    [Open] = &IopOpenFileObject,
+    [Close] = &IopCloseFileObject,
+    [Delete] = &IopDeleteFileObject,
+    [SetSecurity] = &IopSetSecurityFileObject,
 
     [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
     [TypeIdentifier] = OS_FILE_TYPE,
@@ -152,8 +152,8 @@ PUBLIC IoFileType : ObType = {
 PUBLIC IoFcbType : ObType = {
     [Name] = "Fcb",
 
-    [Delete] = &IoDeleteFcbType,
-    [NamespaceLookup] = &IoNamespaceLookupFcbType,
+    [Delete] = &IopDeleteFcbObject,
+    [NamespaceLookup] = &IopNamespaceLookupFcbObject,
 
     [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
     [TypeIdentifier] = OS_FCB_TYPE,
