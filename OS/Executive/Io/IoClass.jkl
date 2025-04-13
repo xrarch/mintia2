@@ -90,35 +90,39 @@ FN IopLookupClass (
     KeAssert ( FALSE )
 END
 
-STRUCT IopRegisterClassContext
-    Module : ^ExLoadedModule,
-    ClassName : ^RtlString,
-    Superclass : ^IoClass,
-    DispatchTable : ^IoPacketBasedCallF,
-    DispatchTableSize : UWORD,
-END
-
 #SECTION "PAGEtext"
-FN (ObTypeInitializeF) IopInitializeClassObject (
-    IN object : ^VOID,
-    IN context : ^VOID,
+FN IoCreateClass (
+    IN module : ^ExLoadedModule,
+    IN classname : ^RtlString,
+    IN superclass : ^IoClass,
+    IN dispatchtable : ^IoPacketBasedCallF,
+    IN dispatchtablesize : UWORD,
+    OUT class : ^IoClass,
 ) : OsStatus
 
-    // Initialize an IO class object.
+    // Register a new IO class.
+    // Returns NULLPTR upon failure.
 
-    class := CAST object TO ^IoClass
-    ctx := CAST context TO ^IopRegisterClassContext
-    superclass := ctx^.Superclass
+    class = CAST MmAllocatePool (
+        MM_NONPAGED_POOL, // poolindex
+        SIZEOF IoClass + dispatchtablesize, // bytes
+        'Clas', // tag
+        TRUE, // wait
+    ) TO ^IoClass
 
-    class^.Name.Data = ctx^.ClassName^.Data
-    class^.Name.Length = ctx^.ClassName^.Length
+    IF NOT class THEN
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    class^.Name.Data = classname^.Data
+    class^.Name.Length = classname^.Length
 
     class^.Superclass = superclass
 
     class^.InstantiationCount = 0
     class^.SubclassCount = 0
 
-    class^.Module = ctx^.Module
+    class^.Module = module
 
     // Enough space was allocated at the end of the class object for the
     // dispatch table.
@@ -126,41 +130,40 @@ FN (ObTypeInitializeF) IopInitializeClassObject (
     mydispatch := CAST (class + SIZEOF IoClass) TO ^IoPacketBasedCallF
 
     class^.DispatchTable = mydispatch
-    class^.DispatchTableSize = ctx^.DispatchTableSize
+    class^.DispatchTableSize = dispatchtablesize
 
     // Initialize the dispatch table.
 
     superdispatch := superclass^.DispatchTable
-    dispatchtemplate := ctx^.DispatchTable
 
     // First fill in the entries that inherit from the superclass.
 
     endptr := superdispatch + superclass^.DispatchTableSize
 
     WHILE superdispatch < endptr DO
-        IF dispatchtemplate^ THEN
-            mydispatch^ = dispatchtemplate^
+        IF dispatchtable^ THEN
+            mydispatch^ = dispatchtable^
         ELSE
             mydispatch^ = superdispatch^
         END
 
         superdispatch += SIZEOF IoPacketBasedCallF
-        dispatchtemplate += SIZEOF IoPacketBasedCallF
+        dispatchtable += SIZEOF IoPacketBasedCallF
         mydispatch += SIZEOF IoPacketBasedCallF
     END
 
     // Now fill in the entries that are unique to the subclass.
 
-    endptr = class^.DispatchTable + ctx^.DispatchTableSize
+    endptr = class^.DispatchTable + dispatchtablesize
 
     WHILE mydispatch < endptr DO
-        IF dispatchtemplate^ THEN
-            mydispatch^ = dispatchtemplate^
+        IF dispatchtable^ THEN
+            mydispatch^ = dispatchtable^
         ELSE
             mydispatch^ = &IopUninitializedDispatch
         END
 
-        dispatchtemplate += SIZEOF IoPacketBasedCallF
+        dispatchtable += SIZEOF IoPacketBasedCallF
         mydispatch += SIZEOF IoPacketBasedCallF
     END
 
@@ -172,6 +175,11 @@ FN (ObTypeInitializeF) IopInitializeClassObject (
         // A class by this name already exists.
 
         KeReleaseLock ( &IopClassLock )
+
+        MmFreePool (
+            class, // ptr
+            'Clas', // tag
+        )
 
         RETURN OS_STATUS_IOCLASS_ALREADY_EXISTS
     END
@@ -188,22 +196,19 @@ FN (ObTypeInitializeF) IopInitializeClassObject (
 
     KeReleaseLock ( &IopClassLock )
 
-    // Increment the reference count of the superclass and of the module.
+    // Increment the reference count of the superclass's module.
 
-    ObReferenceObject ( superclass )
-    ObReferenceObject ( ctx^.Module )
+    ObReferenceObject ( superclass^.Module )
 
     RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) IopDeleteClassObject (
-    IN object : ^VOID,
-) : UWORD
+FN IoDeleteClass (
+    IN class : ^IoClass,
+)
 
-    // Delete a class object.
-
-    class := CAST object TO ^IoClass
+    // Delete a class.
 
     // Make sure there are no instantiations of this class and that any
     // subclasses have disappeared.
@@ -224,69 +229,9 @@ FN (ObTypeDeleteF) IopDeleteClassObject (
 
     KeReleaseLock ( &IopClassLock )
 
-    // Unreference the superclass and the module.
+    // Unreference the superclass's module.
 
-    ObUnreferenceObject ( class^.Superclass )
-    ObUnreferenceObject ( class^.Module )
-
-    RETURN TRUE
-END
-
-#SECTION "PAGEtext"
-PUBLIC IoClassType : ObType = {
-    [Name] = "IoClass",
-
-    [Delete] = &IopDeleteClassObject,
-    [Initialize] = &IopInitializeClassObject,
-
-    [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
-    [TypeIdentifier] = OS_IOCLASS_TYPE,
-    [Tag] = 'Clas',
-
-    [IsPaged] = FALSE,
-}
-
-#SECTION "PAGEtext"
-FN IoCreateClass (
-    IN module : ^ExLoadedModule,
-    IN classname : ^RtlString,
-    IN superclass : ^IoClass,
-    IN dispatchtable : ^IoPacketBasedCallF,
-    IN dispatchtablesize : UWORD,
-    OUT class : ^IoClass,
-) : OsStatus
-
-    // Register a new IO class.
-    // Returns NULLPTR upon failure.
-
-    ctx : IopRegisterClassContext
-
-    ctx.Module = module
-    ctx.ClassName = classname
-    ctx.Superclass = superclass
-    ctx.DispatchTable = dispatchtable
-    ctx.DispatchTableSize = dispatchtablesize
-
-    obparams : ObParameters
-
-    mycred := &PsSystemProcess^.Paged^.Cred
-
-    ObMoveCredentials (
-        &obparams.Permissions.Cred, // dest
-        mycred, // src
-    )
-
-    obparams.Permissions.Access = OS_ACCESS_OWNER_ALL
-    obparams.Flags = 0
-    obparams.Type = &IoClassType
-    obparams.BodySize = SIZEOF IoClass + dispatchtablesize
-    obparams.NpQuotaBias = 0
-    obparams.PgQuotaBias = 0
-
-    RETURN ObAllocateObject (
-        &obparams, // obparams
-        OUT class, // object
-    )
+    ObUnreferenceObject ( class^.Superclass^.Module )
 END
 
 #SECTION "PAGEtext"
@@ -304,7 +249,7 @@ FN IoLoadClassByName (
     class := IopLookupClass ( name )
 
     IF NOT class OR
-        NOT ObConditionallyReferenceObject ( class ) THEN
+        NOT ObConditionallyReferenceObject ( class^.Module ) THEN
 
         // Didn't find the class or failed to reference it. If we failed to
         // reference it, then it is actively being deleted (that is, the module
@@ -333,7 +278,7 @@ FN IoLoadClassByName (
         IF OsError ( status ) THEN
             // The module failed to load, so don't return the class.
 
-            ObUnreferenceObject ( class )
+            ObUnreferenceObject ( class^.Module )
 
             RETURN NULLPTR
         END
