@@ -60,21 +60,6 @@ STRUCT ObType
     IsPaged : UBYTE,
 END
 
-STRUCT ObpHeaderReaper
-    Object : ^VOID,
-    Next : ^VOID,
-END
-
-STRUCT ObpHeaderUsed
-    HandleCount : UWORD,
-    PointerCount : UWORD,
-END
-
-UNION ObpHeaderUnion
-    Reaper : ObpHeaderReaper,
-    Used : ObpHeaderUsed,
-END
-
 STRUCT ObCredentials
     Uid : ULONG,
     Gid : ULONG,
@@ -88,8 +73,6 @@ END
 STRUCT ObHeader
     Type : ^ObType,
 
-    U : ObpHeaderUnion,
-
     QuotaBlock : ^MiQuotaBlock,
 
     Lock : KeLock,
@@ -102,10 +85,14 @@ STRUCT ObHeader
 
     PagedQuotaCharge : ULONG,
     NonpagedQuotaCharge : ULONG,
+
+    HandleCount : UWORD,
 END
 
 STRUCT ObpCommonHeader
     Header : ^ObHeader,
+    PointerCount : UWORD,
+    NextToReap : ^VOID,
 END
 
 STRUCT ObParameters
@@ -121,8 +108,16 @@ STRUCT ObParameters
     PgQuotaBias : ULONG,
 END
 
+#MACRO ObFindObjectFromCommonHeader ( commonheader ) [
+    (CAST (commonheader + SIZEOF ObpCommonHeader) TO ^VOID)
+]
+
+#MACRO ObFindCommonHeader ( object ) [
+    (CAST (object - SIZEOF ObpCommonHeader) TO ^ObpCommonHeader)
+]
+
 #MACRO ObFindHeader ( object ) [
-    ((CAST (object - SIZEOF ObpCommonHeader) TO ^ObpCommonHeader)^.Header)
+    (ObFindCommonHeader ( object )^.Header)
 ]
 
 #MACRO ObFindPagedPart ( object ) [

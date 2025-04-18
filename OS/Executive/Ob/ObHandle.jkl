@@ -147,7 +147,7 @@ FN ObInsertObject (
 
     KeAcquireLockExclusive ( &header^.Lock )
 
-    header^.U.Used.HandleCount += 1
+    header^.HandleCount += 1
 
     KeReleaseLock ( &header^.Lock )
 
@@ -209,8 +209,8 @@ FN ObCloseObject (
 
     KeAcquireLockExclusive ( &header^.Lock )
 
-    oldcount := header^.U.Used.HandleCount
-    header^.U.Used.HandleCount = oldcount - 1
+    oldcount := header^.HandleCount
+    header^.HandleCount = oldcount - 1
 
     IF oldcount == 1 AND
         header^.Flags & OB_FLAG_PERMANENT == 0 AND

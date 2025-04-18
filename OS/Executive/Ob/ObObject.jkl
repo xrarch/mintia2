@@ -127,8 +127,8 @@ FN ObAllocateObject (
 
     header^.Permissions.Access = obparams^.Permissions.Access
 
-    header^.U.Used.PointerCount = 1
-    header^.U.Used.HandleCount = 0
+    commonheader^.PointerCount = 1
+    header^.HandleCount = 0
 
     header^.NamespaceEntry = NULLPTR
 
@@ -272,17 +272,16 @@ FN ObDeleteObject (
     ObFreeObject ( object )
 END
 
-#SECTION "PAGEtext"
 FN ObReferenceObject (
     IN object : ^VOID,
 )
 
     // Reference an object by pointer.
 
-    header := ObFindHeader ( object )
+    commonheader := ObFindCommonHeader ( object )
 
     oldcount := KeIncrementPtr (
-        &header^.U.Used.PointerCount, // ulong
+        &commonheader^.PointerCount, // ulong
         1, // inc
     )
 
@@ -304,16 +303,17 @@ FN ObpEmptyDeferredList (
     WHILE paged^.DeferredObjectHead DO
         // Detach the whole chain.
 
-        header := paged^.DeferredObjectHead
+        object := paged^.DeferredObjectHead
         paged^.DeferredObjectHead = NULLPTR
 
         // Free every object in the chain.
 
-        WHILE header DO
-            object := header^.U.Reaper.Object
-            header = header^.U.Reaper.Next
+        WHILE object DO
+            next := ObFindCommonHeader ( object )^.NextToReap
 
             ObDeleteObject ( object )
+
+            object = next
         END
     END
 END
@@ -326,9 +326,9 @@ FN (KeProcessCustodyListF) ObpDeferredDeleteObject (
 
     // Called to delete an object as a KeProcessCustodyList callback.
 
-    header := CONTAINEROF object TO ObHeader.U.Reaper.Next
+    commonheader := CONTAINEROF object TO ObpCommonHeader.NextToReap
 
-    ObDeleteObject ( header^.U.Reaper.Object )
+    ObDeleteObject ( ObFindObjectFromCommonHeader ( commonheader ) )
 END
 
 #SECTION "PAGEtext"
@@ -356,7 +356,6 @@ FN (ExWorkItemF) ObpDeferredDeletionWorker (
     paged^.DeletingObject = FALSE
 END
 
-#SECTION "PAGEtext"
 FN (KeCustodyListActivateF) ObpActivateDeletionWorker (
     IN list : ^KeCustodyList,
 )
@@ -373,36 +372,32 @@ FN (KeCustodyListActivateF) ObpActivateDeletionWorker (
     )
 END
 
-#SECTION "PAGEtext"
 FN ObpDeferDeletion (
     IN object : ^VOID,
 )
 
     // Enqueue deleting this object as some work to the worker thread pool.
 
-    header := ObFindHeader ( object )
-
-    header^.U.Reaper.Object = object
+    commonheader := ObFindCommonHeader ( object )
 
     // Atomically add it to the list.
 
     KeInsertCustodyList (
         &ObpDeferredDeletionList, // list
-        &header^.U.Reaper.Next, // link
+        &commonheader^.NextToReap, // link
     )
 END
 
-#SECTION "PAGEtext"
 FN ObUnreferenceObject (
     IN object : ^VOID,
 )
 
     // Unreference an object by pointer.
 
-    header := ObFindHeader ( object )
+    commonheader := ObFindCommonHeader ( object )
 
     oldcount := KeIncrementPtr (
-        &header^.U.Used.PointerCount, // ulong
+        &commonheader^.PointerCount, // ulong
         -1, // inc
     )
 
@@ -411,11 +406,21 @@ FN ObUnreferenceObject (
     IF oldcount == 1 THEN
         // Delete it.
 
-        IF NOT KeAreApcsDeliverable () THEN
+        thread := PsCurrentThread ()
+
+        IF NOT KeAreApcsDeliverable () OR
+            thread^.VmPrivileged THEN
+
             // APCs are not deliverable so we're gonna defer this deletion to
             // worker thread context. This is to avoid illegally trying to
             // recursively acquire locks inside deletion routines that are not
             // APC-safe.
+            //
+            // We also defer deletion if the current thread is VM privileged.
+            // This is because actually deleting an object will invariably touch
+            // paged pool (to delete the paged part of the header) and we assume
+            // a VM privileged thread is involved in page-out and so this could
+            // otherwise cause deadlock.
 
             ObpDeferDeletion ( object )
 
@@ -426,7 +431,7 @@ FN ObUnreferenceObject (
         // holding a lock depended upon by APCs, so we can delete this
         // object inline.
 
-        paged := PsCurrentThread ()^.Paged
+        paged := thread^.Paged
 
         IF paged^.DeletingObject THEN 
             // We're already deleting an object. To avoid causing a big
@@ -438,10 +443,8 @@ FN ObUnreferenceObject (
             // Note that there's no need to synchronize this list since we
             // only access it from our own context.
 
-            header^.U.Reaper.Object = object
-
-            header^.U.Reaper.Next = paged^.DeferredObjectHead
-            paged^.DeferredObjectHead = header
+            commonheader^.NextToReap = paged^.DeferredObjectHead
+            paged^.DeferredObjectHead = object
 
         ELSE
             // Delete the object right away.
@@ -463,7 +466,6 @@ FN ObUnreferenceObject (
     END
 END
 
-#SECTION "PAGEtext"
 FN ObUnreferenceObjectDeferDelete (
     IN object : ^VOID,
 )
@@ -474,10 +476,10 @@ FN ObUnreferenceObjectDeferDelete (
     // thread. This is useful when a lock is held that is also taken in the
     // deletion routine.
 
-    header := ObFindHeader ( object )
+    commonheader := ObFindCommonHeader ( object )
 
     oldcount := KeIncrementPtr (
-        &header^.U.Used.PointerCount, // ulong
+        &commonheader^.PointerCount, // ulong
         -1, // inc
     )
 
@@ -490,7 +492,6 @@ FN ObUnreferenceObjectDeferDelete (
     END
 END
 
-#SECTION "PAGEtext"
 FN ObConditionallyReferenceObject (
     IN object : ^VOID,
 ) : UWORD
@@ -501,9 +502,9 @@ FN ObConditionallyReferenceObject (
     // finally frees the object. Returns TRUE if referenced successfully, FALSE
     // otherwise.
 
-    header := ObFindHeader ( object )
+    commonheader := ObFindCommonHeader ( object )
 
-    oldcount := header^.U.Used.PointerCount
+    oldcount := commonheader^.PointerCount
 
     WHILE TRUE DO
         IF oldcount == 0 THEN
@@ -514,7 +515,7 @@ FN ObConditionallyReferenceObject (
         END
 
         new := KeCompareSwapPtr (
-            &header^.U.Used.PointerCount, // ptr
+            &commonheader^.PointerCount, // ptr
             oldcount + 1, // newvalue
             oldcount, // expectedvalue
         )
