@@ -110,6 +110,13 @@ EXTERN FN ExReferenceName (
     IN name : ^ExName,
 )
 
+EXTERN FN ExDuplicateString (
+    IN outputstring : ^RtlString,
+    IN inputstring : ^RtlString,
+    IN poolindex : UWORD,
+    IN tag : UWORD,
+) : OsStatus
+
 STRUCT ExEvent
     Event : KeEvent,
 END
@@ -202,8 +209,18 @@ EXTERN FN ExEmptySet (
 #DEFINE EX_MODULE_UNLOADING 1
 #DEFINE EX_MODULE_LOADING 2
 
-STRUCT ExLoadedModule
+STRUCT ExKnownModule
     Name : RtlString,
+
+    LoadedModule : ^ExLoadedModule,
+
+    Entry : RtlAvlNode,
+
+    UnloadEvent : KeEvent,
+END
+
+STRUCT ExLoadedModule
+    KnownModule : ^ExKnownModule,
 
     LoadEvent : KeEvent,
 

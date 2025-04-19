@@ -646,16 +646,18 @@ EXPORT FN IoEnqueuePacket (
 
     status : OsStatus
 
-    stacktrampoline : IoTrampoline
-    trampoline := &stacktrampoline
+    // Initialize a trampoline on the kernel stack, in case that's useful.
 
+    stacktrampoline : IoTrampoline
     stacktrampoline.InternalFlags = IOP_TRAMPOLINE_DONT_FREE
+
+    trampoline := &stacktrampoline
 
     thread := PsCurrentThread ()
 
     IF thread^.CurrentTrampoline THEN
         // Nested I/O request.
-        // Allocate a trampoline.
+        // Have to allocate a trampoline out of line.
 
         KeAcquireLockExclusive ( &IopTrampolineZoneLock )
 

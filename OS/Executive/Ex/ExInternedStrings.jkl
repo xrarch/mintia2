@@ -233,3 +233,41 @@ FN ExReferenceName (
 
     KeReleaseLock ( &bucket^.Lock )
 END
+
+#SECTION "PAGEtext"
+FN ExDuplicateString (
+    IN outputstring : ^RtlString,
+    IN inputstring : ^RtlString,
+    IN poolindex : UWORD,
+    IN tag : UWORD,
+) : OsStatus
+
+    // Duplicate a string into an output string.
+
+    // Copy the length.
+
+    outputstring^.Length = inputstring^.Length
+
+    // Create a new string buffer (this is the important work).
+
+    outputstring^.Data = MmAllocatePool (
+        poolindex, // poolindex
+        inputstring^.Length + 1, // bytes
+        tag, // tag
+        TRUE, // wait
+    )
+
+    IF NOT outputstring^.Data THEN
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    // Copy the old string into the new one, including the null terminator.
+
+    RtlCopyBytes (
+        outputstring^.Data, // dest
+        inputstring^.Data, // src
+        inputstring^.Length + 1, // sz
+    )
+
+    RETURN OS_STATUS_SUCCESS
+END

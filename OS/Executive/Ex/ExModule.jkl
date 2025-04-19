@@ -4,13 +4,180 @@
 
 #INCLUDE "Exp.hjk"
 
-#SECTION "INITtext"
+ExpModuleLoadingLock : KeLock = KE_INITIAL_LOCK
+
+ExpKnownModuleLookupTree : RtlAvlNode
+
+#SECTION "PAGEtext"
+FN ExpLookupKnownModule (
+    IN name : ^RtlString,
+) : ^ExKnownModule
+
+    // Look up a known module by name. Assumes the module loading lock is held.
+
+    // Look up the name in the tree, which is an AVL tree keyed by string and
+    // ordered lexicographically.
+
+    avlnode := ExpKnownModuleLookupTree.Right
+
+    WHILE TRUE DO
+        IF NOT avlnode THEN
+            // Didn't find it.
+
+            RETURN NULLPTR
+        END
+
+        knownmodule := CONTAINEROF avlnode TO ExKnownModule.Entry
+
+        res := CAST RtlCompareRtlString (
+            name, // str1
+            &knownmodule^.Name, // str2
+        ) TO WORD
+
+        IF res == 0 THEN
+            // Found it! Return it.
+
+            RETURN knownmodule
+        END
+
+        IF res < 0 THEN
+            avlnode = avlnode^.Left
+        ELSE
+            avlnode = avlnode^.Right
+        END
+    END
+
+    KeAssert ( FALSE )
+END
+
+#SECTION "PAGEtext"
+FN (RtlAvlLessThanF) ExpCompareKnownModuleNames (
+    IN a : ^RtlAvlNode,
+    IN b : ^RtlAvlNode,
+) : UWORD
+
+    // Compare the names.
+
+    RETURN CAST RtlCompareRtlString (
+        &(CONTAINEROF a TO ExKnownModule.Entry)^.Name, // str1
+        &(CONTAINEROF b TO ExKnownModule.Entry)^.Name, // str2
+    ) TO WORD < 0
+END
+
+#SECTION "PAGEtext"
+FN ExLookupKnownModule (
+    IN name : ^RtlString,
+    IN create : UWORD,
+) : ^ExKnownModule
+
+    // Look up a known module, or register it.
+    //
+    // If create is FALSE, a return value of NULLPTR means it wasn't found.
+    // If create is TRUE, a return value of NULLPTR means insufficient memory.
+
+    KeAcquireLockExclusive ( &ExpModuleLoadingLock )
+
+    knownmodule := ExpLookupKnownModule ( name )
+
+    IF knownmodule OR NOT create THEN
+        // Found it, or we didn't find it and don't wanna create it.
+        // In either case just return what we have.
+
+        GOTO Exit
+    END
+
+    knownmodule = MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
+        SIZEOF ExKnownModule, // bytes
+        'KnMo', // tag
+        TRUE, // wait
+    )
+
+    IF NOT knownmodule THEN
+        GOTO Exit
+    END
+
+    // Initialize the name.
+
+    status := ExDuplicateString (
+        &knownmodule^.Name, // outputstring
+        name, // inputstring
+        MM_PAGED_POOL, // poolindex
+        'KnMs', // tag
+    )
+
+    IF OsError ( status ) THEN
+        // Failed to duplicate the name string.
+
+        MmFreePool (
+            knownmodule, // ptr
+            'KnMo', // tag
+        )
+
+        knownmodule = NULLPTR
+
+        GOTO Exit
+    END
+
+    knownmodule^.Name.Data = name^.Data
+    knownmodule^.Name.Length = name^.Length
+
+    // Insert it into the lookup tree.
+
+    RtlInsertAvl (
+        &ExpKnownModuleLookupTree, // root
+        &knownmodule^.Entry, // node
+        &ExpCompareKnownModuleNames, // comparisonfunc
+    )
+
+    // Initialize as not having an associated loaded module.
+
+    knownmodule^.LoadedModule = NULLPTR
+
+    // Initialize the unload event.
+
+    KeInitializeEvent (
+        &knownmodule^.UnloadEvent, // event
+        "ModuleUnloadEvent", // name
+        TRUE, // notification
+        FALSE, // signalstate
+    )
+
+@Exit
+
+    KeReleaseLock ( &ExpModuleLoadingLock )
+
+    RETURN knownmodule
+END
+
+#ENTERSECTION "INITtext"
+
 FN ExpInitializeModules ()
 
     // Initialize the loadable modules package.
 
-    NOTHING
+    // Create a "known module" for the kernel itself.
+
+    kernelname : RtlString
+
+    RtlInitializeString ( &kernelname, "mpx.sys" )
+
+    knownmodule := ExLookupKnownModule (
+        &kernelname, // name
+        TRUE, // create
+    )
+
+    IF NOT knownmodule THEN
+        KeCrash ( "ExpInitializeModules: failed to create known module\n" )
+    END
+
+    // Now create a handcrafted ExLoadedModule to represent the kernel binary
+    // and IO classes implemented therein.
+
+    // TODO: that
 END
+
+#LEAVESECTION
 
 #SECTION "PAGEtext"
 FN ExWaitForModuleLoad (
@@ -28,3 +195,30 @@ FN ExWaitForModuleLoad (
 
     RETURN module^.LoadStatus
 END
+
+#SECTION "PAGEtext"
+FN (ObTypeDeleteF) ExpDeleteModuleObject (
+    IN object : ^VOID,
+) : UWORD
+
+    // The module's refcount hit zero, which means none of its classes are in
+    // use. We should unload it now.
+
+    // ...
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+PUBLIC ExModuleType : ObType = {
+    [Name] = "Module",
+
+    [Delete] = &ExpDeleteModuleObject,
+
+//    [Initialize] = &ExpInitializeModuleObject,
+
+    [TypeIdentifier] = OS_MODULE_TYPE,
+    [Tag] = 'Modu',
+
+    [IsPaged] = FALSE,
+}
