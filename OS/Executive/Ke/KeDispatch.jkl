@@ -661,6 +661,9 @@ FN KiSelectRealTimeThread (
     i := OS_PRIORITY_MAX
 
     WHILE i DO
+
+@NextQueue
+
         i -= 1
 
         IF (readybits >> i) & 1 THEN
@@ -673,12 +676,13 @@ FN KiSelectRealTimeThread (
 #IF BLD_MP
             IF migrate THEN
                 WHILE thread^.Pinned DO
-                    // Seek to a non-pinned thread.
+                    // Seek to a non-pinned thread since we can't move pinned
+                    // threads across cores.
 
                     IF thread^.ReadyEntry.Next == queue THEN
                         // Reached the end. Check the next queue.
 
-                        CONTINUE
+                        GOTO NextQueue
                     END
 
                     thread = CONTAINEROF thread^.ReadyEntry.Next TO
