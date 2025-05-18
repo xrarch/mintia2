@@ -162,6 +162,8 @@ FN PspDecrementActiveCountJob (
     // Decrement the active count of a job.
     // Hierarchy lock must be held.
 
+@Restart
+
     oldcount := job^.ActiveCount
 
     KeAssert ( oldcount != 0 )
@@ -182,7 +184,16 @@ FN PspDecrementActiveCountJob (
             job^.CleanedUp = TRUE
 
             IF job^.ParentJob THEN
-                PspDecrementActiveCountJob ( job^.ParentJob )
+                // Decrement the active count on the parent job non-recursively
+                // by doing basically a manual tail call. A smarter compiler
+                // could do this magically one day, but even if we had such a
+                // thing, I prefer this to be explicit since recursion is so
+                // dangerous in the kernel; it could be catastrophic if it were
+                // accidentally introduced.
+
+                job = job^.ParentJob
+
+                GOTO Restart
             END
         END
     END
