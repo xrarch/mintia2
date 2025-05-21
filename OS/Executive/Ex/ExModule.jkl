@@ -172,9 +172,7 @@ FN (ObTypeInitializeF) ExpInitializeModuleObject (
 
     module^.KnownModule = ctx^.KnownModule
 
-    // Initialize the known module flag to be LOADING, cuz it probably is.
-
-    module^.Flags = EX_MODULE_LOADING
+    module^.Flags = 0
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -258,12 +256,8 @@ FN ExpInitializeModules ()
     )
 
     IF OsError ( status ) THEN
-        KeCrash ( "%s: failed to create module %x\n", "ExpInitializeModules", status )
+        KeCrash ( "%s: failed to create module\n", "ExpInitializeModules" )
     END
-
-    // Clear the loading flag since it's not.
-
-    module^.Flags &= ~EX_MODULE_LOADING
 
     // Set the known module to point here.
 
