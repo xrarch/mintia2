@@ -175,14 +175,12 @@ FN NsLookupObject (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    mycred := &PsCurrentProcess()^.Paged^.Cred
-
     handle : NsHandle
 
     status := NsLookupEntryByPath (
         params, // params
         &handle, // handle
-        mycred, // cred
+        PsCurrentCredentials (), // cred
         NULLPTR, // obparams
         type, // type
     )
