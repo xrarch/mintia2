@@ -257,7 +257,7 @@ FN IoAllocatePacket (
 
         packet = MmAllocatePool (
             MM_NONPAGED_POOL, // poolindex
-            SIZEOF IoPacket, // bytes
+            IopPacketSize[ioptype], // bytes
             'Iop ', // tag
             TRUE, // wait
         )
@@ -621,6 +621,11 @@ EXPORT FN IoCompletePacket (
 
         // General completion routine didn't take custody of the packet, so we
         // can go ahead and run it down.
+        //
+        // An example of a completion routine that takes custody of a packet is
+        // the user-initiated async IO completion routine, which takes custody
+        // and then shoots an APC off to the requesting thread, who ultimately
+        // calls IopRundownPacket instead of us doing it here.
 
         IopRundownPacket ( packet )
     END
