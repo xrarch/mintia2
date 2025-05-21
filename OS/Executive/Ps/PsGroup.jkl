@@ -139,19 +139,18 @@ FN PspCreateGroup (
 
     obparams : ObParameters
 
-    mycred := &PsCurrentProcess()^.Paged^.Cred
-
-    ObMoveCredentials (
-        &obparams.Permissions.Cred, // dest
-        mycred, // src
+    ObInitializeParameters (
+        &obparams, // obparams
+        &PsGroupType, // type
+        NULLPTR, // context
+        PsCurrentCredentials (), // cred
+        OS_ACCESS_OWNER_ALL, // access
+        0, // flags
+        SIZEOF PsProcessGroup, // bodysize
+        0, // pagedbodysize
+        0, // npquotabias
+        0, // pgquotabias
     )
-
-    obparams.Permissions.Access = OS_ACCESS_OWNER_ALL
-    obparams.Flags = 0
-    obparams.Type = &PsGroupType
-    obparams.BodySize = SIZEOF PsProcessGroup
-    obparams.NpQuotaBias = 0
-    obparams.PgQuotaBias = 0
 
     RETURN ObAllocateObject (
         &obparams, // obparams

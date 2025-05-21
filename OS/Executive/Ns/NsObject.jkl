@@ -118,19 +118,8 @@ FN NsCreateObject (
     // means it should have been in-copied from userspace and the initial handle
     // should have been resolved. Caller takes care of undoing these things.
 
-    // 'obparams' should be fully initialized other than the permissions and
-    // object flags which we helpfully fill in here.
-
-    mycred := &PsCurrentProcess()^.Paged^.Cred
-
-    ObMoveCredentials (
-        &obparams^.Permissions.Cred, // dest
-        mycred, // src
-    )
-
-    obparams^.Permissions.Access = params^.Captured.Permissions
-
-    obparams^.Flags = params^.Captured.ObFlags
+    // 'obparams' should have been initialized by the NsInitializeParameters
+    // macro.
 
     IF params^.Path.Data THEN
         // We are atomically creating the object within the namespace.
@@ -143,7 +132,7 @@ FN NsCreateObject (
         status := NsLookupEntryByPath (
             params, // params
             &handle, // handle
-            mycred, // cred
+            &obparams^.Permissions.Cred, // cred
             obparams, // obparams
             obparams^.Type, // type
         )

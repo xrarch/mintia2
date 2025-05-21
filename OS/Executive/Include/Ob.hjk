@@ -108,6 +108,21 @@ STRUCT ObParameters
     PgQuotaBias : ULONG,
 END
 
+#MACRO ObInitializeParameters ( obparams, type, context, cred, access, flags, bodysize, pagedbodysize, npquotabias, pgquotabias ) [
+    NOTHING (obparams)^.Type = (type)
+    NOTHING (obparams)^.Context = (context)
+    ObMoveCredentials (
+        &(obparams)^.Permissions.Cred, // dest
+        (cred), // src
+    )
+    NOTHING (obparams)^.Permissions.Access = (access)
+    NOTHING (obparams)^.Flags = (flags)
+    NOTHING (obparams)^.BodySize = (bodysize)
+    NOTHING (obparams)^.PagedBodySize = (pagedbodysize)
+    NOTHING (obparams)^.NpQuotaBias = (npquotabias)
+    NOTHING (obparams)^.PgQuotaBias = (pgquotabias)
+]
+
 #MACRO ObFindObjectFromCommonHeader ( commonheader ) [
     (CAST (commonheader + SIZEOF ObpCommonHeader) TO ^VOID)
 ]

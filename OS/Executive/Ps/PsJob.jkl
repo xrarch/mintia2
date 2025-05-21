@@ -533,13 +533,16 @@ FN PsCreateJobObject (
 
     obparams : ObParameters
 
-    obparams.Type = &PsJobType
-    obparams.BodySize = SIZEOF PsJob
-    obparams.PagedBodySize = 0
-    obparams.NpQuotaBias = 0
-    obparams.PgQuotaBias = 0
-
-    obparams.Context = &ctx
+    NsInitializeObjectParameters (
+        &obparams, // obparams
+        params, // params
+        &PsJobType, // type
+        &ctx, // context
+        SIZEOF PsJob, // bodysize
+        0, // pagedbodysize
+        0, // npquotabias
+        0, // pgquotabias
+    )
 
     RETURN NsCreateObject (
         params, // params

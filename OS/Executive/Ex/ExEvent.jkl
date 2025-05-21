@@ -66,13 +66,16 @@ FN ExCreateEventObject (
 
     obparams : ObParameters
 
-    obparams.Type = &ExEventType
-    obparams.BodySize = SIZEOF ExEvent
-    obparams.PagedBodySize = 0
-    obparams.NpQuotaBias = 0
-    obparams.PgQuotaBias = 0
-
-    obparams.Context = &ctx
+    NsInitializeObjectParameters (
+        &obparams, // obparams
+        params, // params
+        &ExEventType, // type
+        &ctx, // context
+        SIZEOF ExEvent, // bodysize
+        0, // pagedbodysize
+        0, // npquotabias
+        0, // pgquotabias
+    )
 
     RETURN NsCreateObject (
         params, // params

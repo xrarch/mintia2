@@ -989,13 +989,16 @@ FN PsCreateProcessObject (
 
     obparams : ObParameters
 
-    obparams.Type = &PsProcessType
-    obparams.BodySize = SIZEOF PsProcess
-    obparams.PagedBodySize = SIZEOF PsPagedProcess
-    obparams.NpQuotaBias = 0
-    obparams.PgQuotaBias = 0
-
-    obparams.Context = &ctx
+    NsInitializeObjectParameters (
+        &obparams, // obparams
+        params, // params
+        &PsProcessType, // type
+        &ctx, // context
+        SIZEOF PsProcess, // bodysize
+        SIZEOF PsPagedProcess, // pagedbodysize
+        0, // npquotabias
+        0, // pgquotabias
+    )
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     // Put enough space at the end of the nonpaged part of the process for the

@@ -998,13 +998,16 @@ FN PsCreateThreadObject (
 
     obparams : ObParameters
 
-    obparams.Type = &PsThreadType
-    obparams.BodySize = SIZEOF PsThread
-    obparams.PagedBodySize = SIZEOF PsPagedThread
-    obparams.NpQuotaBias = 0
-    obparams.PgQuotaBias = 0
-
-    obparams.Context = &ctx
+    NsInitializeObjectParameters (
+        &obparams, // obparams
+        params, // params
+        &PsThreadType, // type
+        &ctx, // context
+        SIZEOF PsThread, // bodysize
+        SIZEOF PsPagedThread, // pagedbodysize
+        0, // npquotabias
+        0, // pgquotabias
+    )
 
     RETURN NsCreateObject (
         params, // params
