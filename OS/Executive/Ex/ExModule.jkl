@@ -131,15 +131,6 @@ FN ExLookupKnownModule (
 
     knownmodule^.LoadedModule = NULLPTR
 
-    // Initialize the unload event.
-
-    KeInitializeEvent (
-        &knownmodule^.UnloadEvent, // event
-        "ModuleUnloadEvent", // name
-        TRUE, // notification
-        FALSE, // signalstate
-    )
-
 @Exit
 
     KeReleaseLock ( &ExpModuleLoadingLock )
@@ -175,23 +166,6 @@ FN ExpInitializeModules ()
 END
 
 #LEAVESECTION
-
-#SECTION "PAGEtext"
-FN ExWaitForModuleLoad (
-    IN module : ^ExLoadedModule,
-) : OsStatus
-
-    // Wait for the module to finish loading.
-
-    KeWaitForSingleObject (
-        KE_KERNEL_MODE, // waitmode
-        FALSE, // alertable
-        NULLPTR, // timeout
-        &module^.LoadEvent.Header, // event
-    )
-
-    RETURN module^.LoadStatus
-END
 
 #SECTION "PAGEtext"
 FN (ObTypeDeleteF) ExpDeleteModuleObject (
