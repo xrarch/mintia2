@@ -287,9 +287,9 @@ FN ExCreateHandle (
     // Insert the new space into the free list.
     // First set the free list head to this handle plus one.
 
-    handle += 1
+    nexthandle := handle + 1
 
-    handletable^.FreeListHead = handle
+    handletable^.FreeListHead = nexthandle
 
     // Now set the last handle to be the tail of the list.
 
@@ -306,9 +306,9 @@ FN ExCreateHandle (
     WHILE i DO
         i -= 1
         free += (1 << log)
-        handle += 1
+        nexthandle += 1
 
-        free^.Next = (handle << EXP_NEXT_HANDLE_SHIFT) | EXP_FREE_HANDLE
+        free^.Next = (nexthandle << EXP_NEXT_HANDLE_SHIFT) | EXP_FREE_HANDLE
     END
 
     RETURN OS_STATUS_SUCCESS

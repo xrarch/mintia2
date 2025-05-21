@@ -24,8 +24,8 @@ PspIdTable : ExHandleTable
 
 PspIdLock : KeLock = KE_INITIAL_LOCK
 
-#DEFINE PSP_ID_INDEX_SHIFT 5
-#DEFINE PSP_ID_SEQUENCE_MASK 31
+#DEFINE PSP_ID_INDEX_SHIFT 10
+#DEFINE PSP_ID_SEQUENCE_MASK [((1 << PSP_ID_INDEX_SHIFT) - 1)]
 
 STRUCT PspIdEntry
     Object : ^VOID,
@@ -68,7 +68,17 @@ FN PspCreateId (
         GOTO Exit
     END
 
-    // Bitwise OR the 5-bit sequence number into the ID.
+    IF id == 0 THEN
+        KeAssert ( PsSystemProcess == NULLPTR )
+
+        // Fix the sequence number to be 1 for the system process so that we
+        // never hand out a PID of 0. Why? Just seems nasty to, especially
+        // because we use it as the PGID for the system session later.
+
+        entry^.Sequence = 1
+    END
+
+    // Bitwise OR the sequence number into the ID.
 
     id = (id << PSP_ID_INDEX_SHIFT) | (entry^.Sequence & PSP_ID_SEQUENCE_MASK)
 
