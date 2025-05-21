@@ -4,6 +4,8 @@
 
 #INCLUDE "Exp.hjk"
 
+PUBLIC ExExecutiveModule : ^ExLoadedModule
+
 ExpModuleLoadingLock : KeLock = KE_INITIAL_LOCK
 
 ExpKnownModuleLookupTree : RtlAvlNode
@@ -138,6 +140,92 @@ FN ExLookupKnownModule (
     RETURN knownmodule
 END
 
+#SECTION "PAGEtext"
+FN (ObTypeDeleteF) ExpDeleteModuleObject (
+    IN object : ^VOID,
+) : UWORD
+
+    // The module's refcount hit zero, which means none of its classes are in
+    // use. We should unload it now.
+
+    // ...
+
+    RETURN TRUE
+END
+
+STRUCT ExpModuleContext
+    KnownModule : ^ExKnownModule,
+END
+
+#SECTION "PAGEtext"
+FN (ObTypeInitializeF) ExpInitializeModuleObject (
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+    // Initialize an ExLoadedModule object.
+
+    module := CAST object TO ^ExLoadedModule
+    ctx := CAST context TO ^ExpModuleContext
+
+    // Set the known module that this loaded module will be associated with.
+
+    module^.KnownModule = ctx^.KnownModule
+
+    // Initialize the known module flag to be LOADING, cuz it probably is.
+
+    module^.Flags = EX_MODULE_LOADING
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+PUBLIC ExModuleType : ObType = {
+    [Name] = "Module",
+
+    [Delete] = &ExpDeleteModuleObject,
+
+    [Initialize] = &ExpInitializeModuleObject,
+
+    [TypeIdentifier] = OS_MODULE_TYPE,
+    [Tag] = 'Modu',
+
+    [IsPaged] = FALSE,
+}
+
+#SECTION "PAGEtext"
+FN ExpCreateModule (
+    IN knownmodule : ^ExKnownModule,
+    OUT module : ^ExLoadedModule,
+) : OsStatus
+
+    // Create an ExLoadedModule object.
+
+    ctx : ExpModuleContext
+
+    ctx.KnownModule = knownmodule
+
+    obparams : ObParameters
+
+    ObInitializeParameters (
+        &obparams, // obparams
+        &ExModuleType, // type
+        &ctx, // context
+        PsCurrentCredentials (), // cred
+        OS_ACCESS_OWNER_ALL, // access
+        0, // flags
+        SIZEOF ExLoadedModule, // bodysize
+        0, // pagedbodysize
+        0, // npquotabias
+        0, // pgquotabias
+    )
+
+    RETURN ObAllocateObject (
+        &obparams, // obparams
+        OUT module, // object
+    )
+END
+
 #ENTERSECTION "INITtext"
 
 FN ExpInitializeModules ()
@@ -156,40 +244,34 @@ FN ExpInitializeModules ()
     )
 
     IF NOT knownmodule THEN
-        KeCrash ( "ExpInitializeModules: failed to create known module\n" )
+        KeCrash ( "%s: failed to create known module\n", "ExpInitializeModules" )
     END
 
-    // Now create a handcrafted ExLoadedModule to represent the kernel binary
+    // Now create a special ExLoadedModule to represent the executive binary
     // and IO classes implemented therein.
 
-    // TODO: that
+    module : ^ExLoadedModule
+
+    status := ExpCreateModule (
+        knownmodule, // knownmodule
+        OUT module, // module
+    )
+
+    IF OsError ( status ) THEN
+        KeCrash ( "%s: failed to create module %x\n", "ExpInitializeModules", status )
+    END
+
+    // Clear the loading flag since it's not.
+
+    module^.Flags &= ~EX_MODULE_LOADING
+
+    // Set the known module to point here.
+
+    knownmodule^.LoadedModule = module
+
+    // Set the special executive module pointer.
+
+    ExExecutiveModule = module
 END
 
 #LEAVESECTION
-
-#SECTION "PAGEtext"
-FN (ObTypeDeleteF) ExpDeleteModuleObject (
-    IN object : ^VOID,
-) : UWORD
-
-    // The module's refcount hit zero, which means none of its classes are in
-    // use. We should unload it now.
-
-    // ...
-
-    RETURN TRUE
-END
-
-#SECTION "PAGEtext"
-PUBLIC ExModuleType : ObType = {
-    [Name] = "Module",
-
-    [Delete] = &ExpDeleteModuleObject,
-
-//    [Initialize] = &ExpInitializeModuleObject,
-
-    [TypeIdentifier] = OS_MODULE_TYPE,
-    [Tag] = 'Modu',
-
-    [IsPaged] = FALSE,
-}
