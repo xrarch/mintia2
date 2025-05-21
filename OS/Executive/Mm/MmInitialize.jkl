@@ -167,7 +167,8 @@ FN MiIdentifyUnwireableSections (
             ) TO ^MiUnwireableRegion
 
             IF NOT region THEN
-                KeCrash ( "%s: failed to allocate unwire\n", "MiReclaimMemory" )
+                KeCrash ( "%sfailed to allocate unwire\n",
+                    "MiReclaimMemory: " )
             END
 
             region^.Type = type
@@ -203,7 +204,8 @@ FN MiReclaimMemory ()
     )
 
     IF NOT loaderhunk THEN
-        KeCrash ( "%s: failed to allocate loader hunk\n", "MiReclaimMemory" )
+        KeCrash ( "%sfailed to allocate loader hunk\n",
+            "MiReclaimMemory: " )
     END
 
     resource := CAST loaderhunk TO ^BlResource
