@@ -7,6 +7,11 @@
 #DEFINE AFS_INODE_FILE 1
 #DEFINE AFS_INODE_DIR 2
 
+AfsInodeTypeToBlType : UBYTE[3] = {
+    [AFS_INODE_FILE] = BL_FILETYPE_FILE,
+    [AFS_INODE_DIR] = BL_FILETYPE_DIRECTORY,
+}
+
 STRUCT AfsSuperblock
     Version : ULONG,
     Magic : ULONG,
@@ -342,6 +347,7 @@ END
 FN (BlOpenF) AfsOpen (
     IN device : ^BlFile,
     IN path : ^UBYTE,
+    IN type : UWORD,
 ) : ^BlFile
 
     ctx := CAST device^.MountContext TO ^AfsContext
@@ -435,9 +441,22 @@ FN (BlOpenF) AfsOpen (
         )
     END
 
+    bltype := AfsInodeTypeToBlType[ino^.Type]
+
+    IF type != BL_FILETYPE_ANY AND type != bltype THEN
+        // Wrong file type.
+
+        RETURN NULLPTR
+    END
+
     file := CAST BlAllocateMemory (
         SIZEOF BlFile + SIZEOF AfsInode, // bytes
     ) TO ^BlFile
+
+    BlInitializeFile (
+        file, // file
+        AfsInodeTypeToBlType[ino^.Type], // type
+    )
 
     dctx := CAST file + SIZEOF BlFile TO ^AfsInode
 
@@ -447,12 +466,11 @@ FN (BlOpenF) AfsOpen (
         SIZEOF AfsInode, // sz
     )
 
-    BlInitializeFile ( file )
-
     file^.Size = ino^.ByteSize
     file^.DriverContext = dctx
     file^.Device = device
     file^.Read = &AfsRead
+    // file^.IterateEntries = &AfsIterateEntries
 
     RETURN file
 END
@@ -574,16 +592,19 @@ FN (BlMountF) BlMountAisixFs (
     ctx^.SysDirFile = AfsOpen (
         device, // device
         "/mintia", // path
+        BL_FILETYPE_DIRECTORY, // type
     )
 
     ctx^.BootRsrcFile = AfsOpen (
         device, // device
         "/mintia/Resources", // path
+        BL_FILETYPE_DIRECTORY, // type
     )
 
     ctx^.BootDrvFile = AfsOpen (
         device, // device
         "/mintia/Drivers", // path
+        BL_FILETYPE_DIRECTORY, // type
     )
 
     RETURN TRUE

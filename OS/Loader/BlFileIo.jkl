@@ -47,6 +47,7 @@ END
 FN BlOpenFile (
     IN device : ^BlFile,
     IN path : ^UBYTE,
+    IN type : UWORD,
 ) : ^BlFile
 
     // Try to open a file. Return a pointer to the BlFile if success, otherwise
@@ -61,6 +62,7 @@ FN BlOpenFile (
     RETURN device^.Open (
         device, // device
         path, // path
+        type, // type
     )
 END
 
@@ -85,6 +87,7 @@ END
 
 FN BlInitializeFile (
     IN file : ^BlFile,
+    IN type : UWORD,
 )
 
     RtlFillMemoryWithUlong (
@@ -92,9 +95,18 @@ FN BlInitializeFile (
         SIZEOF BlFile, // sz
         0, // ulong
     )
+
+    file^.Type = type
 END
 
 FN BlInitializeIo ()
+
+    // Initialize the boot device.
+
+    BlInitializeFile (
+        &BlBootDevice, // file
+        BL_FILETYPE_FILE, // type
+    )
 
     // Call the platform code.
 

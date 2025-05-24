@@ -140,6 +140,7 @@ FNPTR BlMountF (
 FNPTR BlOpenF (
     IN device : ^BlFile,
     IN path : ^UBYTE,
+    IN type : UWORD,
 ) : ^BlFile
 
 FNPTR BlReadF (
@@ -149,6 +150,10 @@ FNPTR BlReadF (
     IN length : UWORD,
 ) : UWORD
 
+#DEFINE BL_FILETYPE_ANY 0
+#DEFINE BL_FILETYPE_DIRECTORY 1
+#DEFINE BL_FILETYPE_FILE 2
+
 STRUCT BlFile
     Open : BlOpenF,
     Read : BlReadF,
@@ -157,6 +162,7 @@ STRUCT BlFile
     BlockSize : UWORD,
     Device : ^BlFile,
     Size : UWORD,
+    Type : UWORD,
 END
 
 EXTERN FN BxInitializeIo (
@@ -165,6 +171,7 @@ EXTERN FN BxInitializeIo (
 
 EXTERN FN BlInitializeFile (
     IN file : ^BlFile,
+    IN type : UWORD,
 )
 
 EXTERN FN BlReadFile (
@@ -177,6 +184,7 @@ EXTERN FN BlReadFile (
 EXTERN FN BlOpenFile (
     IN device : ^BlFile,
     IN path : ^UBYTE,
+    IN type : UWORD,
 ) : ^BlFile
 
 EXTERN FN BxStartSystem (
