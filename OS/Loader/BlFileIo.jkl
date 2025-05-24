@@ -8,6 +8,9 @@ PUBLIC BlBootDevice : BlFile
 
 PUBLIC BlTemporaryBuffer : UBYTE[BL_TEMP_BUFFER_SIZE]
 
+PUBLIC BlSystemDirectory : ^BlFile
+PUBLIC BlSystemPath : ^UBYTE
+
 EXTERN FN (BlMountF) BlMountAisixFs (
     IN device : ^BlFile,
 ) : UWORD
@@ -137,5 +140,23 @@ FN BlInitializeIo ()
 
     IF NOT BlMountDevice ( &BlBootDevice ) THEN
         BlCrash ( "Inaccessible boot device\n" )
+    END
+
+    // Open the system directory.
+
+    BlSystemPath = BlGetValueArg ( "SYSDIR" )
+
+    IF NOT BlSystemPath THEN
+        BlSystemPath = "/mintia"
+    END
+
+    BlSystemDirectory = BlOpenFile (
+        &BlBootDevice, // file
+        BlSystemPath, // path
+        BL_FILETYPE_DIRECTORY, // type
+    )
+
+    IF NOT BlSystemDirectory THEN
+        BlCrash ( "Nonexistent system directory %s\n", BlSystemPath )
     END
 END

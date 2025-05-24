@@ -4,7 +4,10 @@
 
 #INCLUDE "Bl.hjk"
 
+BlResourceDirectory : ^BlFile
+
 FN BlLoadResource (
+    IN device : ^BlFile,
     IN name : ^UBYTE,
     IN path : ^UBYTE,
 ) : ^BlResource
@@ -24,7 +27,7 @@ FN BlLoadResource (
     )
 
     file := BlOpenFile (
-        &BlBootDevice, // device
+        device, // device
         path, // path
         BL_FILETYPE_FILE, // type
     )
@@ -123,16 +126,10 @@ FN (BlCallbackPerLineF) BlLoadResourceCallback (
         LEAVE
     END
 
-    RtlCopyString (
-        &path[0], // dest
-        "/mintia/Resources/", // src
-        BL_RESOURCE_PATH_MAX, // bufsize
-    )
-
     next = RtlTokenize (
         next, // buffer
-        &path[18], // tokenbuffer
-        BL_RESOURCE_PATH_MAX - 18, // bufsize
+        &path[0], // tokenbuffer
+        BL_RESOURCE_PATH_MAX, // bufsize
         ' ', // delimiter
     )
 
@@ -143,6 +140,7 @@ FN (BlCallbackPerLineF) BlLoadResourceCallback (
     END
 
     BlLoadResource (
+        BlResourceDirectory, // device
         &name[0], // name
         &path[0], // path
     )
@@ -154,15 +152,29 @@ FN BlLoadResources ()
 
     RtlInitializeList ( &BlInfoBlock.ResourceListHead )
 
+    // Open the Resources directory.
+
+    BlResourceDirectory = BlOpenFile (
+        BlSystemDirectory, // file
+        "Resources", // path
+        BL_FILETYPE_DIRECTORY, // type
+    )
+
+    IF NOT BlSystemDirectory THEN
+        RtlPrint ( "WARNING: Couldn't open %s/Resources/\n", BlSystemPath )
+
+        LEAVE
+    END
+
     // Load all of the boot resources.
 
     IF NOT BlCallbackPerLineFile (
-        &BlBootDevice, // device
-        "/mintia/Resources.txt", // path
+        BlSystemDirectory, // device
+        "Resources.txt", // path
         &BlLoadResourceCallback, // callback
         NULLPTR, // context
     ) THEN
 
-        RtlPrint ( "WARNING: Couldn't open /mintia/Resources.txt\n" )
+        RtlPrint ( "WARNING: Couldn't open %s/Resources.txt\n", BlSystemPath )
     END
 END

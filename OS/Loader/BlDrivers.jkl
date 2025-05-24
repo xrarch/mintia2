@@ -51,14 +51,14 @@ FN (BlCallbackPerLineF) BlLoadDriverCallback (
 
     RtlCopyString (
         tokenbuf, // dest
-        "/mintia/Drivers/", // src
+        "Drivers/", // src
         BL_TEMP_BUFFER_SIZE, // bufsize
     )
 
     next := RtlTokenize (
         buf, // buffer
-        &tokenbuf[16], // tokenbuffer
-        BL_TEMP_BUFFER_SIZE - 16, // bufsize
+        &tokenbuf[8], // tokenbuffer
+        BL_TEMP_BUFFER_SIZE - 8, // bufsize
         ' ', // delimiter
     )
 
@@ -78,12 +78,12 @@ FN BlLoadDrivers ()
     // Load all of the boot drivers.
 
     IF NOT BlCallbackPerLineFile (
-        &BlBootDevice, // device
-        "/mintia/Drivers.txt", // path
+        BlSystemDirectory, // device
+        "Drivers.txt", // path
         &BlLoadDriverCallback, // callback
         NULLPTR, // context
     ) THEN
 
-        RtlPrint ( "WARNING: Couldn't open /mintia/Drivers.txt\n" )
+        RtlPrint ( "WARNING: Couldn't open %s/Drivers.txt\n", BlSystemPath )
     END
 END

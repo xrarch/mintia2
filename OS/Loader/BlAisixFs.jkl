@@ -365,11 +365,6 @@ FN (BlIterateEntriesF) AfsIterateEntries (
     dirent : ^AfsDirent
 
     WHILE byteoff < bytesize DO
-        // Re-acquire a pointer to the dirent in the cache since the callback
-        // is allowed to read files and stuff and it could be invalid now. This
-        // is a little slow but hopefully we just hit in the cache every time
-        // anyways.
-
         IF byteoff & 511 == 0 AND byteoff != 0 THEN
             // Advance in the FAT chain.
 
@@ -378,6 +373,11 @@ FN (BlIterateEntriesF) AfsIterateEntries (
                 blkno, // sector
             )
         END
+
+        // Re-acquire a pointer to the dirent in the cache since the callback
+        // is allowed to read files and stuff and it could be invalid now. This
+        // is a little slow but hopefully we just hit in the cache every time
+        // anyways.
 
         dirent = AfsCacheRead (
             device, // device
@@ -450,7 +450,12 @@ FN (BlOpenF) AfsOpen (
     ELSE
         // This open is relative to a directory.
 
+        IF device^.Type != BL_FILETYPE_DIRECTORY THEN
+            BlCrash ( "Not relative to directory\n" )
+        END
+
         ino = CAST device^.DriverContext TO ^AfsInode
+        device = device^.Device
     END
 
     pcomp : UBYTE[64]
@@ -537,6 +542,10 @@ FN (BlOpenF) AfsOpen (
     file^.Device = device
     file^.Read = &AfsRead
     file^.IterateEntries = &AfsIterateEntries
+
+    IF file^.Type == BL_FILETYPE_DIRECTORY THEN
+        file^.Open = &AfsOpen
+    END
 
     RETURN file
 END

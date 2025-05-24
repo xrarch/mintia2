@@ -37,38 +37,23 @@ FN BlpOpenDll (
     IN name : ^UBYTE,
 ) : ^BlFile
 
-    pathbuf : UBYTE[64]
-    path := &pathbuf[0]
-
-    IF name[0] == '/' THEN
-        path = name
-
-    ELSE
-        RtlFormat (
-            path, // dest
-            64, // bufsize
-            "/mintia/%s", // fmt
-            name
-        )
-    END
-
     printafter := FALSE
 
-    IF RtlCompareStringWithMax ( path, "/mintia/Drivers/", 16 ) == 0 THEN
+    IF RtlCompareStringWithMax ( name, "Drivers/", 9 ) == 0 THEN
         printafter = TRUE
 
     ELSE
-        RtlPrint ( "%s\n", path )
+        RtlPrint ( "%s\n", name )
     END
 
     file := BlOpenFile (
-        &BlBootDevice, // device
-        path, // path
+        BlSystemDirectory, // device
+        name, // path
         BL_FILETYPE_FILE, // type
     )
 
     IF file AND printafter THEN
-        RtlPrint ( "%s\n", path )
+        RtlPrint ( "%s\n", name )
     END
 
     RETURN file
