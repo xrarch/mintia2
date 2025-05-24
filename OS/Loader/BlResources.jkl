@@ -4,39 +4,12 @@
 
 #INCLUDE "Bl.hjk"
 
-FN (BlCallbackPerLineF) BlLoadResourceCallback (
-    IN buf : ^UBYTE,
-    IN context : ^VOID,
-    IN linenum : UWORD,
-)
+FN BlLoadResource (
+    IN name : ^UBYTE,
+    IN path : ^UBYTE,
+) : ^BlResource
 
-    WHILE buf^ == ' ' OR buf^ == '\t' DO
-        buf += 1
-    END
-
-    IF buf^ == '#' THEN
-        // Comment line. Ignore.
-
-        LEAVE
-    END
-
-    // Parse a resource line of the format:
-    // name path
-
-    tokenbuf := &BlTemporaryBuffer[0]
-
-    next := RtlTokenize (
-        buf, // buffer
-        tokenbuf, // tokenbuffer
-        BL_TEMP_BUFFER_SIZE, // bufsize
-        ' ', // delimiter
-    )
-
-    IF NOT next THEN
-        // Empty line.
-
-        LEAVE
-    END
+    // Load a single resource. Returns NULLPTR on error.
 
     rsrc := CAST BlAllocateMemory (
         SIZEOF BlResource, // bytes
@@ -46,42 +19,23 @@ FN (BlCallbackPerLineF) BlLoadResourceCallback (
 
     RtlCopyString (
         &rsrc^.Name[0], // dest
-        tokenbuf, // src
+        name, // src
         BL_RESOURCE_NAME_MAX, // bufsize
     )
 
-    RtlCopyString (
-        tokenbuf, // dest
-        "/mintia/Resources/", // src
-        BL_TEMP_BUFFER_SIZE, // bufsize
-    )
-
-    next = RtlTokenize (
-        next, // buffer
-        &tokenbuf[18], // tokenbuffer
-        BL_TEMP_BUFFER_SIZE - 18, // bufsize
-        ' ', // delimiter
-    )
-
-    IF NOT next THEN
-        RtlPrint ( "WARNING: Resources.txt:%d: Badly formatted\n", linenum )
-
-        LEAVE
-    END
-
     file := BlOpenFile (
         &BlBootDevice, // device
-        tokenbuf, // path
+        path, // path
     )
 
     IF NOT file THEN
         RtlPrint (
             "WARNING: Couldn't load %s (%s)\n", // fmt
-            &rsrc^.Name[0],
-            tokenbuf,
+            name,
+            path,
         )
 
-        LEAVE
+        RETURN NULLPTR
     END
 
     rsrc^.Size = file^.Size
@@ -100,14 +54,14 @@ FN (BlCallbackPerLineF) BlLoadResourceCallback (
         OUT desc, // desc
     ) TO ^UBYTE
 
-    IF NOT buf THEN
+    IF NOT rsrc^.Data THEN
         RtlPrint (
             "WARNING: Couldn't alloc %s (%s)\n", // fmt
-            &rsrc^.Name[0],
-            tokenbuf,
+            name,
+            path,
         )
 
-        LEAVE
+        RETURN NULLPTR
     END
 
     // Read the file contents.
@@ -127,6 +81,70 @@ FN (BlCallbackPerLineF) BlLoadResourceCallback (
     )
 
     BlInfoBlock.ResourceCount += 1
+
+    RETURN rsrc
+END
+
+#DEFINE BL_RESOURCE_PATH_MAX 64
+
+FN (BlCallbackPerLineF) BlLoadResourceCallback (
+    IN buf : ^UBYTE,
+    IN context : ^VOID,
+    IN linenum : UWORD,
+)
+
+    WHILE buf^ == ' ' OR buf^ == '\t' DO
+        buf += 1
+    END
+
+    IF buf^ == '#' THEN
+        // Comment line. Ignore.
+
+        LEAVE
+    END
+
+    // Parse a resource line of the format:
+    // name path
+
+    name : UBYTE[BL_RESOURCE_NAME_MAX]
+    path : UBYTE[BL_RESOURCE_PATH_MAX]
+
+    next := RtlTokenize (
+        buf, // buffer
+        &name[0], // tokenbuffer
+        BL_RESOURCE_NAME_MAX, // bufsize
+        ' ', // delimiter
+    )
+
+    IF NOT next THEN
+        // Empty line.
+
+        LEAVE
+    END
+
+    RtlCopyString (
+        &path[0], // dest
+        "/mintia/Resources/", // src
+        BL_RESOURCE_PATH_MAX, // bufsize
+    )
+
+    next = RtlTokenize (
+        next, // buffer
+        &path[18], // tokenbuffer
+        BL_RESOURCE_PATH_MAX - 18, // bufsize
+        ' ', // delimiter
+    )
+
+    IF NOT next THEN
+        RtlPrint ( "WARNING: Resources.txt:%d: Badly formatted\n", linenum )
+
+        LEAVE
+    END
+
+    BlLoadResource (
+        &name[0], // name
+        &path[0], // path
+    )
 END
 
 FN BlLoadResources ()
