@@ -64,10 +64,6 @@ STRUCT AfsContext
     DataListHead : RtlListEntry,
 
     RootInode : AfsInode,
-
-    SysDirFile : ^BlFile,
-    BootRsrcFile : ^BlFile,
-    BootDrvFile : ^BlFile,
 END
 
 FN AfsCacheRead (
@@ -344,6 +340,99 @@ FN (BlReadF) AfsRead (
     RETURN length
 END
 
+FN (BlIterateEntriesF) AfsIterateEntries (
+    IN file : ^BlFile,
+    IN callback : BlIterateEntriesCallbackF,
+    IN context : ^VOID,
+    IN type : UWORD,
+)
+
+    // Iterate all of the entries in the given directory and invoke a callback
+    // for each one.
+
+    IF file^.Type != BL_FILETYPE_DIRECTORY THEN
+        BlCrash ( "AfsIterateEntries: not directory\n" )
+    END
+
+    ino := CAST file^.DriverContext TO ^AfsInode
+    device := file^.Device
+
+    blkno := ino^.StartBlock
+    bytesize := ino^.ByteSize
+
+    byteoff := 0
+
+    dirent : ^AfsDirent
+
+    WHILE byteoff < bytesize DO
+        // Re-acquire a pointer to the dirent in the cache since the callback
+        // is allowed to read files and stuff and it could be invalid now. This
+        // is a little slow but hopefully we just hit in the cache every time
+        // anyways.
+
+        IF byteoff & 511 == 0 AND byteoff != 0 THEN
+            // Advance in the FAT chain.
+
+            blkno = AfsBlockStatus (
+                device, // device
+                blkno, // sector
+            )
+        END
+
+        dirent = AfsCacheRead (
+            device, // device
+            blkno, // sector
+            TRUE, // metadata
+        ) + (byteoff & 511)
+
+        IF dirent^.Inumber THEN
+            // Found a directory entry.
+
+            IF type != BL_FILETYPE_ANY THEN
+                // Have to check the type.
+
+                ino = AfsReadInode (
+                    device, // device
+                    dirent^.Inumber, // inum
+                )
+
+                IF type != AfsInodeTypeToBlType[ino^.Type] THEN
+                    // Not the right type.
+
+                    GOTO NextEntry
+                END
+            END
+
+            // The dirent block could be overwritten in the cache so we need to
+            // save the name into an external buffer.
+
+            name : UBYTE[60]
+
+            RtlCopyString (
+                &name[0], // dest
+                &dirent^.Name[0], // src
+                60, // bufsize
+            )
+
+            // Call the callback.
+
+            IF NOT callback (
+                &name[0], // name
+                context, // context
+            ) THEN
+                // Stop iterating.
+
+                BREAK
+            END
+        END
+
+@NextEntry
+
+        byteoff += SIZEOF AfsDirent
+        dirent += SIZEOF AfsDirent
+    END
+END
+
 FN (BlOpenF) AfsOpen (
     IN device : ^BlFile,
     IN path : ^UBYTE,
@@ -352,39 +441,16 @@ FN (BlOpenF) AfsOpen (
 
     ctx := CAST device^.MountContext TO ^AfsContext
 
-    ino := &ctx^.RootInode
+    ino : ^AfsInode
 
-    // Try to speed up the lookup by using one of the ones we already looked up
-    // to start from.
+    IF ctx THEN
+        // This open is relative to the device root.
+        
+        ino = &ctx^.RootInode
+    ELSE
+        // This open is relative to a directory.
 
-    IF RtlCompareStringWithMax ( path, "/mintia/", 8 ) == 0 THEN
-        IF NOT ctx^.SysDirFile THEN
-            RETURN NULLPTR
-        END
-
-        path += 8
-
-        IF RtlCompareStringWithMax ( path, "Resources/", 10 ) == 0 THEN
-            IF NOT ctx^.BootRsrcFile THEN
-                RETURN NULLPTR
-            END
-
-            ino = CAST ctx^.BootRsrcFile^.DriverContext TO ^AfsInode
-
-            path += 10
-
-        ELSEIF RtlCompareStringWithMax ( path, "Drivers/", 8 ) == 0 THEN
-            IF NOT ctx^.BootDrvFile THEN
-                RETURN NULLPTR
-            END
-
-            ino = CAST ctx^.BootDrvFile^.DriverContext TO ^AfsInode
-
-            path += 8
-
-        ELSE
-            ino = CAST ctx^.SysDirFile^.DriverContext TO ^AfsInode
-        END
+        ino = CAST device^.DriverContext TO ^AfsInode
     END
 
     pcomp : UBYTE[64]
@@ -470,7 +536,7 @@ FN (BlOpenF) AfsOpen (
     file^.DriverContext = dctx
     file^.Device = device
     file^.Read = &AfsRead
-    // file^.IterateEntries = &AfsIterateEntries
+    file^.IterateEntries = &AfsIterateEntries
 
     RETURN file
 END
@@ -585,26 +651,6 @@ FN (BlMountF) BlMountAisixFs (
         &ctx^.RootInode, // dest
         rootino, // src
         SIZEOF AfsInode, // sz
-    )
-
-    // Pre-open some common directories to accelerate lookups.
-
-    ctx^.SysDirFile = AfsOpen (
-        device, // device
-        "/mintia", // path
-        BL_FILETYPE_DIRECTORY, // type
-    )
-
-    ctx^.BootRsrcFile = AfsOpen (
-        device, // device
-        "/mintia/Resources", // path
-        BL_FILETYPE_DIRECTORY, // type
-    )
-
-    ctx^.BootDrvFile = AfsOpen (
-        device, // device
-        "/mintia/Drivers", // path
-        BL_FILETYPE_DIRECTORY, // type
     )
 
     RETURN TRUE
