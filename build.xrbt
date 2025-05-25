@@ -63,11 +63,15 @@
 
 #INCLUDE ( STRCAT "BuildConfig/" ( STRCAT PLATFORM ".xrbt" ) )
 
+#DEFINE PLATFORM_MANIFEST ( STRCAT PLATFORM ".mfst" )
+
 #DEFINE DISK_TOOL_CREATION_OPTIONS_T (
     STRCAT DISK_SECTORS (
         STRCAT (
-            STRCAT " -apt:mintia,root:-1 -fs:0,aisixfs," BUILD_BASE
-        ) ",BuildConfig/BaseManifest.mfst,-BuildConfig/GenericManifest.mfst"
+            STRCAT (
+                STRCAT " -apt:mintia,root:-1 -fs:0,aisixfs," BUILD_BASE
+            ) ",BuildConfig/BaseManifest.mfst,-BuildConfig/GenericManifest.mfst,-BuildConfig/"
+        ) PLATFORM_MANIFEST
     )
 )
 
@@ -125,12 +129,20 @@ END
 
 #DEFINE DISK_TOOL_UPDATE_G ( STRCAT DISK_TOOL_WM_STUB " 0 BuildConfig/GenericManifest.mfst" )
 
+#DEFINE DISK_TOOL_UPDATE_P (
+    STRCAT (
+        STRCAT DISK_TOOL_WM_STUB " 0 BuildConfig/"
+    ) PLATFORM_MANIFEST
+)
+
 #DEFINE DISK_TOOL_UPDATE_STR ( STRCAT "\"" ( STRCAT DISK_TOOL_UPDATE "\"" ) )
 #DEFINE DISK_TOOL_UPDATE_G_STR ( STRCAT "\"" ( STRCAT DISK_TOOL_UPDATE_G "\"" ) )
+#DEFINE DISK_TOOL_UPDATE_P_STR ( STRCAT "\"" ( STRCAT DISK_TOOL_UPDATE_P "\"" ) )
 
 TARGET "updateimg"
     ACTION DISK_TOOL_UPDATE_STR
     ACTION DISK_TOOL_UPDATE_G_STR
+    ACTION DISK_TOOL_UPDATE_P_STR
 
     ALWAYS
 END

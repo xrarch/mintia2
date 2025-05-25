@@ -33,12 +33,6 @@ FN BlLoadResource (
     )
 
     IF NOT file THEN
-        RtlPrint (
-            "WARNING: Couldn't load %s (%s)\n", // fmt
-            name,
-            path,
-        )
-
         RETURN NULLPTR
     END
 
@@ -59,12 +53,6 @@ FN BlLoadResource (
     ) TO ^UBYTE
 
     IF NOT rsrc^.Data THEN
-        RtlPrint (
-            "WARNING: Couldn't alloc %s (%s)\n", // fmt
-            name,
-            path,
-        )
-
         RETURN NULLPTR
     END
 
@@ -139,11 +127,19 @@ FN (BlCallbackPerLineF) BlLoadResourceCallback (
         LEAVE
     END
 
-    BlLoadResource (
+    rsrc := BlLoadResource (
         BlResourceDirectory, // device
         &name[0], // name
         &path[0], // path
     )
+
+    IF NOT rsrc THEN
+        RtlPrint (
+            "WARNING: Couldn't load %s (%s)\n", // fmt
+            &name[0],
+            &path[0],
+        )
+    END
 END
 
 FN BlLoadResources ()

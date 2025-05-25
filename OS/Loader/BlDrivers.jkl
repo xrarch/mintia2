@@ -28,62 +28,74 @@ FN BlLoadDriver (
     RETURN dll
 END
 
-FN (BlCallbackPerLineF) BlLoadDriverCallback (
-    IN buf : ^UBYTE,
-    IN context : ^VOID,
-    IN linenum : UWORD,
-)
+FN BlLoadExtension (
+    IN name : ^UBYTE,
+) : ^BlDll
 
-    WHILE buf^ == ' ' OR buf^ == '\t' DO
-        buf += 1
-    END
+    // Construct the path to the config file, relative to the system directory.
 
-    IF buf^ == '#' THEN
-        // Comment line. Ignore.
+    cfgpath : UBYTE[64]
 
-        LEAVE
-    END
-
-    // Parse a resource line of the format:
-    // name
-
-    tokenbuf := &BlTemporaryBuffer[0]
-
-    RtlCopyString (
-        tokenbuf, // dest
-        "Drivers/", // src
-        BL_TEMP_BUFFER_SIZE, // bufsize
+    RtlFormat (
+        &cfgpath[0], // dest
+        64, // bufsize
+        "Drivers/%s/%s.cfg", // fmt
+        name,
+        name,
     )
 
-    next := RtlTokenize (
-        buf, // buffer
-        &tokenbuf[8], // tokenbuffer
-        BL_TEMP_BUFFER_SIZE - 8, // bufsize
-        ' ', // delimiter
+    // Construct the path to the module.
+
+    dllpath : UBYTE[64]
+
+    RtlFormat (
+        &dllpath[0], // dest
+        64, // bufsize
+        "Drivers/%s/%s.sys", // fmt
+        name,
+        name,
     )
 
-    IF NOT next THEN
-        // Empty line.
+    // Try to load the module.
 
-        LEAVE
+    dll := BlLoadDriver ( &dllpath[0] )
+
+    IF NOT dll THEN
+        RETURN NULLPTR
     END
 
-    IF NOT BlLoadDriver ( &tokenbuf[0] ) THEN
-        RtlPrint ( "WARNING: Failed to load driver %s\n", &tokenbuf[0] )
+    // Try to load the config file.
+
+    rsrc := BlLoadResource (
+        BlSystemDirectory, // device
+        name, // name
+        &cfgpath[0], // path
+    )
+
+    IF rsrc THEN
+        rsrc^.Module = dll
     END
+
+    dll^.Config = rsrc
+
+    RETURN dll
 END
 
 FN BlLoadDrivers ()
 
     // Load all of the boot drivers.
 
-    IF NOT BlCallbackPerLineFile (
-        BlSystemDirectory, // device
-        "Drivers.txt", // path
-        &BlLoadDriverCallback, // callback
-        NULLPTR, // context
-    ) THEN
+    // First load the filesystem driver for the boot device.
 
-        RtlPrint ( "WARNING: Couldn't open %s/Drivers.txt\n", BlSystemPath )
+    drv := BlLoadExtension ( BlBootDevice.DriverName )
+
+    IF NOT drv THEN
+        RtlPrint ( "WARNING: Couldn't load boot fs driver %s\n",
+            BlBootDevice.DriverName )
     END
+
+    // Call platform code to load whatever other storage drivers are necessary
+    // for early boot.
+
+    BxLoadDrivers ()
 END

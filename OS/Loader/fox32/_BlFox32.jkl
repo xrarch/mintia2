@@ -819,6 +819,19 @@ FN BxInitializeIo (
     END
 END
 
+FN BxLoadDrivers ()
+
+    // Load whatever drivers are necessary to access the storage stack.
+
+    dll := BlLoadExtension ( "FoxSystem" )
+
+#IF 0 // TEMP until the driver exists
+    IF NOT dll THEN
+        BlCrash ( "Failed to load FoxSystem extension\n" )
+    END
+#END
+END
+
 FNPTR SysEntry (
     IN loaderblock : ^BlInfoRecord,
 )

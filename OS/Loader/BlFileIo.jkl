@@ -117,10 +117,9 @@ FN BlInitializeIo ()
         BlGetValueArg ( "BOOTDEV" ), // bootdevname
     )
 
-    RtlPrint ( "Selected boot device is %s.\n", &BlInfoBlock.BootDeviceName[0] )
-
     IF NOT BlMountDevice ( &BlBootDevice ) THEN
-        BlCrash ( "Inaccessible boot device\n" )
+        BlCrash ( "Inaccessible boot device %s\n",
+            &BlInfoBlock.BootDeviceName[0] )
     END
 
     // Open the system directory.
@@ -138,6 +137,8 @@ FN BlInitializeIo ()
     )
 
     IF NOT BlSystemDirectory THEN
-        BlCrash ( "Nonexistent system directory %s\n", BlSystemPath )
+        BlCrash ( "Nonexistent system directory %s:%s\n", &BlInfoBlock.BootDeviceName[0], BlSystemPath )
     END
+
+    RtlPrint ( "Selected boot directory is %s:%s.\n", &BlInfoBlock.BootDeviceName[0], BlSystemPath )
 END
