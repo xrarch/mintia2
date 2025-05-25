@@ -150,18 +150,6 @@ FNPTR BlReadF (
     IN length : UWORD,
 ) : UWORD
 
-FNPTR BlIterateEntriesCallbackF (
-    IN name : ^UBYTE,
-    IN context : ^VOID,
-) : UWORD
-
-FNPTR BlIterateEntriesF (
-    IN file : ^BlFile,
-    IN callback : BlIterateEntriesCallbackF,
-    IN context : ^VOID,
-    IN type : UWORD,
-)
-
 #DEFINE BL_FILETYPE_ANY 0
 #DEFINE BL_FILETYPE_DIRECTORY 1
 #DEFINE BL_FILETYPE_FILE 2
@@ -169,13 +157,13 @@ FNPTR BlIterateEntriesF (
 STRUCT BlFile
     Open : BlOpenF,
     Read : BlReadF,
-    IterateEntries : BlIterateEntriesF,
     DriverContext : ^VOID,
     MountContext : ^VOID,
     BlockSize : UWORD,
     Device : ^BlFile,
     Size : UWORD,
     Type : UWORD,
+    DriverName : ^UBYTE,
 END
 
 EXTERN FN BxInitializeIo (
@@ -193,13 +181,6 @@ EXTERN FN BlReadFile (
     IN buf : ^VOID,
     IN length : UWORD,
 ) : UWORD
-
-EXTERN FN BlIterateEntries (
-    IN file : ^BlFile,
-    IN callback : BlIterateEntriesCallbackF,
-    IN context : ^VOID,
-    IN type : UWORD,
-)
 
 EXTERN FN BlOpenFile (
     IN device : ^BlFile,
