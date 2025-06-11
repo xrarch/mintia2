@@ -165,6 +165,8 @@ FN (KiHighLevelHandlerF) KiHandleInterrupt (
     IF idle THEN
         prb^.InIdleLoop = FALSE
 
+        KeMemoryBarrier ()
+
         IF prb^.IdleDeferredIpiEvents THEN
             KiProcessIdleDeferredIpiEvents ()
         END
