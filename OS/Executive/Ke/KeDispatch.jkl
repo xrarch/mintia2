@@ -941,15 +941,20 @@ FN KiPreemptThread (
 
     next := prb^.NextThread
     prb^.NextThread = NULLPTR
+
+#IF BLD_MP
+    IF NOT next THEN
+        // If there's somehow no next thread, just return.
+
+        KiReleaseReadyQueueElevated ( prb )
+        
+        LEAVE
+    END
+#END
+
     next^.Status = KI_THREAD_INFLIGHT
 
     KiReleaseReadyQueueElevated ( prb )
-
-    // If there's somehow no next thread, just return.
-
-    IF NOT next THEN
-        LEAVE
-    END
 
     // Wait for the next thread to no longer be switching off his stack.
 
