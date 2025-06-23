@@ -160,9 +160,21 @@ KeReleaseApcLock:
 
     ReleaseLock ( x )
 
-    // Branch around the slow path.
+    // The lock is APC-safe, so restore the old IPL.
+    // This is KiLowerIpl inlined.
 
-    b    .apcsafe
+    subi t0, zero, 4096
+    mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.
+    mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
+    rsh  t2, t1, a1                 // Right shift pending by new IPL.
+    bne  t2, .dispatch              // If zero, none pending at new IPL.
+
+    ret
+
+.dispatch:
+
+    mov  a0, a1
+    j    KiDispatchSoftwareInterrupts
 
 .slow:
 
@@ -176,10 +188,6 @@ KeReleaseApcLock:
     mov  lr, long [sp + 4]
     addi sp, sp, 8
 
-    // Fall through.
-
-.apcsafe:
-
     // The lock is APC-safe, so restore the old IPL.
     // This is KiLowerIpl inlined.
 
@@ -190,10 +198,6 @@ KeReleaseApcLock:
     bne  t2, .dispatch              // If zero, none pending at new IPL.
 
     ret
-
-.dispatch:
-    mov  a0, a1
-    j    KiDispatchSoftwareInterrupts
 
 
 #IF BLD_CHK
@@ -210,7 +214,7 @@ KiNotLocked:
     jal  KeCrash
 
 KiNotLockedMessage:
-    .ds "KeReleasePushlock: pushlock not locked\n"
+    .ds "KeReleaseLock: not locked\n"
     .db 0
 
 .align 4

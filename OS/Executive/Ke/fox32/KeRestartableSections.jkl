@@ -201,6 +201,7 @@ KiAcquireApcLockExclusiveEnd:
     ret
 
 KiAcquireApcLockExclusiveSlow:
+
     mov  a1, a3
     jmp  KiAcquireLockExclusive
 
@@ -282,11 +283,24 @@ KeReleaseLock:
 KeReleaseApcLock:
 .export KeReleaseApcLock
 
-    ReleaseLock ( KiReleaseApcLockStart, KiReleaseApcLockEnd, KiReleaseSlow )
+    ReleaseLock ( KiReleaseApcLockStart, KiReleaseApcLockEnd, KiReleaseApcLockSlow )
 
-    rjmp KiReleaseApcSafe
+    // The lock is APC-safe, so lower IPL.
 
-KiReleaseSlow:
+    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], a1
+
+    mov  t0, [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)]
+    srl  t0, a1
+    ifnz rjmp KeReleaseApcLockDispatch
+
+    ret
+
+KeReleaseApcLockDispatch:
+
+    mov  a0, a1
+    jmp  KiDispatchSoftwareInterrupts
+
+KiReleaseApcLockSlow:
 
     push fp
     mov  fp, sp
@@ -297,23 +311,15 @@ KiReleaseSlow:
     pop  a1
     pop  fp
 
-    // Fall through.
-
-KiReleaseApcSafe:
-
     // The lock is APC-safe, so lower IPL.
 
     mov.8 [(0xFFFFF000 + KiPrb_Ipl)], a1
 
     mov  t0, [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)]
     srl  t0, a1
-    ifnz rjmp .dispatch
+    ifnz rjmp KeReleaseApcLockDispatch
 
     ret
-
-.dispatch:
-    mov  a0, a1
-    jmp  KiDispatchSoftwareInterrupts
 
 #IF BLD_CHK
 
@@ -328,7 +334,7 @@ KiNotLocked:
     call KeCrash
 
 KiNotLockedMessage:
-    .ds "KeReleasePushlock: pushlock not locked\n"
+    .ds "KeReleaseLock: not locked\n"
     .db 0
 
 .align 4

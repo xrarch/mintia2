@@ -381,7 +381,6 @@ EXTERN FN MmWriteFaultOnLockWord (
 FN KiBlockOnLock (
     IN lock : ^KeLock,
     IN current : UWORD,
-    IN oldipl : UWORD,
 )
 
     // Block on the lock. First acquire a pointer to the current thread.
@@ -897,6 +896,10 @@ FN KiAcquireLockShared (
             )
 
             IF new == current THEN
+                // Return the same oldipl we were passed.
+                // This simplifies the implementation of the fast path wrappers
+                // written in assembly language.
+
                 RETURN oldipl
             END
 
@@ -922,7 +925,6 @@ FN KiAcquireLockShared (
         KiBlockOnLock (
             lock, // lock
             current, // current
-            oldipl, // oldipl
         )
 
         current = lock^.Ptr
@@ -953,6 +955,10 @@ FN KiAcquireLockExclusive (
             )
 
             IF new == current THEN
+                // Return the same oldipl we were passed.
+                // This simplifies the implementation of the fast path wrappers
+                // written in assembly language.
+
                 RETURN oldipl
             END
 
@@ -978,7 +984,6 @@ FN KiAcquireLockExclusive (
         KiBlockOnLock (
             lock, // lock
             current, // current
-            oldipl, // oldipl
         )
 
         current = lock^.Ptr
