@@ -231,13 +231,14 @@ FN MiAllocatePageFromList (
 ) : ^MiPfe
 
     // Allocate a page, preferably with the given color, from the list.
+    // The caller already ensured there's a page to remove from the list.
 
     list^.Count -= 1
 
 #IF ( == MI_COLOR_COUNT 1 )
     entry := list^.Heads[0].Next
 
-    KeAssert ( entry != &list^.Heads[0] )
+    KeAssert ( NOT RtlEmptyList ( &list^.Heads[0] ) )
 
     RtlRemoveEntryList ( entry )
 
@@ -257,20 +258,13 @@ FN MiAllocatePageFromList (
             RETURN CONTAINEROF entry TO MiPfe.Entry
         END
 
-        color += 1
+        color = (color + 1) & (MI_COLOR_COUNT - 1)
         i += 1
-
-        IF color == MI_COLOR_COUNT THEN
-            color = 0
-        END
     END
 
-#IF BLD_CHK
     // Shouldn't be reachable - caller saw there were items in this list.
 
-    KeCrash ( "MiAllocatePageFromList\n" )
-#END
-
+    KeAssert ( FALSE )
 #END
 
 END
