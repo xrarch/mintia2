@@ -173,18 +173,14 @@ EXPORT FN KeRemoveFromBalancedQueue (
 ) : OsStatus
 
     // Remove an item from the balanced queue. If there are too many threads, or
-    // there are no items to remove, we block.
+    // there are no items to remove, we block. 
 
     // Not allowed at >= KI_IPL_APC because the QueueItem field of the thread
     // struct could get corrupted if this happens in an APC.
 
     KeAssert ( KiCurrentIpl () < KI_IPL_APC )
 
-    item = NULLPTR
-
     thread := KeCurrentThread ()
-
-    thread^.QueueItem = NULLPTR
 
     ipl := KiRaiseIpl ( KI_IPL_DPC )
 
@@ -218,8 +214,9 @@ EXPORT FN KeRemoveFromBalancedQueue (
     END
 
     // The thread is now definitely associated with this queue, and won't become
-    // disassociated from it for the duration of this operation as a refcount is
-    // held on the queue object.
+    // disassociated from it for the duration of this operation as the owner of
+    // the queue object has guaranteed its lifetime (for example with an object
+    // manager reference).
 
     IF NOT RtlEmptyList ( &queue^.ItemListHead ) AND
         queue^.ActiveThreadCount <= queue^.MaximumThreadCount THEN
@@ -257,11 +254,9 @@ EXPORT FN KeRemoveFromBalancedQueue (
     IF status == 0 THEN
         // Got an item.
 
-        KeAssert ( thread^.QueueItem != NULLPTR )
-
         item = thread^.QueueItem
 
-        RETURN OS_STATUS_SUCCESS
+        status = OS_STATUS_SUCCESS
     END
 
     RETURN status
