@@ -9,14 +9,18 @@
 //
 // There are three kinds of APCs.
 //
-// Kernel APCs: These are dispatched whenever IPL is below KI_IPL_APC on a
-//              processor. They can take page faults and can acquire pushlocks
-//              that have been marked as KAPC-acquirable.
+// Kernel APCs: KAPCs are dispatched whenever IPL is below KI_IPL_APC for the
+//              thread. They can take page faults and can acquire locks that
+//              are designed to be KAPC-acquirable (i.e. they're only ever taken
+//              with the KeAcquireApcLock family of routines, which
+//              automatically raise and lower IPL appropriately).
 //
-// Lazy APCs:   These are dispatched whenever a processor is executing in
-//              usermode, upon return to usermode from the kernel, and whenever
-//              the kernel takes a KE_USER_MODE wait. They can take page faults
-//              and can acquire (almost) any pushlock.
+// Lazy APCs:   LAPCs are dispatched whenever a thread is executing in usermode,
+//              upon return to usermode from the kernel, and whenever the thread
+//              takes a KE_USER_MODE wait. They can take page faults and can
+//              acquire (almost) any lock, since a KE_USER_MODE waiter is
+//              guaranteed not to be holding the vast majority of internal locks
+//              at wait time.
 //
 // User APCs:   UAPCs are special as they cause code to be executed in usermode
 //              instead of kernel mode. They are dispatched only when the kernel
