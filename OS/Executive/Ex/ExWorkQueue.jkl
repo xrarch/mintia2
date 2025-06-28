@@ -7,11 +7,6 @@
 
 ExpWorkQueues : KeBalancedQueue[EX_MAX_WORK_PRIORITY]
 
-ExpWorkThreads : UBYTE[EX_MAX_WORK_PRIORITY]
-
-#DEFINE EXP_MIN_THREADS 2
-#DEFINE EXP_MAX_THREADS 6
-
 FN (KeStartThreadF) ExpWorkQueueLoop (
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -93,24 +88,26 @@ FN ExpInitializeWorkQueues ()
 
     // Compute how many threads of each priority there should be.
     // We base this off the system size.
+
+    workthreads : UBYTE[EX_MAX_WORK_PRIORITY]
     
     systemsize := MmGetSystemSize ()
 
     IF systemsize <= MM_TINY_SYSTEM THEN
-        ExpWorkThreads[EX_HIGH_WORK_PRIORITY] = 1
-        ExpWorkThreads[EX_LOW_WORK_PRIORITY] = 1
+        workthreads[EX_HIGH_WORK_PRIORITY] = 1
+        workthreads[EX_LOW_WORK_PRIORITY] = 1
 
     ELSEIF systemsize <= MM_SMALL_SYSTEM THEN
-        ExpWorkThreads[EX_HIGH_WORK_PRIORITY] = 2
-        ExpWorkThreads[EX_LOW_WORK_PRIORITY] = 3
+        workthreads[EX_HIGH_WORK_PRIORITY] = 2
+        workthreads[EX_LOW_WORK_PRIORITY] = 3
 
     ELSEIF systemsize <= MM_MEDIUM_SYSTEM THEN
-        ExpWorkThreads[EX_HIGH_WORK_PRIORITY] = 3
-        ExpWorkThreads[EX_LOW_WORK_PRIORITY] = 5
+        workthreads[EX_HIGH_WORK_PRIORITY] = 3
+        workthreads[EX_LOW_WORK_PRIORITY] = 5
 
     ELSE
-        ExpWorkThreads[EX_HIGH_WORK_PRIORITY] = 4
-        ExpWorkThreads[EX_LOW_WORK_PRIORITY] = 7
+        workthreads[EX_HIGH_WORK_PRIORITY] = 4
+        workthreads[EX_LOW_WORK_PRIORITY] = 7
     END
 
     // Initialize a name string for the threads.
@@ -125,7 +122,7 @@ FN ExpInitializeWorkQueues ()
     WHILE j < EX_MAX_WORK_PRIORITY DO
         i = 0
 
-        threads := ExpWorkThreads[j]
+        threads := workthreads[j]
 
         WHILE i < threads DO
             thread : ^PsThread
