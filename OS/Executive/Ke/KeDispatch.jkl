@@ -471,10 +471,14 @@ FN KiWouldPreempt (
 END
 
 FN KiFindProcessor (
+    IN prb : ^KiPrb,
     IN thread : ^KeThread,
 ) : ^KiPrb
 
     // Scan for the preemptible processor with the lowest load.
+    // Start from the current processor to minimize IPIs by preferentially
+    // enqueuing to it.
+    //
     // At the same time, scan for the processor with the lowest load in
     // general.
 
@@ -482,13 +486,11 @@ FN KiFindProcessor (
 
     preemptprb : ^KiPrb = NULLPTR
     unloadedprb : ^KiPrb = NULLPTR
-    prb : ^KiPrb
 
     i := 0
+    id := prb^.Id
 
-    WHILE i < procs DO
-        prb = KiPrbFromNumber ( i )
-
+    WHILE TRUE DO
         preempt := KiWouldPreempt (
             thread, // thread
             prb, // targetprb
@@ -511,6 +513,18 @@ FN KiFindProcessor (
         END
 
         i += 1
+
+        IF i >= procs THEN
+            BREAK
+        END
+
+        id += 1
+
+        IF id >= procs THEN
+            id = 0
+        END
+
+        prb = KiPrbFromNumber ( id )
     END
 
     IF preemptprb THEN
@@ -609,7 +623,10 @@ FN KiReadyThread (
 
     // Scan for the preemptible processor with the lowest load.
 
-    prb = KiFindProcessor ( thread )
+    prb = KiFindProcessor (
+        myprb, // preferential
+        thread, // thread
+    )
 
     KeAssert ( prb != NULLPTR )
 
