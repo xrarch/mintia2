@@ -232,15 +232,13 @@ FN KiClockTick (
     thread^.RunMs += intervalms << KI_TICK_SHIFT
 
     // Update the interactivity score.
+    // If an update must be made to the thread's interactivity, it is deferred
+    // to a lower IPL.
 
-    IF KiUpdateInteractivity ( thread ) THEN
-        // The thread was changed to non-interactive from interactive.
-        // We need to check for preemption at KI_IPL_DPC.
-
-        prb^.CheckInteractivity = TRUE
-
-        KiSoftInterruptSelf ( prb, KI_IPL_DPC )
-    END
+    KiUpdateInteractivity (
+        thread, // thread
+        TRUE, // deferupdate
+    )
 
     // Decrement thread quantum.
 

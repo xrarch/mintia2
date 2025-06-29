@@ -401,6 +401,13 @@ EXTERN FN KiCheckInteractivity (
     IN prb : ^KiPrb,
 )
 
+EXTERN FN KiCheckInteractivityInternal (
+    IN prb : ^KiPrb,
+    IN current : ^KeThread,
+    IN oldinteractivity : UWORD,
+    IN newinteractivity : UWORD,
+)
+
 EXTERN FN KiMoveToInteractiveQueueThread (
     IN thread : ^KeThread,
 )
@@ -424,7 +431,8 @@ EXTERN FN KiJumpIntoIdleThread (
 
 EXTERN FN KiUpdateInteractivity (
     IN thread : ^KeThread,
-) : UWORD
+    IN deferupdate : UWORD,
+)
 
 EXTERN FN (KeDpcF) KiTimerExpiration (
     IN dpc : ^KeDpc,

@@ -91,17 +91,15 @@ END
 
 FN KiUpdateInteractivity (
     IN thread : ^KeThread,
-) : UWORD
+    IN deferupdate : UWORD,
+)
 
     // Update the sliding history of thread interactivity.
     // Adapted from sched_interact_update in sched_ule.c, the FreeBSD ULE
     // scheduler.
-    //
-    // Returns TRUE if the thread was changed from interactive to
-    // non-interactive, false otherwise.
 
     IF thread^.Priority == OS_PRIORITY_IDLE THEN
-        RETURN FALSE
+        LEAVE
     END
 
     sum := thread^.RunMs + thread^.SleepMs
@@ -175,24 +173,38 @@ FN KiUpdateInteractivity (
         score = 0
     END
 
-    lostinteractivity := FALSE
+    IF score < KI_INTERACT_THRESH AND NOT thread^.Interactive THEN
+        // Changing from non-interactive to interactive.
 
-    IF score < KI_INTERACT_THRESH THEN
-        // Interactive.
+        IF deferupdate THEN
+            GOTO DeferUpdate
+        END
 
         thread^.Interactive = TRUE
 
-    ELSE
-        // Not interactive.
+    ELSEIF thread^.Interactive THEN
+        // Changing from interactive to non-interactive.
 
-        IF thread^.Interactive AND NOT thread^.InteractivityFloor THEN
-            lostinteractivity = TRUE
+        IF deferupdate THEN
+            GOTO DeferUpdate
         END
 
         thread^.Interactive = FALSE
     END
 
-    RETURN lostinteractivity
+    LEAVE
+
+@DeferUpdate
+
+    // Our caller was the timer interrupt or something.
+    // We have to defer the actual update to the Interactive field
+    // to a lower IPL holding the thread spinlock.
+
+    prb := KI_CURRENT_PRB_LOCAL
+
+    prb^.CheckInteractivity = TRUE
+
+    KiSoftInterruptSelf ( prb, KI_IPL_DPC )
 END
 
 FN KiSwitchThread (
@@ -1142,6 +1154,16 @@ FN KiSetPriorityThread (
         GOTO Exit
     END
 
+#IF BLD_MP
+    IF thread^.Status == KI_THREAD_RUNNING AND
+        NOT prb^.NextThread THEN
+
+        // Update the stashed priority.
+
+        prb^.CurrentThreadPriority = priority
+    END
+#END
+
     IF priority >= curpri THEN
         // We raised priority, so there's nothing left to do.
 
@@ -1281,6 +1303,51 @@ EXPORT FN KeSetPriorityThread (
     KiReleaseThread ( thread, ipl )
 END
 
+FN KiCheckInteractivityInternal (
+    IN prb : ^KiPrb,
+    IN current : ^KeThread,
+    IN oldinteractivity : UWORD,
+    IN newinteractivity : UWORD,
+)
+
+    // Check for, and cause, preemption by the thread dropping to
+    // non-interactive.
+
+    // Lock the ready queue.
+
+    KiAcquireReadyQueueElevated ( prb )
+
+    IF NOT prb^.NextThread THEN
+#IF BLD_MP
+        // Update the current interactivity stashed in the prb.
+
+        prb^.CurrentThreadInteractivity = newinteractivity
+#END
+
+        IF newinteractivity < oldinteractivity THEN
+            // Try to find a thread to preempt this one with.
+
+            next := KiSelectThread (
+                prb, // prb
+                current, // current
+                FALSE, // exclusive
+                FALSE, // migrate
+            )
+
+            IF next THEN
+                // Found one. Set it as the next thread.
+
+                KiSetNextThread (
+                    prb, // prb
+                    next, // thread
+                )
+            END
+        END
+    END
+
+    KiReleaseReadyQueueElevated ( prb )
+END
+
 FN KiCheckInteractivity (
     IN prb : ^KiPrb,
 )
@@ -1290,31 +1357,39 @@ FN KiCheckInteractivity (
 
     current := prb^.CurrentThread
 
-    // Lock the ready queue.
+    // Lock the thread.
 
-    KiAcquireReadyQueueElevated ( prb )
+    KiAcquireThreadElevated ( current )
 
-    IF NOT prb^.NextThread THEN
-        // Try to find a thread to preempt this one with.
+    oldinteractivity := current^.Interactive |
+        current^.InteractivityFloor
 
-        next := KiSelectThread (
-            prb, // prb
-            current, // current
-            FALSE, // exclusive
-            FALSE, // migrate
-        )
+    // Perform the deferred interactivity update.
 
-        IF next THEN
-            // Found one. Set it as the next thread.
+    KiUpdateInteractivity (
+        current, // thread
+        FALSE, // deferupdate
+    )
 
-            KiSetNextThread (
-                prb, // prb
-                next, // thread
-            )
-        END
+    newinteractivity := current^.Interactive |
+        current^.InteractivityFloor
+
+    IF oldinteractivity == newinteractivity THEN
+        // Nothing to do.
+
+        GOTO Exit
     END
 
-    KiReleaseReadyQueueElevated ( prb )
+    KiCheckInteractivityInternal (
+        prb, // prb
+        current, // current
+        oldinteractivity, // oldinteractivity
+        newinteractivity, // newinteractivity
+    )
+
+@Exit
+
+    KiReleaseThreadElevated ( current )
 END
 
 FN KiMoveToInteractiveQueueThread (
@@ -1340,6 +1415,17 @@ FN KiMoveToInteractiveQueueThread (
     KiAcquireReadyQueueElevated ( prb )
 
     IF thread^.Status != KI_THREAD_READY THEN
+#IF BLD_MP
+        IF thread^.Status == KI_THREAD_RUNNING AND
+            NOT prb^.NextThread THEN
+
+            // Update stashed interactivity.
+
+            prb^.CurrentThreadInteractivity =
+                thread^.Interactive | thread^.InteractivityFloor
+        END
+#END
+
         KiReleaseReadyQueueElevated ( prb )
 
         LEAVE
