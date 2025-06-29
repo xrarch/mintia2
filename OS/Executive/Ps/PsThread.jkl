@@ -411,43 +411,6 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     RETURN status
 END
 
-FN (KeDpcF) PspActivateReaperDpc (
-    IN dpc : ^KeDpc,
-    IN context1 : UWORD,
-    IN context2 : UWORD,
-)
-
-    // Enqueue the reaper work item. Called by Ke when the reaper timer,
-    // enqueued by PspActivateReaper, fires.
-
-    ExEnqueueWorkItem (
-        &PspReaperWorkItem, // item
-        EX_HIGH_WORK_PRIORITY, // priority
-        0, // context1
-        0, // context2
-    )
-END
-
-FN (KeCustodyListActivateF) PspActivateReaper (
-    IN list : ^KeCustodyList,
-)
-
-    // Called by Ke when the reaper list transitions to non-empty.
-    // Enqueue the reaper timer. Fires in 500ms to trigger thread reaping.
-    // PspActivateReaperDpc will be invoked, which will enqueue the work item.
-
-    interval : RtlUquad
-
-    RtlSetUquadToUlong ( &interval, 500 )
-
-    KeEnqueueTimer (
-        &PspReaperTimer, // timer
-        &interval, // interval
-        0, // context1
-        0, // context2
-    )
-END
-
 #SECTION "PAGEtext"
 FN (KeProcessCustodyListF) PspReapThread (
     IN list : ^KeCustodyList,
@@ -488,6 +451,27 @@ FN (ExWorkItemF) PspReaperWorker (
     KeProcessCustodyList (
         &KeReaperCustodyList, // list
         &PspReapThread, // callback
+    )
+END
+
+FN (KeCustodyListActivateF) PspActivateReaper (
+    IN list : ^KeCustodyList,
+)
+
+    // Called by Ke when the reaper list transitions to non-empty.
+    // Enqueue the reaper timer. Fires in 500ms to trigger thread reaping.
+    // PspActivateReaperDpc will be invoked, which will enqueue the work item.
+
+    interval : RtlUquad
+
+    RtlSetUquadToUlong ( &interval, 500 )
+
+    ExEnqueueTimedWorkItem (
+        &PspReaperTimedWorkItem, // item
+        EX_LOW_WORK_PRIORITY, // priority
+        &interval, // interval
+        0, // context1
+        0, // context2
     )
 END
 

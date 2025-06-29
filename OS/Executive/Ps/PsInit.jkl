@@ -14,10 +14,7 @@ PUBLIC PsActiveProcessCount : UWORD = 0
 PUBLIC PsSystemProcess : ^PsProcess
 PUBLIC PsInitialThread : ^PsThread
 
-PUBLIC PspReaperWorkItem : ExWorkItem
-PUBLIC PspReaperTimer : KeTimer
-
-PspReaperDpc : KeDpc
+PUBLIC PspReaperTimedWorkItem : ExTimedWorkItem
 
 PspIdleProcessPaged : PsPagedProcess
 
@@ -316,20 +313,9 @@ FN PsInitializeStage1 ()
         0, // context
     )
 
-    ExInitializeWorkItem (
-        &PspReaperWorkItem, // item
+    ExInitializeTimedWorkItem (
+        &PspReaperTimedWorkItem, // item
         &PspReaperWorker, // routine
-    )
-
-    KeInitializeDpc (
-        &PspReaperDpc, // dpc
-        &PspActivateReaperDpc, // func
-    )
-
-    KeInitializeTimer (
-        &PspReaperTimer, // timer
-        &PspReaperDpc, // dpc
-        "PspReaperTimer", // name
     )
 
     // Create the balance manager thread, which will perform stage 2
