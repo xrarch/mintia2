@@ -6,7 +6,7 @@
 
 PUBLIC ObpDeferredDeletionList : KeCustodyList
 
-PUBLIC ObpDeferredDeletionWorkItem : ExWorkItem
+PUBLIC ObpDeferredDeletionTimedWorkItem : ExTimedWorkItem
 
 #SECTION "PAGEtext"
 FN ObAllocateObject (
@@ -364,9 +364,17 @@ FN (KeCustodyListActivateF) ObpActivateDeletionWorker (
     // Note that this guarantees that the work item is not actively in the
     // queue, because the list is only emptied by the worker itself.
 
-    ExEnqueueWorkItem (
-        &ObpDeferredDeletionWorkItem, // item
+    interval : RtlUquad
+
+    RtlSetUquadToUlong (
+        &interval, // uquad
+        250, // interval
+    )
+
+    ExEnqueueTimedWorkItem (
+        &ObpDeferredDeletionTimedWorkItem, // item
         EX_LOW_WORK_PRIORITY, // priority
+        &interval, // interval
         0, // context1
         0, // context2
     )
