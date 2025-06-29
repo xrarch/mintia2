@@ -50,12 +50,82 @@ FN ExEnqueueWorkItem (
 )
 
     // Enqueue a work item to the appropriate thread.
+    //
+    // Custody of the work item is passed off the the worker thread pool - its
+    // lifetime must be guaranteed by the caller. Custody is returned when the
+    // work routine is called, at which point it may be freed.
+
+    item^.Context1 = context1
+    item^.Context2 = context2
 
     KeInsertIntoBalancedQueue (
         &ExpWorkQueues[priority], // queue
         &item^.QueueEntry, // item
         FALSE, // head
         0, // priorityboost
+    )
+END
+
+FN ExEnqueueTimedWorkItem (
+    IN item : ^ExTimedWorkItem,
+    IN priority : ExWorkQueuePriority,
+    IN interval : ^RtlUquad,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Enqueue the timer embedded in the work item.
+
+    item^.Priority = priority
+
+    KeEnqueueTimer (
+        &item^.Timer, // timer
+        interval, // interval
+        context1, // context1
+        context2, // context2
+    )
+END
+
+FN (KeDpcF) ExpTimedWorkItemDpc (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // The KeTimer embedded in a timed work item expired.
+    // We have to enqueue the work item for real now.
+
+    item := CONTAINEROF dpc TO ExTimedWorkItem.Dpc
+
+    ExEnqueueWorkItem (
+        &item^.Item, // item
+        item^.Priority, // priority
+        context1, // context1
+        context2, // context2
+    )
+END
+
+FN ExInitializeTimedWorkItem (
+    IN item : ^ExTimedWorkItem,
+    IN routine : ExWorkItemF,
+)
+
+    // Initialize a timed work item.
+
+    ExInitializeWorkItem (
+        &item^.Item, // item
+        routine, // routine
+    )
+
+    KeInitializeDpc (
+        &item^.Dpc, // dpc
+        &ExpTimedWorkItemDpc, // func
+    )
+
+    KeInitializeTimer (
+        &item^.Timer, // timer
+        &item^.Dpc, // dpc
+        "TimedWorkItem", // name
     )
 END
 

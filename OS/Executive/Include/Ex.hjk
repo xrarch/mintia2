@@ -151,6 +151,32 @@ EXTERN FN ExEnqueueWorkItem (
     IN context2 : UWORD,
 )
 
+STRUCT ExTimedWorkItem
+    Item : ExWorkItem,
+    Dpc : KeDpc,
+    Timer : KeTimer,
+    Priority : ExWorkQueuePriority,
+END
+
+EXTERN FN ExEnqueueTimedWorkItem (
+    IN item : ^ExTimedWorkItem,
+    IN priority : ExWorkQueuePriority,
+    IN interval : ^RtlUquad,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN (KeDpcF) ExpTimedWorkItemDpc (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN ExInitializeTimedWorkItem (
+    IN item : ^ExTimedWorkItem,
+    IN routine : ExWorkItemF,
+)
+
 #DEFINE EX_SET_INITIAL_BUFFER 4
 
 STRUCT ExObjectSet
