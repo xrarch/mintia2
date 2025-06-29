@@ -144,9 +144,7 @@ FN KiInitializePrb (
     KiInitializeSpinlock ( &prb^.TimerTreeLock )
     KiInitializeSpinlock ( &prb^.StackSwapListLock )
 
-    prb^.CurrentThreadPriority = 0
-    prb^.CurrentThreadInteractivity = FALSE
-    prb^.Idle = TRUE
+    prb^.StashedCurrentThreadInfo = KiSetIdleInStash ( 0, TRUE )
     prb^.IdleDeferredIpiEvents = 0
     prb^.InIdleLoop = TRUE
 #END

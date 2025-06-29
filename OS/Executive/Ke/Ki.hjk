@@ -85,6 +85,44 @@
      (1 << ((ipl) - 1))
 ]
 
+// Fields within the stashed thread info.
+
+#DEFINE KI_STASHED_PRIORITY_SHIFT 0
+#DEFINE KI_STASHED_PRIORITY_MASK 0xFF
+
+#DEFINE KI_STASHED_INTERACTIVE_SHIFT 8
+#DEFINE KI_STASHED_INTERACTIVE_MASK 0xFF
+
+#DEFINE KI_STASHED_IDLE_SHIFT 16
+#DEFINE KI_STASHED_IDLE_MASK 0xFF
+
+#MACRO KiCurrentThreadPriority ( stash ) [
+    (((stash) >> KI_STASHED_PRIORITY_SHIFT) & KI_STASHED_PRIORITY_MASK)
+]
+
+#MACRO KiCurrentThreadInteractivity ( stash ) [
+    (((stash) >> KI_STASHED_INTERACTIVE_SHIFT) & KI_STASHED_INTERACTIVE_MASK)
+]
+
+#MACRO KiCurrentThreadIdle ( stash ) [
+    (((stash) >> KI_STASHED_IDLE_SHIFT) & KI_STASHED_IDLE_MASK)
+]
+
+#MACRO KiSetPriorityInStash ( stash, priority ) [
+    (((stash) & ~KI_STASHED_PRIORITY_MASK) |
+        (priority << KI_STASHED_PRIORITY_SHIFT))
+]
+
+#MACRO KiSetInteractivityInStash ( stash, interactive ) [
+    (((stash) & ~KI_STASHED_INTERACTIVE_MASK) |
+        (interactive << KI_STASHED_INTERACTIVE_SHIFT))
+]
+
+#MACRO KiSetIdleInStash ( stash, idle ) [
+    (((stash) & ~KI_STASHED_IDLE_MASK) |
+        (idle << KI_STASHED_IDLE_SHIFT))
+]
+
 #IF BLD_MP
 
 FNPTR KiIpiF (
@@ -182,6 +220,8 @@ STRUCT KiPrb
     Load : ULONG,
 
     IdleDeferredIpiEvents : ULONG,
+
+    StashedCurrentThreadInfo : ULONG,
 #END
 
     Id : UINT,
@@ -194,9 +234,6 @@ STRUCT KiPrb
     CheckInteractivity : UBYTE,
 
 #IF BLD_MP
-    CurrentThreadPriority : UBYTE,
-    CurrentThreadInteractivity : UBYTE,
-    Idle : UBYTE,
     WakeStackSwapper : UBYTE,
     StealWork : UBYTE,
     InIdleLoop : UBYTE,

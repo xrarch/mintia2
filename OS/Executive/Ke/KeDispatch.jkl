@@ -60,10 +60,10 @@
     // Stash these in the Prb so that they can be examined locklessly by
     // remote processors.
 
-    prb^.CurrentThreadPriority = next^.Priority
-    prb^.CurrentThreadInteractivity =
-        (next^.Interactive | next^.InteractivityFloor)
-    prb^.Idle = FALSE
+    prb^.StashedCurrentThreadInfo =
+        ((next^.Priority) << KI_STASHED_PRIORITY_SHIFT) |
+        ((next^.Interactive | next^.InteractivityFloor)
+            << KI_STASHED_INTERACTIVE_SHIFT)
 #END
 ]
 
@@ -442,11 +442,18 @@ FN KiWouldPreempt (
     // Returns TRUE if thread1 would preempt the current thread on the target
     // processor. We do this locklessly.
 
+    // Language-level BARRIER is to ensure that the value of the stash is only
+    // loaded once by the compiler.
+
+    stash := targetprb^.StashedCurrentThreadInfo
+    BARRIER
+
     pri1 := thread1^.Priority
-    pri2 := targetprb^.CurrentThreadPriority
+
+    pri2 := KiCurrentThreadPriority ( stash )
 
     IF (thread1^.Interactive | thread1^.InteractivityFloor) THEN
-        IF NOT targetprb^.CurrentThreadInteractivity THEN
+        IF NOT KiCurrentThreadInteractivity ( stash ) THEN
             // Interactive threads always preempt non-interactive threads.
 
             RETURN TRUE
@@ -473,7 +480,7 @@ FN KiWouldPreempt (
         RETURN TRUE
     END
 
-    IF targetprb^.Idle THEN
+    IF KiCurrentThreadIdle ( stash ) THEN
         // Always preempt the idle thread.
 
         RETURN TRUE
@@ -1160,7 +1167,8 @@ FN KiSetPriorityThread (
 
         // Update the stashed priority.
 
-        prb^.CurrentThreadPriority = priority
+        prb^.StashedCurrentThreadInfo =
+            KiSetPriorityInStash ( prb^.StashedCurrentThreadInfo, priority )
     END
 #END
 
@@ -1321,7 +1329,9 @@ FN KiCheckInteractivityInternal (
 #IF BLD_MP
         // Update the current interactivity stashed in the prb.
 
-        prb^.CurrentThreadInteractivity = newinteractivity
+        prb^.StashedCurrentThreadInfo =
+            KiSetInteractivityInStash ( prb^.StashedCurrentThreadInfo,
+            newinteractivity )
 #END
 
         IF newinteractivity < oldinteractivity THEN
@@ -1421,8 +1431,9 @@ FN KiMoveToInteractiveQueueThread (
 
             // Update stashed interactivity.
 
-            prb^.CurrentThreadInteractivity =
-                thread^.Interactive | thread^.InteractivityFloor
+            prb^.StashedCurrentThreadInfo =
+                KiSetInteractivityInStash ( prb^.StashedCurrentThreadInfo,
+                thread^.Interactive | thread^.InteractivityFloor )
         END
 #END
 
@@ -1535,8 +1546,8 @@ FN KiYield (
     ELSE
 #IF BLD_MP
         prb^.StealWork = TRUE
-        prb^.Idle = TRUE
         prb^.InIdleLoop = TRUE
+        prb^.StashedCurrentThreadInfo = KiSetIdleInStash ( 0, TRUE )
 #END
 
         // Switch to the idle thread. KiSwitchThread returns with the thread
