@@ -77,6 +77,44 @@ FN PspFreeTurnstile (
 END
 
 #SECTION "PAGEtext"
+FN PspPerformEagerThreadCleanup (
+    IN thread : ^PsThread,
+)
+
+    // Perform the parts of thread cleanup that can be done "eagerly" after the
+    // thread terminates and before the thread object's refcount hits zero. This
+    // is anything that isn't needed by holders of handles to the thread object.
+
+    paged := thread^.Paged
+
+    IF paged^.CleanedUp THEN
+        LEAVE
+    END
+
+    paged^.CleanedUp = TRUE
+
+    // Free the turnstile.
+
+    PspFreeTurnstile ( thread^.Tcb.Turnstile )
+
+    // Free the kernel stack.
+
+    MmFreeKernelStack (
+        CONTAINEROF thread^.Tcb.Process TO PsProcess.Pcb, // process
+        thread^.Tcb.KernelStackTop - (KE_STACK_PAGES << RTL_PAGE_SHIFT), // kstack
+    )
+
+    IF paged^.IpcBlock THEN
+        // Free the IPC block.
+
+        MmFreePool (
+            paged^.IpcBlock, // ptr
+            'Ipcb', // tag
+        )
+    END
+END
+
+#SECTION "PAGEtext"
 FN (ObTypeDeleteF) PspDeleteThreadObject (
     IN object : ^VOID,
 ) : UWORD
@@ -97,25 +135,9 @@ FN (ObTypeDeleteF) PspDeleteThreadObject (
 
     ExUnreferenceName ( paged^.Name )
 
-    // Free the turnstile.
+    // Perform eager cleanup if it hasn't been done.
 
-    PspFreeTurnstile ( thread^.Tcb.Turnstile )
-
-    // Free the kernel stack.
-
-    MmFreeKernelStack (
-        process, // process
-        thread^.Tcb.KernelStackTop - (KE_STACK_PAGES << RTL_PAGE_SHIFT), // kstack
-    )
-
-    IF paged^.IpcBlock THEN
-        // Free the IPC block.
-
-        MmFreePool (
-            paged^.IpcBlock, // ptr
-            'Ipcb', // tag
-        )
-    END
+    PspPerformEagerThreadCleanup ( thread )
 
     // Unreference the process.
 
@@ -263,6 +285,8 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     END
 
     paged^.TerminationStatus = OS_STATUS_SUCCESS
+
+    paged^.CleanedUp = FALSE
 
     // Allocate a turnstile.
 
@@ -431,6 +455,11 @@ FN (KeProcessCustodyListF) PspReapThread (
 
     KeReaperBarrier ( thread )
 #END
+
+    // Perform eager cleanup of the thread object to rid ourselves of resources
+    // no longer needed that it's best to free as early as we can.
+
+    PspPerformEagerThreadCleanup ( psthrd )
 
     // Remove the reference from the thread object that signified that there
     // was an active execution context that depended on it. There no longer is
