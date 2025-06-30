@@ -4,8 +4,6 @@
 
 #INCLUDE "Mi.hjk"
 
-MiNextStackColor : ULONG = 0
-
 #SECTION "PAGEtext"
 FN MmCreateKernelStack (
     IN process : ^PsProcess,
@@ -49,20 +47,16 @@ FN MmCreateKernelStack (
     //       look like at time of writing.
 
     i := 0
+    ptr := kstack
 
     WHILE i < KE_STACK_PAGES DO
         // Allocate a physical page.
-
-        color := KeIncrementUlong (
-            &MiNextStackColor, // ptr
-            1, // inc
-        )
 
         pfes[i] = MiAllocatePageWait (
             partition, // partition
             FALSE, // zeroed
             FALSE, // low
-            color, // color
+            MiVirtualAddressColor ( ptr ), // color
         )
 
         IF NOT pfes[i] THEN
@@ -85,6 +79,7 @@ FN MmCreateKernelStack (
         END
 
         i += 1
+        ptr += RTL_PAGE_SIZE
     END
 
     // Acquire a pointer to the first PTE for this region.

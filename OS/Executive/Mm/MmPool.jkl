@@ -85,8 +85,6 @@ STRUCT MiPool
     Flags : UBYTE,
 END
 
-MiNonpagedPoolColor : ULONG = 0
-
 MiPoolRecords : MiPool[MM_MAXIMUM_POOL]
 
 MiPoolTable : ^MiPool[MM_MAXIMUM_POOL]
@@ -216,18 +214,13 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
     pte := MiPteAddress ( ptr )
 
     WHILE i < pages DO
-        color := KeIncrementUlong (
-            &MiNonpagedPoolColor, // ptr
-            1, // inc
-        )
-
         // Allocate a page frame to place here.
 
         pfe := MiAllocatePage (
             &MiSystemPartition, // partition
             FALSE, // zeroed
             low, // low
-            color, // color
+            MiVirtualAddressColor ( ptr ), // color
         )
 
         IF NOT pfe THEN
@@ -250,6 +243,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
         pte[i] = MiBuildPoolPte ( MiPfeToPfn ( pfe ) )
 
         i += 1
+        ptr += RTL_PAGE_SIZE
     END
 
     RETURN TRUE
