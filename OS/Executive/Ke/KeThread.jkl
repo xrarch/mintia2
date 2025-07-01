@@ -486,6 +486,8 @@ FN KiWakeThreadForSignal (
         thread^.UserInterrupt = TRUE
 
 #IF BLD_MP
+        KeMemoryBarrier ()
+
         IF thread^.Status == KI_THREAD_RUNNING AND
             thread^.CurrentMode == KE_USER_MODE THEN
 
