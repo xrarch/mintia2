@@ -345,14 +345,24 @@ FN KiSatisfyObject (
     RETURN NULLPTR
 END
 
-#MACRO KiWaitHead ( thread, ipl, alertable, waitmode, waitblocktable, waitcount, starttime, timeout ) [
+FN KiWaitCheck (
+    IN thread : ^KeThread,
+    IN ipl : UWORD,
+    IN alertable : UWORD,
+    IN waitmode : UWORD,
+    IN waitblocktable : ^KiWaitBlock,
+    IN waitcount : UWORD,
+    IN starttime : ^RtlUquad,
+    IN timeout : ^RtlUquad,
+) : OsStatus
 
-    KeAssert ( KiCurrentIpl () < KI_IPL_DPC )
+    // Ensure that everything is in order for the thread to wait, and that no
+    // events should interrupt said wait.
 
-    // Raise IPL to stop APCs from corrupting our wait state if they come in
-    // and try to wait in our context.
+    // NOTE: This was once a macro but was turned into a full function due to
+    //       Icache considerations.
 
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+@Retry
 
     // Capture the start time.
 
@@ -483,11 +493,18 @@ END
     KiSetWaitAttempt ( thread, KI_THREAD_WAIT_TRY )
 
     KiReleaseThreadElevated ( thread )
-]
 
-#MACRO KiKernelApcReceived ( timeout, starttime ) [
+    RETURN OS_STATUS_SUCCESS
+END
+
+FN KiKernelApcReceived (
+    IN timeout : ^RtlUquad,
+    IN starttime : ^RtlUquad,
+) : UWORD
+
     // A kernel APC interrupted the wait, so decrement the timeout based on how
-    // many milliseconds have transpired since the wait began.
+    // many milliseconds have transpired since the wait began. Return TRUE if
+    // the timeout is already in the past.
 
     currenttime : RtlUquad
 
@@ -495,15 +512,16 @@ END
 
     RtlSubUquadFromUquad ( &currenttime, starttime )
 
-    IF RtlUquadLtUquad ( &currenttime, timeout ) THEN
-        RtlSubUquadFromUquad ( timeout, &currenttime )
-
-    ELSE
+    IF NOT RtlUquadLtUquad ( &currenttime, timeout ) THEN
         // Timeout already expired.
 
-        RETURN OS_STATUS_WAIT_TIMEOUT
+        RETURN TRUE
     END
-]
+
+    RtlSubUquadFromUquad ( timeout, &currenttime )
+
+    RETURN FALSE
+END
 
 EXPORT FN KeWaitForObjects (
     IN waitmode : UWORD,
@@ -564,12 +582,18 @@ EXPORT FN KeWaitForObjects (
 
 @Retry
 
-    // The following function is a macro that can perform an early return.
-    // It puts us in a WAIT_TRY state and raises IPL to KI_IPL_DPC.
+    KeAssert ( KiCurrentIpl () < KI_IPL_DPC )
+
+    // Raise IPL to stop APCs from corrupting our wait state if they come in
+    // and try to wait in our context.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
 
     starttime : RtlUquad
 
-    KiWaitHead (
+    // Ensure no interrupting events are pending.
+
+    status := KiWaitCheck (
         thread, // thread
         ipl, // ipl
         alertable, // alertable
@@ -580,8 +604,13 @@ EXPORT FN KeWaitForObjects (
         timeout, // timeout
     )
 
+    IF OsError ( status ) THEN
+        // NOTE: KiWaitCheck lowered IPL before returning this error status.
+
+        RETURN status
+    END
+
     timer : ^KeTimer
-    status : OsStatus
     object : ^KiDispatchHeader
 
     waitblock = &waitblocktable[0]
@@ -782,8 +811,11 @@ EXPORT FN KeWaitForObjects (
         RETURN status
     END
 
-    IF timeout THEN
-        KiKernelApcReceived ( &capturedtimeout, &starttime )
+    IF timeout AND KiKernelApcReceived (
+        &capturedtimeout, // timeout
+        &starttime, // starttime
+    ) THEN
+        RETURN OS_STATUS_WAIT_TIMEOUT
     END
 
     GOTO Retry
@@ -806,12 +838,18 @@ EXPORT FN KeSleep (
 
 @Retry
 
-    // The following function is a macro that can perform an early return.
-    // It puts us in a WAIT_TRY state and raises IPL to KI_IPL_DPC.
+    KeAssert ( KiCurrentIpl () < KI_IPL_DPC )
+
+    // Raise IPL to stop APCs from corrupting our wait state if they come in
+    // and try to wait in our context.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
 
     starttime : RtlUquad
 
-    KiWaitHead (
+    // Ensure no interrupting events are pending.
+
+    status := KiWaitCheck (
         thread, // thread
         ipl, // ipl
         alertable, // alertable
@@ -822,7 +860,11 @@ EXPORT FN KeSleep (
         interval, // timeout
     )
 
-    status : OsStatus
+    IF OsError ( status ) THEN
+        // NOTE: KiWaitCheck lowered IPL before returning this error status.
+
+        RETURN status
+    END
 
     // Start the timeout.
     // NOTE: The timer object and the timeout wait block have been
@@ -947,7 +989,12 @@ EXPORT FN KeSleep (
         RETURN status
     END
 
-    KiKernelApcReceived ( &capturedinterval, &starttime )
+    IF KiKernelApcReceived (
+        &capturedinterval, // timeout
+        &starttime, // starttime
+    ) THEN
+        RETURN OS_STATUS_WAIT_TIMEOUT
+    END
 
     GOTO Retry
 END
@@ -988,12 +1035,18 @@ EXPORT FN KeWaitForSingleObject (
 
 @Retry
 
-    // The following function is a macro that can perform an early return.
-    // It puts us in a WAIT_TRY state and raises IPL to KI_IPL_DPC.
+    KeAssert ( KiCurrentIpl () < KI_IPL_DPC )
+
+    // Raise IPL to stop APCs from corrupting our wait state if they come in
+    // and try to wait in our context.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
 
     starttime : RtlUquad
 
-    KiWaitHead (
+    // Ensure no interrupting events are pending.
+
+    status := KiWaitCheck (
         thread, // thread
         ipl, // ipl
         alertable, // alertable
@@ -1004,8 +1057,13 @@ EXPORT FN KeWaitForSingleObject (
         timeout, // timeout
     )
 
+    IF OsError ( status ) THEN
+        // NOTE: KiWaitCheck lowered IPL before returning this error status.
+
+        RETURN status
+    END
+
     timer : ^KeTimer
-    status : OsStatus
 
     KiAcquireObjectElevated ( object )
 
@@ -1212,8 +1270,11 @@ EXPORT FN KeWaitForSingleObject (
         RETURN status
     END
 
-    IF timeout THEN
-        KiKernelApcReceived ( &capturedtimeout, &starttime )
+    IF timeout AND KiKernelApcReceived (
+        &capturedtimeout, // timeout
+        &starttime, // starttime
+    ) THEN
+        RETURN OS_STATUS_WAIT_TIMEOUT
     END
 
     GOTO Retry
