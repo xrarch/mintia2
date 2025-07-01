@@ -447,9 +447,13 @@ KiExceptionHandler:
 #IF BLD_MP
     // Set current thread as currently in usermode.
     // Do this *before* dispatching usermode interrupts, or there's a risk of
-    // missed IPIs. This field is advisory for IPI delivery.
+    // missed IPIs. This field is advisory for IPI delivery since there's no
+    // point sending an IPI to get the thread into the kernel to check its
+    // signals, if we're already there.
 
     mov  byte [s1 + KeThread_CurrentMode], KE_USER_MODE
+
+    mb
 #END
 
     // Check for pending usermode interrupt.
