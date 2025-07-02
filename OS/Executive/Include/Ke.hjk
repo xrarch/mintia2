@@ -9,11 +9,30 @@
 
 TYPE KiSpinlock : ULONG
 
-EXTERN FN KeMemoryBarrier ()
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+
+#MACRO KeMemoryBarrier () [
+    INSERTASM "mb"
+    BARRIER
+]
+
+#MACRO KeWriteMemoryBarrier () [
+    INSERTASM "wmb"
+    BARRIER
+]
+
+#MACRO KeSpinPause () [
+    INSERTASM "pause"
+    BARRIER
+]
+
+#END
 
 #ELSE
 
-#MACRO KeMemoryBarrier () []
+#MACRO KeMemoryBarrier () [ BARRIER ]
+
+#MACRO KeWriteMemoryBarrier () [ BARRIER ]
 
 #END
 
@@ -44,8 +63,6 @@ EXTERN FN KeFindResource (
 EXTERN FN KePinResource (
     IN rsrc : ^BlResource,
 )
-
-EXTERN FN KeSpinPause ()
 
 EXTERN FN KeIncrementUlong (
     IN ptr : ^ULONG,

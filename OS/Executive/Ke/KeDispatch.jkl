@@ -1034,6 +1034,8 @@ FN KiPreemptThread (
         // No longer in the idle loop.
 
         prb^.InIdleLoop = FALSE
+
+        KeWriteMemoryBarrier ()
 #END
     END
 
@@ -1546,8 +1548,11 @@ FN KiYield (
     ELSE
 #IF BLD_MP
         prb^.StealWork = TRUE
-        prb^.InIdleLoop = TRUE
         prb^.StashedCurrentThreadInfo = KiSetIdleInStash ( 0, TRUE )
+
+        prb^.InIdleLoop = TRUE
+
+        KeWriteMemoryBarrier ()
 #END
 
         // Switch to the idle thread. KiSwitchThread returns with the thread
