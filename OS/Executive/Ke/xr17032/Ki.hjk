@@ -21,6 +21,25 @@
 #DEFINE KI_CURRENT_PRB [((CAST 0xFFFFF000 TO ^KiPrb)^.RealVirtual)]
 #DEFINE KI_VIRTUAL_PRB 1
 
+#MACRO KiReleaseSpinlock ( spinlock ) [
+    BARRIER
+
+    // Memory barrier to ensure old writes are committed.
+
+    INSERTASM "wmb"
+    BARRIER
+
+    // Set spinlock un-owned.
+    
+    NOTHING (spinlock)^ = 0
+    BARRIER
+]
+
+#MACRO KiReleaseSpinlockLower ( spinlock, ipl ) [
+    KiReleaseSpinlock ( spinlock )
+    KiLowerIpl ( ipl )
+]
+
 #ELSE
 
 #DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]

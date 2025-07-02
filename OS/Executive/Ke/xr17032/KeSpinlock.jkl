@@ -119,47 +119,6 @@ KiAcquireSpinlock:
     bne  t0, .spin
     b    .retry
 
-// a0 - spinlock
-KiReleaseSpinlock:
-.global KiReleaseSpinlock
-
-    // Memory barrier to ensure old writes are committed.
-
-    wmb
-
-    // Set spinlock un-owned.
-
-    mov  long [a0], zero
-
-    ret
-
-// a0 - spinlock
-// a1 - oldipl
-KiReleaseSpinlockLower:
-.global KiReleaseSpinlockLower
-
-    // Memory barrier to ensure old writes are committed.
-
-    wmb
-
-    // Set spinlock un-owned.
-
-    mov  long [a0], zero
-
-    // Inline KiLowerIpl here.
-
-    subi t0, zero, 4096             // Acquire a pointer to the Prb.
-    mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.
-    mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
-    rsh  t2, t1, a1                 // Right shift pending by new IPL.
-    bne  t2, .dispatch              // If zero, none pending at new IPL.
-
-    ret
-
-.dispatch:
-    mov   a0, a1
-    j     KiDispatchSoftwareInterrupts
-
 ]
 
 #END
