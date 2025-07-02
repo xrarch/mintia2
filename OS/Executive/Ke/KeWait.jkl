@@ -380,44 +380,12 @@ FN KiWaitCheck (
     IN ipl : UWORD,
     IN alertable : UWORD,
     IN waitmode : UWORD,
-    IN waitblocktable : ^KiWaitBlock,
-    IN waitcount : UWORD,
-    IN starttime : ^RtlUquad,
-    IN timeout : ^RtlUquad,
 ) : OsStatus
 
     // Ensure that everything is in order for the thread to wait, and that no
     // events should interrupt said wait.
 
-    // NOTE: This was once a macro but was turned into a full function due to
-    //       Icache considerations.
-
-@Retry
-
-    // Capture the start time.
-
-    IF timeout THEN
-        KiCaptureCurrentTicks ( starttime )
-    END
-
-    // Clear timeout wait block flags field.
-
-    thread^.TimeoutWaitBlock.Flags = 0
-
-    // Set the wait values in the thread.
-
-    thread^.Alertable = alertable
-    thread^.WaitMode = waitmode
-    thread^.WaitIpl = ipl
-
-    // Store the wait block table in the thread.
-
-    thread^.WaitBlockTable = waitblocktable
-    thread^.WaitCount = waitcount
-
-    // Acquire the thread lock to check for interrupting events.
-
-    KiAcquireThreadElevated ( thread )
+    bits := thread^.PendingEventsSet
 
     // Before we start, check for events that would interrupt the wait.
 
@@ -425,9 +393,7 @@ FN KiWaitCheck (
         // IPL >= KI_IPL_APC masks out all events, but the caller can request
         // cancellation upon KAPC reception.
 
-        IF alertable == KE_CANCEL_ON_KAPC AND
-            NOT RtlEmptyList ( &thread^.KapcListHead ) THEN
-
+        IF alertable == KE_CANCEL_ON_KAPC AND bits & KI_THREAD_PENDING_KAPC THEN
             // This wait is cancelled when kernel APCs are pending.
             // This allows consumers to use custom wait cleanup logic prior to
             // the execution of pending KAPCs (in particular, the turnstile
@@ -439,17 +405,17 @@ FN KiWaitCheck (
         END
 
 #IF BLD_MP
-    ELSEIF NOT RtlEmptyList ( &thread^.KapcListHead ) THEN
+    ELSEIF bits & KI_THREAD_PENDING_KAPC THEN
         // A KAPC was enqueued between raising IPL and locking our thread, so
         // dispatch it and retry.
 
         KiReleaseThread ( thread, KI_IPL_LOW )
 
-        GOTO Retry
+        RETURN OS_STATUS_TRY_AGAIN
 #END
 
     ELSEIF waitmode == KE_USER_MODE AND
-        NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
+        bits & KI_THREAD_PENDING_LAPC THEN
 
         // There are pending lazy APCs and this is a usermode wait,
         // so dispatch them and retry.
@@ -458,7 +424,7 @@ FN KiWaitCheck (
 
         KiDispatchLazyApcQueue ( thread )
 
-        GOTO Retry
+        RETURN OS_STATUS_TRY_AGAIN
 
     ELSEIF alertable == KE_UNALERTABLE THEN
         // Wait was unalertable.
@@ -486,7 +452,7 @@ FN KiWaitCheck (
             RETURN OS_STATUS_KILLED
         END
 
-    ELSEIF NOT RtlEmptyList ( &thread^.UapcListHead ) THEN
+    ELSEIF bits & KI_THREAD_PENDING_UAPC THEN
         // There are pending usermode APCs and this is a usermode
         // wait, so interrupt the wait and cause them to be
         // dispatched upon return to userspace.
@@ -498,9 +464,7 @@ FN KiWaitCheck (
 
         RETURN OS_STATUS_USER_APC
 
-    ELSEIF thread^.SignalMask &
-        thread^.SignalAcceptMask THEN
-
+    ELSEIF bits & KI_THREAD_PENDING_SIGNAL THEN
         // There are pending signals and this is a usermode wait, so
         // interrupt the wait and cause them to be dispatched upon return
         // to usermode.
@@ -513,6 +477,68 @@ FN KiWaitCheck (
         RETURN OS_STATUS_SIGNALED
     END
 
+    RETURN 0
+END
+
+FN KiCaptureCurrentTicksFunc (
+    IN time : ^RtlUquad,
+)
+
+    // Capture current ticks, out-of-line.
+
+    KiCaptureCurrentTicks ( time )
+END
+
+#MACRO KiRaiseIplForWait ( ipl ) [
+    KeAssert ( KiCurrentIpl () < KI_IPL_DPC )
+
+    // Raise IPL to stop APCs from corrupting our wait state if they come in
+    // and try to wait in our context.
+
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+]
+
+#MACRO KiWaitHead ( thread, ipl, alertable, waitmode, waitblocktable, waitcount, status ) [
+    // Clear timeout wait block flags field.
+
+    thread^.TimeoutWaitBlock.Flags = 0
+
+    // Set the wait values in the thread.
+
+    thread^.Alertable = alertable
+    thread^.WaitMode = waitmode
+    thread^.WaitIpl = ipl
+
+    // Store the wait block table in the thread.
+
+    thread^.WaitBlockTable = waitblocktable
+    thread^.WaitCount = waitcount
+
+    // Acquire the thread lock to check for interrupting events.
+
+    KiAcquireThreadElevated ( thread )
+
+    IF thread^.PendingEventsSet THEN
+        // There are pending events that need checking.
+
+        status = KiWaitCheck (
+            thread, // thread
+            ipl, // ipl
+            alertable, // alertable
+            waitmode, // waitmode
+        )
+
+        IF status THEN
+            // KiWaitCheck already released the thread and lowered IPL.
+
+            IF status == OS_STATUS_TRY_AGAIN THEN
+                GOTO Retry
+            END
+
+            RETURN status
+        END
+    END
+
     // Set the thread to wait-try.
     //
     // Note that this wait-try tactic was derived from an explanation given
@@ -522,9 +548,7 @@ FN KiWaitCheck (
     KiSetWaitAttempt ( thread, KI_THREAD_WAIT_TRY )
 
     KiReleaseThreadElevated ( thread )
-
-    RETURN OS_STATUS_SUCCESS
-END
+]
 
 FN KiKernelApcReceived (
     IN timeout : ^RtlUquad,
@@ -611,33 +635,30 @@ EXPORT FN KeWaitForObjects (
 
 @Retry
 
-    KeAssert ( KiCurrentIpl () < KI_IPL_DPC )
-
-    // Raise IPL to stop APCs from corrupting our wait state if they come in
-    // and try to wait in our context.
-
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    KiRaiseIplForWait ( ipl )
 
     starttime : RtlUquad
 
-    // Ensure no interrupting events are pending.
+    // Capture the start time.
 
-    status := KiWaitCheck (
+    IF timeout THEN
+        KiCaptureCurrentTicksFunc ( &starttime )
+    END
+
+    // The following function is a macro that can perform an early return.
+    // It puts us in a WAIT_TRY state and raises IPL to KI_IPL_DPC.
+
+    status : OsStatus
+
+    KiWaitHead (
         thread, // thread
         ipl, // ipl
         alertable, // alertable
         waitmode, // waitmode
         waitblocktable, // waitblocktable
         objectcount, // waitcount
-        &starttime, // starttime
-        timeout, // timeout
+        status, // status
     )
-
-    IF OsError ( status ) THEN
-        // NOTE: KiWaitCheck lowered IPL before returning this error status.
-
-        RETURN status
-    END
 
     timer : ^KeTimer
     object : ^KiDispatchHeader
@@ -867,33 +888,28 @@ EXPORT FN KeSleep (
 
 @Retry
 
-    KeAssert ( KiCurrentIpl () < KI_IPL_DPC )
-
-    // Raise IPL to stop APCs from corrupting our wait state if they come in
-    // and try to wait in our context.
-
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    KiRaiseIplForWait ( ipl )
 
     starttime : RtlUquad
 
-    // Ensure no interrupting events are pending.
+    // Capture the start time.
 
-    status := KiWaitCheck (
+    KiCaptureCurrentTicks ( &starttime )
+
+    // The following function is a macro that can perform an early return.
+    // It puts us in a WAIT_TRY state and raises IPL to KI_IPL_DPC.
+
+    status : OsStatus
+
+    KiWaitHead (
         thread, // thread
         ipl, // ipl
         alertable, // alertable
         waitmode, // waitmode
         NULLPTR, // waitblocktable
         0, // waitcount
-        &starttime, // starttime
-        interval, // timeout
+        status, // status
     )
-
-    IF OsError ( status ) THEN
-        // NOTE: KiWaitCheck lowered IPL before returning this error status.
-
-        RETURN status
-    END
 
     // Start the timeout.
     // NOTE: The timer object and the timeout wait block have been
@@ -1041,7 +1057,7 @@ EXPORT FN KeWaitForSingleObject (
 
     thread := KeCurrentThread ()
 
-    singlewaitblock : KiWaitBlock
+    singlewaitblock := &thread^.WaitBlocks[0]
 
     capturedtimeout : RtlUquad
 
@@ -1057,40 +1073,37 @@ EXPORT FN KeWaitForSingleObject (
     // while enqueuing wait blocks to the objects, clearing the Flags field
     // is racey with other processors satisfying object waits.
 
-    singlewaitblock.Thread = thread
-    singlewaitblock.Object = object
-    singlewaitblock.WakeStatus = 0
-    singlewaitblock.Flags = 0
+    singlewaitblock^.Thread = thread
+    singlewaitblock^.Object = object
+    singlewaitblock^.WakeStatus = 0
+    singlewaitblock^.Flags = 0
 
 @Retry
 
-    KeAssert ( KiCurrentIpl () < KI_IPL_DPC )
-
-    // Raise IPL to stop APCs from corrupting our wait state if they come in
-    // and try to wait in our context.
-
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    KiRaiseIplForWait ( ipl )
 
     starttime : RtlUquad
 
-    // Ensure no interrupting events are pending.
+    // Capture the start time.
 
-    status := KiWaitCheck (
+    IF timeout THEN
+        KiCaptureCurrentTicksFunc ( &starttime )
+    END
+
+    // The following function is a macro that can perform an early return.
+    // It puts us in a WAIT_TRY state and raises IPL to KI_IPL_DPC.
+
+    status : OsStatus
+
+    KiWaitHead (
         thread, // thread
         ipl, // ipl
         alertable, // alertable
         waitmode, // waitmode
-        &singlewaitblock, // waitblocktable
+        singlewaitblock, // waitblocktable
         1, // waitcount
-        &starttime, // starttime
-        timeout, // timeout
+        status, // status
     )
-
-    IF OsError ( status ) THEN
-        // NOTE: KiWaitCheck lowered IPL before returning this error status.
-
-        RETURN status
-    END
 
     timer : ^KeTimer
 
@@ -1150,7 +1163,7 @@ EXPORT FN KeWaitForSingleObject (
 
     RtlInsertAtTailList (
         &object^.WaitListHead, // head
-        &singlewaitblock.Entry, // entry
+        &singlewaitblock^.Entry, // entry
     )
 
     // Increment waiter count.
@@ -1249,7 +1262,7 @@ EXPORT FN KeWaitForSingleObject (
 
         // Dequeue the single wait block.
 
-        KiDequeueWaitBlock ( &singlewaitblock )
+        KiDequeueWaitBlock ( singlewaitblock )
 
         // Set to not waiting.
 

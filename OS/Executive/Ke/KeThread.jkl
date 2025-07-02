@@ -182,7 +182,6 @@ FN KeInitializeThread (
 
 #IF BLD_MP
     KiInitializeSpinlock ( &thread^.Spinlock )
-    KiInitializeSpinlock ( &thread^.ApcSpinlock )
 
     thread^.WaitAttempt = KI_THREAD_WAIT_NONE
 
@@ -207,6 +206,8 @@ FN KeInitializeThread (
 
     thread^.UserInterrupt = FALSE
     thread^.UserApcTriggered = FALSE
+
+    thread^.PendingEventsSet = 0
 
     // Initialize abort state.
 
@@ -590,6 +591,14 @@ FN KeMaskSignalThread (
         thread^.SignalAcceptMask &= ~(1 << signal)
     END
 
+    // Set or clear the pending event bit if necessary.
+
+    IF thread^.SignalMask & thread^.SignalAcceptMask != 0 THEN
+        thread^.PendingEventsSet |= KI_THREAD_PENDING_SIGNAL
+    ELSE
+        thread^.PendingEventsSet &= ~KI_THREAD_PENDING_SIGNAL
+    END
+
     KiReleaseThread ( thread, ipl )
 
     RETURN enabled
@@ -626,6 +635,12 @@ FN KeSignalThread (
     // OR the new signal bit in.
 
     thread^.SignalMask |= (1 << signal)
+
+    // Set the pending event bit.
+
+    IF thread^.SignalMask & thread^.SignalAcceptMask != 0 THEN
+        thread^.PendingEventsSet |= KI_THREAD_PENDING_SIGNAL
+    END
 
     // Check if the thread needs to be kicked in the pants.
 
@@ -822,6 +837,12 @@ FN KiDispatchSignal (
     // Mask off the signal.
 
     thread^.SignalAcceptMask &= ~(1 << signal)
+
+    // Clear the pending signal bit if necessary.
+
+    IF thread^.SignalMask & thread^.SignalAcceptMask == 0 THEN
+        thread^.PendingEventsSet &= ~KI_THREAD_PENDING_SIGNAL
+    END
 
     KiReleaseThread ( thread, ipl )
 

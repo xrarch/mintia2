@@ -388,28 +388,6 @@ EXTERN FN KiReleaseLock (
     IN lock : ^KeLock,
 )
 
-#DEFINE KI_PUSHLOCK_LOCKED 0x1
-#DEFINE KI_PUSHLOCK_WAITING 0x2
-#DEFINE KI_PUSHLOCK_WAKING 0x4
-#DEFINE KI_PUSHLOCK_MULTIPLE_SHARED 0x8
-#DEFINE KI_PUSHLOCK_SHARE_INC 0x10
-#DEFINE KI_PUSHLOCK_PTR_BITS 0xF
-#DEFINE KI_PUSHLOCK_SHARE_SHIFT 4
-
-EXTERN FN KiAcquirePushlockShared (
-    IN pushlock : ^KePushlock,
-    IN oldipl : UWORD,
-) : UWORD
-
-EXTERN FN KiAcquirePushlockExclusive (
-    IN pushlock : ^KePushlock,
-    IN oldipl : UWORD,
-) : UWORD
-
-EXTERN FN KiReleasePushlock (
-    IN pushlock : ^KePushlock,
-)
-
 EXTERN FN KiDispatchKernelApcQueue (
     IN current : ^KeThread,
 )
@@ -894,3 +872,8 @@ EXTERN FN KiReadyOutswappedThread (
 EXTERN FN KiReadyThreadOutswappedProcess (
     IN thread : ^KeThread,
 ) : UWORD
+
+#DEFINE KI_THREAD_PENDING_KAPC 1
+#DEFINE KI_THREAD_PENDING_UAPC 2
+#DEFINE KI_THREAD_PENDING_LAPC 4
+#DEFINE KI_THREAD_PENDING_SIGNAL 8
