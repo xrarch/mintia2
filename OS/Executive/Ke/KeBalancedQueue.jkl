@@ -62,7 +62,9 @@ FN KiDisassociateFromBalancedQueue (
 
     oldqueue := thread^.BalancedQueue
 
-    ipl := KiAcquireQueueRemoval ( oldqueue )
+    KiComputeQueueRemovalLockAddress ( lock, oldqueue )
+
+    ipl := KiAcquireQueueRemoval ( lock )
 
     // Since we acquired the queue removal lock, we might have gotten
     // removed from the old queue, so check that we're still associated.
@@ -79,7 +81,7 @@ FN KiDisassociateFromBalancedQueue (
         thread^.BalancedQueue = NULLPTR
     END
 
-    KiReleaseQueueRemoval ( oldqueue, ipl )
+    KiReleaseQueueRemoval ( lock, ipl )
 END
 
 EXPORT FN KeInitializeBalancedQueue (
@@ -270,7 +272,9 @@ FN KeRundownBalancedQueue (
     // would imply a reference, and as it is being deleted, there must be zero
     // references. We have to disassociate all threads from this queue.
 
-    ipl := KiAcquireQueueRemoval ( queue )
+    KiComputeQueueRemovalLockAddress ( lock, queue )
+
+    ipl := KiAcquireQueueRemoval ( lock )
 
     KiAcquireObjectElevated ( &queue^.Header )
 
@@ -290,5 +294,5 @@ FN KeRundownBalancedQueue (
 
     KiReleaseObjectElevated ( &queue^.Header )
 
-    KiReleaseQueueRemoval ( queue, ipl )
+    KiReleaseQueueRemoval ( lock, ipl )
 END

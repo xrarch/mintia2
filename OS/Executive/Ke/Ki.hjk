@@ -640,20 +640,24 @@ EXTERN KiQueueRemovalLocks : KiSpinlock[KI_QUEUE_REMOVAL_LOCKS]
     (((queue) >> KI_QUEUE_SHIFT) & (KI_QUEUE_REMOVAL_LOCKS - 1))
 ]
 
-#MACRO KiAcquireQueueRemoval ( queue ) [
-    KiAcquireSpinlockRaise ( &KiQueueRemovalLocks[KiQueueLockIndex(queue)] )
+#MACRO KiComputeQueueRemovalLockAddress ( lock, queue ) [
+    lock := &KiQueueRemovalLocks[KiQueueLockIndex(queue)]
 ]
 
-#MACRO KiReleaseQueueRemoval ( queue, ipl ) [
-    KiReleaseSpinlockLower ( &KiQueueRemovalLocks[KiQueueLockIndex(queue)], ipl )
+#MACRO KiAcquireQueueRemoval ( lock ) [
+    KiAcquireSpinlockRaise ( lock )
 ]
 
-#MACRO KiAcquireQueueRemovalElevated ( queue ) [
-    KiAcquireSpinlock ( &KiQueueRemovalLocks[KiQueueLockIndex(queue)] )
+#MACRO KiReleaseQueueRemoval ( lock, ipl ) [
+    KiReleaseSpinlockLower ( lock, ipl )
 ]
 
-#MACRO KiReleaseQueueRemovalElevated ( queue ) [
-    KiReleaseSpinlock ( &KiQueueRemovalLocks[KiQueueLockIndex(queue)] )
+#MACRO KiAcquireQueueRemovalElevated ( lock ) [
+    KiAcquireSpinlock ( lock )
+]
+
+#MACRO KiReleaseQueueRemovalElevated ( lock ) [
+    KiReleaseSpinlock ( lock )
 ]
 
 #MACRO KiAcquireThread ( thread ) [
@@ -713,17 +717,19 @@ EXTERN KiWorkBalanceDpc : KeDpc
 
 #MACRO KiReleaseObjectElevated ( object ) []
 
-#MACRO KiAcquireQueueRemoval ( queue ) [
+#MACRO KiComputeQueueRemovalLockAddress ( lock, queue ) []
+
+#MACRO KiAcquireQueueRemoval ( lock ) [
     KiRaiseIpl ( KI_IPL_DPC )
 ]
 
-#MACRO KiReleaseQueueRemoval ( queue, ipl ) [
+#MACRO KiReleaseQueueRemoval ( lock, ipl ) [
     KiLowerIpl ( ipl )
 ]
 
-#MACRO KiAcquireQueueRemovalElevated ( queue ) []
+#MACRO KiAcquireQueueRemovalElevated ( lock ) []
 
-#MACRO KiReleaseQueueRemovalElevated ( queue ) []
+#MACRO KiReleaseQueueRemovalElevated ( lock ) []
 
 #MACRO KiAcquireThread ( thread ) [
     KiRaiseIpl ( KI_IPL_DPC )

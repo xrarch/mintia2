@@ -51,7 +51,9 @@ FN KiIndicateActiveFunc (
 
     // Long path.
 
-    KiAcquireQueueRemovalElevated ( queue )
+    KiComputeQueueRemovalLockAddress ( lock, queue )
+
+    KiAcquireQueueRemovalElevated ( lock )
 
 #IF BLD_MP
     IF thread^.BalancedQueue THEN
@@ -65,7 +67,7 @@ FN KiIndicateActiveFunc (
     END
 #END
 
-    KiReleaseQueueRemovalElevated ( queue )
+    KiReleaseQueueRemovalElevated ( lock )
 END
 
 #MACRO KiIndicateActive ( thread, queue ) [
@@ -89,7 +91,9 @@ FN KiIndicateDeactivatedFunc (
 
     // Long path.
 
-    KiAcquireQueueRemovalElevated ( queue )
+    KiComputeQueueRemovalLockAddress ( lock, queue )
+
+    KiAcquireQueueRemovalElevated ( lock )
 
 #IF BLD_MP
     IF (thread)^.BalancedQueue THEN
@@ -103,7 +107,7 @@ FN KiIndicateDeactivatedFunc (
     END
 #END
 
-    KiReleaseQueueRemovalElevated ( queue )
+    KiReleaseQueueRemovalElevated ( lock )
 END
 
 #MACRO KiIndicateDeactivated ( thread, queue ) [
