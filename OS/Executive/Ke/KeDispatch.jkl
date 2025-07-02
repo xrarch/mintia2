@@ -18,6 +18,10 @@
     KiReleaseSpinlock ( &(prb)^.ReadyQueueLock )
 ]
 
+#MACRO KiReleaseReadyQueueAndThreadElevated ( prb, thread ) [
+    KiReleaseTwoSpinlocks ( &(prb)^.ReadyQueueLock, &(thread)^.Spinlock )
+]
+
 #MACRO KiWaitForSwitch ( thread ) [
     // Wait for the next thread to no longer be switching off his stack.
 
@@ -43,6 +47,8 @@
 #MACRO KiAcquireReadyQueueElevated ( prb ) []
 
 #MACRO KiReleaseReadyQueueElevated ( prb ) []
+
+#MACRO KiReleaseReadyQueueAndThreadElevated ( prb, thread ) []
 
 #MACRO KiWaitForSwitch ( thread ) []
 
@@ -1508,9 +1514,7 @@ FN KiQuantumEnd (
         END
     END
 
-    KiReleaseReadyQueueElevated ( prb )
-
-    KiReleaseThreadElevated ( current )
+    KiReleaseReadyQueueAndThreadElevated ( prb, current )
 END
 
 FN KiYield (
@@ -1624,11 +1628,9 @@ FN KiMoveThread (
 
     // Release the destination Prb.
 
-    KiReleaseReadyQueueElevated ( destprb )
-
     // Release the thread.
 
-    KiReleaseThreadElevated ( thread )
+    KiReleaseReadyQueueAndThreadElevated ( destprb, thread )
 
     RETURN TRUE
 END

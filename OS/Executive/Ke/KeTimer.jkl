@@ -26,19 +26,16 @@
     KiAcquireSpinlockRaise ( &(prb)^.TimerTreeLock )
 ]
 
-#MACRO KiReleaseOtherTimerTree ( prb, ipl ) [
-    KiReleaseSpinlockLower (
-        &(prb)^.TimerTreeLock, // spinlock
-        ipl, // oldipl
-    )
-]
-
 #MACRO KiAcquireTimerTreeElevated ( prb ) [
     KiAcquireSpinlock ( &(prb)^.TimerTreeLock )
 ]
 
 #MACRO KiReleaseTimerTreeElevated ( prb ) [
     KiReleaseSpinlock ( &(prb)^.TimerTreeLock )
+]
+
+#MACRO KiReleaseTimerAndTree ( timer, prb, ipl ) [
+    KiReleaseTwoSpinlocksLower ( &(timer)^.Header.Spinlock, &(prb)^.TimerTreeLock, ipl )
 ]
 
 #ELSE
@@ -56,7 +53,7 @@
     KiRaiseIpl ( KI_IPL_DPC )
 ]
 
-#MACRO KiReleaseOtherTimerTree ( prb, ipl ) [
+#MACRO KiReleaseTimerAndTree ( timer, prb, ipl ) [
     KiLowerIpl ( ipl )
 ]
 
@@ -117,9 +114,7 @@ EXPORT FN KeEnqueueTimer (
     IF timer^.EnqueuedTo THEN
         // It was already inserted in a timer tree.
 
-        KiReleaseObjectElevated ( &timer^.Header )
-
-        KiReleaseTimerTree ( prb, ipl )
+        KiReleaseTimerAndTree ( timer, prb, ipl )
 
         RETURN FALSE
     END
@@ -159,9 +154,7 @@ EXPORT FN KeEnqueueTimer (
 
         timer^.EnqueuedTo = NULLPTR
 
-        KiReleaseObjectElevated ( &timer^.Header )
-
-        KiReleaseTimerTree ( prb, ipl )
+        KiReleaseTimerAndTree ( timer, prb, ipl )
 
         RETURN FALSE
     END
@@ -196,9 +189,7 @@ EXPORT FN KeEnqueueTimer (
 
     timer^.Header.SignalCount = 0
 
-    KiReleaseObjectElevated ( &timer^.Header )
-
-    KiReleaseTimerTree ( prb, ipl )
+    KiReleaseTimerAndTree ( timer, prb, ipl )
 
     RETURN TRUE
 END
@@ -229,7 +220,7 @@ EXPORT FN KeDequeueTimer (
         // It changed while we were checking.
         // Retry.
 
-        KiReleaseOtherTimerTree ( trgprb, ipl )
+        KiReleaseTimerTree ( trgprb, ipl )
 
         GOTO Retry
     END
@@ -252,11 +243,9 @@ EXPORT FN KeDequeueTimer (
 
     // Release the timer's object lock.
 
-    KiReleaseObjectElevated ( &timer^.Header )
-
     // Release the timer tree lock.
 
-    KiReleaseOtherTimerTree ( trgprb, ipl )
+    KiReleaseTimerAndTree ( timer, trgprb, ipl )
 END
 
 EXPORT FN KeResetTimer (

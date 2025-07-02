@@ -46,6 +46,10 @@ KiTurnstileListHead : ^KiTurnstile = NULLPTR
     KiReleaseSpinlock ( &(turnstile)^.Spinlock )
 ]
 
+#MACRO KiReleaseTurnstileAndThreadElevated ( turnstile, thread ) [
+    KiReleaseTwoSpinlocks ( &(turnstile)^.Spinlock, &(thread)^.Spinlock )
+]
+
 KiTurnstileListLock : KiSpinlock = KI_INITIAL_SPINLOCK
 
 #MACRO KiAcquireTurnstileList () [
@@ -73,6 +77,8 @@ KiTurnstileListLock : KiSpinlock = KI_INITIAL_SPINLOCK
 #MACRO KiAcquireTurnstileElevated ( turnstile ) []
 
 #MACRO KiReleaseTurnstileElevated ( turnstile ) []
+
+#MACRO KiReleaseTurnstileAndThreadElevated ( turnstile, thread ) []
 
 #MACRO KiAcquireTurnstileList () [
     KiRaiseIpl ( KI_IPL_DPC )
@@ -593,9 +599,7 @@ FN KiBlockOnLock (
             &thread^.TurnstileEntry, // entry
         )
 
-        KiReleaseTurnstileElevated ( turnstile )
-
-        KiReleaseThreadElevated ( thread )
+        KiReleaseTurnstileAndThreadElevated ( turnstile, thread )
 
         // Acquire the owning thread's spinlock and release the chain.
 
@@ -681,9 +685,7 @@ FN KiBlockOnLock (
             &thread^.TurnstileEntry, // entry
         )
 
-        KiReleaseTurnstileElevated ( turnstile )
-
-        KiReleaseThreadElevated ( thread )
+        KiReleaseTurnstileAndThreadElevated ( turnstile, thread )
     END
 
     // Make sure we didn't magically get a turnstile back.

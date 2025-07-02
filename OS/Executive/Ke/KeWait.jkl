@@ -44,6 +44,30 @@
     KiReleaseObjectElevated ( object )
 ]
 
+FN KiIndicateActiveFunc (
+    IN thread : ^KeThread,
+    IN queue : ^KeBalancedQueue,
+)
+
+    // Long path.
+
+    KiAcquireQueueRemovalElevated ( queue )
+
+#IF BLD_MP
+    IF thread^.BalancedQueue THEN
+#END
+        KiAcquireObjectElevated ( &queue^.Header )
+
+        queue^.ActiveThreadCount += 1
+
+        KiReleaseObjectElevated ( &queue^.Header )
+#IF BLD_MP
+    END
+#END
+
+    KiReleaseQueueRemovalElevated ( queue )
+END
+
 #MACRO KiIndicateActive ( thread, queue ) [
     // If we're associated with a balanced queue, we have to indicate that we've
     // awoken.
@@ -51,46 +75,48 @@
     IF queue THEN
         // Indicate that we're active again.
 
-        KiAcquireQueueRemovalElevated ( queue )
-
-#IF BLD_MP
-        IF (thread)^.BalancedQueue THEN
-#END
-            KiAcquireObjectElevated ( &queue^.Header )
-
-            queue^.ActiveThreadCount += 1
-
-            KiReleaseObjectElevated ( &queue^.Header )
-#IF BLD_MP
-        END
-#END
-
-        KiReleaseQueueRemovalElevated ( queue )
+        KiIndicateActiveFunc (
+            thread, // thread
+            queue, // queue
+        )
     END
 ]
+
+FN KiIndicateDeactivatedFunc (
+    IN thread : ^KeThread,
+    IN queue : ^KeBalancedQueue,
+)
+
+    // Long path.
+
+    KiAcquireQueueRemovalElevated ( queue )
+
+#IF BLD_MP
+    IF (thread)^.BalancedQueue THEN
+#END
+        KiAcquireObjectElevated ( &queue^.Header )
+
+        KiWakeBalancedQueue ( queue )
+
+        KiReleaseObjectElevated ( &queue^.Header )
+#IF BLD_MP
+    END
+#END
+
+    KiReleaseQueueRemovalElevated ( queue )
+END
 
 #MACRO KiIndicateDeactivated ( thread, queue ) [
     // If we're associated with a balanced queue, we have to indicate that we're
     // blocking.
 
     IF queue THEN
-        // Indicate that we're active again.
+        // Indicate that we're deactivated again.
 
-        KiAcquireQueueRemovalElevated ( queue )
-
-#IF BLD_MP
-        IF (thread)^.BalancedQueue THEN
-#END
-            KiAcquireObjectElevated ( &queue^.Header )
-
-            KiWakeBalancedQueue ( queue )
-
-            KiReleaseObjectElevated ( &queue^.Header )
-#IF BLD_MP
-        END
-#END
-
-        KiReleaseQueueRemovalElevated ( queue )
+        KiIndicateDeactivatedFunc (
+            thread, // thread
+            queue, // queue
+        )
     END
 ]
 

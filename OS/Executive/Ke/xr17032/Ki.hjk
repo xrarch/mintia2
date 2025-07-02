@@ -35,8 +35,28 @@
     BARRIER
 ]
 
+#MACRO KiReleaseTwoSpinlocks ( spinlock1, spinlock2 ) [
+    BARRIER
+
+    // Memory barrier to ensure old writes are committed.
+
+    INSERTASM "wmb"
+    BARRIER
+
+    // Set spinlock un-owned.
+    
+    NOTHING (spinlock1)^ = 0
+    NOTHING (spinlock2)^ = 0
+    BARRIER
+]
+
 #MACRO KiReleaseSpinlockLower ( spinlock, ipl ) [
     KiReleaseSpinlock ( spinlock )
+    KiLowerIpl ( ipl )
+]
+
+#MACRO KiReleaseTwoSpinlocksLower ( spinlock1, spinlock2, ipl ) [
+    KiReleaseTwoSpinlocks ( spinlock1, spinlock2 )
     KiLowerIpl ( ipl )
 ]
 
