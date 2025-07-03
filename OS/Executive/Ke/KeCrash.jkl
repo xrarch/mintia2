@@ -234,22 +234,30 @@ FN KiDoCrashPrints (
 
     procname := "?"
     thrdname := "?"
+    attprocname := "?"
 
     prb := KI_CURRENT_PRB
 
     IF prb^.CurrentThread THEN
         thrdname = &prb^.CurrentThread^.Name[0]
-        procname = &prb^.CurrentThread^.Process^.Name[0]
+        procname = &prb^.CurrentThread^.ActualProcess^.Name[0]
+
+        IF prb^.CurrentThread^.ActualProcess != prb^.CurrentThread^.Process THEN
+            attprocname = &prb^.CurrentThread^.Process^.Name[0]
+        ELSE
+            attprocname = "N/A"
+        END
     END
 
     RtlPrint (
-        "%s BL=%u IPL=%u CPU=%u [%s, %s]\n",
+        "%s BL=%u IPL=%u CPU=%u [%s, %s, %s]\n",
         PLATFORM_FULL_NAME_STR,
         BLD_BASE_LEVEL,
         prb^.Ipl,
         prb^.Id,
         procname,
         thrdname,
+        attprocname,
     )
 
     RtlPrint ( "*** STOP: " )
