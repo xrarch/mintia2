@@ -295,28 +295,6 @@ STRUCT KiPrb
     IplTimes : RtlUquad[KI_IPL_MAX],
 END
 
-// KiRaiseIpl and KiLowerIpl may only be used to move between the software IPLs:
-//
-//  o  KI_IPL_DPC
-//  o  KI_IPL_APC
-//  o  KI_IPL_LOW
-//
-// With this in mind, they can be implemented quite efficiently as macros,
-// provided direct access to the Prb is sane across thread migration on this
-// architecture.
-//
-// If it is not, these routines are written as short assembly routines elsewhere
-// so that they can disable interrupts briefly while holding a pointer to the
-// current Prb.
-//
-// Direct access to the Prb is always sane if this is a uniprocessor build.
-// Otherwise, it's sane if the architecture provides a way to wire the Prb into
-// the same address across all cores. If neither of the above hold, it's insane!
-
-EXTERN FN KiRaiseIpl (
-    IN newipl : UWORD,
-) : UWORD
-
 EXTERN FN KiLowerIpl (
     IN newipl : UWORD,
 )
