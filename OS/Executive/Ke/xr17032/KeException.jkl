@@ -746,8 +746,7 @@ KiSwitchMapCode:
     la   t0, (0xB02C0000 >> 12)
     mtcr dtbtag, t0
 
-    rshi t0, a0, 12
-    lshi t0, t0, 5
+    lshi t0, a0, 5
     ori  t0, t0, 0x17
     mtcr dtbpte, t0
 
@@ -884,7 +883,7 @@ FN KiSwitchAddressSpace (
         // for the system address space.
 
         KiSwitchMap (
-            process^.PageDirectoryPfn << 12, // pgtb
+            process^.PageDirectoryPfn, // pgtb
             0, // asid
         )
 
@@ -940,7 +939,7 @@ FN KiSwitchAddressSpace (
     // Perform the low-level address space switch.
 
     KiSwitchMap (
-        process^.PageDirectoryPfn << 12, // pgtb
+        process^.PageDirectoryPfn, // pgtb
         asidentry^.Asid, // asid
     )
 END
