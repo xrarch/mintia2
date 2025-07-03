@@ -90,6 +90,8 @@ FN KiJumpIntoIdleThread (
     prb^.CurrentThread = &prb^.IdleThread
     prb^.KernelStackTop = prb^.IdleThread.KernelStackTop
 
+    KiSetCurrentThreadForProcessor ( &prb^.IdleThread )
+
     // Switch into our idle thread.
 
     KiJumpIntoThread ( &prb^.IdleThread )
@@ -260,6 +262,8 @@ FN KiSwitchThread (
 
     prb^.CurrentThread = thread
     prb^.KernelStackTop = thread^.KernelStackTop
+
+    KiSetCurrentThreadForProcessor ( thread )
 
     // Note that KiSwitchContext releases the old thread's lock.
     // It is not reacquired before switching back in.

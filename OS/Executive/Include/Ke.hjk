@@ -5,39 +5,21 @@
 #INCLUDE "<ll>/System/OsStatus.hjk"
 #INCLUDE "<ll>/System/OsContext.hjk"
 
-#IF BLD_MP
-
 TYPE KiSpinlock : ULONG
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
+    #INCLUDE "KeXr17032.hjk"
 
-#MACRO KeMemoryBarrier () [
-    BARRIER
-    INSERTASM "mb"
-    BARRIER
-]
-
-#MACRO KeWriteMemoryBarrier () [
-    BARRIER
-    INSERTASM "wmb"
-    BARRIER
-]
-
-#MACRO KeSpinPause () [
-    BARRIER
-    INSERTASM "pause"
-    BARRIER
-]
-
-#END
+#ELSEIF ( STRCMP ARCHITECTURE "fox32" )
+    #INCLUDE "KeFox32.hjk"
 
 #ELSE
-
-#MACRO KeMemoryBarrier () [ BARRIER ]
-
-#MACRO KeWriteMemoryBarrier () [ BARRIER ]
-
+    #ERROR "Unknown architecture"
 #END
+
+#MACRO KeCurrentProcess () [
+    KeCurrentThread ()^.Process
+]
 
 STRUCT KeLock
     Ptr : UWORD,
@@ -209,10 +191,6 @@ FNPTR KeDebuggerEntryF (
 )
 
 EXTERN KeDebuggerEntry : KeDebuggerEntryF
-
-EXTERN FN KeCurrentThread () : ^KeThread
-
-EXTERN FN KeCurrentProcess () : ^KeProcess
 
 FNPTR KeDpcF (
     IN dpc : ^KeDpc,

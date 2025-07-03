@@ -1,0 +1,33 @@
+//
+// Architecture-specific part of the exported Ke.hjk header file.
+//
+
+#MACRO KeMemoryBarrier () [
+    BARRIER
+    INSERTASM "mb"
+    BARRIER
+]
+
+#MACRO KeWriteMemoryBarrier () [
+    BARRIER
+    INSERTASM "wmb"
+    BARRIER
+]
+
+#MACRO KeSpinPause () [
+    BARRIER
+    INSERTASM "pause"
+    BARRIER
+]
+
+// The current thread pointer is stashed in the final 4 bytes of the Prb for
+// rapid access. This works on XR/17032 MP systems because the Prb is a
+// per-processor mapping maintained by a wired TB entry.
+
+#MACRO KeCurrentThread () [
+    ((CAST 0xFFFFFFFC TO ^^KeThread)^)
+]
+
+#MACRO KiSetCurrentThreadForProcessor ( thread ) [
+    NOTHING (CAST 0xFFFFFFFC TO ^^KeThread)[0] = (thread)
+]
