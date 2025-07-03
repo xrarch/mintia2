@@ -140,8 +140,8 @@ KiCompareSwapUlongAbort:
 KeAcquireApcLockShared:
 .export KeAcquireApcLockShared
 
-    movz.8 a3, [(0xFFFFF000 + KiPrb_Ipl)]
-    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], KI_IPL_APC
+    movz.8 a3, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
+    mov.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], KI_IPL_APC
 
 KiAcquireApcLockSharedStart:
 .global KiAcquireApcLockSharedStart
@@ -169,7 +169,7 @@ KiAcquireLockSharedEnd:
     ret
 
 KiAcquireLockSharedSlow:
-    movz.8 a1, [(0xFFFFF000 + KiPrb_Ipl)]
+    movz.8 a1, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
     jmp  KiAcquireLockShared
 
 #MACRO KiAcquireLockExclusiveLoop ( slow ) [
@@ -184,10 +184,10 @@ KiAcquireLockSharedSlow:
 KeAcquireApcLockExclusive:
 .export KeAcquireApcLockExclusive
 
-    movz.8 a3, [(0xFFFFF000 + KiPrb_Ipl)]
-    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], KI_IPL_APC
+    movz.8 a3, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
+    mov.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], KI_IPL_APC
 
-    mov  t1, [(0xFFFFF000 + KiPrb_CurrentThread)]
+    mov  t1, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
     or   t1, KI_LOCK_WRITE_LOCKED
 
 KiAcquireApcLockExclusiveStart:
@@ -209,7 +209,7 @@ KiAcquireApcLockExclusiveSlow:
 KeAcquireLockExclusive:
 .export KeAcquireLockExclusive
 
-    mov  t1, [(0xFFFFF000 + KiPrb_CurrentThread)]
+    mov  t1, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
     or   t1, KI_LOCK_WRITE_LOCKED
 
 KiAcquireLockExclusiveStart:
@@ -223,7 +223,7 @@ KiAcquireLockExclusiveEnd:
     ret
 
 KiAcquireLockExclusiveSlow:
-    movz.8 a1, [(0xFFFFF000 + KiPrb_Ipl)]
+    movz.8 a1, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
     jmp  KiAcquireLockExclusive
 
 // Release
@@ -287,9 +287,9 @@ KeReleaseApcLock:
 
     // The lock is APC-safe, so lower IPL.
 
-    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], a1
+    mov.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], a1
 
-    mov  t0, [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)]
+    mov  t0, [(KI_CURRENT_PRB_ADDR + KiPrb_PendingSoftwareInterrupts)]
     srl  t0, a1
     ifnz rjmp KeReleaseApcLockDispatch
 
@@ -313,9 +313,9 @@ KiReleaseApcLockSlow:
 
     // The lock is APC-safe, so lower IPL.
 
-    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], a1
+    mov.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], a1
 
-    mov  t0, [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)]
+    mov  t0, [(KI_CURRENT_PRB_ADDR + KiPrb_PendingSoftwareInterrupts)]
     srl  t0, a1
     ifnz rjmp KeReleaseApcLockDispatch
 

@@ -3,10 +3,12 @@
 //
 
 // The Prb is mapped in the same location on all processors on XR/17032 via
-// a wired entry in each DTB. This location is -4096 in order to allow the
+// a wired entry in each DTB. This location is -16384 in order to allow the
 // address to be loaded with a single SUBI instruction.
 
-#DEFINE KI_CURRENT_PRB_LOCAL [(CAST 0xFFFFF000 TO ^KiPrb)]
+#DEFINE KI_PRB_LESS_ZERO 16384
+
+#DEFINE KI_CURRENT_PRB_LOCAL [(CAST 0xFFFFC000 TO ^KiPrb)]
 
 #DEFINE KI_CACHE_ALIGN 16
 
@@ -18,7 +20,7 @@
 
 #IF BLD_MP
 
-#DEFINE KI_CURRENT_PRB [((CAST 0xFFFFF000 TO ^KiPrb)^.RealVirtual)]
+#DEFINE KI_CURRENT_PRB [((CAST 0xFFFFC000 TO ^KiPrb)^.RealVirtual)]
 #DEFINE KI_VIRTUAL_PRB 1
 
 #MACRO KiReleaseSpinlock ( spinlock ) [
@@ -62,7 +64,7 @@
 
 #ELSE
 
-#DEFINE KI_CURRENT_PRB [(CAST 0xFFFFF000 TO ^KiPrb)]
+#DEFINE KI_CURRENT_PRB [(CAST 0xFFFFC000 TO ^KiPrb)]
 #DEFINE KI_VIRTUAL_PRB 0
 
 #END

@@ -72,7 +72,7 @@ KiAcquireSpinlockInPrb:
     // raise IPL and that's safe, allowing us to order it with the following
     // fall-through.
     
-    subi a0, a0, 4096               // Calculate the pointer of the spinlock
+    subi a0, a0, KI_PRB_LESS_ZERO   // Calculate the pointer of the spinlock
                                     // within the Prb.
 
     // Fall through.
@@ -85,7 +85,7 @@ KiAcquireSpinlockRaise:
 
     // Inline KiRaiseIpl here.
 
-    subi a2, zero, 4096             // Acquire a pointer to the Prb.
+    subi a2, zero, KI_PRB_LESS_ZERO // Acquire a pointer to the Prb.
     mov  a3, byte [a2 + KiPrb_Ipl]  // Load the old IPL.
     mov  byte [a2 + KiPrb_Ipl], 2   // Store the new IPL.
 

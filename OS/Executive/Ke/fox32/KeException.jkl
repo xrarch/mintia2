@@ -405,11 +405,11 @@ KiRaiseIpl:
 
     // Load the old IPL.
 
-    movz.8 a3, [(0xFFFFF000 + KiPrb_Ipl)]
+    movz.8 a3, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
 
     // Store the new IPL.
 
-    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], a0
+    mov.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], a0
 
 #IF BLD_CHK
 
@@ -446,7 +446,7 @@ KiLowerIpl:
 
 #IF BLD_CHK
 
-    movz.8 t0, [(0xFFFFF000 + KiPrb_Ipl)]
+    movz.8 t0, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
     cmp  t0, a0
     iflt rjmp .badlower
 
@@ -454,9 +454,9 @@ KiLowerIpl:
 
     // Store the new IPL.
 
-    mov.8 [(0xFFFFF000 + KiPrb_Ipl)], a0
+    mov.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], a0
 
-    mov  t0, [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)]
+    mov  t0, [(KI_CURRENT_PRB_ADDR + KiPrb_PendingSoftwareInterrupts)]
     srl  t0, a0
     ifnz jmp KiDispatchSoftwareInterrupts
 
@@ -579,7 +579,7 @@ KiJumpIntoThread:
     sub  t0, t1
     ifz  rjmp .none
 
-    or   [(0xFFFFF000 + KiPrb_PendingSoftwareInterrupts)], (1 << ((KI_IPL_APC) - 1))
+    or   [(KI_CURRENT_PRB_ADDR + KiPrb_PendingSoftwareInterrupts)], (1 << ((KI_IPL_APC) - 1))
 
 .none:
 

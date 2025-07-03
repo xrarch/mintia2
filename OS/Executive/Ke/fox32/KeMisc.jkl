@@ -59,7 +59,7 @@ KeExceptionJacket:
 
     // Acquire a pointer to the current thread.
 
-    mov  s1, [(0xFFFFF000 + KiPrb_CurrentThread)]
+    mov  s1, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
 
     // The AbortListHead field is out of range of the fox32 offsets.
 
@@ -149,7 +149,7 @@ KiRestoreInterrupts:
     cmp  a0, 1
     ifz  jmp .dontenable
 
-    cmp.8 [(0xFFFFF000 + KiPrb_Ipl)], KI_IPL_DPC
+    cmp.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], KI_IPL_DPC
     ifgt jmp .dontenable
 
     ise
@@ -165,7 +165,7 @@ KiEnableInterrupts:
 
     mov  [KiInterruptsDisabled], 0
 
-    cmp.8 [(0xFFFFF000 + KiPrb_Ipl)], KI_IPL_DPC
+    cmp.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], KI_IPL_DPC
     ifgt jmp .dontenable
 
     ise
@@ -179,7 +179,7 @@ KiEnableInterrupts:
 KeCurrentThread:
 .export KeCurrentThread
 
-    mov  a3, [(0xFFFFF000 + KiPrb_CurrentThread)]
+    mov  a3, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
 
     ret
 
@@ -188,7 +188,7 @@ KeCurrentThread:
 KeCurrentProcess:
 .export KeCurrentProcess
 
-    mov  t0, [(0xFFFFF000 + KiPrb_CurrentThread)]
+    mov  t0, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
     mov  a3, [t0 + KeThread_Process]
 
     ret
@@ -214,7 +214,7 @@ KiWaitForInterrupt:
 KiCurrentIpl:
 .global KiCurrentIpl
 
-    movz.8 a3, [(0xFFFFF000 + KiPrb_Ipl)]
+    movz.8 a3, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
 
     ret
 
@@ -238,7 +238,7 @@ KeSweepMyTb:
     // This will not switch address spaces but it does cause a TB flush on
     // fox32.
 
-    mov  t0, [(0xFFFFF000 + KiPrb_CurrentThread)]
+    mov  t0, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
     mov  t0, [t0 + KeThread_Process]
     mov  t0, [t0 + KeProcess_PageDirectoryPfn]
     sla  t0, 12

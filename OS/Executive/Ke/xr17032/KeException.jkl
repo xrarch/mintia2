@@ -360,7 +360,7 @@ KiExceptionHandler:
     beq  t0, .waskernel             // If not set, we were already in kernel
                                     // mode. If clear, we entered from usermode.
 
-    subi t0, zero, 4096             // Load the address of the PRB.
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
 
     // Switch to the current thread's kernel stack.
 
@@ -414,7 +414,7 @@ KiExceptionHandler:
     beq  s0, .waskernel2            // If not set, we were already in kernel
                                     // mode. If clear, we entered from usermode.
 
-    subi t0, zero, 4096             // Load the address of the PRB.
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
 
     // Load the current thread.
 
@@ -528,7 +528,7 @@ KiRaiseIpl:
 
     // Note: This routine is inlined at KiAcquireSpinlockRaise.
     
-    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
     mov  a3, byte [t0 + KiPrb_Ipl]  // Load the old IPL.
     mov  byte [t0 + KiPrb_Ipl], a0  // Store the new IPL.
 
@@ -568,7 +568,7 @@ KiLowerIpl:
 
     // Note: This routine is inlined at KiReleaseSpinlockLower.
 
-    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
 
 #IF BLD_CHK
 
@@ -693,7 +693,7 @@ LoadContext:
 
     // Trigger.
 
-    subi a0, zero, (4096 - KiPrb_PendingSoftwareInterrupts)
+    subi a0, zero, (KI_PRB_LESS_ZERO - KiPrb_PendingSoftwareInterrupts)
     li   a1, (1 << ((KI_IPL_APC) - 1))
     jal  KeOrUlong
 

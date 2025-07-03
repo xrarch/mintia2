@@ -27,7 +27,7 @@ KeExceptionJacket:
 
     // Acquire a pointer to the current thread.
 
-    subi t0, zero, 4096
+    subi t0, zero, KI_PRB_LESS_ZERO
     mov  s1, long [t0 + KiPrb_CurrentThread]
 
     // Bias the current thread pointer by 4 * ExecutingKapc.
@@ -178,7 +178,7 @@ KiCurrentProcessor:
 KiCurrentIpl:
 .global KiCurrentIpl
 
-    subi t0, zero, 4096             // Calculate Prb address.
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
     mov  a3, byte [t0 + KiPrb_Ipl]  // Load IPL.
 
     ret
@@ -404,7 +404,7 @@ KeFlushMyTbAddress:
 
     // Ensure zeroes in the low 12 bits.
 
-    subi t0, zero, 4096
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
     and  a0, a0, t0
 
     mtcr itbctrl, a0                // Flush the ITB page.

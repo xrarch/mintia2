@@ -12,7 +12,7 @@
 KeAcquireLockShared:
 .export KeAcquireLockShared
 
-    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
     mov  a3, byte [t0 + KiPrb_Ipl]  // Load old IPL.
 
 .acquire:
@@ -49,7 +49,7 @@ KeAcquireLockShared:
 KeAcquireApcLockShared:
 .export KeAcquireApcLockShared
 
-    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
     mov  a3, byte [t0 + KiPrb_Ipl]  // Load old IPL.
     mov  byte [t0 + KiPrb_Ipl], KI_IPL_APC
 
@@ -59,7 +59,7 @@ KeAcquireApcLockShared:
 KeAcquireLockExclusive:
 .export KeAcquireLockExclusive
 
-    subi t0, zero, 4096
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
     mov  a3, byte [t0 + KiPrb_Ipl]
 
 .acquire:
@@ -94,7 +94,7 @@ KeAcquireLockExclusive:
 KeAcquireApcLockExclusive:
 .export KeAcquireApcLockExclusive
 
-    subi t0, zero, 4096             // Acquire a pointer to the Prb.
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
     mov  a3, byte [t0 + KiPrb_Ipl]  // Load old IPL.
     mov  byte [t0 + KiPrb_Ipl], KI_IPL_APC
 
@@ -164,7 +164,7 @@ KeReleaseApcLock:
     // The lock is APC-safe, so restore the old IPL.
     // This is KiLowerIpl inlined.
 
-    subi t0, zero, 4096
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
     mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.
     mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a1                 // Right shift pending by new IPL.
@@ -192,7 +192,7 @@ KeReleaseApcLock:
     // The lock is APC-safe, so restore the old IPL.
     // This is KiLowerIpl inlined.
 
-    subi t0, zero, 4096
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
     mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.
     mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a1                 // Right shift pending by new IPL.
