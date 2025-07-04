@@ -319,6 +319,10 @@ FN KiExecuteOnEveryoneElse (
                 // low-power state (which can take a long while) and makes idle
                 // processors less of a burden to their active brethren.
 
+                // NOTE: KeOrUlong does the necessary read-side barriers, so we
+                //       don't need to repeat them before re-examining
+                //       InIdleLoop; it has an effective SeqCst ordering effect.
+
                 KeOrUlong (
                     &targetprb^.IdleDeferredIpiEvents, // ptr
                     deferred, // set
