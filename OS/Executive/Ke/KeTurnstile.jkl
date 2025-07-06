@@ -332,7 +332,10 @@ FN KiBoostPriority (
 
         // Try to acquire the chain spinlock. Note that this is out of order
         // with respect to the thread lock, so we only try-acquire it and retry
-        // the entire lock operation if we fail.
+        // the entire lock operation if we fail. Also note that try-acquire
+        // spins many times rather than trying once and just giving up, just in
+        // case the holder is on his way out. This includes using PAUSE
+        // instructions.
 
         IF NOT KiTryAcquireSpinlock ( &chain^.Spinlock ) THEN
             // Failed to acquire it.
