@@ -60,6 +60,7 @@ FNPTR MiPoolGetMemoryF (
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN low : UWORD,
+    IN wait : UWORD,
 ) : UWORD
 
 FNPTR MiPoolReturnMemoryF (
@@ -196,6 +197,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN low : UWORD,
+    IN wait : UWORD,
 ) : UWORD
     
     // Allocate an extension for nonpaged pool. If the required page frame can't
@@ -216,6 +218,8 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
     WHILE i < pages DO
         // Allocate a page frame to place here.
 
+@Retry
+
         pfe := MiAllocatePage (
             &MiSystemPartition, // partition
             FALSE, // zeroed
@@ -224,6 +228,17 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
         )
 
         IF NOT pfe THEN
+            IF wait THEN
+                // Caller said we should wait here for more pages.
+
+                MiWaitForPages (
+                    &MiSystemPartition, // partition
+                    low, // low
+                )
+
+                GOTO Retry
+            END
+
             // Free everything we just did.
 
             IF i THEN
@@ -263,6 +278,7 @@ FN (MiPoolGetMemoryF) MiGetPagedMemory (
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN low : UWORD,
+    IN wait : UWORD,
 ) : UWORD
     
     // Allocate an extension for paged pool.
@@ -481,6 +497,7 @@ FN MiAllocateFromPool (
         ext, // ptr
         1, // pages
         pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
+        FALSE, // wait
     ) THEN
 
         // Failed to allocate a pool extension.
@@ -944,36 +961,24 @@ FN MiAllocatePageAligned (
 
     // Call the pool callback to initialize the allocation.
 
-@Retry
-
     IF NOT pool^.GetMemory (
         node^.StartVa, // ptr
         bytes, // pages
         pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
+        wait, // wait
     ) THEN
-        IF NOT wait THEN
-            // Caller told us not to wait and we didn't get the page frames we
-            // wanted, so just return.
+        // Caller told us not to wait and we didn't get the page frames we
+        // wanted, so just return.
 
-            // No need to flush the dynamic space since we didn't map anything
-            // into it.
+        // No need to flush the dynamic space since we didn't map anything
+        // into it.
 
-            MiReleaseDynamicSpace (
-                node, // node
-                FALSE, // flush
-            )
-
-            RETURN NULLPTR
-        END
-
-        // Wait for page frames and retry.
-
-        MiWaitForPages (
-            &MiSystemPartition, // partition
-            pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
+        MiReleaseDynamicSpace (
+            node, // node
+            FALSE, // flush
         )
 
-        GOTO Retry
+        RETURN NULLPTR
     END
 
     RETURN node^.StartVa

@@ -32,6 +32,10 @@ FN PspAllocateTurnstile () : ^KiTurnstile
 
     IF NOT turnstile THEN
         // Allocate a new hunk of turnstiles.
+        // Do this outside the turnstile list lock to avoid deadlocking with the
+        // thread reaper.
+
+        KeReleaseLock ( &PspTurnstileLock )
 
         turnstile = MmAllocatePool (
             MM_NONPAGED_POOL, // poolindex
@@ -41,17 +45,21 @@ FN PspAllocateTurnstile () : ^KiTurnstile
             TRUE, // wait
         )
 
-        IF turnstile THEN
-            // Extend the zone starting from the second turnstile in the hunk.
-            // We take the first for ourselves.
-
-            MmExtendZone (
-                &PspTurnstileZone, // zone
-                turnstile + SIZEOF KiTurnstile, // hunk
-                SIZEOF KiTurnstile * (PSP_TURNSTILE_EXTENSION - 1) +
-                MM_ZONE_OVERHEAD, // bytes
-            )
+        IF NOT turnstile THEN
+            RETURN NULLPTR
         END
+
+        KeAcquireLockExclusive ( &PspTurnstileLock )
+
+        // Extend the zone starting from the second turnstile in the hunk.
+        // We take the first for ourselves.
+
+        MmExtendZone (
+            &PspTurnstileZone, // zone
+            turnstile + SIZEOF KiTurnstile, // hunk
+            SIZEOF KiTurnstile * (PSP_TURNSTILE_EXTENSION - 1) +
+            MM_ZONE_OVERHEAD, // bytes
+        )
     END
 
     KeReleaseLock ( &PspTurnstileLock )
@@ -93,16 +101,16 @@ FN PspPerformEagerThreadCleanup (
 
     paged^.CleanedUp = TRUE
 
-    // Free the turnstile.
-
-    PspFreeTurnstile ( thread^.Tcb.Turnstile )
-
     // Free the kernel stack.
 
     MmFreeKernelStack (
         CONTAINEROF thread^.Tcb.Process TO PsProcess.Pcb, // process
         thread^.Tcb.KernelStackTop - (KE_STACK_PAGES << RTL_PAGE_SHIFT), // kstack
     )
+
+    // Free the turnstile.
+
+    PspFreeTurnstile ( thread^.Tcb.Turnstile )
 
     IF paged^.IpcBlock THEN
         // Free the IPC block.
@@ -439,6 +447,7 @@ END
 FN (KeProcessCustodyListF) PspReapThread (
     IN list : ^KeCustodyList,
     IN object : ^VOID,
+    IN context : ^VOID,
 )
 
     // Called to reap a thread as a KeProcessCustodyList callback.
@@ -448,6 +457,8 @@ FN (KeProcessCustodyListF) PspReapThread (
 
     thread := CONTAINEROF object TO KeThread.SwapNext
     psthrd := CONTAINEROF thread TO PsThread.Tcb
+
+    threadlisthead := CAST context TO ^^KeThread
 
 #IF BLD_MP
     // Execute the reaper barrier to make sure the thread has fully switched off
@@ -461,12 +472,10 @@ FN (KeProcessCustodyListF) PspReapThread (
 
     PspPerformEagerThreadCleanup ( psthrd )
 
-    // Remove the reference from the thread object that signified that there
-    // was an active execution context that depended on it. There no longer is
-    // (and its last act was to place itself on our reaper list), so unreference
-    // it.
+    // Add the thread to the list for final unreferencing.
 
-    ObUnreferenceObject ( psthrd )
+    thread^.SwapNext = threadlisthead^
+    threadlisthead^ = thread
 END
 
 #SECTION "PAGEtext"
@@ -477,10 +486,36 @@ FN (ExWorkItemF) PspReaperWorker (
 
     // Implements the thread reaper.
 
+    threadlisthead : ^KeThread[1]
+
     KeProcessCustodyList (
         &KeReaperCustodyList, // list
         &PspReapThread, // callback
+        &threadlisthead[0], // context
     )
+
+    // Unreference the thread objects as a second step. We don't do this inline
+    // with the PspPerformEagerThreadCleanup()s that PspReapThread does because
+    // we really want to free all the kernel stacks we can before we try to
+    // unreference the objects, to minimize the risk of contending (or even
+    // deadlocking) with threads holding locks that we need to take to delete
+    // this thread object, that block for free pages while holding those locks.
+
+    thread := threadlisthead[0]
+
+    WHILE thread DO
+        next := thread^.SwapNext
+        psthrd := CONTAINEROF thread TO PsThread.Tcb
+
+        // Remove the reference from the thread object that signified that there
+        // was an active execution context that depended on it. There no longer
+        // is (and its last act was to place itself on our reaper list), so
+        // unreference it.
+
+        ObUnreferenceObject ( psthrd )
+
+        thread = next
+    END
 END
 
 FN (KeCustodyListActivateF) PspActivateReaper (

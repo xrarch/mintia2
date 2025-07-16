@@ -322,6 +322,7 @@ END
 FN (KeProcessCustodyListF) ObpDeferredDeleteObject (
     IN list : ^KeCustodyList,
     IN object : ^VOID,
+    IN context : ^VOID,
 )
 
     // Called to delete an object as a KeProcessCustodyList callback.
@@ -347,6 +348,7 @@ FN (ExWorkItemF) ObpDeferredDeletionWorker (
     KeProcessCustodyList (
         &ObpDeferredDeletionList, // list
         &ObpDeferredDeleteObject, // callback
+        NULLPTR, // context
     )
 
     IF paged^.DeferredObjectHead THEN
