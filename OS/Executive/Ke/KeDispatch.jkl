@@ -22,6 +22,10 @@
     KiReleaseTwoSpinlocks ( &(prb)^.ReadyQueueLock, &(thread)^.Spinlock )
 ]
 
+#MACRO KiReleaseTwoReadyQueuesElevated ( prb1, prb2 ) [
+    KiReleaseTwoSpinlocks ( &(prb1)^.ReadyQueueLock, &(prb2)^.ReadyQueueLock )
+]
+
 #MACRO KiWaitForSwitch ( thread ) [
     // Wait for the next thread to no longer be switching off his stack.
 
@@ -1575,68 +1579,154 @@ END
 
 #IF BLD_MP
 
-FN KiMoveThread (
+#DEFINE KI_MAX_THREAD_MOVES 8
+
+FN KiMoveThreads (
     IN destprb : ^KiPrb,
     IN srcprb : ^KiPrb,
-) : UWORD
+    IN other : UWORD,
+)
 
-    // Move a thread from the source to the destination.
-    // Return TRUE if a thread was moved, FALSE otherwise.
+    // Move threads from the source to the destination, so long as it would not
+    // worsen an imbalance.
 
-    myprb := KI_CURRENT_PRB
+    threads : ^KeThread[KI_MAX_THREAD_MOVES]
+    skippedthreads : ^KeThread[KI_MAX_THREAD_MOVES]
+    thread : ^KeThread
 
-    // Lock the source Prb.
+    i := 0
 
-    KiAcquireReadyQueueElevated ( srcprb )
+    // Lock the queues. We need to define a consistent ordering, so we use the
+    // order of their addresses.
+    //
+    // Previously we would lock the source, take a thread, unlock the source,
+    // lock the thread, lock the destination, then enqueue to the destination.
+    // This created too many opportunities for imbalances to be worsened.
+    //
+    // Now we lock both queues, make sure there's still an imbalance with the
+    // locks held, take threads from the source, unlock it, enqueue threads
+    // (which, because we still hold the destination, is out of order, so we
+    // need to trylock the thread), then unlock the destination.
 
-    // Select a thread.
-
-    thread := KiSelectThread (
-        srcprb, // prb
-        NULLPTR, // current
-        FALSE, // exclusive
-        TRUE, // migrate
-    )
-
-    IF NOT thread THEN
-        // Unlikely situation, but we got no thread to move. Give up.
-
-        KiReleaseReadyQueueElevated ( srcprb )
-
-        RETURN FALSE
+    IF destprb < srcprb THEN
+        KiAcquireReadyQueueElevated ( destprb )
+        KiAcquireReadyQueueElevated ( srcprb )
+    ELSE
+        KiAcquireReadyQueueElevated ( srcprb )
+        KiAcquireReadyQueueElevated ( destprb )
     END
 
-    // Set INFLIGHT so nobody tries to touch it while we've got it.
+    IF destprb^.Load >= srcprb^.Load THEN
+        // There is no imbalance, bail out.
 
-    thread^.Status = KI_THREAD_INFLIGHT
+        KiReleaseTwoReadyQueuesElevated ( destprb, srcprb )
 
-    // Release the ready queue.
+        LEAVE
+    END
+
+    // Only move half as many threads as the difference in load. This will
+    // create a balance between the two processors. If we moved the full
+    // difference then we'd just shuffle the imbalance around.
+
+    count := (srcprb^.Load - destprb^.Load + 1) / 2
+
+    IF count > KI_MAX_THREAD_MOVES THEN
+        count = KI_MAX_THREAD_MOVES
+    END
+
+    WHILE i < count DO
+        // Select a thread.
+
+        thread = KiSelectThread (
+            srcprb, // prb
+            NULLPTR, // current
+            FALSE, // exclusive
+            TRUE, // migrate
+        )
+
+        IF NOT thread THEN
+            // Unlikely situation, but we got no thread to move. Give up.
+            // This can happen if the source processor had only pinned threads
+            // enqueued to it.
+
+            BREAK
+        END
+
+        // Set INFLIGHT so nobody tries to touch the thread while we've got it.
+
+        thread^.Status = KI_THREAD_INFLIGHT
+
+        threads[i] = thread
+
+        i += 1
+    END
 
     KiReleaseReadyQueueElevated ( srcprb )
 
-    // Lock the thread.
+    skipped := 0
+    j := 0
 
-    KiAcquireThreadElevated ( thread )
+    WHILE j < i DO
+        thread = threads[j]
 
-    // Lock the destination Prb.
+        // Lock the thread.
+        // This is out of order with respect to the ready queue locks, so we
+        // just make a best effort with a trylock.
 
-    KiAcquireReadyQueueElevated ( destprb )
+        IF KiTryAcquireThreadElevated ( thread ) THEN
+            // Insert the thread.
 
-    // Insert the thread.
+            KiInsertThread (
+                destprb, // prb
+                thread, // thread
+                other, // other
+            )
 
-    KiInsertThread (
-        destprb, // prb
-        thread, // thread
-        myprb != destprb, // other
-    )
+            // Release the thread.
 
-    // Release the destination Prb.
+            KiReleaseThreadElevated ( thread )
+        
+        ELSE
+            // Failed to acquire the thread spinlock. Record this thread for the
+            // second pass.
 
-    // Release the thread.
+            skippedthreads[skipped] = thread
+            skipped += 1
+        END
 
-    KiReleaseReadyQueueAndThreadElevated ( destprb, thread )
+        j += 1
+    END
 
-    RETURN TRUE
+    // Release the destination ready queue.
+
+    KiReleaseReadyQueueElevated ( destprb )
+
+    IF NOT skipped THEN
+        LEAVE
+    END
+
+    // Some threads were skipped due to a failure to acquire their spinlock.
+    // Enqueue them now.
+
+    j = 0
+
+    WHILE j < skipped DO
+        thread = skippedthreads[j]
+
+        KiAcquireThreadElevated ( thread )
+
+        KiAcquireReadyQueueElevated ( destprb )
+
+        KiInsertThread (
+            destprb, // prb
+            thread, // thread
+            other, // other
+        )
+
+        KiReleaseReadyQueueAndThreadElevated ( destprb, thread )
+
+        j += 1
+    END
 END
 
 FN KiStealWork ()
@@ -1674,9 +1764,10 @@ FN KiStealWork ()
         LEAVE
     END
 
-    KiMoveThread (
+    KiMoveThreads (
         myprb, // destprb
         loadedprb, // srcprb
+        FALSE, // other
     )
 
     // Lower IPL - we should switch to the stolen thread.
@@ -1684,7 +1775,7 @@ FN KiStealWork ()
     KiLowerIpl ( ipl )
 END
 
-#DEFINE KI_BALANCE_MAX 150
+#DEFINE KI_MAX_BALANCE_ITERATIONS 32
 
 FN (KeDpcF) KiBalanceWork (
     IN dpc : ^KeDpc,
@@ -1695,9 +1786,10 @@ FN (KeDpcF) KiBalanceWork (
     // Called once per second on processor 0. Moves work from the most loaded
     // processor to the least loaded processor until balance is achieved.
 
+    myprb := KI_CURRENT_PRB
     j := 0
 
-    WHILE j < KI_BALANCE_MAX DO
+    WHILE j < KI_MAX_BALANCE_ITERATIONS DO
         mostloaded : ^KiPrb
         leastloaded : ^KiPrb
 
@@ -1720,9 +1812,10 @@ FN (KeDpcF) KiBalanceWork (
             LEAVE
         END
 
-        moved := KiMoveThread (
+        KiMoveThreads (
             leastloaded, // destprb
             mostloaded, // srcprb
+            leastloaded != myprb, // other
         )
 
         IF diff == 1 THEN
