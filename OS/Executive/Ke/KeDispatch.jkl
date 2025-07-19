@@ -1579,7 +1579,7 @@ END
 
 #IF BLD_MP
 
-#DEFINE KI_MAX_THREAD_MOVES 8
+#DEFINE KI_MAX_THREAD_MOVES 16
 
 FN KiMoveThreads (
     IN destprb : ^KiPrb,
@@ -1775,8 +1775,6 @@ FN KiStealWork ()
     KiLowerIpl ( ipl )
 END
 
-#DEFINE KI_MAX_BALANCE_ITERATIONS 32
-
 FN (KeDpcF) KiBalanceWork (
     IN dpc : ^KeDpc,
     IN context1 : UWORD,
@@ -1786,10 +1784,11 @@ FN (KeDpcF) KiBalanceWork (
     // Called once per second on processor 0. Moves work from the most loaded
     // processor to the least loaded processor until balance is achieved.
 
+    max := KiMaximumBalanceIterations
     myprb := KI_CURRENT_PRB
     j := 0
 
-    WHILE j < KI_MAX_BALANCE_ITERATIONS DO
+    WHILE j < max DO
         mostloaded : ^KiPrb
         leastloaded : ^KiPrb
 
@@ -1797,6 +1796,10 @@ FN (KeDpcF) KiBalanceWork (
             OUT mostloaded, // mostloaded
             OUT leastloaded, // leastloaded
         )
+
+        IF mostloaded == leastloaded THEN
+            BREAK
+        END
 
         diff := CAST mostloaded^.Load - leastloaded^.Load TO WORD
 
@@ -1809,7 +1812,7 @@ FN (KeDpcF) KiBalanceWork (
         IF diff < 1 THEN
             // Balance is achieved.
 
-            LEAVE
+            BREAK
         END
 
         KiMoveThreads (

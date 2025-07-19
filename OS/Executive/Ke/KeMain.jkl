@@ -29,6 +29,8 @@ KiAnnounceSpinlock : KiSpinlock = KI_INITIAL_SPINLOCK
 
 PUBLIC KiWorkBalanceDpc : KeDpc
 
+PUBLIC KiMaximumBalanceIterations : ULONG
+
 #MACRO KiAcquireAnnounce () [
     KiAcquireSpinlockRaise ( &KiAnnounceSpinlock )
 ]
@@ -439,6 +441,19 @@ EXPORT FN KeMain (
         &KiWorkBalanceDpc, // dpc
         &KiBalanceWork, // func
     )
+
+    // Compute the maximum number of balance iterations as the number of
+    // possible pairs between processors plus one. This is the same as the
+    // number of possible imbalances plus one for good measure.
+    //
+    // This is calculated as n choose 2 which simplifies to n(n-1)/2 + 1.
+
+    KiMaximumBalanceIterations = (KeLoaderBlock.ProcessorCount *
+        (KeLoaderBlock.ProcessorCount - 1)) / 2 + 1
+
+    IF KiMaximumBalanceIterations > 64 THEN
+        KiMaximumBalanceIterations = 64
+    END
 
     // We're ready to pull the other processors into the system.
 
