@@ -766,53 +766,17 @@ FN KeReadyThread (
     KiReleaseThread ( thread, ipl )
 END
 
-FN KiSelectRealTimeThread (
-    IN prb : ^KiPrb,
-    IN migrate : UWORD,
-) : ^KeThread
-
-    // Return a thread to switch into from the given processor's real time ready
-    // queues. The processor's ready queue lock is held.
-
-    readybits := prb^.RealTimeReady
-
-    KeAssert ( readybits != 0 )
-
-@SeekNextQueue
-
-    // Binary search within the 32 bit ready bit set to find the highest byte
-    // that has a set bit.
-
-    i : UWORD
-
-    IF readybits & 0xFFFF0000 THEN
-        IF readybits & 0xFF000000 THEN
-            // 0xFF000000 is the highest byte.
-            i = 24
-        ELSE
-            // 0x00FF0000 is the highest byte.
-            i = 16
-        END
-    ELSEIF readybits & 0x0000FF00 THEN
-        // 0x0000FF00 is the highest byte.
-        i = 8
-    ELSE
-        // 0x000000FF is the highest byte.
-        i = 0
-    END
-
-    // Use a lookup table to find the highest bit set within this byte.
-
-    i = KiIndexLastBitSet[(readybits >> i) & 0xFF] + i
-
-    queue := &prb^.RealTimeListHeads[i]
-
-    thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
-
 #IF BLD_MP
+
+#MACRO KiSkipPinnedThreads ( migrate, thread, readybits, queue, i ) [
     IF migrate AND thread^.Pinned THEN
         // We can't migrate pinned threads, so try to find one that isn't
         // pinned.
+        //
+        // Note that this causes a degradation of the scheduler to O(n) in
+        // number of pinned threads on a ready queue before the first non-pinned
+        // thread. It's expected that this won't be an issue because thread
+        // pinning is rare.
 
         WHILE TRUE DO
             IF thread^.ReadyEntry.Next == queue THEN
@@ -837,7 +801,68 @@ FN KiSelectRealTimeThread (
             END
         END
     END
+]
+
+#ELSE
+
+#MACRO KiSkipPinnedThreads ( migrate, thread, readybits, queue, i ) []
+
 #END
+
+FN KiSelectRealTimeThread (
+    IN prb : ^KiPrb,
+    IN migrate : UWORD,
+) : ^KeThread
+
+    // Return a thread to switch into from the given processor's real time ready
+    // queues. The processor's ready queue lock is held.
+
+    readybits := prb^.RealTimeReady
+
+    KeAssert ( readybits != 0 )
+
+@SeekNextQueue
+
+    // Binary search within the 32 bit ready bit set to find the highest byte
+    // that has a set bit.
+
+    i : UWORD
+
+    IF readybits & 0xFFFF0000 THEN
+        IF readybits & 0xFF000000 THEN
+            // 0xFF000000 is the highest byte.
+            i = 24
+
+        ELSE
+            // 0x00FF0000 is the highest byte.
+            i = 16
+        END
+
+    ELSEIF readybits & 0x0000FF00 THEN
+        // 0x0000FF00 is the highest byte.
+        i = 8
+
+    ELSE
+        // 0x000000FF is the highest byte.
+        i = 0
+    END
+
+    // Use a lookup table to find the highest bit set within this byte.
+
+    i = KiIndexLastBitSet[(readybits >> i) & 0xFF] + i
+
+    queue := &prb^.RealTimeListHeads[i]
+
+    thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
+
+    // If we're migrating threads, we can't take pinned threads off of this
+    // ready queue, so skip any pinned threads in that case.
+    //
+    // NOTE: This macro can GOTO SeekNextQueue and modify readybits.
+
+    KiSkipPinnedThreads ( migrate, thread, readybits, queue, i )
+
+    // Remove from the ready queue.
 
     RtlRemoveEntryList ( &thread^.ReadyEntry )
 
@@ -891,34 +916,27 @@ FN KiSelectTimesharedThread (
         fbsarray := &KiIndexFirstBitSet[0]
 
         // Start from bit k. Assume the ready bits are 32 bit.
-
+        // We seek circularly (i.e. with wraparound) from index k to k-1 for the
+        // first encountered set bit.
+        //
         // Portability hazard: We assume the architecture we run on, masks the
         // rotation amount. This is true on all current and planned
         // architectures (fox32, xr17032, Aphelion, AMD64).
+        //
+        // Optimization note: This was tried in both an unrolled form and an
+        // explicit loop form. They both generated code that executed the same
+        // absolute number of instructions. The loop is better on Icache. The
+        // unrolled form branch predicts better. Due to the small Icache on
+        // xr17032, the loop form was selected with the idea the Icache impact
+        // will be more important and the branch mispredicts will come out in
+        // the wash, however this needs benchmarking to tell for sure.
+        // Also this is probably not that important anyway.
 
         fbs := fbsarray[(readybits ROR k) & 0xFF]
 
-        IF fbs == 8 THEN
-            // No bits set here, check next 8 bits.
-
+        WHILE fbs == 8 DO
             k += 8
             fbs = fbsarray[(readybits ROR k) & 0xFF]
-
-            IF fbs == 8 THEN
-                k += 8
-                fbs = fbsarray[(readybits ROR k) & 0xFF]
-
-                IF fbs == 8 THEN
-                    k += 8
-                    fbs = fbsarray[(readybits ROR k) & 0xFF]
-
-                    // If we're here there must be SOME bit set or the caller
-                    // was supposed to completely avoid calling us. No need to
-                    // deal with a "no bits set" case.
-
-                    KeAssert ( fbs != 8 )
-                END
-            END
         END
 
         k = (k + fbs) & 31
@@ -927,43 +945,20 @@ FN KiSelectTimesharedThread (
         RETURN NULLPTR
     END
 
-    // There's a thread in this queue. Unlink and return it.
+    // There's a thread in this queue.
 
     queue := &prb^.CalendarListHeads[k]
 
     thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
 
-#IF BLD_MP
-    IF migrate AND thread^.Pinned THEN
-        // We can't migrate pinned threads, so try to find one that isn't
-        // pinned.
+    // If we're migrating threads, we can't take pinned threads off of this
+    // ready queue, so skip any pinned threads in that case.
+    //
+    // NOTE: This macro can GOTO SeekNextQueue and modify readybits.
 
-        WHILE TRUE DO
-            IF thread^.ReadyEntry.Next == queue THEN
-                // Only pinned threads in this queue, check the next one by
-                // masking this one out of the ready bit set.
+    KiSkipPinnedThreads ( migrate, thread, readybits, queue, k )
 
-                readybits &= ~(1 << k)
-
-                IF readybits != 0 THEN
-                    k += 1
-
-                    GOTO SeekNextQueue
-                END
-
-                // No queues have threads we're allowed to take.
-
-                RETURN NULLPTR
-            END
-
-            thread = CONTAINEROF thread^.ReadyEntry.Next TO KeThread.ReadyEntry
-
-            IF NOT thread^.Pinned THEN
-                BREAK
-            END
-        END
-    END
-#END
+    // Remove the thread from the queue.
 
     RtlRemoveEntryList ( &thread^.ReadyEntry )
 
