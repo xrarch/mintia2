@@ -334,6 +334,7 @@ FN KiInsertThread (
     IN prb : ^KiPrb,
     IN thread : ^KeThread,
     IN other : UWORD,
+    IN preempted : UWORD,
 )
 
     // Insert a thread into the appropriate ready queue of the given processor.
@@ -375,12 +376,21 @@ FN KiInsertThread (
 
             thread^.CurrentQueue = KI_REAL_TIME_QUEUE
 
-            // Go on the back of the queue.
+            IF preempted THEN
+                // Go on the front of the queue.
 
-            RtlInsertAtTailList (
-                &prb^.RealTimeListHeads[thread^.Priority], // head
-                &thread^.ReadyEntry, // entry
-            )
+                RtlInsertAtHeadList (
+                    &prb^.RealTimeListHeads[thread^.Priority], // head
+                    &thread^.ReadyEntry, // entry
+                )
+            ELSE
+                // Go on the back of the queue.
+
+                RtlInsertAtTailList (
+                    &prb^.RealTimeListHeads[thread^.Priority], // head
+                    &thread^.ReadyEntry, // entry
+                )
+            END
 
             // Indicate that an item exists in this queue.
 
@@ -401,10 +411,17 @@ FN KiInsertThread (
 
                 thread^.CurrentQueue = KI_IDLE_QUEUE
 
-                RtlInsertAtTailList (
-                    &prb^.IdleListHead, // head
-                    &thread^.ReadyEntry, // entry
-                )
+                IF preempted THEN
+                    RtlInsertAtHeadList (
+                        &prb^.IdleListHead, // head
+                        &thread^.ReadyEntry, // entry
+                    )
+                ELSE
+                    RtlInsertAtTailList (
+                        &prb^.IdleListHead, // head
+                        &thread^.ReadyEntry, // entry
+                    )
+                END
 
                 LEAVE
             END
@@ -415,17 +432,19 @@ FN KiInsertThread (
 
             insertat := prb^.CalendarEnqueueIndex
 
-            // Bias the index by the inverse of the priority, so that higher
-            // priority timeshared threads are scheduled sooner.
+            IF NOT preempted THEN
+                // Bias the index by the inverse of the priority, so that higher
+                // priority timeshared threads are scheduled sooner.
 
-            insertat += KI_TIMESHARED_DISTANCE - thread^.Priority
-            insertat %= KI_TIMESHARED_QUEUES
+                insertat = (insertat + KI_TIMESHARED_DISTANCE - thread^.Priority)
+                    % KI_TIMESHARED_QUEUES
 
-            IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex AND
-                insertat == prb^.CalendarRunIndex THEN
+                IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex AND
+                    insertat == prb^.CalendarRunIndex THEN
 
-                insertat -= 1
-                insertat %= KI_TIMESHARED_QUEUES
+                    insertat -= 1
+                    insertat %= KI_TIMESHARED_QUEUES
+                END
             END
 
             // Reuse Alertable to stash the timeshared queue index.
@@ -467,6 +486,7 @@ FN KiInsertThread (
             prb, // prb
             next, // thread
             other, // other
+            TRUE, // preempted
         )
 
     ELSE
@@ -717,6 +737,7 @@ FN KiReadyThread (
         prb, // prb
         thread, // thread
         myprb != prb, // other
+        FALSE, // preempted
     )
 
     KiReleaseReadyQueueElevated ( prb )
@@ -726,6 +747,7 @@ FN KiReadyThread (
         myprb, // prb
         thread, // thread
         FALSE, // other
+        FALSE, // preempted
     )
 #END
 
@@ -1153,6 +1175,7 @@ FN KiPreemptThread (
             prb, // prb
             current, // thread
             FALSE, // other
+            TRUE, // preempted
         )
 
         KiReleaseReadyQueueElevated ( prb )
@@ -1224,6 +1247,7 @@ FN KiReinsertThread (
         prb, // prb
         thread, // thread
         other, // other
+        FALSE, // preempted
     )
 END
 
@@ -1343,6 +1367,7 @@ FN KiSetPriorityThread (
             prb, // prb
             thread, // thread
             other, // other
+            TRUE, // preempted
         )
 
         GOTO Exit
@@ -1828,6 +1853,7 @@ FN KiMoveThreads (
                 destprb, // prb
                 thread, // thread
                 other, // other
+                FALSE, // preempted
             )
 
             // Release the thread.
@@ -1869,6 +1895,7 @@ FN KiMoveThreads (
             destprb, // prb
             thread, // thread
             other, // other
+            FALSE, // preempted
         )
 
         KiReleaseReadyQueueAndThreadElevated ( destprb, thread )
@@ -2025,6 +2052,7 @@ FN KiPinThread (
         prb, // prb
         current, // thread
         TRUE, // other
+        TRUE, // preempted
     )
 
     KiReleaseReadyQueueElevated ( prb )

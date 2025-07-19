@@ -1150,9 +1150,11 @@ FN PsCreateExecutiveThread (
         RETURN status
     END
 
-    // Set the thread running.
+    IF flags & OS_THREAD_SUSPENDED == 0 THEN
+        // Set the thread running.
 
-    KeReadyThread ( &thread^.Tcb )
+        KeReadyThread ( &thread^.Tcb )
+    END
 
     RETURN status
 END
