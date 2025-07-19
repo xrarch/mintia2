@@ -558,7 +558,6 @@ STRUCT KeThread
     ActualProcess : ^KeProcess,
     KernelStackTop : ^VOID,
     UserFrame : ^OsContext,
-    SwapNext : ^KeThread,
 
     BalancedQueue : ^KeBalancedQueue,
     QueueItem : ^RtlListEntry,
@@ -619,6 +618,9 @@ STRUCT KeThread
     // Put large and uncommonly accessed fields at the end to increase odds that
     // the commonly accessed ones are within range of immediate offsets on
     // various architectures (especially fox32 whose range is only 255 bytes).
+
+    // NOTE: The ReadyEntry is reused by thread reaping and kernel stack
+    //       swapping.
 
     ReadyEntry : RtlListEntry,
     BalancedQueueEntry : RtlListEntry,

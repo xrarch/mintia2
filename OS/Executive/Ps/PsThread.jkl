@@ -452,10 +452,10 @@ FN (KeProcessCustodyListF) PspReapThread (
 
     // Called to reap a thread as a KeProcessCustodyList callback.
 
-    // Ke uses the SwapNext link of the thread as the custody list link.
+    // Ke uses the ready queue link of the thread as the custody list link.
     // This is fine since it is useless at this point in the thread's lifetime.
 
-    thread := CONTAINEROF object TO KeThread.SwapNext
+    thread := CONTAINEROF object TO KeThread.ReadyEntry.Next
     psthrd := CONTAINEROF thread TO PsThread.Tcb
 
     threadlisthead := CAST context TO ^^KeThread
@@ -474,7 +474,7 @@ FN (KeProcessCustodyListF) PspReapThread (
 
     // Add the thread to the list for final unreferencing.
 
-    thread^.SwapNext = threadlisthead^
+    thread^.ReadyEntry.Next = CAST threadlisthead^ TO ^VOID
     threadlisthead^ = thread
 END
 
@@ -504,7 +504,7 @@ FN (ExWorkItemF) PspReaperWorker (
     thread := threadlisthead[0]
 
     WHILE thread DO
-        next := thread^.SwapNext
+        next := CAST thread^.ReadyEntry.Next TO ^KeThread
         psthrd := CONTAINEROF thread TO PsThread.Tcb
 
         // Remove the reference from the thread object that signified that there

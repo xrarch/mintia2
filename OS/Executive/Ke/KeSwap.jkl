@@ -46,10 +46,10 @@ PUBLIC KeStackSwapperEvent : KeEvent
 
 #END
 
-#MACRO KiInsertInSwapList ( headptr, item ) [
+#MACRO KiInsertInSwapList ( headptr, item, fieldname ) [
     WHILE TRUE DO
         head := (headptr)^
-        NOTHING (item)^.SwapNext = head
+        NOTHING (item)^.fieldname = CAST (head) TO ^VOID
 
         IF KeCompareSwapPtr (
             headptr, // ptr
@@ -105,7 +105,7 @@ FN KeReadyInswappedProcess (
     // will get placed back on a queue and we'll see them later.
 
     WHILE thread DO
-        nextthread := thread^.SwapNext
+        nextthread := CAST thread^.ReadyEntry.Next TO ^KeThread
 
         ipl = KiAcquireThread ( thread )
 
@@ -255,7 +255,7 @@ FN KeHarvestSwapCandidates (
                 // WaitEntry. It should not be possible for the thread to be
                 // re-enqueued to a candidate list while it is on this singly
                 // linked list (the custody of the swapper thread). We can't
-                // reuse the SwapNext list link because it may come into use
+                // reuse the ready queue list link because it may come into use
                 // concurrently if this thread is readied while it is being
                 // outswapped.
 
@@ -285,6 +285,7 @@ FN KeHarvestSwapCandidates (
                     KiInsertInSwapList (
                         &KiProcessOutSwapListHead, // headptr
                         process, // item
+                        SwapNext, // fieldname
                     )
                 END
 
@@ -360,7 +361,7 @@ FN KiReadyThreadOutswappedProcess (
     // The process isn't resident, so we need to enqueue the thread in its
     // swap-in list.
 
-    thread^.SwapNext = process^.SwapListHead
+    thread^.ReadyEntry.Next = CAST process^.SwapListHead TO ^VOID
     process^.SwapListHead = thread
 
     IF memorystate == KI_PROCESS_OUTSWAPPED THEN
@@ -372,6 +373,7 @@ FN KiReadyThreadOutswappedProcess (
         KiInsertInSwapList (
             &KiProcessSwapListHead, // headptr
             process, // item
+            SwapNext, // fieldname
         )
     END
 
@@ -440,6 +442,7 @@ FN KiReadyOutswappedThread (
     KiInsertInSwapList (
         &KiStackSwapListHead, // headptr
         thread, // item
+        ReadyEntry.Next, // fieldname
     )
 
     // Wake the swapper to bring in this thread's stack.
@@ -567,7 +570,7 @@ FN KeAttachProcess (
     // The process isn't resident, so we need to enqueue the thread in its
     // swap-in list.
 
-    thread^.SwapNext = process^.SwapListHead
+    thread^.ReadyEntry.Next = CAST process^.SwapListHead TO ^VOID
     process^.SwapListHead = thread
 
     IF process^.MemoryState == KI_PROCESS_OUTSWAPPED THEN
@@ -579,6 +582,7 @@ FN KeAttachProcess (
         KiInsertInSwapList (
             &KiProcessSwapListHead, // headptr
             process, // item
+            SwapNext, // fieldname
         )
     END
 
@@ -652,6 +656,7 @@ FN KeDetachProcess (
         KiInsertInSwapList (
             &KiProcessOutSwapListHead, // headptr
             process, // item
+            SwapNext, // fieldname
         )
 
         // Wake the swapper to get it to deal with this outswapped process.
