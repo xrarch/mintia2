@@ -73,6 +73,11 @@
     prb^.StashedCurrentThreadInfo =
         (next^.Priority << KI_STASHED_PRIORITY_SHIFT) |
         (next^.InteractiveBits << KI_STASHED_INTERACTIVE_SHIFT)
+
+    // Clear StealWork in case the processor is planning on doing that, since
+    // that has become unnecessary now it isn't gonna become idle.
+
+    prb^.StealWork = FALSE
 #END
 ]
 
@@ -1584,6 +1589,7 @@ FN KiMoveThreads (
     IN destprb : ^KiPrb,
     IN srcprb : ^KiPrb,
     IN other : UWORD,
+    IN idlestealing : UWORD,
 )
 
     // Move threads from the source to the destination, so long as it would not
@@ -1618,9 +1624,22 @@ FN KiMoveThreads (
     IF destprb^.Load >= srcprb^.Load THEN
         // There is no imbalance, bail out.
 
+@Bail
+
         KiReleaseTwoReadyQueuesElevated ( destprb, srcprb )
 
         LEAVE
+    END
+
+    IF idlestealing THEN
+        IF NOT destprb^.StealWork THEN
+            // Someone decided we shouldn't steal work after all in the time
+            // since we decided to do it, so nevermind.
+
+            GOTO Bail
+        END
+
+        destprb^.StealWork = FALSE
     END
 
     // Only move half as many threads as the difference in load. This will
@@ -1767,6 +1786,7 @@ FN KiStealWork ()
         myprb, // destprb
         loadedprb, // srcprb
         FALSE, // other
+        TRUE, // idlestealing
     )
 
     // Lower IPL - we should switch to the stolen thread.
@@ -1818,6 +1838,7 @@ FN (KeDpcF) KiBalanceWork (
             leastloaded, // destprb
             mostloaded, // srcprb
             leastloaded != myprb, // other
+            FALSE, // idlestealing
         )
 
         IF diff == 1 THEN
