@@ -71,9 +71,8 @@
     // remote processors.
 
     prb^.StashedCurrentThreadInfo =
-        ((next^.Priority) << KI_STASHED_PRIORITY_SHIFT) |
-        ((next^.Interactive | next^.InteractivityFloor)
-            << KI_STASHED_INTERACTIVE_SHIFT)
+        (next^.Priority << KI_STASHED_PRIORITY_SHIFT) |
+        (next^.InteractiveBits << KI_STASHED_INTERACTIVE_SHIFT)
 #END
 ]
 
@@ -185,23 +184,25 @@ FN KiUpdateInteractivity (
         score = 0
     END
 
-    IF score < KI_INTERACT_THRESH AND NOT thread^.Interactive THEN
+    IF score < KI_INTERACT_THRESH AND
+        NOT KiIsInteractiveForBehavior ( thread ) THEN
+
         // Changing from non-interactive to interactive.
 
         IF deferupdate THEN
             GOTO DeferUpdate
         END
 
-        thread^.Interactive = TRUE
+        KiSetInteractiveForBehavior ( thread )
 
-    ELSEIF thread^.Interactive THEN
+    ELSEIF KiIsInteractiveForBehavior ( thread ) THEN
         // Changing from interactive to non-interactive.
 
         IF deferupdate THEN
             GOTO DeferUpdate
         END
 
-        thread^.Interactive = FALSE
+        KiClearInteractiveForBehavior ( thread )
     END
 
     LEAVE
@@ -317,14 +318,14 @@ FN KiInsertThread (
     END
 
     IF thread^.Priority >= OS_PRIORITY_LOW_REALTIME OR
-        thread^.Interactive | thread^.InteractivityFloor THEN
+        thread^.InteractiveBits THEN
 
         // It's either one of the forced real time priorities or we've deemed it
         // interactive. Either way it goes in the real time queue or preempts
         // the current thread.
 
         IF (compare^.Priority >= OS_PRIORITY_LOW_REALTIME OR
-            compare^.Interactive | compare^.InteractivityFloor) AND
+            compare^.InteractiveBits) AND
             thread^.Priority <= compare^.Priority THEN
 
             thread^.CurrentQueue = KI_REAL_TIME_QUEUE
@@ -466,7 +467,7 @@ FN KiWouldPreempt (
 
     pri2 := KiCurrentThreadPriority ( stash )
 
-    IF (thread1^.Interactive | thread1^.InteractivityFloor) THEN
+    IF thread1^.InteractiveBits THEN
         IF NOT KiCurrentThreadInteractivity ( stash ) THEN
             // Interactive threads always preempt non-interactive threads.
 
@@ -881,7 +882,7 @@ FN KiSelectThread (
         // We're selecting a thread whose priority is >= the 'current' thread.
 
         minimumpriority = current^.Priority
-        interactive = current^.Interactive | current^.InteractivityFloor
+        interactive = current^.InteractiveBits
 
         IF exclusive THEN
             // Only pick a thread whose priority is strictly > the 'current'
@@ -1161,7 +1162,7 @@ FN KiSetPriorityThread (
     IF priority == OS_PRIORITY_IDLE THEN
         // Make sure idle priority threads are never marked interactive.
 
-        thread^.Interactive = FALSE
+        KiClearInteractiveForBehavior ( thread )
     END
 
     IF thread^.Status == KI_THREAD_READY THEN
@@ -1387,8 +1388,7 @@ FN KiCheckInteractivity (
 
     KiAcquireThreadElevated ( current )
 
-    oldinteractivity := current^.Interactive |
-        current^.InteractivityFloor
+    oldinteractivity := current^.InteractiveBits
 
     // Perform the deferred interactivity update.
 
@@ -1397,8 +1397,7 @@ FN KiCheckInteractivity (
         FALSE, // deferupdate
     )
 
-    newinteractivity := current^.Interactive |
-        current^.InteractivityFloor
+    newinteractivity := current^.InteractiveBits
 
     IF oldinteractivity == newinteractivity THEN
         // Nothing to do.
@@ -1449,13 +1448,11 @@ FN KiMoveToInteractiveQueueThread (
 
             prb^.StashedCurrentThreadInfo =
                 KiSetInteractivityInStash ( prb^.StashedCurrentThreadInfo,
-                thread^.Interactive | thread^.InteractivityFloor )
+                thread^.InteractiveBits )
         END
 #END
 
-        KiReleaseReadyQueueElevated ( prb )
-
-        LEAVE
+        GOTO Exit
     END
 
     KiReinsertThread (
@@ -1464,6 +1461,8 @@ FN KiMoveToInteractiveQueueThread (
         other, // other
         thread^.Priority, // curpri
     )
+
+@Exit
 
     KiReleaseReadyQueueElevated ( prb )
 END

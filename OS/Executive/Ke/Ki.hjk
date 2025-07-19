@@ -123,6 +123,37 @@
         (idle << KI_STASHED_IDLE_SHIFT))
 ]
 
+#DEFINE KI_INTERACTIVE_WELL_BEHAVED 1
+#DEFINE KI_INTERACTIVE_PI_FLOOR 2
+
+#MACRO KiIsInteractiveForBehavior ( thread ) [
+    ((thread)^.InteractiveBits & KI_INTERACTIVE_WELL_BEHAVED)
+]
+
+#MACRO KiIsInteractiveForFloor ( thread ) [
+    ((thread)^.InteractiveBits & KI_INTERACTIVE_PI_FLOOR)
+]
+
+#MACRO KiIsInteractiveForOtherThanFloor ( thread ) [
+    ((thread)^.InteractiveBits & ~KI_INTERACTIVE_PI_FLOOR)
+]
+
+#MACRO KiSetInteractiveForBehavior ( thread ) [
+    NOTHING (thread)^.InteractiveBits |= KI_INTERACTIVE_WELL_BEHAVED
+]
+
+#MACRO KiSetInteractiveForFloor ( thread ) [
+    NOTHING (thread)^.InteractiveBits |= KI_INTERACTIVE_PI_FLOOR
+]
+
+#MACRO KiClearInteractiveForBehavior ( thread ) [
+    NOTHING (thread)^.InteractiveBits &= ~KI_INTERACTIVE_WELL_BEHAVED
+]
+
+#MACRO KiClearInteractiveForFloor ( thread ) [
+    NOTHING (thread)^.InteractiveBits &= ~KI_INTERACTIVE_PI_FLOOR
+]
+
 #IF BLD_MP
 
 FNPTR KiIpiF (
@@ -836,9 +867,7 @@ EXTERN FN KiRemoveSwapCandidateListFunc (
 )
 
 #MACRO KiInsertSwapCandidateList ( thread, waitmode ) [
-    IF (waitmode) == KE_USER_MODE AND
-        (thread)^.KernelStackSwappable THEN
-
+    IF (waitmode) == KE_USER_MODE THEN
         KiInsertSwapCandidateListFunc ( thread )
     END
 ]

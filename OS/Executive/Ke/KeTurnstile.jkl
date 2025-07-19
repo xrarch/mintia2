@@ -188,7 +188,7 @@ FN KiBoostPriority (
 
         boost := FALSE
 
-        IF owner^.InteractivityFloor OR
+        IF KiIsInteractiveForFloor ( owner ) OR
             owner^.PriorityFloor >= OS_PRIORITY_LOW_REALTIME THEN
 
             // This owner goes on the real time queues.
@@ -207,12 +207,12 @@ FN KiBoostPriority (
         IF boost THEN
             boost = FALSE
 
-            IF interactive AND NOT owner^.InteractivityFloor THEN
+            IF interactive AND NOT KiIsInteractiveForFloor ( owner ) THEN
                 // Raise the interactivity floor.
 
-                owner^.InteractivityFloor = TRUE
+                KiSetInteractiveForFloor ( owner )
 
-                IF NOT owner^.Interactive THEN
+                IF NOT KiIsInteractiveForOtherThanFloor ( owner ) THEN
                     // It wasn't interactive and we just raised the floor, so
                     // it's probably in the wrong queue now.
 
@@ -277,8 +277,7 @@ FN KiBoostPriority (
         // Set new bestowed.
 
         owner^.BestowedPriority = owner^.Priority
-        owner^.BestowedInteractivity = (owner^.Interactive |
-            owner^.InteractivityFloor)
+        owner^.BestowedInteractivity = owner^.InteractiveBits
 
         // Re-insert.
 
@@ -563,7 +562,7 @@ FN KiBlockOnLock (
         priority := thread^.Priority
         thread^.BestowedPriority = priority
 
-        interactive := (thread^.Interactive | thread^.InteractivityFloor)
+        interactive := thread^.InteractiveBits
         thread^.BestowedInteractivity = interactive
 
 #IF BLD_MP
@@ -591,7 +590,7 @@ FN KiBlockOnLock (
         KiReleaseChainElevated ( chain )
 
         IF owner^.PriorityFloor < priority OR
-            (interactive AND NOT owner^.InteractivityFloor) THEN
+            (interactive AND NOT KiIsInteractiveForFloor ( owner )) THEN
 
             // Raise the priority floor. Returns with the thread lock released.
 
@@ -769,12 +768,12 @@ FN KiComputeFloor (
 
     // Apply the new interactivity floor.
 
-    IF thread^.InteractivityFloor AND NOT interactivityfloor THEN
+    IF KiIsInteractiveForFloor ( thread ) AND NOT interactivityfloor THEN
         // No longer interactive.
 
-        thread^.InteractivityFloor = FALSE
+        KiClearInteractiveForFloor ( thread )
 
-        IF NOT thread^.Interactive THEN
+        IF NOT KiIsInteractiveForOtherThanFloor ( thread ) THEN
             // We weren't interactive in our own right either, which means we
             // may need to be preempted by someone who is.
 
