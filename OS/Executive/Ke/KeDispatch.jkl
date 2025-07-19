@@ -83,7 +83,7 @@
 
 #SECTION "text"
 PUBLIC KiIndexFirstBitSet : UBYTE[256] = {
-    255, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    8, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
     4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
     5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
     4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
@@ -103,7 +103,7 @@ PUBLIC KiIndexFirstBitSet : UBYTE[256] = {
 
 #SECTION "text"
 PUBLIC KiIndexLastBitSet : UBYTE[256] = {
-    255, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
+    8, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
     4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
@@ -876,17 +876,17 @@ FN KiSelectTimesharedThread (
 
         fbs := fbsarray[(readybits ROR k) & 0xFF]
 
-        IF fbs == 255 THEN
+        IF fbs == 8 THEN
             // No bits set here, check next 8 bits.
 
             k += 8
             fbs = fbsarray[(readybits ROR k) & 0xFF]
 
-            IF fbs == 255 THEN
+            IF fbs == 8 THEN
                 k += 8
                 fbs = fbsarray[(readybits ROR k) & 0xFF]
 
-                IF fbs == 255 THEN
+                IF fbs == 8 THEN
                     k += 8
                     fbs = fbsarray[(readybits ROR k) & 0xFF]
 
@@ -894,7 +894,7 @@ FN KiSelectTimesharedThread (
                     // was supposed to completely avoid calling us. No need to
                     // deal with a "no bits set" case.
 
-                    KeAssert ( fbs != 255 )
+                    KeAssert ( fbs != 8 )
                 END
             END
         END
