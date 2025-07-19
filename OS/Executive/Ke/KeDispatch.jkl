@@ -81,6 +81,46 @@
 #END
 ]
 
+#SECTION "text"
+PUBLIC KiIndexFirstBitSet : UBYTE[256] = {
+    255, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    6, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    7, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    6, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+    4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+}
+
+#SECTION "text"
+PUBLIC KiIndexLastBitSet : UBYTE[256] = {
+    255, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
+    4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+}
+
 #DEFINE KI_INTERACT_MAX 100
 #DEFINE KI_INTERACT_HALF ( / KI_INTERACT_MAX 2 )
 #DEFINE KI_INTERACT_THRESH 15
@@ -714,59 +754,86 @@ FN KiSelectRealTimeThread (
 
     readybits := prb^.RealTimeReady
 
-    i := OS_PRIORITY_MAX
+    KeAssert ( readybits != 0 )
 
-@NextQueue
+@SeekNextQueue
 
-    WHILE i DO
-        i -= 1
+    // Binary search within the 32 bit ready bit set to find the highest byte
+    // that has a set bit.
 
-        IF (readybits >> i) & 1 THEN
-            // There's a thread in this queue. Unlink and return it.
+    i : UWORD
 
-            queue := &prb^.RealTimeListHeads[i]
-
-            thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
-
-#IF BLD_MP
-            IF migrate THEN
-                WHILE thread^.Pinned DO
-                    // Seek to a non-pinned thread since we can't move pinned
-                    // threads across cores.
-
-                    IF thread^.ReadyEntry.Next == queue THEN
-                        // Reached the end. Check the next queue.
-
-                        GOTO NextQueue
-                    END
-
-                    thread = CONTAINEROF thread^.ReadyEntry.Next TO
-                        KeThread.ReadyEntry
-                END
-            END
-#END
-
-            RtlRemoveEntryList ( &thread^.ReadyEntry )
-
-            IF RtlEmptyList ( queue ) THEN
-                // The queue is empty now. Clear the bit.
-
-                prb^.RealTimeReady = readybits & ~(1 << i)
-            END
-
-            // Decrement count of ready threads.
-
-            KiDecrementLoad ( prb )
-
-            // No longer on a queue, so set INFLIGHT.
-
-            thread^.Status = KI_THREAD_INFLIGHT
-
-            RETURN thread
+    IF readybits & 0xFFFF0000 THEN
+        IF readybits & 0xFF000000 THEN
+            // 0xFF000000 is the highest byte.
+            i = 24
+        ELSE
+            // 0x00FF0000 is the highest byte.
+            i = 16
         END
+    ELSEIF readybits & 0x0000FF00 THEN
+        // 0x0000FF00 is the highest byte.
+        i = 8
+    ELSE
+        // 0x000000FF is the highest byte.
+        i = 0
     END
 
-    RETURN NULLPTR
+    // Use a lookup table to find the highest bit set within this byte.
+
+    i = KiIndexLastBitSet[(readybits >> i) & 0xFF] + i
+
+    queue := &prb^.RealTimeListHeads[i]
+
+    thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
+
+#IF BLD_MP
+    IF migrate AND thread^.Pinned THEN
+        // We can't migrate pinned threads, so try to find one that isn't
+        // pinned.
+
+        WHILE TRUE DO
+            IF thread^.ReadyEntry.Next == queue THEN
+                // Only pinned threads in this queue, check the next one by
+                // masking this one out of the ready bit set.
+
+                readybits &= ~(1 << i)
+
+                IF readybits != 0 THEN
+                    GOTO SeekNextQueue
+                END
+
+                // No queues have threads we're allowed to take.
+
+                RETURN NULLPTR
+            END
+
+            thread = CONTAINEROF thread^.ReadyEntry.Next TO KeThread.ReadyEntry
+
+            IF NOT thread^.Pinned THEN
+                BREAK
+            END
+        END
+    END
+#END
+
+    RtlRemoveEntryList ( &thread^.ReadyEntry )
+
+    IF RtlEmptyList ( queue ) THEN
+        // The queue is empty now. Clear the bit.
+
+        prb^.RealTimeReady &= ~(1 << i)
+    END
+
+    // Decrement count of ready threads.
+
+    KiDecrementLoad ( prb )
+
+    // No longer on a queue, so set INFLIGHT.
+
+    thread^.Status = KI_THREAD_INFLIGHT
+
+    RETURN thread
 END
 
 FN KiSelectTimesharedThread (
@@ -784,6 +851,8 @@ FN KiSelectTimesharedThread (
 
     readybits := prb^.CalendarReady
 
+    KeAssert ( readybits != 0 )
+
     k := prb^.CalendarRunIndex
 
     IF NOT current
@@ -795,20 +864,42 @@ FN KiSelectTimesharedThread (
         // If we're migrating, or we'd become idle if we fail to get a thread
         // here, seek to a set bit to make sure we get a thread.
 
-        count := KI_TIMESHARED_QUEUES
+@SeekNextQueue
 
-        WHILE (readybits >> k) & 1 == 0 DO
-            IF NOT count THEN
-                RETURN NULLPTR
-            END
+        fbsarray := &KiIndexFirstBitSet[0]
 
-            k += 1
-            count -= 1
+        // Start from bit k. Assume the ready bits are 32 bit.
 
-            IF k == KI_TIMESHARED_QUEUES THEN
-                k = 0
+        // Portability hazard: We assume the architecture we run on, masks the
+        // rotation amount. This is true on all current and planned
+        // architectures (fox32, xr17032, Aphelion, AMD64).
+
+        fbs := fbsarray[(readybits ROR k) & 0xFF]
+
+        IF fbs == 255 THEN
+            // No bits set here, check next 8 bits.
+
+            k += 8
+            fbs = fbsarray[(readybits ROR k) & 0xFF]
+
+            IF fbs == 255 THEN
+                k += 8
+                fbs = fbsarray[(readybits ROR k) & 0xFF]
+
+                IF fbs == 255 THEN
+                    k += 8
+                    fbs = fbsarray[(readybits ROR k) & 0xFF]
+
+                    // If we're here there must be SOME bit set or the caller
+                    // was supposed to completely avoid calling us. No need to
+                    // deal with a "no bits set" case.
+
+                    KeAssert ( fbs != 255 )
+                END
             END
         END
+
+        k = (k + fbs) & 31
 
     ELSEIF (readybits >> k) & 1 == 0 THEN
         RETURN NULLPTR
@@ -821,8 +912,34 @@ FN KiSelectTimesharedThread (
     thread := CONTAINEROF queue^.Next TO KeThread.ReadyEntry
 
 #IF BLD_MP
-    IF thread^.Pinned AND migrate THEN
-        RETURN NULLPTR
+    IF migrate AND thread^.Pinned THEN
+        // We can't migrate pinned threads, so try to find one that isn't
+        // pinned.
+
+        WHILE TRUE DO
+            IF thread^.ReadyEntry.Next == queue THEN
+                // Only pinned threads in this queue, check the next one by
+                // masking this one out of the ready bit set.
+
+                readybits &= ~(1 << k)
+
+                IF readybits != 0 THEN
+                    k += 1
+
+                    GOTO SeekNextQueue
+                END
+
+                // No queues have threads we're allowed to take.
+
+                RETURN NULLPTR
+            END
+
+            thread = CONTAINEROF thread^.ReadyEntry.Next TO KeThread.ReadyEntry
+
+            IF NOT thread^.Pinned THEN
+                BREAK
+            END
+        END
     END
 #END
 
@@ -831,7 +948,7 @@ FN KiSelectTimesharedThread (
     IF RtlEmptyList ( queue ) THEN
         // The queue is empty now. Clear the bit.
 
-        prb^.CalendarReady = readybits & ~(1 << k)
+        prb^.CalendarReady &= ~(1 << k)
 
 #IF BLD_MP
         IF NOT migrate THEN
@@ -867,18 +984,10 @@ FN KiSelectThread (
     // Return a thread to switch into from the given processor's queues.
     // A thread lock is held, or we are otherwise at KI_IPL_DPC. Ready queue
     // lock is held.
+    //
     // If a current thread is given, we only return threads that can preempt it.
 
-    next := prb^.NextThread
-
-    IF NOT migrate AND next THEN
-        // There's already a next thread selected, return that.
-
-        prb^.NextThread = NULLPTR
-        next^.Status = KI_THREAD_INFLIGHT
-
-        RETURN next
-    END
+    next : ^KeThread = NULLPTR
 
     minimumpriority := 0
     interactive := FALSE
@@ -898,6 +1007,11 @@ FN KiSelectThread (
             IF minimumpriority == OS_PRIORITY_MAX THEN
                 // The thread is already at the highest priority, it can't be
                 // preempted.
+
+                // Portability hazard: This check currently stops a right shift
+                // below from ever having a shift amount >= the register bit
+                // width, which causes unpredictable results on some chips.
+                // That should be kept in mind before changing this code.
 
                 RETURN NULLPTR
             END
@@ -933,9 +1047,7 @@ FN KiSelectThread (
 
     // Check the calendar queue (timeshared) bitmap.
 
-    readybits = prb^.CalendarReady
-
-    IF readybits THEN
+    IF prb^.CalendarReady THEN
         // We're taking a thread off the timeshared queues.
 
         next = KiSelectTimesharedThread (
@@ -1362,7 +1474,7 @@ FN KiCheckInteractivityInternal (
             next := KiSelectThread (
                 prb, // prb
                 current, // current
-                FALSE, // exclusive
+                TRUE, // exclusive
                 FALSE, // migrate
             )
 
@@ -1540,12 +1652,37 @@ FN KiYield (
 
     KiAcquireReadyQueueElevated ( prb )
 
+#IF BLD_MP
+    // There's a chance that a next thread was selected inbetween raising IPL
+    // and taking the Prb lock.
+
+    next := prb^.NextThread
+
+    IF next THEN
+        // Yep.
+
+        prb^.NextThread = NULLPTR
+        next^.Status = KI_THREAD_INFLIGHT
+
+    ELSE
+        next = KiSelectThread (
+            prb, // prb
+            NULLPTR, // current
+            FALSE, // exclusive
+            FALSE, // migrate
+        )
+    END
+
+#ELSE
+    KeAssert ( prb^.NextThread == NULLPTR )
+
     next := KiSelectThread (
         prb, // prb
         NULLPTR, // current
         FALSE, // exclusive
         FALSE, // migrate
     )
+#END
 
     KiReleaseReadyQueueElevated ( prb )
 
