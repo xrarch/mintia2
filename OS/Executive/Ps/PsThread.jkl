@@ -37,7 +37,7 @@ FN PspAllocateTurnstile () : ^KiTurnstile
 
         KeReleaseLock ( &PspTurnstileLock )
 
-        turnstile = MmAllocatePool (
+        hunk := MmAllocatePool (
             MM_NONPAGED_POOL, // poolindex
             SIZEOF KiTurnstile * PSP_TURNSTILE_EXTENSION +
             MM_ZONE_OVERHEAD, // bytes
@@ -45,22 +45,50 @@ FN PspAllocateTurnstile () : ^KiTurnstile
             TRUE, // wait
         )
 
-        IF NOT turnstile THEN
-            RETURN NULLPTR
+        KeAcquireLockExclusive ( &PspTurnstileLock )
+
+        // Try to grab one again.
+
+        turnstile = MmAllocateZone (
+            &PspTurnstileZone, // zone
+        )
+
+        IF turnstile THEN
+            // Someone else extended it. No need to waste memory on our
+            // extension.
+
+            IF hunk THEN
+                MmFreePool (
+                    hunk, // ptr
+                    'Turn', // tag
+                )
+            END
+
+            GOTO Exit
         END
 
-        KeAcquireLockExclusive ( &PspTurnstileLock )
+        IF NOT hunk THEN
+            // We failed to allocate a hunk and also failed on the second
+            // attempt to get a turnstile from the zone, so just bail and
+            // return NULLPTR.
+
+            GOTO Exit
+        END
 
         // Extend the zone starting from the second turnstile in the hunk.
         // We take the first for ourselves.
 
         MmExtendZone (
             &PspTurnstileZone, // zone
-            turnstile + SIZEOF KiTurnstile, // hunk
+            hunk + SIZEOF KiTurnstile, // hunk
             SIZEOF KiTurnstile * (PSP_TURNSTILE_EXTENSION - 1) +
             MM_ZONE_OVERHEAD, // bytes
         )
+
+        turnstile = hunk
     END
+
+@Exit
 
     KeReleaseLock ( &PspTurnstileLock )
 
