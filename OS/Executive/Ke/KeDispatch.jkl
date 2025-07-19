@@ -1621,25 +1621,18 @@ FN KiMoveThreads (
         KiAcquireReadyQueueElevated ( destprb )
     END
 
-    IF destprb^.Load >= srcprb^.Load THEN
+    IF destprb^.Load >= srcprb^.Load OR
+        (idlestealing AND destprb^.NextThread) THEN
+
         // There is no imbalance, bail out.
 
-@Bail
+        // Alternatively, we were here to steal work upon becoming idle, but in
+        // the time since we decided to do that, this processor became busy.
+        // So it's no longer necessary.
 
         KiReleaseTwoReadyQueuesElevated ( destprb, srcprb )
 
         LEAVE
-    END
-
-    IF idlestealing THEN
-        IF NOT destprb^.StealWork THEN
-            // Someone decided we shouldn't steal work after all in the time
-            // since we decided to do it, so nevermind.
-
-            GOTO Bail
-        END
-
-        destprb^.StealWork = FALSE
     END
 
     // Only move half as many threads as the difference in load. This will
