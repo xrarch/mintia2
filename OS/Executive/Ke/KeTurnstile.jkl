@@ -289,13 +289,6 @@ FN KiBoostPriority (
 
         KiReleaseTurnstileElevated ( turnstile )
 
-#IF BLD_MP
-        // Set Boosted flag so that if he's in the middle of boosting stuff
-        // himself, he knows to retry since his bestowed priority just changed.
-
-        owner^.Boosted = TRUE
-#END
-
         IF turnstile^.Event.Header.SignalCount THEN
             // The turnstile was already awoken and this thread just hasn't made
             // its way out of KiBlockOnLock yet. Note that we aren't holding any
@@ -558,16 +551,24 @@ FN KiBlockOnLock (
         KiAcquireThreadElevated ( thread )
 
         // Capture current priority as the BestowedPriority.
+        //
+        // NOTE: Currently no attempt is made to re-boost the waiter chain if
+        //       this thread's priority is increased after it did its own
+        //       boosting; boosting is done purely based on the priority we see
+        //       for ourselves right here. It's assumed to be sufficient to just
+        //       boost the waiter chain with whatever priority we had when we
+        //       blocked, but if that assumption turns out to be faulty, it
+        //       wouldn't be difficult to extend KiSetPriorityThread to unblock
+        //       a thread blocked on a turnstile if its priority was raised,
+        //       with an OS_STATUS_KERNEL_APC, which would cause the lock
+        //       acquisition to be performed again and the waiters re-boosted
+        //       (by this thread) to the new priority.
 
         priority := thread^.Priority
         thread^.BestowedPriority = priority
 
         interactive := thread^.InteractiveBits
         thread^.BestowedInteractivity = interactive
-
-#IF BLD_MP
-        thread^.Boosted = FALSE
-#END
 
         thread^.BlockedOnTurnstile = turnstile
 
@@ -600,10 +601,10 @@ FN KiBlockOnLock (
                 thread, // thread
                 interactive, // interactive
                 priority, // priority
-            ) OR thread^.Boosted THEN
+            ) THEN
 
-                // Failed to try-acquire a spinlock, or I was boosted while
-                // boosting. In either case, retry everything.
+                // Failed to try-acquire a spinlock. Unwind and retry
+                // everything.
 
                 GOTO UnreferenceAndLeave
             END
