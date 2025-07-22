@@ -317,8 +317,8 @@ FN KiBoostPriority (
         // with respect to the thread lock, so we only try-acquire it and retry
         // the entire lock operation if we fail. Also note that try-acquire
         // spins many times rather than trying once and just giving up, just in
-        // case the holder is on his way out. This includes using PAUSE
-        // instructions.
+        // case the holder holds it along a codepath that never contends on the
+        // out of order spinlock we're currently holding (which is most common).
 
         IF NOT KiTryAcquireSpinlock ( &chain^.Spinlock ) THEN
             // Failed to acquire it.
