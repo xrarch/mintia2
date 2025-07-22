@@ -289,6 +289,17 @@ FN KiBoostPriority (
 
         KiReleaseTurnstileElevated ( turnstile )
 
+        // NOTE: Previously we set an owner^.Boosted flag here which indicated
+        //       to the owner that if he was in the middle of performing
+        //       boosting on another processor, he needs to redo everything.
+        //       This was unnecessary because we are definitely "behind" him
+        //       in boosting the waiter chain he lies along; he necessarily got
+        //       there first, and if we ever caught up we would contend with him
+        //       on a thread or chain spinlock and be forced to remain behind
+        //       him. So, the boosting will always happen correctly.
+        //
+        // owner^.Boosted = TRUE
+
         IF turnstile^.Event.Header.SignalCount THEN
             // The turnstile was already awoken and this thread just hasn't made
             // its way out of KiBlockOnLock yet. Note that we aren't holding any
