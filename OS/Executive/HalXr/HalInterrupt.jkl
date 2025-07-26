@@ -3,7 +3,6 @@
 //
 
 #INCLUDE "Halp.hjk"
-#INCLUDE "<ll>/System/OsContext.hjk"
 
 #SECTION "text"
 HalpIplToLsicIpl : UBYTE[32] = {
@@ -198,7 +197,7 @@ FN (KeInterruptF) HalpTimerInterrupt (
 
     KiClockTick (
         HAL_TIMER_INTERVAL, // intervalms
-        context^.Rs & 8, // usermode
+        context^.Rs & OS_XR_RS_OLD_USER, // usermode
         context^.OldIpl, // previpl
     )
 END

@@ -3,7 +3,6 @@
 //
 
 #INCLUDE "Halp.hjk"
-#INCLUDE "<ll>/System/OsContext.hjk"
 
 FN HalRaiseHardwareIpl (
     IN ipl : UWORD,
@@ -89,7 +88,7 @@ FN (KeInterruptF) HalpTimerInterrupt (
 
     KiClockTick (
         HAL_TIMER_INTERVAL, // intervalms
-        context^.Eflags & 8, // usermode
+        context^.Eflags & OS_FOX32_EFLAGS_SWAPSP, // usermode
         context^.OldIpl, // previpl
     )
 END

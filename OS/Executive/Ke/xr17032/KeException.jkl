@@ -19,17 +19,6 @@ FNPTR KiHighLevelHandlerF (
     IN badaddr : ^VOID,
 )
 
-#DEFINE EXC_INT 1
-#DEFINE EXC_SYS 2
-#DEFINE EXC_BUS 4
-#DEFINE EXC_NMI 5
-#DEFINE EXC_BRK 6
-#DEFINE EXC_INV 7
-#DEFINE EXC_PRV 8
-#DEFINE EXC_UNA 9
-#DEFINE EXC_PGF 12
-#DEFINE EXC_PFW 13
-
 KiCauseNames : ^UBYTE[16] = {
     "EXC0",
     "INTERRUPT",
@@ -59,7 +48,7 @@ FN KiFaultCrash (
         context^.Rs,
         badaddr,
         context^.Epc,
-        KiCauseNames[context^.Rs >> 28],
+        KiCauseNames[context^.Rs >> OS_XR_RS_ECAUSE_SHIFT],
     )
 END
 
@@ -113,7 +102,7 @@ FN (KiHighLevelHandlerF) KiSpuriousException (
 
     KeCrash (
         "Spurious Exception EXC=%u ADDR=%p\n", // fmt
-        context^.Rs >> 28,
+        context^.Rs >> OS_XR_RS_ECAUSE_SHIFT,
         badaddr
     )
 END
@@ -186,17 +175,17 @@ FN (KiHighLevelHandlerF) KiHandleInterrupt (
 END
 
 KiExceptionToSignal : UBYTE[16] = {
-    [EXC_BUS] = OS_SIGNAL_BUS,
-    [EXC_INV] = OS_SIGNAL_ILL,
-    [EXC_PRV] = OS_SIGNAL_ILL,
-    [EXC_UNA] = OS_SIGNAL_ACV,
+    [OS_XR_ECAUSE_BUS] = OS_SIGNAL_BUS,
+    [OS_XR_ECAUSE_INV] = OS_SIGNAL_ILL,
+    [OS_XR_ECAUSE_PRV] = OS_SIGNAL_ILL,
+    [OS_XR_ECAUSE_UNA] = OS_SIGNAL_ACV,
 }
 
 KiExceptionToStatus : OsStatus[16] = {
-    [EXC_BUS] = OS_STATUS_BUS_ERROR,
-    [EXC_INV] = OS_STATUS_ILLEGAL_INSTRUCTION,
-    [EXC_PRV] = OS_STATUS_ILLEGAL_INSTRUCTION,
-    [EXC_UNA] = OS_STATUS_UNALIGNED_FAULT,
+    [OS_XR_ECAUSE_BUS] = OS_STATUS_BUS_ERROR,
+    [OS_XR_ECAUSE_INV] = OS_STATUS_ILLEGAL_INSTRUCTION,
+    [OS_XR_ECAUSE_PRV] = OS_STATUS_ILLEGAL_INSTRUCTION,
+    [OS_XR_ECAUSE_UNA] = OS_STATUS_UNALIGNED_FAULT,
 }
 
 FN (KiHighLevelHandlerF) KiHandleError (
@@ -213,14 +202,16 @@ FN (KiHighLevelHandlerF) KiHandleError (
 
     thread := KeCurrentThread ()
 
-    IF context^.Rs & (1 << 8) THEN
+    ecause := context^.Rs >> OS_XR_RS_ECAUSE_SHIFT
+
+    IF context^.Rs & OS_XR_RS_OLD_USER THEN
         // Happened in usermode, send a signal.
 
-        thread^.LastFaultStatus = KiExceptionToStatus[context^.Rs >> 28]
+        thread^.LastFaultStatus = KiExceptionToStatus[ecause]
 
         KeSignalThread (
             thread, // thread
-            KiExceptionToSignal[context^.Rs >> 28], // signal
+            KiExceptionToSignal[ecause], // signal
         )
 
     ELSE
@@ -229,7 +220,7 @@ FN (KiHighLevelHandlerF) KiHandleError (
         KiAbort (
             thread, // thread
             context, // context
-            KiExceptionToStatus[context^.Rs >> 28], // status
+            KiExceptionToStatus[ecause], // status
             badaddr, // badaddr
         )
     END
@@ -242,9 +233,9 @@ FN (KiHighLevelHandlerF) KiHandleBreakpoint (
     IN badaddr : ^VOID,
 )
 
-    ecause := context^.Rs >> 28
+    ecause := context^.Rs >> OS_XR_RS_ECAUSE_SHIFT
 
-    IF context^.Rs & (1 << 8) AND ecause != EXC_NMI THEN
+    IF context^.Rs & OS_XR_RS_OLD_USER AND ecause != OS_XR_ECAUSE_NMI THEN
         // Usermode breakpoint. Dispatch to debugger or send an illegal
         // instruction signal to the thread if no debugger attached.
 
@@ -253,13 +244,13 @@ FN (KiHighLevelHandlerF) KiHandleBreakpoint (
     ELSEIF KeDebuggerEntry THEN
         KeDebuggerEntry ( context )
 
-        IF ecause == EXC_BRK AND context^.Epc == &KeBreakpoint THEN
+        IF ecause == OS_XR_ECAUSE_BRK AND context^.Epc == &KeBreakpoint THEN
             // Skip over the explicit breakpoint.
 
             context^.Epc += 4
         END
 
-    ELSEIF ecause != EXC_NMI THEN
+    ELSEIF ecause != OS_XR_ECAUSE_NMI THEN
         KeCrash ( "Unhandled kernel mode breakpoint\n" )
     END
 END
@@ -291,8 +282,8 @@ FN (KiHighLevelHandlerF) KiHandlePageFault (
 
     status := MmPageFault (
         badaddr, // address
-        (context^.Rs >> 28) == EXC_PFW, // writing
-        context^.Rs & (1 << 8), // usermode
+        (context^.Rs >> OS_XR_RS_ECAUSE_SHIFT) == OS_XR_ECAUSE_PFW, // writing
+        context^.Rs & OS_XR_RS_OLD_USER, // usermode
     )
 
     IF OsError ( status ) THEN
@@ -300,7 +291,7 @@ FN (KiHighLevelHandlerF) KiHandlePageFault (
 
         thread := KeCurrentThread ()
 
-        IF context^.Rs & (1 << 8) THEN
+        IF context^.Rs & OS_XR_RS_OLD_USER THEN
             // Happened in usermode. Send a signal.
 
             thread^.LastFaultStatus = status
@@ -328,19 +319,19 @@ END
 #SECTION "text"
 KiHandlerTable : KiHighLevelHandlerF[16] = {
     [0] = &KiSpuriousException,
-    [EXC_INT] = &KiHandleInterrupt,
+    [OS_XR_ECAUSE_INT] = &KiHandleInterrupt,
     [2] = &KiSpuriousException,
     [3] = &KiSpuriousException,
-    [EXC_BUS] = &KiHandleError,
-    [EXC_NMI] = &KiHandleBreakpoint,
-    [EXC_BRK] = &KiHandleBreakpoint,
-    [EXC_INV] = &KiHandleError,
-    [EXC_PRV] = &KiHandleError,
-    [EXC_UNA] = &KiHandleError,
+    [OS_XR_ECAUSE_BUS] = &KiHandleError,
+    [OS_XR_ECAUSE_NMI] = &KiHandleBreakpoint,
+    [OS_XR_ECAUSE_BRK] = &KiHandleBreakpoint,
+    [OS_XR_ECAUSE_INV] = &KiHandleError,
+    [OS_XR_ECAUSE_PRV] = &KiHandleError,
+    [OS_XR_ECAUSE_UNA] = &KiHandleError,
     [10] = &KiSpuriousException,
     [11] = &KiSpuriousException,
-    [EXC_PGF] = &KiHandlePageFault,
-    [EXC_PFW] = &KiHandlePageFault,
+    [OS_XR_ECAUSE_PGF] = &KiHandlePageFault,
+    [OS_XR_ECAUSE_PFW] = &KiHandlePageFault,
     [14] = &KiSpuriousException,
     [15] = &KiSpuriousException,
 }
@@ -356,7 +347,7 @@ KiExceptionHandler:
     mtcr scratch1, sp               // Save the current stack pointer.
 
     mfcr t0, rs                     // Read the status register.
-    andi t0, t0, (1 << 8)           // Isolate the old USER bit.
+    andi t0, t0, OS_XR_RS_OLD_USER  // Isolate the old USER bit.
     beq  t0, .waskernel             // If not set, we were already in kernel
                                     // mode. If clear, we entered from usermode.
 
@@ -410,7 +401,7 @@ KiExceptionHandler:
     mov  long [sp + OsContext_Epc], t1
     mov  long [sp + OsContext_Rs], t2
 
-    andi s0, t2, (1 << 8)           // Isolate the old USER bit.
+    andi s0, t2, OS_XR_RS_OLD_USER  // Isolate the old USER bit.
     beq  s0, .waskernel2            // If not set, we were already in kernel
                                     // mode. If clear, we entered from usermode.
 
@@ -432,7 +423,7 @@ KiExceptionHandler:
 
 .waskernel2:
 
-    rshi t0, t2, 28                 // Isolate the exception code.
+    rshi t0, t2, OS_XR_RS_ECAUSE_SHIFT // Isolate the exception code.
     la   t1, KiHandlerTable         // Load the address of the handler table.
     mov  t0, long [t1 + t0 LSH 2]   // Load the handler.
 

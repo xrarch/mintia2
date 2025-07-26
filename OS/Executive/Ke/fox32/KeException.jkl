@@ -612,36 +612,29 @@ KiJumpIntoThread:
 
 ]
 
-#DEFINE FOX_EXC_DIV_ZERO 0
-#DEFINE FOX_EXC_ILLEGAL 1
-#DEFINE FOX_EXC_READ_FAULT 2
-#DEFINE FOX_EXC_WRITE_FAULT 3
-#DEFINE FOX_EXC_DEBUGGER 4
-#DEFINE FOX_EXC_BUS_ERROR 5
-
 KiCauseNames : ^UBYTE[16] = {
-    [FOX_EXC_DIV_ZERO] = "DIVBYZERO",
-    [FOX_EXC_ILLEGAL] = "ILLEGAL",
-    [FOX_EXC_READ_FAULT] = "READFAULT",
-    [FOX_EXC_WRITE_FAULT] = "WRITEFAULT",
-    [FOX_EXC_DEBUGGER] = "DEBUGGER",
-    [FOX_EXC_BUS_ERROR] = "BUSERR",
+    [OS_FOX32_EXC_DIV_ZERO] = "DIVBYZERO",
+    [OS_FOX32_EXC_ILLEGAL] = "ILLEGAL",
+    [OS_FOX32_EXC_READ_FAULT] = "READFAULT",
+    [OS_FOX32_EXC_WRITE_FAULT] = "WRITEFAULT",
+    [OS_FOX32_EXC_DEBUGGER] = "DEBUGGER",
+    [OS_FOX32_EXC_BUS_ERROR] = "BUSERR",
 }
 
 KiExceptionToStatus : OsStatus[16] = {
-    [FOX_EXC_DIV_ZERO] = OS_STATUS_DIVIDE_BY_ZERO,
-    [FOX_EXC_ILLEGAL] = OS_STATUS_ILLEGAL_INSTRUCTION,
-    [FOX_EXC_READ_FAULT] = OS_STATUS_READ_FAULT,
-    [FOX_EXC_WRITE_FAULT] = OS_STATUS_WRITE_FAULT,
-    [FOX_EXC_BUS_ERROR] = OS_STATUS_BUS_ERROR,
+    [OS_FOX32_EXC_DIV_ZERO] = OS_STATUS_DIVIDE_BY_ZERO,
+    [OS_FOX32_EXC_ILLEGAL] = OS_STATUS_ILLEGAL_INSTRUCTION,
+    [OS_FOX32_EXC_READ_FAULT] = OS_STATUS_READ_FAULT,
+    [OS_FOX32_EXC_WRITE_FAULT] = OS_STATUS_WRITE_FAULT,
+    [OS_FOX32_EXC_BUS_ERROR] = OS_STATUS_BUS_ERROR,
 }
 
 KiExceptionToSignal : UBYTE[16] = {
-    [FOX_EXC_DIV_ZERO] = OS_SIGNAL_FPE,
-    [FOX_EXC_ILLEGAL] = OS_SIGNAL_ILL,
-    [FOX_EXC_READ_FAULT] = OS_SIGNAL_ACV,
-    [FOX_EXC_WRITE_FAULT] = OS_SIGNAL_ACV,
-    [FOX_EXC_BUS_ERROR] = OS_SIGNAL_BUS,
+    [OS_FOX32_EXC_DIV_ZERO] = OS_SIGNAL_FPE,
+    [OS_FOX32_EXC_ILLEGAL] = OS_SIGNAL_ILL,
+    [OS_FOX32_EXC_READ_FAULT] = OS_SIGNAL_ACV,
+    [OS_FOX32_EXC_WRITE_FAULT] = OS_SIGNAL_ACV,
+    [OS_FOX32_EXC_BUS_ERROR] = OS_SIGNAL_BUS,
 }
 
 FN KiFaultCrash (
@@ -852,7 +845,7 @@ FN (KiExceptionHandlerF) KiErrorFault (
 
     thread := KeCurrentThread ()
 
-    IF context^.Eflags & 8 THEN
+    IF context^.Eflags & OS_FOX32_EFLAGS_SWAPSP THEN
         // Happened in usermode, send a signal.
 
         thread^.LastFaultStatus = KiExceptionToStatus[ecause]
@@ -899,8 +892,8 @@ FN (KiExceptionHandlerF) KiPageFault (
 
     status := MmPageFault (
         CAST context^.BadAddr TO ^VOID, // address
-        ecause == FOX_EXC_WRITE_FAULT, // writing
-        context^.Eflags & 8, // usermode
+        ecause == OS_FOX32_EXC_WRITE_FAULT, // writing
+        context^.Eflags & OS_FOX32_EFLAGS_SWAPSP, // usermode
     )
 
     IF OsError ( status ) THEN
@@ -908,7 +901,7 @@ FN (KiExceptionHandlerF) KiPageFault (
 
         thread := KeCurrentThread ()
 
-        IF context^.Eflags & 8 THEN
+        IF context^.Eflags & OS_FOX32_EFLAGS_SWAPSP THEN
             // Happened in usermode. Send a signal.
 
             thread^.LastFaultStatus = status
@@ -938,7 +931,7 @@ FN (KiExceptionHandlerF) KiDebugger (
     IN ecause : UWORD,
 )
 
-    IF context^.Eflags & 8 THEN
+    IF context^.Eflags & OS_FOX32_EFLAGS_SWAPSP THEN
         KeCrash ( "NYI usermode breakpoints\n" )
 
     ELSEIF KeDebuggerEntry THEN
@@ -950,12 +943,12 @@ FN (KiExceptionHandlerF) KiDebugger (
 END
 
 KiExceptionHandlers : KiExceptionHandlerF[16] = {
-    [FOX_EXC_DIV_ZERO] = &KiErrorFault,
-    [FOX_EXC_ILLEGAL] = &KiErrorFault,
-    [FOX_EXC_READ_FAULT] = &KiPageFault,
-    [FOX_EXC_WRITE_FAULT] = &KiPageFault,
-    [FOX_EXC_DEBUGGER] = &KiDebugger,
-    [FOX_EXC_BUS_ERROR] = &KiErrorFault,
+    [OS_FOX32_EXC_DIV_ZERO] = &KiErrorFault,
+    [OS_FOX32_EXC_ILLEGAL] = &KiErrorFault,
+    [OS_FOX32_EXC_READ_FAULT] = &KiPageFault,
+    [OS_FOX32_EXC_WRITE_FAULT] = &KiPageFault,
+    [OS_FOX32_EXC_DEBUGGER] = &KiDebugger,
+    [OS_FOX32_EXC_BUS_ERROR] = &KiErrorFault,
 }
 
 EXTERN KiInterruptsDisabled : UWORD
@@ -970,7 +963,7 @@ FN KiExceptionHandler (
 
     current := KI_CURRENT_PRB^.CurrentThread
 
-    IF context^.Eflags & 8 THEN
+    IF context^.Eflags & OS_FOX32_EFLAGS_SWAPSP THEN
         // We interrupted usermode. Set the user trapframe pointer.
 
         current^.UserFrame = context
@@ -1006,7 +999,9 @@ FN KiExceptionHandler (
         END
     END
 
-    IF context^.Eflags & 8 AND current^.UserInterrupt THEN
+    IF context^.Eflags & OS_FOX32_EFLAGS_SWAPSP AND
+        current^.UserInterrupt THEN
+
         // We interrupted usermode. See if any usermode interrupts are pending.
 
         KiDispatchUserInterrupts ()
