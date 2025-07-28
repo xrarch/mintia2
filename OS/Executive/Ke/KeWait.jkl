@@ -489,15 +489,6 @@ FN KiCaptureCurrentTicksFunc (
     KiCaptureCurrentTicks ( time )
 END
 
-#MACRO KiRaiseIplForWait ( ipl ) [
-    KeAssert ( KiCurrentIpl () < KI_IPL_DPC )
-
-    // Raise IPL to stop APCs from corrupting our wait state if they come in
-    // and try to wait in our context.
-
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
-]
-
 #MACRO KiWaitHead ( thread, ipl, alertable, waitmode, waitblocktable, waitcount, status ) [
     // Clear timeout wait block flags field.
 
@@ -635,11 +626,16 @@ EXPORT FN KeWaitForObjects (
 
 @Retry
 
-    KiRaiseIplForWait ( ipl )
+    // Raise IPL to stop APCs from corrupting our wait state if they come in
+    // and try to wait in our context.
 
-    starttime : RtlUquad
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+    KeAssert ( ipl < KI_IPL_DPC )
 
     // Capture the start time.
+
+    starttime : RtlUquad
 
     IF timeout THEN
         KiCaptureCurrentTicksFunc ( &starttime )
@@ -888,11 +884,16 @@ EXPORT FN KeSleep (
 
 @Retry
 
-    KiRaiseIplForWait ( ipl )
+    // Raise IPL to stop APCs from corrupting our wait state if they come in
+    // and try to wait in our context.
 
-    starttime : RtlUquad
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+    KeAssert ( ipl < KI_IPL_DPC )
 
     // Capture the start time.
+
+    starttime : RtlUquad
 
     KiCaptureCurrentTicks ( &starttime )
 
@@ -1080,11 +1081,16 @@ EXPORT FN KeWaitForSingleObject (
 
 @Retry
 
-    KiRaiseIplForWait ( ipl )
+    // Raise IPL to stop APCs from corrupting our wait state if they come in
+    // and try to wait in our context.
 
-    starttime : RtlUquad
+    ipl := KiRaiseIpl ( KI_IPL_DPC )
+
+    KeAssert ( ipl < KI_IPL_DPC )
 
     // Capture the start time.
+
+    starttime : RtlUquad
 
     IF timeout THEN
         KiCaptureCurrentTicksFunc ( &starttime )
