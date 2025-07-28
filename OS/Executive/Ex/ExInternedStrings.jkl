@@ -73,7 +73,7 @@ FN ExFindName (
 
     // Find a name in the string internment buckets.
 
-    node : ^ExName
+    node : ^ExName = NULLPTR
 
     // Hash the name.
 
@@ -84,6 +84,8 @@ FN ExFindName (
     // Get the hash bucket.
 
     bucket := &ExpNameBuckets[hash & (EXP_NAME_BUCKETS - 1)]
+
+@Retry
 
     // Lock the bucket.
 
@@ -101,21 +103,30 @@ FN ExFindName (
             BREAK
         END
 
-        node = CONTAINEROF avlnode TO ExName.Entry
+        checknode := CONTAINEROF avlnode TO ExName.Entry
 
         res := CAST RtlCompareRtlString (
             str, // str1
-            ExNameToString ( node ), // str2
+            ExNameToString ( checknode ), // str2
         ) TO WORD
 
         IF res == 0 THEN
             // Found it! Unlock the bucket and return the node.
 
-            node^.References += 1
+            checknode^.References += 1
 
             KeReleaseLock ( &bucket^.Lock )
 
-            RETURN node
+            IF node THEN
+                // We allocated a node unnecessarily earlier, have to free it.
+
+                MmFreePool (
+                    node, // ptr
+                    'Name', // tag
+                )
+            END
+
+            RETURN checknode
         END
 
         IF res < 0 THEN
@@ -125,21 +136,29 @@ FN ExFindName (
         END
     END
 
-    // Create a node.
-
-    node = MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
-        SIZEOF ExName + SIZEOF RtlString + len + 1, // bytes
-        'Name', // tag
-        TRUE, // wait
-    )
-
     IF NOT node THEN
-        // Failed to allocate the name.
+        // Have to create a node.
+        // Unlock the bucket across the allocation.
 
         KeReleaseLock ( &bucket^.Lock )
 
-        RETURN NULLPTR
+        node = MmAllocatePool (
+            MM_PAGED_POOL, // poolindex
+            SIZEOF ExName + SIZEOF RtlString + len + 1, // bytes
+            'Name', // tag
+            TRUE, // wait
+        )
+
+        IF NOT node THEN
+            // Failed to allocate the name.
+
+            RETURN NULLPTR
+        END
+
+        // Retry the lookup. We'll use the node we just allocated if it's still
+        // not there, otherwise we'll free it.
+
+        GOTO Retry
     END
 
     // Initialize the name.
@@ -199,12 +218,16 @@ FN ExUnreferenceName (
             &name^.Entry, // node
         )
 
-        // Free.
+        KeReleaseLock ( &bucket^.Lock )
+
+        // Free outside the bucket lock.
 
         MmFreePool (
             name, // ptr
             'Name', // tag
         )
+
+        LEAVE
     END
 
     // Unlock the bucket.
