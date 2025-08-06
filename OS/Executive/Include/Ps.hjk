@@ -58,10 +58,10 @@ STRUCT PsPagedProcess
     Pid : ULONG,
     ParentPid : ULONG,
 
+    RundownDefermentCount : ULONG,
+
     ActivationStatus : OsStatus,
     TerminationStatus : OsStatus,
-
-    CleanedUp : UBYTE,
 
     GrantedPrivileges : UBYTE[(OS_PRIVILEGE_MAX + 7) / 8],
     EnabledPrivileges : UBYTE[(OS_PRIVILEGE_MAX + 7) / 8],
@@ -214,10 +214,10 @@ EXTERN KeIdleProcess : PsProcess
     ((process)^.Paged^.HandleTable.QuotaBlock)
 ]
 
-#MACRO PsUnblockRundownProcess ( process ) [
-    KeReleaseLock ( &(process)^.Pcb.Lock )
-]
-
 EXTERN FN PsBlockRundownProcess (
     IN process : ^PsProcess,
 ) : UWORD
+
+EXTERN FN PsUnblockRundownProcess (
+    IN process : ^PsProcess,
+)

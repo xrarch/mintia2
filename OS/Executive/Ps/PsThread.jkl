@@ -230,11 +230,15 @@ FN PsExitThread ()
         // Ke marked the thread's process terminated. Threads can no longer be
         // created within the process and early exit processing should be
         // performed.
+        //
+        // Decrement the rundown deferment count and possibly cause process
+        // rundown.
 
-        PspExitProcess (
-            process, // process
-            thread^.Paged^.TerminationStatus, // status
-        )
+        IF thread^.Paged^.TerminationStatus != OS_STATUS_SUCCESS THEN
+            process^.Paged^.TerminationStatus = thread^.Paged^.TerminationStatus
+        END
+
+        PsUnblockRundownProcess ( process )
     END
 
     // Now exit the thread. This does not return.
@@ -579,7 +583,7 @@ FN PsTerminateThreadObject (
 
     KeSignalThread (
         &thread^.Tcb, // thread
-        OS_SIGNAL_KILL, // signal
+        OS_SIGNAL_TERMINATE_THREAD, // signal
     )
 END
 
@@ -885,10 +889,22 @@ FN OsSignalThread (
         GOTO Exit
     END
 
-    KeSignalThread (
-        &thread^.Tcb, // thread
-        signal, // signal
-    )
+    IF signal == OS_SIGNAL_KILL THEN
+        // Kill the thread's whole process.
+        // We don't permit single threads to be involuntarily terminated at the
+        // kernel level.
+
+        KeSignalProcess (
+            thread^.Tcb.ActualProcess, // process
+            signal, // signal
+        )
+
+    ELSE
+        KeSignalThread (
+            &thread^.Tcb, // thread
+            signal, // signal
+        )
+    END
 
 @Exit
 

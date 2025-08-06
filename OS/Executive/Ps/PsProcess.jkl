@@ -12,33 +12,86 @@ STRUCT PspProcessContext
     Flags : ULONG,
 END
 
+// FORWARD
+EXTERN FN PspExitProcess (
+    IN process : ^PsProcess,
+)
+
 #SECTION "PAGEtext"
 FN PsBlockRundownProcess (
     IN process : ^PsProcess,
 ) : UWORD
 
     // Prevent the rundown (clean-up) of the process until the next
-    // PsUnblockRundownProcess. This works by locking the process lock shared,
-    // so recursive nesting of this state is inadvisable (if not prohibited).
-    //
-    // If needsthread is set, atomically check for the existence of a living
-    // thread who is going to tear down the process if its terminated. This is
-    // intended to provide a guarantee that terminating a process, even one that
-    // is only partially constructed, will reliably tear down certain resources
-    // like handles and memory mappings. Returns TRUE on success, FALSE
-    // otherwise.
+    // PsUnblockRundownProcess. If it is already being run down, tell the
+    // caller.
 
-    KeAcquireLockShared ( &process^.Pcb.Lock )
-
-    IF NOT process^.Pcb.SignalThread THEN
-        // No living thread.
-
-        KeReleaseLock ( &process^.Pcb.Lock )
+    IF process^.Pcb.ThreadCount == 0 THEN
+        // If the process has no threads, we shouldn't allow anybody else to be
+        // able to defer rundown, so just reject this request. This just makes
+        // sure that the time between process termination and rundown is finite
+        // and spamming system calls that block rundown can't extend the time
+        // indefinitely. There's no functional reason to have this check other
+        // than that, so there's no need to hold a lock or perform a memory
+        // barrier.
+        //
+        // It also serves another purpose which is to prevent certain things
+        // from being done to a process object that *does not yet* have a
+        // thread, such as memory mapping. This makes sure we can reliably empty
+        // out a process's address space (and release lots of resources) by
+        // terminating it; if it has such resources, it will have at least one
+        // thread who can release them promptly on its way out, even if many
+        // references exist to the process object itself.
 
         RETURN FALSE
     END
 
-    RETURN TRUE
+    paged := process^.Paged
+
+    oldcount := paged^.RundownDefermentCount
+
+    WHILE TRUE DO
+        IF oldcount == 0 THEN
+            // Already being run down.
+
+            RETURN FALSE
+        END
+
+        new := KeCompareSwapPtr (
+            &paged^.RundownDefermentCount, // ptr
+            oldcount + 1, // newvalue
+            oldcount, // expectedvalue
+        )
+
+        IF new == oldcount THEN
+            // Got it. The previous count was nonzero so we know the process was
+            // not being run down.
+
+            RETURN TRUE
+        END
+
+        oldcount = new
+    END
+END
+
+#SECTION "PAGEtext"
+FN PsUnblockRundownProcess (
+    IN process : ^PsProcess,
+)
+
+    // Decrement the rundown deferment count and perform process rundown if it
+    // reaches zero.
+
+    oldcount := KeIncrementUlong (
+        &process^.Paged^.RundownDefermentCount, // ulong
+        0xFFFFFFFF, // inc
+    )
+
+    IF oldcount == 1 THEN
+        // Rundown is no longer deferred, do it now.
+
+        PspExitProcess ( process )
+    END
 END
 
 #SECTION "PAGEtext"
@@ -93,7 +146,7 @@ FN PspAwaitActivation (
 
     paged := process^.Paged
 
-    KeAcquireLockShared ( &paged^.ActivationLock )
+    KeAcquireLockExclusive ( &paged^.ActivationLock )
 
     event := paged^.ActivationEvent
 
@@ -134,7 +187,6 @@ END
 #SECTION "PAGEtext"
 FN PspExitProcess (
     IN process : ^PsProcess,
-    IN status : OsStatus,
 )
 
     // The process has exited and exit-time teardown must be performed. This can
@@ -153,14 +205,6 @@ FN PspExitProcess (
     // and relinquish all of the resources associated with the process.
 
     paged := process^.Paged
-
-    IF status != OS_STATUS_SUCCESS THEN
-        paged^.TerminationStatus = status
-    END
-
-    KeAssert ( NOT paged^.CleanedUp )
-
-    paged^.CleanedUp = TRUE
 
     IF paged^.Job THEN
         // Indicate termination to job.
@@ -182,7 +226,7 @@ FN PspExitProcess (
     IF paged^.ActivationEvent THEN
         PspSignalActivation (
             process, // process
-            status, // status
+            paged^.TerminationStatus, // status
         )
     END
 
@@ -205,13 +249,15 @@ FN (ObTypeDeleteF) PspDeleteProcessObject (
 
     paged := process^.Paged
 
-    IF NOT paged^.CleanedUp THEN
-        // Clean up the process. It had no "final thread" to do this earlier.
+    IF paged^.RundownDefermentCount != 0 THEN
+        KeAssert ( paged^.RundownDefermentCount == 1 )
 
-        PspExitProcess (
-            process, // process
-            OS_STATUS_SUCCESS, // status
-        )
+        // Clean up the process.
+        // It never reached a terminated state, so its initial rundown deferment
+        // count of 1 wasn't removed. This can happen if the process object is
+        // deleted before any threads are ever added to it.
+
+        PspExitProcess ( process )
     END
 
     // Remove from the global process list.
@@ -422,9 +468,11 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     paged^.ParentPid = currentprocess^.Paged^.Pid
 
-    // Set not cleaned up yet.
+    // Set rundown deferment count to 1. This will be decremented when the
+    // process enters a terminated state after its last thread exits, which
+    // will cause immediate rundown of hefty resources like memory mappings.
 
-    paged^.CleanedUp = FALSE
+    paged^.RundownDefermentCount = 1
 
     // Create the activation event.
 
@@ -1270,15 +1318,14 @@ FN PsQueryProcessObject (
     query^.OwningUid = paged^.Cred.Uid
     query^.OwningGid = paged^.Cred.Gid
 
-    IF PsBlockRundownProcess ( process ) THEN
-        // If we successfully blocked process rundown then it definitely has at
-        // least one thread, and therefore there must be a signal thread.
+    KeAcquireLockExclusive ( &process^.Pcb.Lock )
 
+    IF process^.Pcb.SignalThread THEN
         query^.Status = process^.Pcb.SignalThread^.Status
         query^.Priority = process^.Pcb.SignalThread^.Priority
-
-        PsUnblockRundownProcess ( process )
     END
+
+    KeReleaseLock ( &process^.Pcb.Lock )
 
     query^.ThreadCount = process^.Pcb.ThreadCount
     query^.TerminationStatus = paged^.TerminationStatus
