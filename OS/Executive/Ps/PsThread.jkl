@@ -416,8 +416,8 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     current := PsCurrentThread ()
 
-    thread^.Tcb.SignalAcceptMask[0] = current^.Tcb.SignalAcceptMask[0]
-    thread^.Tcb.SignalAcceptMask[1] = current^.Tcb.SignalAcceptMask[1]
+    thread^.Tcb.SignalAcceptMask[0] |= current^.Tcb.SignalAcceptMask[0]
+    thread^.Tcb.SignalAcceptMask[1] |= current^.Tcb.SignalAcceptMask[1]
 
     // Bias the reference count of the thread object.
     // This reflects an active execution context existing, which means its
@@ -582,7 +582,9 @@ FN PsTerminateThreadObject (
 
     // Terminate the thread object.
 
-    thread^.Paged^.TerminationStatus = status
+    IF status != OS_STATUS_SUCCESS THEN
+        thread^.Paged^.TerminationStatus = status
+    END
 
     KeSignalThread (
         &thread^.Tcb, // thread

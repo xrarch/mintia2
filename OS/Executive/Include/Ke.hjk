@@ -680,6 +680,15 @@ END
     thread^.SignalMask[1]))
 ]
 
+#MACRO KeAreThereUnmaskableSignals ( thread ) [
+    ((thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL)) |
+    (thread^.SignalMask[1] & (1 << (OS_SIGNAL_TERMINATE_THREAD - 32))))
+]
+
+#MACRO KeSignalIsUnmaskable ( signal ) [
+    ((signal == OS_SIGNAL_KILL) OR (signal == OS_SIGNAL_TERMINATE_THREAD))
+]
+
 EXTERN FN KeIgnoreEvents ()
 
 EXTERN FN KeAcceptEvents ()

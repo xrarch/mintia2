@@ -198,12 +198,20 @@ FN KeInitializeThread (
     // Initialize signal state.
 
     thread^.SignalMask[0] = 0
-    thread^.SignalAcceptMask[0] = (1 << OS_SIGNAL_KILL)
+    thread^.SignalAcceptMask[0] = 0
     thread^.SignalDeliverOnWaitMask[0] = 0
 
     thread^.SignalMask[1] = 0
     thread^.SignalAcceptMask[1] = 0
     thread^.SignalDeliverOnWaitMask[1] = 0
+
+    // Enable KILL and TERMINATE_THREAD, which are unmaskable.
+
+    thread^.SignalAcceptMask[OS_SIGNAL_KILL / 32] |=
+        (1 << (OS_SIGNAL_KILL & 31))
+    
+    thread^.SignalAcceptMask[OS_SIGNAL_TERMINATE_THREAD / 32] |=
+        (1 << (OS_SIGNAL_TERMINATE_THREAD & 31))
 
     thread^.UserInterrupt = FALSE
     thread^.UserApcTriggered = FALSE
@@ -434,7 +442,7 @@ FN KiWakeThreadForSignal (
         status := 0
 
         IF thread^.WaitMode == KE_USER_MODE THEN
-            IF thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
+            IF KeAreThereUnmaskableSignals ( thread ) THEN
                 // This is a usermode wait and KILL is pending, so cause a wake.
 
                 status = OS_STATUS_KILLED
@@ -454,7 +462,7 @@ FN KiWakeThreadForSignal (
             END
         
         ELSEIF thread^.Alertable == KE_ALERTABLE AND
-            thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
+            KeAreThereUnmaskableSignals ( thread ) THEN
 
             // Alertable kernel mode waits are (only) interrupted by
             // termination.
@@ -513,9 +521,7 @@ FN KeDeliverOnWaitSignalThread (
     KeAssert ( signal != 0 )
     KeAssert ( signal < OS_SIGNAL_COUNT )
 
-    IF signal == OS_SIGNAL_KILL THEN
-        // Can't mask off KILL.
-
+    IF KeSignalIsUnmaskable ( signal ) THEN
         RETURN TRUE
     END
 
@@ -563,9 +569,7 @@ FN KeMaskSignalThread (
     KeAssert ( signal != 0 )
     KeAssert ( signal < OS_SIGNAL_COUNT )
 
-    IF signal == OS_SIGNAL_KILL THEN
-        // Can't mask off KILL.
-
+    IF KeSignalIsUnmaskable ( signal ) THEN
         RETURN TRUE
     END
 

@@ -88,7 +88,9 @@ FN KeSignalProcess (
         LEAVE
     END
 
-    IF signal == OS_SIGNAL_KILL THEN
+    IF signal == OS_SIGNAL_KILL OR
+        signal == OS_SIGNAL_TERMINATE_THREAD THEN
+
         // Mark the process terminated so that no more threads can be added to
         // it.
 
@@ -104,7 +106,7 @@ FN KeSignalProcess (
 
             KeSignalThread (
                 thread, // thread
-                OS_SIGNAL_KILL, // signal
+                signal, // signal
             )
 
             listentry = listentry^.Next

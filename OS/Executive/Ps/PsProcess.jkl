@@ -1568,22 +1568,61 @@ FN OsSetBasePriorityProcess (
 END
 
 #SECTION "PAGEtext"
-FN OsExitProcess (
+FN PsTerminateProcessObject (
+    IN process : ^PsProcess,
     IN status : OsStatus,
 )
 
-    // Exit the current process.
-    // Basically just killing it and setting the termination status.
-    // We'll funnel into the thread termination codepath after this.
+    // Terminate the provided process.
 
-    process := PsCurrentProcess ()
-
-    process^.Paged^.TerminationStatus = status
+    IF status != OS_STATUS_SUCCESS THEN
+        process^.Paged^.TerminationStatus = status
+    END
 
     KeSignalProcess (
         &process^.Pcb, // process
-        OS_SIGNAL_TERMINATE_PROCESS, // signal
+        OS_SIGNAL_TERMINATE_THREAD, // signal
     )
+END
+
+#SECTION "PAGEtext"
+FN OsTerminateProcess (
+    IN processhandle : UWORD,
+    IN status : OsStatus,
+) : OsStatus
+
+    // Terminate a process, system service.
+
+    process : ^PsProcess
+    access : UWORD
+
+    retstatus := ObReferenceByHandle (
+        processhandle, // handle
+        &PsProcessType, // type
+        OUT process, // object
+        OUT access, // access
+    )
+
+    IF OsError ( retstatus ) THEN
+        RETURN retstatus
+    END
+
+    IF access | OS_ACCESS_EXEC != access THEN
+        retstatus = OS_STATUS_ACCESS_DENIED
+
+        GOTO Exit
+    END
+
+    PsTerminateProcessObject (
+        process, // process
+        status, // status
+    )
+
+@Exit
+
+    ObUnreferenceObject ( process )
+
+    RETURN retstatus
 END
 
 #SECTION "PAGEtext"
