@@ -603,8 +603,15 @@ FN KeMaskSignalThread (
     // Set or clear the pending event bit if necessary.
 
     IF thread^.SignalMask[index] & thread^.SignalAcceptMask[index] != 0 THEN
+        // We set a pending signal, so set the bit.
+
         thread^.PendingEventsSet |= KI_THREAD_PENDING_SIGNAL
-    ELSE
+
+    ELSEIF thread^.SignalMask[index $ 1] &
+        thread^.SignalAcceptMask[index $ 1] == 0 THEN
+
+        // There are no pending signals in this bit set or the other one, so clear the bit.
+
         thread^.PendingEventsSet &= ~KI_THREAD_PENDING_SIGNAL
     END
 
@@ -863,7 +870,9 @@ FN KiDispatchSignal (
 
     // Clear the pending signal event bit if necessary.
 
-    IF thread^.SignalMask[index] & thread^.SignalAcceptMask[index] == 0 THEN
+    IF ((thread^.SignalMask[0] & thread^.SignalAcceptMask[0]) |
+        (thread^.SignalMask[1] & thread^.SignalAcceptMask[1])) == 0 THEN
+
         thread^.PendingEventsSet &= ~KI_THREAD_PENDING_SIGNAL
     END
 
