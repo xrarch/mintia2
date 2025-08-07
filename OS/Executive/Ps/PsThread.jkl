@@ -894,10 +894,12 @@ FN OsSignalThread (
         GOTO Exit
     END
 
-    IF signal == OS_SIGNAL_KILL THEN
+    IF signal == OS_SIGNAL_KILL AND
+        thread^.Tcb.ActualProcess != KeCurrentProcess () THEN
+
         // Kill the thread's whole process.
         // We don't permit single threads to be involuntarily terminated at the
-        // kernel level.
+        // kernel level, other than by the process itself.
 
         KeSignalProcess (
             thread^.Tcb.ActualProcess, // process
