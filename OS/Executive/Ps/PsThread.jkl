@@ -414,7 +414,10 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     // Inherit the signal mask from the current thread.
 
-    thread^.Tcb.SignalAcceptMask = PsCurrentThread()^.Tcb.SignalAcceptMask
+    current := PsCurrentThread ()
+
+    thread^.Tcb.SignalAcceptMask[0] = current^.Tcb.SignalAcceptMask[0]
+    thread^.Tcb.SignalAcceptMask[1] = current^.Tcb.SignalAcceptMask[1]
 
     // Bias the reference count of the thread object.
     // This reflects an active execution context existing, which means its

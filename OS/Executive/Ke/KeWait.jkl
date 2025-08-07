@@ -430,7 +430,7 @@ FN KiWaitCheck (
         // Wait was unalertable.
 
         IF waitmode == KE_USER_MODE AND
-            thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+            thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
 
             // Unalertable usermode waits are only interrupted by
             // termination.
@@ -442,7 +442,7 @@ FN KiWaitCheck (
 
     ELSEIF waitmode == KE_KERNEL_MODE THEN
         IF NOT thread^.IgnoreEventCount AND
-            thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+            thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
 
             // Alertable kernel mode waits are only interrupted by
             // termination.
@@ -469,7 +469,9 @@ FN KiWaitCheck (
         // interrupt the wait and cause them to be dispatched upon return
         // to usermode.
 
-        thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
+        thread^.SignalDeliverOnWaitMask[0] &= ~thread^.SignalMask[0]
+        thread^.SignalDeliverOnWaitMask[1] &= ~thread^.SignalMask[1]
+
         thread^.UserInterrupt = TRUE
 
         KiReleaseThread ( thread, KI_IPL_LOW )

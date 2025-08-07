@@ -913,8 +913,6 @@ FN KiSelectTimesharedThread (
 
 @SeekNextQueue
 
-        fbsarray := &KiIndexFirstBitSet[0]
-
         // Start from bit k. Assume the ready bits are 32 bit.
         // We seek circularly (i.e. with wraparound) from index k to k-1 for the
         // first encountered set bit.
@@ -922,24 +920,20 @@ FN KiSelectTimesharedThread (
         // Portability hazard: We assume the architecture we run on, masks the
         // rotation amount. This is true on all current and planned
         // architectures (fox32, xr17032, Aphelion, AMD64).
-        //
-        // Optimization note: This was tried in both an unrolled form and an
-        // explicit loop form. They both generated code that executed the same
-        // absolute number of instructions. The loop is better on Icache. The
-        // unrolled form branch predicts better. Due to the small Icache on
-        // xr17032, the loop form was selected with the idea the Icache impact
-        // will be more important and the branch mispredicts will come out in
-        // the wash, however this needs benchmarking to tell for sure.
-        // Also this is probably not that important anyway.
 
-        fbs := fbsarray[(readybits ROR k) & 0xFF]
-
-        WHILE fbs == 8 DO
+        IF (readybits ROR k) & 0xFF == 0 THEN
             k += 8
-            fbs = fbsarray[(readybits ROR k) & 0xFF]
+
+            IF (readybits ROR k) & 0xFF == 0 THEN
+                k += 8
+
+                IF (readybits ROR k) & 0xFF == 0 THEN
+                    k += 8
+                END
+            END
         END
 
-        k = (k + fbs) & 31
+        k = (k + KiIndexFirstBitSet[(readybits ROR k) & 0xFF]) & 31
 
     ELSEIF (readybits >> k) & 1 == 0 THEN
         RETURN NULLPTR

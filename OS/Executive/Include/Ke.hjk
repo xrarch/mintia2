@@ -572,9 +572,9 @@ STRUCT KeThread
     Spinlock : KiSpinlock,
 #END
 
-    SignalMask : ULONG,
-    SignalAcceptMask : ULONG,
-    SignalDeliverOnWaitMask : ULONG,
+    SignalMask : ULONG[2],
+    SignalAcceptMask : ULONG[2],
+    SignalDeliverOnWaitMask : ULONG[2],
     WaitStatus : OsStatus,
     SleepMs : ULONG,
     RunMs : ULONG,
@@ -670,6 +670,15 @@ STRUCT KeThread
 
     Name : UBYTE[KE_DEBUG_NAME_LENGTH],
 END
+
+#MACRO KeAreTherePendingSignals ( thread ) [
+    ((thread^.SignalAcceptMask[0] &
+    ~thread^.SignalDeliverOnWaitMask[0] &
+    thread^.SignalMask[0]) |
+    (thread^.SignalAcceptMask[1] &
+    ~thread^.SignalDeliverOnWaitMask[1] &
+    thread^.SignalMask[1]))
+]
 
 EXTERN FN KeIgnoreEvents ()
 

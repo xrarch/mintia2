@@ -197,9 +197,13 @@ FN KeInitializeThread (
 
     // Initialize signal state.
 
-    thread^.SignalMask = 0
-    thread^.SignalAcceptMask = (1 << OS_SIGNAL_KILL)
-    thread^.SignalDeliverOnWaitMask = 0
+    thread^.SignalMask[0] = 0
+    thread^.SignalAcceptMask[0] = (1 << OS_SIGNAL_KILL)
+    thread^.SignalDeliverOnWaitMask[0] = 0
+
+    thread^.SignalMask[1] = 0
+    thread^.SignalAcceptMask[1] = 0
+    thread^.SignalDeliverOnWaitMask[1] = 0
 
     thread^.UserInterrupt = FALSE
     thread^.UserApcTriggered = FALSE
@@ -430,13 +434,13 @@ FN KiWakeThreadForSignal (
         status := 0
 
         IF thread^.WaitMode == KE_USER_MODE THEN
-            IF thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+            IF thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
                 // This is a usermode wait and KILL is pending, so cause a wake.
 
                 status = OS_STATUS_KILLED
 
             ELSEIF thread^.Alertable == KE_ALERTABLE AND
-                thread^.SignalMask & thread^.SignalAcceptMask THEN
+                thread^.PendingEventsSet & KI_THREAD_PENDING_SIGNAL THEN
 
                 // This is a usermode alertable wait and there are pending
                 // signals, so cause a wake.
@@ -445,11 +449,12 @@ FN KiWakeThreadForSignal (
 
                 // Clear the signals from the deliver-on-wait mask.
 
-                thread^.SignalDeliverOnWaitMask &= ~thread^.SignalMask
+                thread^.SignalDeliverOnWaitMask[0] &= ~thread^.SignalMask[0]
+                thread^.SignalDeliverOnWaitMask[1] &= ~thread^.SignalMask[1]
             END
         
         ELSEIF thread^.Alertable == KE_ALERTABLE AND
-            thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+            thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
 
             // Alertable kernel mode waits are (only) interrupted by
             // termination.
@@ -474,10 +479,7 @@ FN KiWakeThreadForSignal (
             END
         END
 
-    ELSEIF thread^.SignalMask &
-        thread^.SignalAcceptMask &
-        ~thread^.SignalDeliverOnWaitMask THEN
-
+    ELSEIF KeAreTherePendingSignals ( thread ) THEN
         // There are pending signals. Set user interrupt pending so he checks
         // it eventually.
 
@@ -509,7 +511,7 @@ FN KeDeliverOnWaitSignalThread (
     // Returns TRUE if it was previously enabled, FALSE otherwise.
 
     KeAssert ( signal != 0 )
-    KeAssert ( signal < 32 )
+    KeAssert ( signal < OS_SIGNAL_COUNT )
 
     IF signal == OS_SIGNAL_KILL THEN
         // Can't mask off KILL.
@@ -517,23 +519,26 @@ FN KeDeliverOnWaitSignalThread (
         RETURN TRUE
     END
 
+    index := signal / 32
+    offset := signal % 32
+
     ipl := KiAcquireThread ( thread )
 
     enabled := FALSE
 
-    IF thread^.SignalDeliverOnWaitMask & (1 << signal) THEN
+    IF thread^.SignalDeliverOnWaitMask[index] & (1 << offset) THEN
         enabled = TRUE
     END
 
     IF enable THEN
         // Deliver-on-wait the signal.
 
-        thread^.SignalDeliverOnWaitMask |= (1 << signal)
+        thread^.SignalDeliverOnWaitMask[index] |= (1 << offset)
 
     ELSE
         // Un-deliver-on-wait the signal.
 
-        thread^.SignalDeliverOnWaitMask &= ~(1 << signal)
+        thread^.SignalDeliverOnWaitMask[index] &= ~(1 << offset)
 
         // See if we need to wake the thread now that this signal has been
         // enabled.
@@ -556,7 +561,7 @@ FN KeMaskSignalThread (
     // Returns TRUE if it was previously enabled, FALSE otherwise.
 
     KeAssert ( signal != 0 )
-    KeAssert ( signal < 32 )
+    KeAssert ( signal < OS_SIGNAL_COUNT )
 
     IF signal == OS_SIGNAL_KILL THEN
         // Can't mask off KILL.
@@ -564,18 +569,21 @@ FN KeMaskSignalThread (
         RETURN TRUE
     END
 
+    index := signal / 32
+    offset := signal % 32
+
     ipl := KiAcquireThread ( thread )
 
     enabled := FALSE
 
-    IF thread^.SignalAcceptMask & (1 << signal) THEN
+    IF thread^.SignalAcceptMask[index] & (1 << offset) THEN
         enabled = TRUE
     END
 
     IF enable THEN
         // Enable the signal.
 
-        thread^.SignalAcceptMask |= (1 << signal)
+        thread^.SignalAcceptMask[index] |= (1 << offset)
 
         // See if we need to wake the thread now that this signal has been
         // enabled.
@@ -585,12 +593,12 @@ FN KeMaskSignalThread (
     ELSE
         // Disable the signal.
 
-        thread^.SignalAcceptMask &= ~(1 << signal)
+        thread^.SignalAcceptMask[index] &= ~(1 << offset)
     END
 
     // Set or clear the pending event bit if necessary.
 
-    IF thread^.SignalMask & thread^.SignalAcceptMask != 0 THEN
+    IF thread^.SignalMask[index] & thread^.SignalAcceptMask[index] != 0 THEN
         thread^.PendingEventsSet |= KI_THREAD_PENDING_SIGNAL
     ELSE
         thread^.PendingEventsSet &= ~KI_THREAD_PENDING_SIGNAL
@@ -609,7 +617,7 @@ FN KeSignalThread (
     // Send a signal to the thread.
 
     KeAssert ( signal != 0 )
-    KeAssert ( signal < 32 )
+    KeAssert ( signal < OS_SIGNAL_COUNT )
 
     // If this is a KILL signal, unsuspend the thread.
 
@@ -625,17 +633,20 @@ FN KeSignalThread (
         )
     END
 
+    index := signal / 32
+    offset := signal % 32
+
     // Acquire the thread lock.
 
     ipl := KiAcquireThread ( thread )
 
     // OR the new signal bit in.
 
-    thread^.SignalMask |= (1 << signal)
+    thread^.SignalMask[index] |= (1 << offset)
 
     // Set the pending event bit.
 
-    IF thread^.SignalMask & thread^.SignalAcceptMask != 0 THEN
+    IF thread^.SignalMask[index] & thread^.SignalAcceptMask[index] != 0 THEN
         thread^.PendingEventsSet |= KI_THREAD_PENDING_SIGNAL
     END
 
@@ -800,44 +811,55 @@ FN KiDispatchSignal (
     // There's a pending signal and we are ready to receive it. Find out what
     // it is and redirect the usermode trapframe to the signal dispatcher.
 
+    index := 0
+    signal := 0
+
     ipl := KiAcquireThread ( thread )
 
-    excsignals := thread^.SignalAcceptMask &
-        ~thread^.SignalDeliverOnWaitMask &
-        thread^.SignalMask
+    excsignals := thread^.SignalAcceptMask[0] &
+        ~thread^.SignalDeliverOnWaitMask[0] &
+        thread^.SignalMask[0]
 
     IF NOT excsignals THEN
-        // No signals pending, somehow.
+        index = 1
+        signal = 32
 
-        KiReleaseThread ( thread, ipl )
+        excsignals = thread^.SignalAcceptMask[1] &
+            ~thread^.SignalDeliverOnWaitMask[1] &
+            thread^.SignalMask[1]
 
-        LEAVE
+        IF NOT excsignals THEN
+            // No signals pending, somehow.
+
+            KiReleaseThread ( thread, ipl )
+
+            LEAVE
+        END
     END
 
     // There must be a set bit, and therefore a pending signal; we WILL find it
     // here.
 
-    signal := 0
-
-    WHILE signal < 32 DO
-        IF excsignals & (1 << signal) THEN
-            BREAK
-        END
-
-        signal += 1
+    WHILE excsignals & 0xFF == 0 DO
+        excsignals >>= 8
+        signal += 8
     END
+
+    signal += KiIndexFirstBitSet[excsignals & 0xFF]
+
+    offset := signal & 31
 
     // Clear the pending signal bit.
 
-    thread^.SignalMask &= ~(1 << signal)
+    thread^.SignalMask[index] &= ~(1 << offset)
 
     // Mask off the signal.
 
-    thread^.SignalAcceptMask &= ~(1 << signal)
+    thread^.SignalAcceptMask[index] &= ~(1 << offset)
 
     // Clear the pending signal event bit if necessary.
 
-    IF thread^.SignalMask & thread^.SignalAcceptMask == 0 THEN
+    IF thread^.SignalMask[index] & thread^.SignalAcceptMask[index] == 0 THEN
         thread^.PendingEventsSet &= ~KI_THREAD_PENDING_SIGNAL
     END
 
@@ -873,7 +895,7 @@ FN KiDispatchUserInterrupts ()
 
         KiEnableInterrupts ()
 
-        IF thread^.SignalMask & (1 << OS_SIGNAL_KILL) THEN
+        IF thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
             // The current thread has been terminated.
             // Upcall into Ps to go die. It'll call KeExitThread when it's ready
             // and then we will add this thread to the reaper list and yield the
@@ -886,10 +908,7 @@ FN KiDispatchUserInterrupts ()
 #END
         END
 
-        IF thread^.SignalAcceptMask &
-            ~thread^.SignalDeliverOnWaitMask &
-            thread^.SignalMask THEN
-
+        IF KeAreTherePendingSignals ( thread ) THEN
             // Dispatch a pending signal.
 
             KiDispatchSignal ( thread )
