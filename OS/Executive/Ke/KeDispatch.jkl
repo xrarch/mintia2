@@ -1088,45 +1088,45 @@ FN KiSelectThread (
 
     // Check the idle thread queue.
 
-    IF NOT RtlEmptyList ( &prb^.IdleListHead ) THEN
-        // We're taking a thread off the idle queue.
+    IF RtlEmptyList ( &prb^.IdleListHead ) THEN
+        // No idle threads.
 
-        next = CONTAINEROF prb^.IdleListHead.Next TO KeThread.ReadyEntry
-
-        IF migrate AND next^.Pinned THEN
-            // Seek to a non-pinned thread.
-
-            WHILE TRUE DO
-                IF next^.ReadyEntry.Next == &prb^.IdleListHead THEN
-                    // Queue has only pinned threads.
-
-                    RETURN NULLPTR
-                END
-
-                next = CONTAINEROF next^.ReadyEntry.Next TO KeThread.ReadyEntry
-
-                IF NOT next^.Pinned THEN
-                    BREAK
-                END
-            END
-        END
-
-        RtlRemoveEntryList ( &next^.ReadyEntry )
-
-        // Decrement count of ready threads.
-
-        KiDecrementLoad ( prb )
-
-        // No longer on a queue, so set INFLIGHT.
-
-        next^.Status = KI_THREAD_INFLIGHT
-
-        RETURN next
+        RETURN NULLPTR
     END
 
-    // Nothing to run.
+    // We're taking a thread off the idle queue.
 
-    RETURN NULLPTR
+    next = CONTAINEROF prb^.IdleListHead.Next TO KeThread.ReadyEntry
+
+    IF migrate AND next^.Pinned THEN
+        // Seek to a non-pinned thread.
+
+        WHILE TRUE DO
+            IF next^.ReadyEntry.Next == &prb^.IdleListHead THEN
+                // Queue has only pinned threads.
+
+                RETURN NULLPTR
+            END
+
+            next = CONTAINEROF next^.ReadyEntry.Next TO KeThread.ReadyEntry
+
+            IF NOT next^.Pinned THEN
+                BREAK
+            END
+        END
+    END
+
+    RtlRemoveEntryList ( &next^.ReadyEntry )
+
+    // Decrement count of ready threads.
+
+    KiDecrementLoad ( prb )
+
+    // No longer on a queue, so set INFLIGHT.
+
+    next^.Status = KI_THREAD_INFLIGHT
+
+    RETURN next
 END
 
 FN KiPreemptThread (
