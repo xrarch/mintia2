@@ -1093,6 +1093,24 @@ FN KiSelectThread (
 
         next = CONTAINEROF prb^.IdleListHead.Next TO KeThread.ReadyEntry
 
+        IF migrate AND next^.Pinned THEN
+            // Seek to a non-pinned thread.
+
+            WHILE TRUE DO
+                IF next^.ReadyEntry.Next == &prb^.IdleListHead THEN
+                    // Queue has only pinned threads.
+
+                    RETURN NULLPTR
+                END
+
+                next = CONTAINEROF next^.ReadyEntry.Next TO KeThread.ReadyEntry
+
+                IF NOT next^.Pinned THEN
+                    BREAK
+                END
+            END
+        END
+
         RtlRemoveEntryList ( &next^.ReadyEntry )
 
         // Decrement count of ready threads.
