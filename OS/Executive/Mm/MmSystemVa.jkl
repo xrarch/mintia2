@@ -39,19 +39,6 @@ STRUCT MiDynamicSpaceFreeNode
     Next : ^MiDynamicSpaceFreeNode,
 END
 
-STRUCT MiQuickPteBlock
-    Locks : KeLock[MI_QUICK_PER_CPU],
-    BasePte : ^MiPte,
-    NextIndex : UBYTE,
-END
-
-#DEFINE MI_QUICK_PTE_BLOCK_SIZE [((SIZEOF MiQuickPteBlock + KE_CACHE_ALIGN - 1) &
-    ~(KE_CACHE_ALIGN - 1))]
-
-MiQuickPteBase : ^MiPte
-
-PUBLIC MiQuickPteBlocks : ^MiQuickPteBlock
-
 #SECTION "INITtext"
 FN MiInitializeChunkSpace (
     IN chunkspace : ^MiChunkSpace,
@@ -321,121 +308,7 @@ FN MiInitializeSystemVa ()
         MiPteAddress ( MI_DYNAMIC_SPACE + (dsize << RTL_PAGE_SHIFT) )
 END
 
-#SECTION "INITtext"
-FN MiInitializeQuickPages ()
-
-    // Initialize the quick page mappings.
-
-    procs := KeLoaderBlock.ProcessorCount
-
-    MiQuickPteBlocks = MmAllocatePool (
-        MM_NONPAGED_POOL, // poolindex
-        MI_QUICK_PTE_BLOCK_SIZE * procs, // bytes
-        'Quic', // tag
-        FALSE, // wait
-    )
-
-    IF NOT MiQuickPteBlocks THEN
-        KeCrash ( "Failed to allocate quick PTE blocks\n" )
-    END
-
-    i := 0
-
-    WHILE i < procs DO
-        block := MiQuickPteBlocks + (i * MI_QUICK_PTE_BLOCK_SIZE)
-
-        block^.NextIndex = 0
-
-        block^.BasePte = MiQuickPteBase +
-            ((i * MI_QUICK_PER_CPU) * SIZEOF MiPte)
-
-        j := 0
-
-        WHILE j < MI_QUICK_PER_CPU DO
-            KeInitializeLock ( &block^.Locks[j] )
-
-            j += 1
-        END
-
-        i += 1
-
-    END
-END
-
 #LEAVESECTION
-
-FN MmUseQuickPte (
-    IN func : MmUseQuickPteF,
-    IN pfn : UWORD,
-) : OsStatus
-
-    // Allocate a quick mapping for the given PFN.
-
-    // Disable migration of the current thread to another processor.
-
-    old := KeControlMigration ( FALSE )
-
-    id := KeCurrentProcessorId ()
-
-    block := MiQuickPteBlocks + (id * MI_QUICK_PTE_BLOCK_SIZE)
-
-    i := block^.NextIndex & (MI_QUICK_PER_CPU - 1)
-    block^.NextIndex = i + 1
-
-    pte := block^.BasePte + (i * SIZEOF MiPte)
-    vaddr := MiVirtualAddress ( pte )
-
-    // Lock the quick page.
-
-    ipl := KeAcquireApcLockExclusive ( &block^.Locks[i] )
-
-    // Map the page.
-
-    pte[0] = MiBuildPoolPte ( pfn )
-
-    // Flush TB.
-
-    KeFlushMyTbAddress ( vaddr )
-
-    // Call provided function.
-
-    status := func ( vaddr )
-
-    // Release the page lock.
-
-    KeReleaseApcLock ( &block^.Locks[i], ipl )
-
-    // Restore migration.
-
-    KeControlMigration ( old )
-
-    RETURN status
-END
-
-FN (MmUseQuickPteF) MiZeroPageFunc (
-    IN vaddr : ^VOID,
-) : OsStatus
-
-    // Called with the pointer to a quick mapping to zero the page through.
-
-    RtlFillMemoryWithUlong (
-        vaddr, // ptr
-        RTL_PAGE_SIZE, // sz
-        0, // ulong
-    )
-END
-
-FN MmZeroPage (
-    IN pfn : UWORD,
-)
-
-    // Zero out a page frame.
-
-    MmUseQuickPte (
-        &MiZeroPageFunc, // func
-        pfn, // pfn
-    )
-END
 
 FN MiFlushDynamicSpace ()
 
