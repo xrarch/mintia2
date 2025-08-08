@@ -71,29 +71,55 @@ FN MmUseQuickPte (
 
     // Allocate a quick mapping for the given PFN.
 
+    ipl := -1
+
     // Disable migration of the current thread to another processor.
 
     old := KeControlMigration ( FALSE )
 
     id := KeCurrentProcessorId ()
 
+    // Trylock all of this processor's quick PTEs.
+
     block := MiQuickPteBlocks + (id * MI_QUICK_PTE_BLOCK_SIZE)
 
-    i := block^.NextIndex & (MI_QUICK_PER_CPU - 1)
+    i := 0
+
+    WHILE i < MI_QUICK_PER_CPU DO
+        IF KeTryAcquireLockExclusive ( &block^.Locks[i] ) THEN
+            GOTO GotOne
+        END
+
+        i += 1
+    END
+
+    // Failed to trylock a page. Increment a counter and lock whatever
+    // it lands on.
+
+    i = block^.NextIndex & (MI_QUICK_PER_CPU - 1)
     block^.NextIndex = i + 1
+
+    // Lock the quick page. Only now do we need to mask off KAPCs, to prevent
+    // ourselves from self-contending on this lock, blockingly, which would
+    // cause a deadlock.
+
+    ipl = KeMaskApcs ()
+
+    KeAcquireLockExclusive ( &block^.Locks[i] )
+
+@GotOne
+
+    // Calculate the PTE and virtual address.
 
     pte := block^.BasePte + (i * SIZEOF MiPte)
     vaddr := MiVirtualAddress ( pte )
-
-    // Lock the quick page.
-
-    ipl := KeAcquireApcLockExclusive ( &block^.Locks[i] )
 
     // Map the page.
 
     pte[0] = MiBuildPoolPte ( pfn )
 
-    // Flush TB.
+    // Flush TB. We only need to flush the local TB because we disabled
+    // migration of the current thread to any other CPU.
 
     KeFlushMyTbAddress ( vaddr )
 
@@ -106,11 +132,17 @@ FN MmUseQuickPte (
 
     // Release the page lock.
 
-    KeReleaseApcLock ( &block^.Locks[i], ipl )
+    KeReleaseLock ( &block^.Locks[i] )
 
     // Restore migration.
 
     KeControlMigration ( old )
+
+    IF ipl != -1 THEN
+        // Restore APCs.
+
+        KeUnmaskApcs ( ipl )
+    END
 
     RETURN status
 END
