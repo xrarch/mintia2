@@ -1670,9 +1670,16 @@ FN KiYield (
 
     KiAcquireReadyQueueElevated ( prb )
 
-#IF BLD_MP
     // There's a chance that a next thread was selected inbetween raising IPL
     // and taking the Prb lock.
+    //
+    // NOTE: We used to assume that there was no way for this to happen on UP
+    //       and so the following block of code was conditionalized out for
+    //       uniprocessor builds. This assumption was broken by KeExitThread
+    //       which can cause the high priority reaper thread to be awoken, which
+    //       would be selected as the NextThread, and then it would call KiYield
+    //       and would fail a KeAssert ( prb^.NextThread == NULLPTR ) below.
+    //       So now we do this on both UP and MP builds.
 
     next := prb^.NextThread
 
@@ -1690,17 +1697,6 @@ FN KiYield (
             FALSE, // migrate
         )
     END
-
-#ELSE
-    KeAssert ( prb^.NextThread == NULLPTR )
-
-    next := KiSelectThread (
-        prb, // prb
-        NULLPTR, // current
-        FALSE, // exclusive
-        FALSE, // migrate
-    )
-#END
 
     KiReleaseReadyQueueElevated ( prb )
 
