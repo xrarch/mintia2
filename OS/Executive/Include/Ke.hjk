@@ -33,6 +33,24 @@ END
     NOTHING (lock)^.Ptr = 0
 ]
 
+#DEFINE KI_LOCK_WAITERS 0x1
+#DEFINE KI_LOCK_WRITE_LOCKED 0x2
+#DEFINE KI_LOCK_SHARE_INC 0x4
+#DEFINE KI_LOCK_SHARE_SHIFT 2
+#DEFINE KI_LOCK_BITS ( - 0 KI_LOCK_SHARE_INC )
+#DEFINE KI_LOCK_C_BITS ( ~ KI_LOCK_BITS )
+
+// This macro can be used to get the current owner of an exclusively held lock.
+// Care is required because obviously you need to know the thread won't
+// disappear out from under you if you access it through this pointer.
+// Additionally if the lock is held shared, this will give nonsense results, so
+// you need to know that it isn't. This macro is primarily intended for
+// comparison rather than for actually accessing the thread pointer it yields.
+
+#MACRO KeGetLockOwner ( lock ) [
+    (CAST ((lock)^.Ptr & KI_LOCK_BITS) TO ^KeThread)
+]
+
 #DEFINE KE_STACK_PAGES 1
 
 #DEFINE KE_KERNEL_MODE 1
@@ -1097,13 +1115,26 @@ EXTERN FN KeReaperBarrier (
     IN thread : ^KeThread,
 )
 
-EXTERN FN KeControlMigration (
-    IN migrate : UWORD,
-) : UWORD
+#MACRO KeControlMigration ( thread, pinned ) [
+    // Control whether the current thread can migrate to another CPU.
+    //
+    // We take a thread pointer to avoid having to load the current thread
+    // redundantly, but it's not allowed to be anything other than the current
+    // thread. This is because we don't take any spinlocks while disabling
+    // migration, relying on the fact that the Pinned field is only accessed
+    // from other contexts while the thread is on a ready queue, and if it's the
+    // currently running thread, it ain't on a ready queue.
+
+    NOTHING (thread)^.Pinned
+
+    KeAssert ( (thread) == KeCurrentThread () )
+
+    NOTHING (thread)^.Pinned = pinned
+]
 
 #ELSE
 
-#MACRO KeControlMigration ( migrate ) [ TRUE ]
+#MACRO KeControlMigration ( thread, pinned ) [ TRUE ]
 
 #END
 

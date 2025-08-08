@@ -2095,23 +2095,4 @@ FN KiUnpinThread ()
     current^.Pinned = FALSE
 END
 
-FN KeControlMigration (
-    IN migrate : UWORD,
-) : UWORD
-    
-    // Disable thread migration for the current thread.
-    // Returns the old pinned state.
-
-    thread := KeCurrentThread ()
-
-    // No lock is needed because Pinned is only read while the thread is on a
-    // ready queue. Since it's running *right now*, it can't be on a ready
-    // queue!
-
-    oldpinned := thread^.Pinned
-    thread^.Pinned = migrate
-
-    RETURN oldpinned
-END
-
 #END

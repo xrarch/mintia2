@@ -71,11 +71,14 @@ FN MmUseQuickPte (
 
     // Allocate a quick mapping for the given PFN.
 
-    ipl := -1
-
     // Disable migration of the current thread to another processor.
 
-    old := KeControlMigration ( TRUE )
+    thread := KeCurrentThread ()
+
+    old := KeControlMigration (
+        thread, // thread
+        TRUE, // pinned
+    )
 
     id := KeCurrentProcessorId ()
 
@@ -99,11 +102,25 @@ FN MmUseQuickPte (
     i = block^.NextIndex & (MI_QUICK_PER_CPU - 1)
     block^.NextIndex = i + 1
 
-    // Lock the quick page. Only now do we need to mask off KAPCs, to prevent
-    // ourselves from self-contending on this lock, blockingly, which would
-    // cause a deadlock.
+    IF KeGetLockOwner ( &block^.Locks[i] ) == thread THEN
+        // The lock is held by the current thread, so we can't block on it or we
+        // will self-deadlock. This can happen if this thread previously
+        // acquired this quick page and then took an APC which we are running in
+        // now. Luckily the solution is easy - we can just skip ahead by one and
+        // lock that one instead.
 
-    ipl = KeMaskApcs ()
+        i = block^.NextIndex & (MI_QUICK_PER_CPU - 1)
+        block^.NextIndex = i + 1
+
+        // It should not be possible for this lock to also be held by the
+        // current thread, because thread execution can only nest a maximum of
+        // two levels deep (normal execution and KAPC), we're in the second
+        // level, and we already skipped the lock held by the first level.
+
+        KeAssert ( KeGetLockOwner ( &block^.Locks[i] ) != thread )
+    END
+
+    // Lock the quick page.
 
     KeAcquireLockExclusive ( &block^.Locks[i] )
 
@@ -136,13 +153,10 @@ FN MmUseQuickPte (
 
     // Restore migration.
 
-    KeControlMigration ( old )
-
-    IF ipl != -1 THEN
-        // Restore APCs.
-
-        KeUnmaskApcs ( ipl )
-    END
+    KeControlMigration (
+        thread, // thread
+        old, // pinned
+    )
 
     RETURN status
 END
