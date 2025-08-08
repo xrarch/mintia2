@@ -2,6 +2,8 @@
 // Architecture-specific part of the exported Ke.hjk header file.
 //
 
+#IF BLD_MP
+
 #MACRO KeMemoryBarrier () [
     BARRIER
     INSERTASM "mb"
@@ -13,6 +15,19 @@
     INSERTASM "wmb"
     BARRIER
 ]
+
+#MACRO KeCurrentProcessorId () [
+    ((CAST 0xFFFFCFF8 TO ^ULONG)^)
+]
+
+#ELSE
+
+#MACRO KeMemoryBarrier () [ BARRIER ]
+#MACRO KeWriteMemoryBarrier () [ BARRIER ]
+
+#MACRO KeCurrentProcessorId () [ 0 ]
+
+#END
 
 #MACRO KeSpinPause () [
     BARRIER
@@ -31,3 +46,9 @@
 #MACRO KiSetCurrentThreadForProcessor ( thread ) [
     NOTHING (CAST 0xFFFFCFFC TO ^^KeThread)[0] = (thread)
 ]
+
+#MACRO KiStashPrbId ( prb, id ) [
+    NOTHING (CAST ((prb) + 0xFF8) TO ^ULONG)[0] = (id)
+]
+
+#DEFINE KE_CACHE_ALIGN 16

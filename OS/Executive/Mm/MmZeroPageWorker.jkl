@@ -5,6 +5,10 @@
 #INCLUDE "Mi.hjk"
 #INCLUDE "<ll>/System/OsProcess.hjk"
 
+#DEFINE MI_ZERO_BATCH 4
+#DEFINE MI_ZERO_MAXIMUM 64
+#DEFINE MI_ZERO_DELAY 100
+
 FN (KeStartThreadF) MmZeroPageWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -20,11 +24,13 @@ FN (KeStartThreadF) MmZeroPageWorker (
         partition = &MiSystemPartition
     END
 
+    zerobatch : ^MiPfe[MI_ZERO_BATCH]
+
     interval : RtlUquad
 
     RtlSetUquadToUlong (
         &interval, // uquad
-        30, // ulong
+        MI_ZERO_DELAY, // ulong
     )
 
     // Set myself to the idle priority.
@@ -45,50 +51,69 @@ FN (KeStartThreadF) MmZeroPageWorker (
             &partition^.ZeroPageEvent.Header, // object
         )
 
-        // Zero at most the threshold of pages.
+        // Zero at most 64 pages during each 100ms interval.
+        // We will zero a maximum of 640 pages per second which is about 2.5MB.
 
-        count := partition^.ZeroingThreshold
+        count : WORD = MI_ZERO_MAXIMUM
 
-        WHILE count DO
-            IF partition^.FreeList.Count == 0 THEN
+        WHILE count > 0 DO
+            IF partition^.FreeList.Count < MI_ZERO_BATCH THEN
                 BREAK
             END
 
+            i := 0
+
             ipl := MiAcquireListExclusive ( partition )
 
-            IF partition^.FreeList.Count == 0 THEN
+            IF partition^.FreeList.Count < MI_ZERO_BATCH THEN
                 MiReleaseList ( partition, ipl )
 
                 BREAK
             END
 
-            pfe := MiAllocatePageFromList (
-                &partition^.FreeList, // list
-                0, // color
-            )
+            WHILE i < MI_ZERO_BATCH DO
+                zerobatch[i] = MiAllocatePageFromList (
+                    &partition^.FreeList, // list
+                    0, // color
+                )
+
+                i += 1
+            END
 
             MiReleaseList ( partition, ipl )
 
-            // Zero the page.
+            // Zero the pages.
 
-            KeZeroPage ( MiPfeToPfn ( pfe ) )
+            i = 0
+
+            WHILE i < MI_ZERO_BATCH DO
+                MmZeroPage ( MiPfeToPfn ( zerobatch[i] ) )
+
+                i += 1
+            END
 
             // Place on zeroed list.
 
+            i = 0
+
             ipl = MiAcquireListExclusive ( partition )
 
-            MiInsertPageIntoList (
-                &partition^.ZeroList, // list
-                pfe, // pfe
-                TRUE, // head
-            )
+            WHILE i < MI_ZERO_BATCH DO
+                MiInsertPageIntoList (
+                    &partition^.ZeroList, // list
+                    zerobatch[i], // pfe
+                    TRUE, // head
+                )
+
+                i += 1
+            END
 
             MiReleaseList ( partition, ipl )
 
-            count -= 1
+            count -= MI_ZERO_BATCH
         END
 
-        // Sleep for 30ms to avoid using too much memory bandwidth.
+        // Sleep for 100ms to avoid using too much memory bandwidth.
 
         KeSleep (
             &interval, // interval
