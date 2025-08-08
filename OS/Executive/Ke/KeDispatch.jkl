@@ -1098,6 +1098,7 @@ FN KiSelectThread (
 
     next = CONTAINEROF prb^.IdleListHead.Next TO KeThread.ReadyEntry
 
+#IF BLD_MP
     IF migrate AND next^.Pinned THEN
         // Seek to a non-pinned thread.
 
@@ -1115,6 +1116,7 @@ FN KiSelectThread (
             END
         END
     END
+#END
 
     RtlRemoveEntryList ( &next^.ReadyEntry )
 
