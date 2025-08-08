@@ -2078,4 +2078,23 @@ FN KiUnpinThread ()
     KiReleaseThreadElevated ( current )
 END
 
+FN KeControlMigration (
+    IN migrate : UWORD,
+) : UWORD
+    
+    // Disable thread migration for the current thread.
+    // Return the old pinned state.
+
+    thread := KeCurrentThread ()
+
+    ipl := KiAcquireThread ( thread )
+
+    oldpinned := thread^.Pinned
+    thread^.Pinned = migrate
+
+    KiReleaseThread ( thread, ipl )
+
+    RETURN oldpinned
+END
+
 #END
