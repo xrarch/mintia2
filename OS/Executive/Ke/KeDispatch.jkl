@@ -400,10 +400,14 @@ FN KiInsertThread (
         END
 
     ELSE
-        // It's a timeshared or idle thread. There's only one thing these can
-        // preempt - the idle thread.
+        // It's a timeshared or idle thread. Timeshared threads can preempt any
+        // idle priority thread. Idle priority threads can only preempt *the*
+        // idle thread.
 
-        IF compare != &prb^.IdleThread THEN
+        IF compare != &prb^.IdleThread AND
+            (thread^.Priority == OS_PRIORITY_IDLE OR
+            compare^.Priority != OS_PRIORITY_IDLE) THEN
+
             // No preemption. Just place on the appropriate queue.
 
             IF thread^.Priority == OS_PRIORITY_IDLE THEN
