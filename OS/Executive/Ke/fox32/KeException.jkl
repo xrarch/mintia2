@@ -709,6 +709,9 @@ EXTERN KiAcquireLockSharedEnd : UBYTE
 EXTERN KiAcquireLockExclusiveStart : UBYTE
 EXTERN KiAcquireLockExclusiveEnd : UBYTE
 
+EXTERN KiTryAcquireLockExclusiveStart : UBYTE
+EXTERN KiTryAcquireLockExclusiveEnd : UBYTE
+
 EXTERN KiAcquireApcLockSharedStart : UBYTE
 EXTERN KiAcquireApcLockSharedEnd : UBYTE
 EXTERN KiAcquireApcLockExclusiveStart : UBYTE
@@ -805,6 +808,14 @@ FN KiResetPc (
         epc < &KiAcquireLockExclusiveEnd THEN
 
         context^.Epc = &KiAcquireLockExclusiveStart
+
+        LEAVE
+    END
+
+    IF epc >= &KiTryAcquireLockExclusiveStart AND
+        epc < &KiTryAcquireLockExclusiveEnd THEN
+
+        context^.Epc = &KiTryAcquireLockExclusiveStart
 
         LEAVE
     END

@@ -206,6 +206,31 @@ KiAcquireApcLockExclusiveSlow:
     jmp  KiAcquireLockExclusive
 
 // a0 - lock
+// outputs:
+// a3 - success
+KeTryAcquireLockExclusive:
+.export KeTryAcquireLockExclusive
+
+    mov  t1, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
+    or   t1, KI_LOCK_WRITE_LOCKED
+
+KiTryAcquireLockExclusiveStart:
+.global KiTryAcquireLockExclusiveStart
+
+    KiAcquireLockExclusiveLoop ( KiTryAcquireLockFailure )
+
+KiTryAcquireLockExclusiveEnd:
+.global KiTryAcquireLockExclusiveEnd
+
+    movz.8 a3, 1
+    ret
+
+KiTryAcquireLockFailure:
+
+    movz.8 a3, 0
+    ret
+
+// a0 - lock
 KeAcquireLockExclusive:
 .export KeAcquireLockExclusive
 

@@ -9,6 +9,39 @@
 #ASM [
 
 // a0 - lock
+// outputs:
+// a3 - success
+KeTryAcquireLockExclusive:
+.export KeTryAcquireLockExclusive
+
+    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
+    mov  t1, long [t0 + KiPrb_CurrentThread]
+    ori  t1, t1, KI_LOCK_WRITE_LOCKED
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+.retry:
+
+    ll   t0, a0                     // Load-locked the lock word.
+    bne  t0, .failure               // If it's non-zero, we failed.
+    sc   t2, a0, t1                 // Grab it.
+    beq  t2, .retry                 // If failed, retry.
+
+#IF BLD_MP
+    mb                              // Ensure coherence with other processors.
+#END
+
+    li   a3, 1                      // Report success.
+    ret
+
+.failure:
+
+    li   a3, 0                      // Report failure.
+    ret
+
+// a0 - lock
 KeAcquireLockShared:
 .export KeAcquireLockShared
 
