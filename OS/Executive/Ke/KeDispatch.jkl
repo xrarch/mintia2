@@ -2068,14 +2068,11 @@ FN KiUnpinThread ()
     KeAssert ( KiCurrentIpl () == KI_IPL_DPC )
     KeAssert ( current != &myprb^.IdleThread )
 
-    // Acquire the thread lock so that nobody sees the value of Pinned change
-    // partway through an operation.
-
-    KiAcquireThreadElevated ( current )
+    // No lock is needed because Pinned is only read while the thread is on a
+    // ready queue. Since it's running *right now*, it can't be on a ready
+    // queue!
 
     current^.Pinned = FALSE
-
-    KiReleaseThreadElevated ( current )
 END
 
 FN KeControlMigration (
@@ -2083,16 +2080,16 @@ FN KeControlMigration (
 ) : UWORD
     
     // Disable thread migration for the current thread.
-    // Return the old pinned state.
+    // Returns the old pinned state.
 
     thread := KeCurrentThread ()
 
-    ipl := KiAcquireThread ( thread )
+    // No lock is needed because Pinned is only read while the thread is on a
+    // ready queue. Since it's running *right now*, it can't be on a ready
+    // queue!
 
     oldpinned := thread^.Pinned
     thread^.Pinned = migrate
-
-    KiReleaseThread ( thread, ipl )
 
     RETURN oldpinned
 END
