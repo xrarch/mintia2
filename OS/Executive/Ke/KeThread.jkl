@@ -205,13 +205,13 @@ FN KeInitializeThread (
     thread^.SignalAcceptMask[1] = 0
     thread^.SignalDeliverOnWaitMask[1] = 0
 
-    // Enable KILL and TERMINATE_THREAD, which are unmaskable.
+    // Enable KILL and CANCEL_THREAD.
 
     thread^.SignalAcceptMask[OS_SIGNAL_KILL / 32] |=
         (1 << (OS_SIGNAL_KILL & 31))
     
-    thread^.SignalAcceptMask[OS_SIGNAL_TERMINATE_THREAD / 32] |=
-        (1 << (OS_SIGNAL_TERMINATE_THREAD & 31))
+    thread^.SignalAcceptMask[OS_SIGNAL_CANCEL_THREAD / 32] |=
+        (1 << (OS_SIGNAL_CANCEL_THREAD & 31))
 
     thread^.UserInterrupt = FALSE
     thread^.UserApcTriggered = FALSE
@@ -442,7 +442,7 @@ FN KiWakeThreadForSignal (
         status := 0
 
         IF thread^.WaitMode == KE_USER_MODE THEN
-            IF KeAreThereUnmaskableSignals ( thread ) THEN
+            IF thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
                 // This is a usermode wait and KILL is pending, so cause a wake.
 
                 status = OS_STATUS_KILLED
@@ -462,7 +462,7 @@ FN KiWakeThreadForSignal (
             END
         
         ELSEIF thread^.Alertable == KE_ALERTABLE AND
-            KeAreThereUnmaskableSignals ( thread ) THEN
+            thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
 
             // Alertable kernel mode waits are (only) interrupted by
             // termination.
