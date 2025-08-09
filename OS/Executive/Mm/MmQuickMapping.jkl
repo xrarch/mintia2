@@ -109,7 +109,7 @@ FN MmUseQuickPte (
         // now. Luckily the solution is easy - we can just skip ahead by one and
         // lock that one instead.
 
-        i = block^.NextIndex & (MI_QUICK_PER_CPU - 1)
+        i = (i + 1) & (MI_QUICK_PER_CPU - 1)
         block^.NextIndex = i + 1
 
         // It should not be possible for this lock to also be held by the
