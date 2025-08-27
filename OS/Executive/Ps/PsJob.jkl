@@ -270,7 +270,7 @@ FN (ObTypeInitializeF) PspInitializeJobObject (
 
     job^.SignalOnClose = ctx^.SignalOnClose
 
-    IF ctx^.SignalOnClose >= OS_SIGNAL_COUNT THEN
+    IF KeInvalidSignal ( ctx^.SignalOnClose ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
