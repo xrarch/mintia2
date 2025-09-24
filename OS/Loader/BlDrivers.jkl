@@ -32,19 +32,7 @@ FN BlLoadExtension (
     IN name : ^UBYTE,
 ) : ^BlDll
 
-    // Construct the path to the config file, relative to the system directory.
-
-    cfgpath : UBYTE[64]
-
-    RtlFormat (
-        &cfgpath[0], // dest
-        64, // bufsize
-        "Drivers/%s/%s.cfg", // fmt
-        name,
-        name,
-    )
-
-    // Construct the path to the module.
+    // Construct the path to the module, relative to the system directory.
 
     dllpath : UBYTE[64]
 
@@ -60,25 +48,32 @@ FN BlLoadExtension (
 
     dll := BlLoadDriver ( &dllpath[0] )
 
-    IF NOT dll THEN
-        RETURN NULLPTR
-    END
+    RETURN dll
+END
 
-    // Try to load the config file.
+FN (BlIterateEntriesCallbackF) BlLoadConfigFileCallback (
+    IN name : ^UBYTE,
+    IN context : ^VOID,
+) : UWORD
 
-    rsrc := BlLoadResource (
-        BlSystemDirectory, // device
-        name, // name
-        &cfgpath[0], // path
+    // Load the config file for this driver.
+
+    cfgpath : UBYTE[64]
+
+    RtlFormat (
+        &cfgpath[0], // dest
+        64, // bufsize
+        "%s/%s.cfg", // fmt
+        name,
+        name,
     )
 
-    IF rsrc THEN
-        rsrc^.Module = dll
-    END
-
-    dll^.Config = rsrc
-
-    RETURN dll
+    BlLoadResource (
+        BlDriverDirectory, // file
+        name, // name
+        &cfgpath[0], // path
+        TRUE, // ioconfig
+    )
 END
 
 FN BlLoadDrivers ()
@@ -98,4 +93,13 @@ FN BlLoadDrivers ()
     // for early boot.
 
     BxLoadDrivers ()
+
+    // Load all of the configuration files for all drivers currently present.
+
+    BlIterateEntries (
+        BlDriverDirectory, // file
+        &BlLoadConfigFileCallback, // callback
+        NULLPTR, // context
+        BL_FILETYPE_DIRECTORY, // type
+    )
 END

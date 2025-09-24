@@ -18,7 +18,9 @@ EXPORT FN KeFindResource (
     WHILE listentry != listhead DO
         rsrc := CONTAINEROF listentry TO BlResource.Entry
 
-        IF RtlCompareString ( &rsrc^.Name[0], name ) == 0 THEN
+        IF NOT rsrc^.IoConfig AND
+            RtlCompareString ( &rsrc^.Name[0], name ) == 0 THEN
+
             data = rsrc^.Data
 
             RETURN rsrc

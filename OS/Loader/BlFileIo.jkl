@@ -11,6 +11,8 @@ PUBLIC BlTemporaryBuffer : UBYTE[BL_TEMP_BUFFER_SIZE]
 PUBLIC BlSystemDirectory : ^BlFile
 PUBLIC BlSystemPath : ^UBYTE
 
+PUBLIC BlDriverDirectory : ^BlFile
+
 EXTERN FN (BlMountF) BlMountAisixFs (
     IN device : ^BlFile,
 ) : UWORD
@@ -160,4 +162,16 @@ FN BlInitializeIo ()
     END
 
     RtlPrint ( "Selected boot directory is %s:%s.\n", &BlInfoBlock.BootDeviceName[0], BlSystemPath )
+
+    // Open the drivers directory.
+
+    BlDriverDirectory = BlOpenFile (
+        BlSystemDirectory, // file
+        "Drivers", // path
+        BL_FILETYPE_DIRECTORY, // type
+    )
+
+    IF NOT BlDriverDirectory THEN
+        BlCrash ( "Nonexistent driver directory %s:%s/Drivers\n", &BlInfoBlock.BootDeviceName[0], BlSystemPath )
+    END
 END

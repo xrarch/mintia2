@@ -6,25 +6,69 @@
 
 BlResourceDirectory : ^BlFile
 
+BlConfigBumpPointer : ^UBYTE
+BlConfigBumpRemaining : ULONG = 0
+
+#DEFINE BL_CONFIG_BUMP_EXTENSION [RTL_PAGE_SIZE]
+
+FN BlAllocateConfigFile (
+    IN bytes : UWORD,
+) : ^UBYTE
+
+    // Allocate space to load a configuration file into.
+    // We load a lot of configuration files (one for each driver present in the
+    // Drivers directory at boot time) so we want to squish them together to
+    // save memory.
+
+    desc : ^BlMemoryDescriptor
+
+    IF bytes >= (BL_CONFIG_BUMP_EXTENSION / 2) THEN
+        RETURN BlAllocateMappedRange (
+            (bytes + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT, // pages
+            BL_KERNEL_STRUCTURES, // preferredva
+            FALSE, // fixed
+            BL_MEMORY_USED, // type
+            OUT desc, // desc
+        )
+    END
+
+    IF BlConfigBumpRemaining < bytes THEN
+        pages := BL_CONFIG_BUMP_EXTENSION + RTL_PAGE_SIZE - 1
+        pages >>= RTL_PAGE_SHIFT
+
+        BlConfigBumpPointer = BlAllocateMappedRange (
+            pages, // pages
+            BL_KERNEL_STRUCTURES, // preferredva
+            FALSE, // fixed
+            BL_MEMORY_USED, // type
+            OUT desc, // desc
+        )
+
+        IF NOT BlConfigBumpPointer THEN
+            BlConfigBumpRemaining = 0
+
+            RETURN NULLPTR
+        END
+
+        BlConfigBumpRemaining = pages << RTL_PAGE_SHIFT
+    END
+
+    ptr := BlConfigBumpPointer
+
+    BlConfigBumpPointer += bytes
+    BlConfigBumpRemaining -= bytes
+
+    RETURN ptr
+END
+
 FN BlLoadResource (
     IN device : ^BlFile,
     IN name : ^UBYTE,
     IN path : ^UBYTE,
+    IN ioconfig : UWORD,
 ) : ^BlResource
 
     // Load a single resource. Returns NULLPTR on error.
-
-    rsrc := CAST BlAllocateMemory (
-        SIZEOF BlResource, // bytes
-    ) TO ^BlResource
-
-    rsrc^.Jettison = TRUE
-
-    RtlCopyString (
-        &rsrc^.Name[0], // dest
-        name, // src
-        BL_RESOURCE_NAME_MAX, // bufsize
-    )
 
     file := BlOpenFile (
         device, // device
@@ -36,21 +80,39 @@ FN BlLoadResource (
         RETURN NULLPTR
     END
 
+    rsrc := CAST BlAllocateMemory (
+        SIZEOF BlResource, // bytes
+    ) TO ^BlResource
+
+    rsrc^.Jettison = TRUE
+    rsrc^.IoConfig = ioconfig
+
+    RtlCopyString (
+        &rsrc^.Name[0], // dest
+        name, // src
+        BL_RESOURCE_NAME_MAX, // bufsize
+    )
+
     rsrc^.Size = file^.Size
 
-    filepages := file^.Size + 1
-    filepages += RTL_PAGE_SIZE - 1
-    filepages >>= RTL_PAGE_SHIFT
+    IF ioconfig THEN
+        rsrc^.Data = BlAllocateConfigFile ( file^.Size )
 
-    desc : ^BlMemoryDescriptor
+    ELSE
+        filepages := file^.Size + 1
+        filepages += RTL_PAGE_SIZE - 1
+        filepages >>= RTL_PAGE_SHIFT
 
-    rsrc^.Data = CAST BlAllocateMappedRange (
-        filepages, // pages
-        BL_KERNEL_STRUCTURES, // preferredva
-        FALSE, // fixed
-        BL_MEMORY_USED, // type
-        OUT desc, // desc
-    ) TO ^UBYTE
+        desc : ^BlMemoryDescriptor
+
+        rsrc^.Data = CAST BlAllocateMappedRange (
+            filepages, // pages
+            BL_KERNEL_STRUCTURES, // preferredva
+            FALSE, // fixed
+            BL_MEMORY_USED, // type
+            OUT desc, // desc
+        ) TO ^UBYTE
+    END
 
     IF NOT rsrc^.Data THEN
         RETURN NULLPTR
@@ -131,6 +193,7 @@ FN (BlCallbackPerLineF) BlLoadResourceCallback (
         BlResourceDirectory, // device
         &name[0], // name
         &path[0], // path
+        FALSE, // ioconfig
     )
 
     IF NOT rsrc THEN

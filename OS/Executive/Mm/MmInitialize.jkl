@@ -62,27 +62,32 @@ FN MmJettisonUnusedResources ()
 
             pte := MiPteAddress ( rsrc^.Data )
 
-            pages := rsrc^.Size + RTL_PAGE_OFFSET_MASK >> RTL_PAGE_SHIFT
+            pages := (rsrc^.Size + RTL_PAGE_OFFSET_MASK) >> RTL_PAGE_SHIFT
 
             i := 0
 
             WHILE i < pages DO
                 ptecontents := pte[i]
 
-                KeAssert ( MiIsPteValid ( ptecontents ) )
+                // Not all boot resources are page aligned (in particular, the
+                // IO config files are represented as boot resources and are
+                // packed together rather than page aligned). As a result, we
+                // need to check if each PTE has already been invalidated and
+                // don't do it a second time if so.
 
-                // Clear the PTE, makes it more likely we'll see it if a bad
-                // pointer within this space is used later. Due to the TB it's
-                // not 100% though.
+                KeAssert ( (NOT rsrc^.IoConfig) OR
+                    MiIsPteValid ( ptecontents ) )
 
-                pte[i] = MI_INVALID_KERNEL_PTE
+                IF MiIsPteValid ( ptecontents ) THEN
+                    pte[i] = MI_INVALID_KERNEL_PTE
 
-                // Free the page frame.
+                    // Free the page frame.
 
-                MiFreePage (
-                    partition, // partition
-                    MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
-                )
+                    MiFreePage (
+                        partition, // partition
+                        MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
+                    )
+                END
 
                 i += 1
             END

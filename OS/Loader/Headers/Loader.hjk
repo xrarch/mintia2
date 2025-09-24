@@ -61,6 +61,7 @@ STRUCT BlInfoRecord
     ResourceListHead : RtlListEntry,
     DllListHead : RtlListEntry,
     DescriptorListHead : RtlListEntry,
+
     PfnDatabase : ^VOID,
     BootDeviceName : UBYTE[BL_BOOT_NAME_MAX],
     ProcessorCount : UWORD,
@@ -105,6 +106,9 @@ ENUM BlMemoryDescriptorType : UBYTE
 
     // Used by debugger at runtime.
     BL_MEMORY_DEBUG,
+
+    // Used by loaded configuration file data.
+    BL_MEMORY_IO_CONFIG,
 END
 
 STRUCT BlMemoryDescriptor
@@ -123,12 +127,12 @@ STRUCT BlResource
 
     Name : UBYTE[BL_RESOURCE_NAME_MAX],
 
-    Module : ^BlDll,
-
     Data : ^VOID,
 
     Size : UWORD,
-    Jettison : UWORD,
+
+    Jettison : UBYTE,
+    IoConfig : UBYTE,
 END
 
 #DEFINE BL_DLL_NAME_MAX 64
@@ -148,8 +152,6 @@ STRUCT BlDll
     DriverEntrypoint : ^VOID,
 
     Base : ^VOID,
-
-    Config : ^BlResource,
 
     Head : ^XloHeader,
     HeadLength : ULONG,
