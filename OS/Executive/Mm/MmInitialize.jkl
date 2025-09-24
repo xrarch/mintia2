@@ -75,8 +75,7 @@ FN MmJettisonUnusedResources ()
                 // need to check if each PTE has already been invalidated and
                 // don't do it a second time if so.
 
-                KeAssert ( (NOT rsrc^.IoConfig) OR
-                    MiIsPteValid ( ptecontents ) )
+                KeAssert ( rsrc^.IoConfig OR MiIsPteValid ( ptecontents ) )
 
                 IF MiIsPteValid ( ptecontents ) THEN
                     pte[i] = MI_INVALID_KERNEL_PTE
