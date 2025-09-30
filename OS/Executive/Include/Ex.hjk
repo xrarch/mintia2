@@ -232,6 +232,53 @@ EXTERN FN ExEmptySet (
     IN context : ^VOID,
 )
 
+#DEFINE EXP_DICTIONARY_BUCKET_COUNT 32
+
+STRUCT ExDictionary
+    Buckets : RtlAvlNode[EXP_DICTIONARY_BUCKET_COUNT],
+    OrderedListHead : RtlListEntry,
+END
+
+FNPTR ExEnumerateDictionaryF (
+    IN dict : ^ExDictionary,
+    IN key : ^RtlString,
+    IN value : ^VOID,
+    IN context : ^VOID,
+)
+
+EXTERN FN ExInitializeDictionary (
+    IN dict : ^ExDictionary,
+)
+
+EXTERN FN (RtlAvlLessThanF) ExpCompareDictionaryEntries (
+    IN a : ^RtlAvlNode,
+    IN b : ^RtlAvlNode,
+) : UWORD
+
+EXTERN FN ExLookupDictionary (
+    IN dict : ^ExDictionary,
+    IN key : ^RtlString,
+) : ^VOID
+
+EXTERN FN ExRemoveFromDictionary (
+    IN dict : ^ExDictionary,
+    IN key : ^RtlString,
+) : ^VOID
+
+EXTERN FN ExInsertInDictionary (
+    IN dict : ^ExDictionary,
+    IN key : ^RtlString,
+    IN value : ^VOID,
+    IN canupdate : UWORD,
+) : OsStatus
+
+EXTERN FN ExEnumerateDictionary (
+    IN dict : ^ExDictionary,
+    IN func : ExEnumerateDictionaryF,
+    IN context : ^VOID,
+    IN delete : UWORD,
+)
+
 #DEFINE EX_MODULE_UNLOADING 1
 #DEFINE EX_MODULE_LOADING 2
 

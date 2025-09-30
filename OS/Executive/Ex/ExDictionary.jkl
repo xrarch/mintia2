@@ -1,0 +1,274 @@
+//
+// Implements a simple key-value dictionary for the MINTIA Executive.
+//
+
+#INCLUDE "Exp.hjk"
+
+STRUCT ExpDictionaryEntry
+    Entry : RtlAvlNode,
+    OrderedEntry : RtlListEntry,
+    Key : ^ExName,
+    Value : ^VOID,
+END
+
+#SECTION "PAGEtext"
+FN ExInitializeDictionary (
+    IN dict : ^ExDictionary,
+)
+
+    // Initialize a dictionary.
+
+    RtlInitializeList ( &dict^.OrderedListHead )
+
+    i := 0
+
+    WHILE i < EXP_DICTIONARY_BUCKET_COUNT DO
+        RtlInitializeAvl ( &dict^.Buckets[i] )
+
+        i += 1
+    END
+END
+
+#SECTION "PAGEtext"
+FN (RtlAvlLessThanF) ExpCompareDictionaryEntries (
+    IN a : ^RtlAvlNode,
+    IN b : ^RtlAvlNode,
+) : UWORD
+
+    // Return whether A < B, lexicographically.
+
+    RETURN CAST RtlCompareRtlString (
+        ExNameToString((CONTAINEROF a TO ExpDictionaryEntry.Entry)^.Key), // str1
+        ExNameToString((CONTAINEROF b TO ExpDictionaryEntry.Entry)^.Key), // str2
+    ) TO WORD < 0
+END
+
+#SECTION "PAGEtext"
+FN ExpLookupDictionaryEntry (
+    IN dict : ^ExDictionary,
+    IN key : ^RtlString,
+    IN hash : UWORD,
+) : ^ExpDictionaryEntry
+
+    // Look up an entry in the dictionary. Returns NULLPTR if not found.
+
+    len := key^.Length
+
+    bucket := &dict^.Buckets[hash & (EXP_DICTIONARY_BUCKET_COUNT - 1)]
+
+    // Look up the name in the bucket, which is an AVL tree keyed by string and
+    // ordered lexicographically.
+
+    avlnode := bucket^.Right
+
+    WHILE TRUE DO
+        IF NOT avlnode THEN
+            // Doesn't exist.
+
+            RETURN NULLPTR
+        END
+
+        checknode := CONTAINEROF avlnode TO ExpDictionaryEntry.Entry
+
+        res := CAST RtlCompareRtlString (
+            key, // str1
+            ExNameToString ( checknode^.Key ), // str2
+        ) TO WORD
+
+        IF res == 0 THEN
+            // Found it!
+
+            RETURN checknode
+        END
+
+        IF res < 0 THEN
+            avlnode = avlnode^.Left
+        ELSE
+            avlnode = avlnode^.Right
+        END
+    END
+END
+
+#SECTION "PAGEtext"
+FN ExLookupDictionary (
+    IN dict : ^ExDictionary,
+    IN key : ^RtlString,
+) : ^VOID
+
+    // Look up an entry in the dictionary. Returns the previously stored value
+    // associated with the key or NULLPTR if not found.
+
+    entry := ExpLookupDictionaryEntry (
+        dict, // dict
+        key, // key
+        ExpHash ( key^.Data ), // hash
+    )
+
+    IF NOT entry THEN
+        RETURN NULLPTR
+    END
+
+    RETURN entry^.Value
+END
+
+#SECTION "PAGEtext"
+FN ExpRemoveEntryFromDictionary (
+    IN dict : ^ExDictionary,
+    IN entry : ^ExpDictionaryEntry,
+    IN hash : UWORD,
+)
+
+    RtlRemoveEntryList ( &entry^.OrderedEntry )
+
+    RtlRemoveAvl (
+        &dict^.Buckets[hash & EXP_DICTIONARY_BUCKET_COUNT], // root
+        &entry^.Entry, // node
+    )
+
+    ExUnreferenceName ( entry^.Key )
+
+    MmFreePool (
+        entry, // entry
+        'DcEn', // tag
+    )
+END
+
+#SECTION "PAGEtext"
+FN ExRemoveFromDictionary (
+    IN dict : ^ExDictionary,
+    IN key : ^RtlString,
+) : ^VOID
+
+    // Remove the entry with the given key from the dictionary.
+    // Returns the value of the entry if removed, NULLPTR if not found.
+
+    hash := ExpHash ( key^.Data )
+
+    entry := ExpLookupDictionaryEntry (
+        dict, // dict
+        key, // key
+        hash, // hash
+    )
+
+    IF NOT entry THEN
+        RETURN NULLPTR
+    END
+
+    value := entry^.Value
+
+    ExpRemoveEntryFromDictionary (
+        dict, // dict
+        entry, // entry
+        hash, // hash
+    )
+
+    RETURN value
+END
+
+#SECTION "PAGEtext"
+FN ExInsertInDictionary (
+    IN dict : ^ExDictionary,
+    IN key : ^RtlString,
+    IN value : ^VOID,
+    IN canupdate : UWORD,
+) : OsStatus
+
+    // Insert the given key-value pair into the dictionary.
+    // If canupdate is TRUE, the key will be updated if it already exists.
+    // Otherwise an error will be returned if it already exists.
+
+    hash := ExpHash ( key^.Data )
+
+    entry := ExpLookupDictionaryEntry (
+        dict, // dict
+        key, // key
+        hash, // hash
+    )
+
+    IF entry THEN
+        IF NOT canupdate THEN
+            // Can't update, so return an error.
+
+            RETURN OS_STATUS_EXISTS
+        END
+
+        // Update.
+
+        entry^.Value = value
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    // The entry doesn't exist, so create it.
+
+    entry = MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
+        SIZEOF ExpDictionaryEntry, // bytes
+        'DcEn', // tag
+        TRUE, // wait
+    )
+
+    IF NOT entry THEN
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    entry^.Key = ExFindName ( key )
+
+    IF NOT entry^.Key THEN
+        MmFreePool (
+            entry, // entry
+            'DcEn', // tag
+        )
+
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    entry^.Value = value
+
+    RtlInsertAtTailList (
+        &dict^.OrderedListHead, // head
+        &entry^.OrderedEntry, // entry
+    )
+
+    RtlInsertAvl (
+        &dict^.Buckets[hash & EXP_DICTIONARY_BUCKET_COUNT], // root
+        &entry^.Entry, // node
+        &ExpCompareDictionaryEntries, // comparisonfunc
+    )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN ExEnumerateDictionary (
+    IN dict : ^ExDictionary,
+    IN func : ExEnumerateDictionaryF,
+    IN context : ^VOID,
+    IN delete : UWORD,
+)
+
+    listhead := &dict^.OrderedListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        next := listentry^.Next
+        entry := CONTAINEROF listentry TO ExpDictionaryEntry.OrderedEntry
+
+        func (
+            dict, // dict
+            ExNameToString ( entry^.Key ), // key
+            entry^.Value, // value
+            context, // context
+        )
+
+        IF delete THEN
+            ExpRemoveEntryFromDictionary (
+                dict, // dict
+                entry, // entry
+                ExpHash ( ExNameToString ( entry^.Key )^.Data ), // hash
+            )
+        END
+
+        listentry = next
+    END
+END
