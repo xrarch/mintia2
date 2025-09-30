@@ -121,7 +121,7 @@ FN ExpRemoveEntryFromDictionary (
     RtlRemoveEntryList ( &entry^.OrderedEntry )
 
     RtlRemoveAvl (
-        &dict^.Buckets[hash & EXP_DICTIONARY_BUCKET_COUNT], // root
+        &dict^.Buckets[hash & (EXP_DICTIONARY_BUCKET_COUNT - 1)], // root
         &entry^.Entry, // node
     )
 
@@ -231,7 +231,7 @@ FN ExInsertInDictionary (
     )
 
     RtlInsertAvl (
-        &dict^.Buckets[hash & EXP_DICTIONARY_BUCKET_COUNT], // root
+        &dict^.Buckets[hash & (EXP_DICTIONARY_BUCKET_COUNT - 1)], // root
         &entry^.Entry, // node
         &ExpCompareDictionaryEntries, // comparisonfunc
     )
@@ -254,12 +254,14 @@ FN ExEnumerateDictionary (
         next := listentry^.Next
         entry := CONTAINEROF listentry TO ExpDictionaryEntry.OrderedEntry
 
-        func (
-            dict, // dict
-            ExNameToString ( entry^.Key ), // key
-            entry^.Value, // value
-            context, // context
-        )
+        IF func THEN
+            func (
+                dict, // dict
+                ExNameToString ( entry^.Key ), // key
+                entry^.Value, // value
+                context, // context
+            )
+        END
 
         IF delete THEN
             ExpRemoveEntryFromDictionary (
