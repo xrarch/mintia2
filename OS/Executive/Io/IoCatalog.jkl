@@ -4,13 +4,43 @@
 //
 
 #INCLUDE "Iop.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
+
+#SECTION "PAGEtext"
+FN IopProcessConfiguration (
+    IN modulename : ^UBYTE,
+    IN configtext : ^UBYTE,
+    IN configsize : UWORD,
+)
+
+    // Process a driver configuration file.
+END
 
 #ENTERSECTION "INITtext"
 
 FN IopInitializeCatalog ()
 
     // Initialize the IO Catalog.
+    //
+    // We need to process all of the configuration files loaded by the
+    // bootloader.
 
+    listhead := &KeLoaderBlock.ResourceListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        rsrc := CONTAINEROF listentry TO BlResource.Entry
+
+        IF rsrc^.IoConfig THEN
+            IopProcessConfiguration (
+                &rsrc^.Name[0], // modulename
+                rsrc^.Data, // configtext
+                rsrc^.Size, // configsize
+            )
+        END
+
+        listentry = listentry^.Next
+    END
 END
 
 #LEAVESECTION
