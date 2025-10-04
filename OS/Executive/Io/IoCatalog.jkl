@@ -6,14 +6,88 @@
 #INCLUDE "Iop.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
+IopCatalogLock : KeLock = KE_INITIAL_LOCK
+
+#SECTION "PAGEtext"
+FN IopParseConfiguration (
+    IN configtext : ^UBYTE,
+    IN configsize : UWORD,
+    OUT class : ^IoKnownClass,
+) : OsStatus
+
+    // Parse the given configuration file data and return a list of IoKnownClass
+    // which represent the information found therein.
+
+    RETURN OS_STATUS_NOT_IMPLEMENTED
+END
+
+#SECTION "PAGEtext"
+FN IopForgetModule (
+    IN modulename : ^UBYTE,
+) : OsStatus
+
+    // Forcibly forget a module. The catalog lock is held on entry.
+
+    // First look up the module.
+
+    // If the module wasn't found, nothing to do.
+
+    // If the module was found and is currently loaded, unlock the catalog lock
+    // and initiate an unload and then retry the whole operation. If the unload
+    // fails, propagate the status to the caller.
+
+    // If the module was found and is unloaded, forget about it from the
+    // catalog.
+
+    RETURN OS_STATUS_NOT_IMPLEMENTED
+END
+
 #SECTION "PAGEtext"
 FN IopProcessConfiguration (
     IN modulename : ^UBYTE,
     IN configtext : ^UBYTE,
     IN configsize : UWORD,
-)
+) : OsStatus
 
     // Process a driver configuration file.
+
+    class : ^IoKnownClass
+
+    // First parse the configuration and create an IoKnownClass for each
+    // described class.
+
+    status := IopParseConfiguration (
+        configtext, // configtext
+        configsize, // configsize
+        OUT class, // class
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Now take the catalog lock.
+
+    KeAcquireLockExclusive ( &IopCatalogLock )
+
+    // If we already processed a configuration file for this module, we want to
+    // forget whatever we learned there. 
+
+    status = IopForgetModule ( modulename )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    // Insert all of the known classes into the IO catalog.
+
+    // ...
+
+@Exit
+
+    KeReleaseLock ( &IopCatalogLock )
+
+    RETURN status
 END
 
 #ENTERSECTION "INITtext"
