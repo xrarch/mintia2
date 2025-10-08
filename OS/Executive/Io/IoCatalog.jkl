@@ -9,19 +9,6 @@
 IopCatalogLock : KeLock = KE_INITIAL_LOCK
 
 #SECTION "PAGEtext"
-FN IopParseConfiguration (
-    IN configtext : ^UBYTE,
-    IN configsize : UWORD,
-    OUT class : ^IoKnownClass,
-) : OsStatus
-
-    // Parse the given configuration file data and return a list of IoKnownClass
-    // which represent the information found therein.
-
-    RETURN OS_STATUS_NOT_IMPLEMENTED
-END
-
-#SECTION "PAGEtext"
 FN IopForgetModule (
     IN modulename : ^UBYTE,
 ) : OsStatus
@@ -51,9 +38,9 @@ FN IopProcessConfiguration (
 
     // Process a driver configuration file.
 
-    class : ^IoKnownClass
+    class : ^IopKnownClass
 
-    // First parse the configuration and create an IoKnownClass for each
+    // First parse the configuration and create an IopKnownClass for each
     // described class.
 
     status := IopParseConfiguration (

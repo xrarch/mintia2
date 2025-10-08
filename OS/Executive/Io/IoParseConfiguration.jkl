@@ -1,0 +1,145 @@
+//
+// Parses configuration files for loadable modules.
+//
+
+#INCLUDE "Iop.hjk"
+
+STRUCT IopParseContext
+    Text : ^UBYTE,
+    Size : UWORD,
+    Index : UWORD,
+    ClassListHead : ^IopKnownClass,
+    ClassListTail : ^IopKnownClass,
+END
+
+#MACRO IopIsWhitespace ( c ) [ ((c) == ' ' OR (c) == '\t' OR (c) == '\n') ]
+
+#SECTION "PAGEtext"
+FN IopConsumeWhitespace (
+    IN parse : ^IopParseContext,
+) : UWORD
+
+    // Consume whitespace until the next non-whitespace character is
+    // encountered. Returns TRUE if EOF was encountered. Also elides
+    // line comments.
+
+    comment := FALSE
+
+    WHILE parse^.Index < parse^.Size DO
+        c := parse^.Text[parse^.Index]
+
+        IF comment THEN
+            IF c == '\n' THEN
+                // Comments continue until the end of the line.
+
+                comment = FALSE
+            END
+
+        ELSEIF c == '#' THEN
+            comment = TRUE
+
+        ELSEIF NOT IopIsWhitespace ( c ) THEN
+            RETURN TRUE
+        END
+
+        parse^.Index += 1
+    END
+
+    RETURN FALSE
+END
+
+#SECTION "PAGEtext"
+FN IopConsumeToken (
+    IN parse : ^IopParseContext,
+    IN buffer : ^UBYTE,
+    IN bufsize : UWORD,
+) : UWORD
+
+    // Consume a token into the buffer. Returns FALSE if EOF was encountered.
+
+    IF NOT IopConsumeWhitespace ( parse ) THEN
+        RETURN FALSE
+    END
+
+    i := 0
+
+    // Make sure there's enough room for the null terminator.
+
+    bufsize -= 1
+
+    WHILE parse^.Index < parse^.Size DO
+        c := parse^.Text[parse^.Index]
+
+        IF IopIsWhitespace ( c ) THEN
+            BREAK
+        END
+
+        IF i >= bufsize THEN
+            RETURN FALSE
+        END
+        
+        buffer[i] = c
+        i += 1
+
+        parse^.Index += 1
+    END
+
+    buffer[i] = 0
+
+    RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN IopParseDefinition (
+    IN parse : ^IopParseContext,
+) : OsStatus
+
+    // Parse a definition.
+
+    buf : UBYTE[32]
+
+    WHILE IopConsumeToken (
+        parse, // parse
+        &buf[0], // buffer
+        32, // bufsize
+    ) DO
+
+        RtlPrint ( "%s ", &buf[0] )
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN IopParseConfiguration (
+    IN configtext : ^UBYTE,
+    IN configsize : UWORD,
+    OUT class : ^IopKnownClass,
+) : OsStatus
+
+    // Parse the given configuration file data and return a list of IoKnownClass
+    // which represent the information found therein.
+
+    parse : IopParseContext
+    parse.Text = configtext
+    parse.Size = configsize
+    parse.Index = 0
+    parse.ClassListHead = NULLPTR
+    parse.ClassListTail = NULLPTR
+
+    WHILE TRUE DO
+        status := IopParseDefinition ( &parse )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+
+        IF status == 0 THEN
+            BREAK
+        END
+    END
+
+    class = parse.ClassListHead
+
+    RETURN OS_STATUS_SUCCESS
+END
