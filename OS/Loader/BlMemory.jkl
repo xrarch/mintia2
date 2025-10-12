@@ -223,7 +223,9 @@ FN BlAllocateKernelSpace (
 
         va := BlKernelStructureBump
 
-        BlKernelStructureBump += pages << RTL_PAGE_SHIFT
+        // Add a guard page to the bump just to be safe.
+
+        BlKernelStructureBump += (pages + 1) << RTL_PAGE_SHIFT
 
         RETURN va
 

@@ -29,7 +29,7 @@ FN MmCreateKernelStack (
 
     // Allocate the required system space.
 
-    kstack = MiAllocateDynamicPages ( KE_STACK_PAGES )
+    kstack = MiAllocateDynamicPages ( KE_STACK_PAGES + 1 )
 
     IF NOT kstack THEN
         // Couldn't acquire them.
@@ -38,6 +38,10 @@ FN MmCreateKernelStack (
 
         GOTO Error1
     END
+
+    // Skip the guard page.
+
+    kstack += RTL_PAGE_SIZE
 
     pfes : ^MiPfe[KE_STACK_PAGES]
 
@@ -84,7 +88,15 @@ FN MmCreateKernelStack (
 
     // Acquire a pointer to the first PTE for this region.
 
-    pte := MiPteAddress ( kstack )
+    pte := MiPteAddress ( kstack - RTL_PAGE_SIZE )
+
+    // Set the guard page invalid.
+
+    pte[0] = MI_INVALID_KERNEL_PTE
+
+    // Skip to the first real stack page.
+
+    pte = &pte[1]
 
     // Map the stack pages.
 
@@ -101,8 +113,8 @@ FN MmCreateKernelStack (
 @Error2
 
     MiReleaseDynamicPages (
-        kstack, // ptr
-        KE_STACK_PAGES, // pages
+        kstack - RTL_PAGE_SIZE, // ptr
+        KE_STACK_PAGES + 1, // pages
         FALSE, // flush
     )
 
@@ -163,8 +175,8 @@ FN MmFreeKernelStack (
     // Release the system space containing the stack.
 
     MiReleaseDynamicPages (
-        kstack, // ptr
-        KE_STACK_PAGES, // pages
+        kstack - RTL_PAGE_SIZE, // ptr
+        KE_STACK_PAGES + 1, // pages
         TRUE, // flush
     )
 
