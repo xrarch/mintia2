@@ -463,8 +463,12 @@ FN KiServiceIpi (
         // Oh snap! Lock up until the freeze count reaches zero.
 
         // Set our context in our Prb for the debugger.
+        // If it was already set, then don't reset it as this is
+        // probably the more relevant information.
 
-        prb^.FrozenContext = context
+        IF NOT prb^.FrozenContext THEN
+            prb^.FrozenContext = context
+        END
 
         // Increment this count so that the freezer knows when we froze.
 

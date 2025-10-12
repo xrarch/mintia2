@@ -43,6 +43,17 @@ FN KiFaultCrash (
     IN badaddr : ^VOID,
 )
 
+    // Set the FrozenContext to the faulting context because that will be the
+    // most relevant information for the debugger.
+
+    prb := KI_CURRENT_PRB_LOCAL
+
+    IF prb^.FrozenContext THEN
+        RtlPrint ( "CPU%d OLD CONTEXT: 0x%p\n", prb^.FrozenContext )
+    END
+
+    prb^.FrozenContext = context
+
     KeCrash (
         "ERS=%08x BADADDR=%08x EPC=%08x ECAUSE=%s\n", // fmt
         context^.Rs,

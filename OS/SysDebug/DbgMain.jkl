@@ -38,10 +38,13 @@ FN (KeDebuggerEntryF) DbgEntrypoint (
     KiFreezeOtherProcessors ()
 #END
 
-    NOTHING KI_CURRENT_PRB_LOCAL^.FrozenContext = context
-
-    DbgCurrentContext = context
     DbgCurrentPrb = KI_CURRENT_PRB
+
+    IF NOT DbgCurrentPrb^.FrozenContext THEN
+        DbgCurrentPrb^.FrozenContext = context
+    END
+
+    DbgCurrentContext = DbgCurrentPrb^.FrozenContext
 
     DbgPrompt ()
 
