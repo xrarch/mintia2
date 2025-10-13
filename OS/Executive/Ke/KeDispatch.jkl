@@ -1595,45 +1595,6 @@ FN KiCheckInteractivity (
     KiReleaseReadyQueueAndThreadElevated ( prb, current )
 END
 
-FN KiMoveToInteractiveQueueThread (
-    IN prb : ^KiPrb,
-    IN thread : ^KeThread,
-)
-
-    // The given thread is ready and was not interactive. It's now interactive
-    // so we want to move it to the right queue. Thread and ready queue lock
-    // are held.
-
-#IF BLD_MP
-    other := prb != KI_CURRENT_PRB
-#ELSE
-    other := FALSE
-#END
-
-    IF thread^.Status != KI_THREAD_READY THEN
-#IF BLD_MP
-        IF thread^.Status == KI_THREAD_RUNNING AND
-            NOT prb^.NextThread THEN
-
-            // Update stashed interactivity.
-
-            prb^.StashedCurrentThreadInfo =
-                KiSetInteractivityInStash ( prb^.StashedCurrentThreadInfo,
-                thread^.InteractiveBits )
-        END
-#END
-
-        LEAVE
-    END
-
-    KiReinsertThread (
-        thread, // thread
-        prb, // prb
-        other, // other
-        thread^.Priority, // curpri
-    )
-END
-
 FN KiQuantumEnd (
     IN prb : ^KiPrb,
 )
@@ -1763,7 +1724,7 @@ FN KiYield (
     END
 END
 
-FN KiInheritPriorityThread (
+FN KiRaisePriorityFloorThread (
     IN thread : ^KeThread,
     IN interactive : UWORD,
     IN priority : UWORD,
@@ -1806,23 +1767,10 @@ FN KiInheritPriorityThread (
         prb := KI_CURRENT_PRB
 #END
 
-        IF interactive AND NOT KiIsInteractiveForFloor ( thread ) THEN
-            // Raise the interactivity floor.
-
-            KiSetInteractiveForFloor ( thread )
-
-            IF NOT KiIsInteractiveForOtherThanFloor ( thread ) THEN
-                // It wasn't interactive and we just raised the floor, so
-                // it's probably in the wrong queue now.
-
-                KiMoveToInteractiveQueueThread (
-                    prb, // prb
-                    thread, // thread
-                )
-            END
-
-            boosted = TRUE
-        END
+        // XXX We must do it in the order of raising priority floor and then
+        //     raising interactivity floor, otherwise we run the risk of
+        //     calling KiInsertThread with an idle priority + interactive
+        //     thread which it doesn't know how to deal with.
 
         IF thread^.PriorityFloor < priority THEN
             // Raise the priority floor.
@@ -1842,9 +1790,42 @@ FN KiInheritPriorityThread (
             boosted = TRUE
         END
 
+        IF interactive AND NOT KiIsInteractiveForFloor ( thread ) THEN
+            // Raise the interactivity floor.
+
+            KiSetInteractiveForFloor ( thread )
+
+            IF NOT KiIsInteractiveForOtherThanFloor ( thread ) THEN
+                // It wasn't interactive and we just raised the floor, so
+                // it's probably in the wrong queue now.
+
+                IF thread^.Status == KI_THREAD_READY THEN
+                    KiReinsertThread (
+                        thread, // thread
+                        prb, // prb
+                        prb != KI_CURRENT_PRB, // other
+                        thread^.Priority, // curpri
+                    )
+                ELSE
 #IF BLD_MP
-        KiReleaseReadyQueueElevated ( prb )
+                    IF thread^.Status == KI_THREAD_RUNNING AND
+                        NOT prb^.NextThread THEN
+
+                        // Update stashed interactivity.
+
+                        prb^.StashedCurrentThreadInfo =
+                            KiSetInteractivityInStash (
+                            prb^.StashedCurrentThreadInfo,
+                            thread^.InteractiveBits )
+                    END
 #END
+                END
+            END
+
+            boosted = TRUE
+        END
+
+        KiReleaseReadyQueueElevated ( prb )
     END
 
     RETURN boosted
@@ -1852,8 +1833,8 @@ END
 
 FN KiLowerPriorityFloorThread (
     IN thread : ^KeThread,
-    IN floor : UWORD,
-    IN interactivityfloor : UWORD,
+    IN interactive : UWORD,
+    IN priority : UWORD,
 )
 
     // Lower the priority floor of a thread.
@@ -1865,25 +1846,25 @@ FN KiLowerPriorityFloorThread (
 
     KiAcquireReadyQueueElevated ( prb )
 
-    thread^.PriorityFloor = floor
+    thread^.PriorityFloor = priority
 
-    IF floor < thread^.BasePriority THEN
-        floor = thread^.BasePriority
+    IF priority < thread^.BasePriority THEN
+        priority = thread^.BasePriority
     END
 
-    IF floor < thread^.Priority THEN
+    IF priority < thread^.Priority THEN
         // Set new priority.
 
         KiSetPriorityThread (
             prb, // prb
             thread, // thread
-            floor, // priority
+            priority, // priority
         )
     END
 
     // Apply the new interactivity floor.
 
-    IF KiIsInteractiveForFloor ( thread ) AND NOT interactivityfloor THEN
+    IF KiIsInteractiveForFloor ( thread ) AND NOT interactive THEN
         // No longer interactive.
 
         KiClearInteractiveForFloor ( thread )

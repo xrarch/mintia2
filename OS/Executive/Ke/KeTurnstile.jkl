@@ -185,7 +185,7 @@ FN KiBoostPriority (
     WHILE TRUE DO
         // Boost the owner. His lock is held on entry, released on exit.
 
-        IF NOT KiInheritPriorityThread (
+        IF NOT KiRaisePriorityFloorThread (
             owner, // thread
             interactive, // interactive
             priority, // priority
@@ -712,8 +712,8 @@ FN KiComputeFloor (
 
     KiLowerPriorityFloorThread (
         thread, // thread
-        floor, // floor
-        interactivityfloor, // interactivityfloor
+        interactivityfloor, // interactive
+        floor, // priority
     )
 
     KiReleaseThread ( thread, ipl )
