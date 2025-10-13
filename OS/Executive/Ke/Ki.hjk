@@ -423,10 +423,6 @@ EXTERN FN KiCheckInteractivityInternal (
     IN newinteractivity : UWORD,
 )
 
-EXTERN FN KiMoveToInteractiveQueueThread (
-    IN thread : ^KeThread,
-)
-
 EXTERN FN KiSwitchAddressSpace (
     IN process : ^KeProcess,
 )
@@ -474,14 +470,21 @@ EXTERN FN KiUnwaitThread (
     IN priorityboost : UWORD,
 )
 
-EXTERN FN KiSetPriorityThread (
-    IN thread : ^KeThread,
-    IN priority : UWORD,
-)
-
 EXTERN FN KiYield (
     IN current : ^KeThread,
     IN prb : ^KiPrb,
+)
+
+EXTERN FN KiInheritPriorityThread (
+    IN thread : ^KeThread,
+    IN interactive : UWORD,
+    IN priority : UWORD,
+) : UWORD
+
+EXTERN FN KiLowerPriorityFloorThread (
+    IN thread : ^KeThread,
+    IN floor : UWORD,
+    IN interactivityfloor : UWORD,
 )
 
 EXTERN FN KiReadyThread (

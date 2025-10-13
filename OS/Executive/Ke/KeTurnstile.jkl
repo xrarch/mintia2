@@ -173,7 +173,6 @@ END
 
 FN KiBoostPriority (
     IN owner : ^KeThread,
-    IN thread : ^KeThread,
     IN interactive : UWORD,
     IN priority : UWORD,
 ) : UWORD
@@ -186,61 +185,11 @@ FN KiBoostPriority (
     WHILE TRUE DO
         // Boost the owner. His lock is held on entry, released on exit.
 
-        boost := FALSE
-
-        IF KiIsInteractiveForFloor ( owner ) OR
-            owner^.PriorityFloor >= OS_PRIORITY_LOW_REALTIME THEN
-
-            // This owner goes on the real time queues.
-            // I should only boost him if I do too.
-
-            IF interactive OR priority >= OS_PRIORITY_LOW_REALTIME THEN
-                boost = TRUE
-            END
-
-        ELSE
-            // This owner goes on the timeshared queues.
-
-            boost = TRUE
-        END
-
-        IF boost THEN
-            boost = FALSE
-
-            IF interactive AND NOT KiIsInteractiveForFloor ( owner ) THEN
-                // Raise the interactivity floor.
-
-                KiSetInteractiveForFloor ( owner )
-
-                IF NOT KiIsInteractiveForOtherThanFloor ( owner ) THEN
-                    // It wasn't interactive and we just raised the floor, so
-                    // it's probably in the wrong queue now.
-
-                    KiMoveToInteractiveQueueThread ( owner )
-                END
-
-                boost = TRUE
-            END
-
-            IF owner^.PriorityFloor < priority THEN
-                // Raise the priority floor.
-
-                owner^.PriorityFloor = priority
-
-                IF owner^.Priority < owner^.PriorityFloor THEN
-                    // Raise the priority.
-
-                    KiSetPriorityThread (
-                        owner, // thread
-                        owner^.PriorityFloor, // priority
-                    )
-                END
-
-                boost = TRUE
-            END
-        END
-
-        IF NOT boost THEN
+        IF NOT KiInheritPriorityThread (
+            owner, // thread
+            interactive, // interactive
+            priority, // priority
+        ) THEN
             // Didn't boost, we're done.
 
             BREAK
@@ -609,7 +558,6 @@ FN KiBlockOnLock (
 #IF BLD_MP
             IF KiBoostPriority (
                 owner, // owner
-                thread, // thread
                 interactive, // interactive
                 priority, // priority
             ) THEN
@@ -622,7 +570,6 @@ FN KiBlockOnLock (
 #ELSE
             KiBoostPriority (
                 owner, // owner
-                thread, // thread
                 interactive, // interactive
                 priority, // priority
             )
@@ -763,42 +710,11 @@ FN KiComputeFloor (
 
     // Apply the new priority floor.
 
-    thread^.PriorityFloor = floor
-
-    IF floor < thread^.BasePriority THEN
-        floor = thread^.BasePriority
-    END
-
-    IF floor < thread^.Priority THEN
-        // Set new priority.
-
-        KiSetPriorityThread (
-            thread, // thread
-            floor, // priority
-        )
-    END
-
-    // Apply the new interactivity floor.
-
-    IF KiIsInteractiveForFloor ( thread ) AND NOT interactivityfloor THEN
-        // No longer interactive.
-
-        KiClearInteractiveForFloor ( thread )
-
-        IF NOT KiIsInteractiveForOtherThanFloor ( thread ) THEN
-            // We weren't interactive in our own right either, which means we
-            // may need to be preempted by someone who is.
-
-            // Remember "thread" is the current thread, on this processor.
-
-            KiCheckInteractivityInternal (
-                KI_CURRENT_PRB, // prb
-                thread, // current
-                TRUE, // oldinteractivity
-                FALSE, // newinteractivity
-            )
-        END
-    END
+    KiLowerPriorityFloorThread (
+        thread, // thread
+        floor, // floor
+        interactivityfloor, // interactivityfloor
+    )
 
     KiReleaseThread ( thread, ipl )
 END

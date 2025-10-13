@@ -256,7 +256,7 @@ FN KiUpdateInteractivity (
 
     // Our caller was the timer interrupt or something.
     // We have to defer the actual update to the Interactive field
-    // to a lower IPL holding the thread spinlock.
+    // to a lower IPL holding the thread and ready queue lock.
 
     prb := KI_CURRENT_PRB_LOCAL
 
@@ -343,6 +343,18 @@ FN KiInsertThread (
     // exclusive custody of the thread object by the caller at this point. Also
     // the ready queue of the processor should be locked. Also the thread lock
     // is held.
+
+#IF BLD_CHK
+    iterations := 0
+#END
+
+@Loop
+
+    // Ensure that this is not an "interactive idle thread" which should not be
+    // able to occur.
+
+    KeAssert ( (thread^.Priority != OS_PRIORITY_IDLE) OR
+        (thread^.InteractiveBits == 0) )
 
     thread^.Status = KI_THREAD_READY
 
@@ -440,7 +452,8 @@ FN KiInsertThread (
                 // Bias the index by the inverse of the priority, so that higher
                 // priority timeshared threads are scheduled sooner.
 
-                insertat = (insertat + KI_TIMESHARED_DISTANCE - thread^.Priority)
+                insertat =
+                    (insertat + KI_TIMESHARED_DISTANCE - thread^.Priority)
                     % KI_TIMESHARED_QUEUES
 
                 IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex AND
@@ -483,15 +496,18 @@ FN KiInsertThread (
     )
 
     IF next THEN
-        // Recursively re-ready the preempted NextThread. Don't fear - this can
-        // only nest one level deep.
+        // Loop to re-ready the preempted NextThread. This should only happen
+        // at most one time.
 
-        KiInsertThread (
-            prb, // prb
-            next, // thread
-            other, // other
-            TRUE, // preempted
-        )
+#IF BLD_CHK
+        KeAssert ( iterations == 0 )
+        iterations += 1
+#END
+
+        preempted = TRUE
+        thread = next
+
+        GOTO Loop
 
     ELSE
         // Trigger a software interrupt.
@@ -1265,11 +1281,13 @@ FN KiReinsertThread (
 END
 
 FN KiSetPriorityThread (
+    IN prb : ^KiPrb,
     IN thread : ^KeThread,
     IN priority : UWORD,
 )
 
-    // Set the new priority for a thread. The thread lock is held.
+    // Set the new priority for a thread. The thread lock and ready queue locks
+    // are held.
 
     KeAssert ( KiCurrentIpl () == KI_IPL_DPC )
 
@@ -1289,18 +1307,8 @@ FN KiSetPriorityThread (
     END
 
 #IF BLD_MP
-    // Lock any processor ready queue that it is enqueued to.
-
-    prb := thread^.CurrentPrb
-
-    IF prb THEN
-        KiAcquireReadyQueueElevated ( prb )
-    END
-
     other := (prb != KI_CURRENT_PRB)
-
 #ELSE
-    prb := KI_CURRENT_PRB
     other := FALSE
 #END
 
@@ -1329,7 +1337,7 @@ FN KiSetPriorityThread (
             curpri, // curpri
         )
 
-        GOTO Exit
+        LEAVE
     END
 
 #IF BLD_MP
@@ -1346,7 +1354,7 @@ FN KiSetPriorityThread (
     IF priority >= curpri THEN
         // We raised priority, so there's nothing left to do.
 
-        GOTO Exit
+        LEAVE
     END
 
     // Priority was dropped. It may need to be preempted.
@@ -1366,7 +1374,7 @@ FN KiSetPriorityThread (
         )
 
         IF NOT next THEN
-            GOTO Exit
+            LEAVE
         END
 
         KiSetNextThread (
@@ -1383,7 +1391,7 @@ FN KiSetPriorityThread (
             TRUE, // preempted
         )
 
-        GOTO Exit
+        LEAVE
     END
 
     IF thread^.Status == KI_THREAD_RUNNING THEN
@@ -1393,7 +1401,7 @@ FN KiSetPriorityThread (
         IF prb^.NextThread THEN
             // A next thread was already selected.
 
-            GOTO Exit
+            LEAVE
         END
 
         next = KiSelectThread (
@@ -1404,7 +1412,7 @@ FN KiSetPriorityThread (
         )
 
         IF NOT next THEN
-            GOTO Exit
+            LEAVE
         END
 
         // Cause a preemption.
@@ -1423,7 +1431,7 @@ FN KiSetPriorityThread (
                 KI_IPL_DPC, // ipl
             )
 
-            GOTO Exit
+            LEAVE
         END
 #END
 
@@ -1432,15 +1440,6 @@ FN KiSetPriorityThread (
             KI_IPL_DPC, // ipl
         )
     END
-
-@Exit
-
-#IF BLD_MP
-    IF prb THEN
-        KiReleaseReadyQueueElevated ( prb )
-    END
-#END
-
 END
 
 EXPORT FN KeSetBasePriorityThread (
@@ -1457,10 +1456,27 @@ EXPORT FN KeSetBasePriorityThread (
     thread^.BasePriority = priority
 
     IF setcurrentpriority OR thread^.Priority < priority THEN
+#IF BLD_MP
+        prb := thread^.CurrentPrb
+
+        IF prb THEN
+            KiAcquireReadyQueueElevated ( prb )
+        END
+#ELSE
+        prb := KI_CURRENT_PRB
+#END
+
         KiSetPriorityThread (
+            prb, // prb
             thread, // thread
             priority, // priority
         )
+
+#IF BLD_MP
+        IF prb THEN
+            KiReleaseReadyQueueElevated ( prb )
+        END
+#END
     END
 
     KiReleaseThread ( thread, ipl )
@@ -1475,10 +1491,27 @@ EXPORT FN KeSetPriorityThread (
 
     ipl := KiAcquireThread ( thread )
 
+#IF BLD_MP
+    prb := thread^.CurrentPrb
+
+    IF prb THEN
+        KiAcquireReadyQueueElevated ( prb )
+    END
+#ELSE
+    prb := KI_CURRENT_PRB
+#END
+
     KiSetPriorityThread (
+        prb, // prb
         thread, // thread
         priority, // priority
     )
+
+#IF BLD_MP
+    IF prb THEN
+        KiReleaseReadyQueueElevated ( prb )
+    END
+#END
 
     KiReleaseThread ( thread, ipl )
 END
@@ -1491,11 +1524,7 @@ FN KiCheckInteractivityInternal (
 )
 
     // Check for, and cause, preemption by the thread dropping to
-    // non-interactive.
-
-    // Lock the ready queue.
-
-    KiAcquireReadyQueueElevated ( prb )
+    // non-interactive. Ready queue is locked.
 
     IF NOT prb^.NextThread THEN
 #IF BLD_MP
@@ -1526,8 +1555,6 @@ FN KiCheckInteractivityInternal (
             END
         END
     END
-
-    KiReleaseReadyQueueElevated ( prb )
 END
 
 FN KiCheckInteractivity (
@@ -1543,6 +1570,8 @@ FN KiCheckInteractivity (
 
     KiAcquireThreadElevated ( current )
 
+    KiAcquireReadyQueueElevated ( prb )
+
     oldinteractivity := current^.InteractiveBits
 
     // Perform the deferred interactivity update.
@@ -1554,45 +1583,32 @@ FN KiCheckInteractivity (
 
     newinteractivity := current^.InteractiveBits
 
-    IF oldinteractivity == newinteractivity THEN
-        // Nothing to do.
-
-        GOTO Exit
+    IF oldinteractivity != newinteractivity THEN
+        KiCheckInteractivityInternal (
+            prb, // prb
+            current, // current
+            oldinteractivity, // oldinteractivity
+            newinteractivity, // newinteractivity
+        )
     END
 
-    KiCheckInteractivityInternal (
-        prb, // prb
-        current, // current
-        oldinteractivity, // oldinteractivity
-        newinteractivity, // newinteractivity
-    )
-
-@Exit
-
-    KiReleaseThreadElevated ( current )
+    KiReleaseReadyQueueAndThreadElevated ( prb, current )
 END
 
 FN KiMoveToInteractiveQueueThread (
+    IN prb : ^KiPrb,
     IN thread : ^KeThread,
 )
 
     // The given thread is ready and was not interactive. It's now interactive
-    // so we want to move it to the right queue. Thread lock is held.
+    // so we want to move it to the right queue. Thread and ready queue lock
+    // are held.
 
 #IF BLD_MP
-    prb := thread^.CurrentPrb
     other := prb != KI_CURRENT_PRB
-
-    IF NOT prb THEN
-        LEAVE
-    END
-
 #ELSE
-    prb := KI_CURRENT_PRB
     other := FALSE
 #END
-
-    KiAcquireReadyQueueElevated ( prb )
 
     IF thread^.Status != KI_THREAD_READY THEN
 #IF BLD_MP
@@ -1607,7 +1623,7 @@ FN KiMoveToInteractiveQueueThread (
         END
 #END
 
-        GOTO Exit
+        LEAVE
     END
 
     KiReinsertThread (
@@ -1616,10 +1632,6 @@ FN KiMoveToInteractiveQueueThread (
         other, // other
         thread^.Priority, // curpri
     )
-
-@Exit
-
-    KiReleaseReadyQueueElevated ( prb )
 END
 
 FN KiQuantumEnd (
@@ -1643,18 +1655,17 @@ FN KiQuantumEnd (
 
     KiAcquireThreadElevated ( current )
 
+    KiAcquireReadyQueueElevated ( prb )
+
     IF current^.Priority > current^.BasePriority THEN
         // Decay priority by one.
 
         KiSetPriorityThread (
+            prb, // prb
             current, // thread
             current^.Priority - 1, // priority
         )
     END
-
-    // Lock the ready queue.
-
-    KiAcquireReadyQueueElevated ( prb )
 
     IF NOT prb^.NextThread THEN
         // Try to find a thread to preempt this one with.
@@ -1750,6 +1761,149 @@ FN KiYield (
             &prb^.IdleThread, // thread
         )
     END
+END
+
+FN KiInheritPriorityThread (
+    IN thread : ^KeThread,
+    IN interactive : UWORD,
+    IN priority : UWORD,
+) : UWORD
+
+    // Boost the thread to the given interactivity and priority. This is used
+    // to implement priority inheritance and is called by the turnstile
+    // package. The thread lock is held.
+
+    boosted := FALSE
+
+    IF KiIsInteractiveForFloor ( thread ) OR
+        thread^.PriorityFloor >= OS_PRIORITY_LOW_REALTIME THEN
+
+        // This thread goes on the real time queues.
+        // I should only boost him if I do too.
+
+        IF interactive OR priority >= OS_PRIORITY_LOW_REALTIME THEN
+            boosted = TRUE
+        END
+
+    ELSE
+        // This thread goes on the timeshared queues.
+
+        boosted = TRUE
+    END
+
+    IF boosted THEN
+        boosted = FALSE
+
+#IF BLD_MP
+        // We need to grab the ready queue lock.
+
+        prb := thread^.CurrentPrb
+
+        KeAssert ( prb != NULLPTR )
+
+        KiAcquireReadyQueueElevated ( prb )
+#ELSE
+        prb := KI_CURRENT_PRB
+#END
+
+        IF interactive AND NOT KiIsInteractiveForFloor ( thread ) THEN
+            // Raise the interactivity floor.
+
+            KiSetInteractiveForFloor ( thread )
+
+            IF NOT KiIsInteractiveForOtherThanFloor ( thread ) THEN
+                // It wasn't interactive and we just raised the floor, so
+                // it's probably in the wrong queue now.
+
+                KiMoveToInteractiveQueueThread (
+                    prb, // prb
+                    thread, // thread
+                )
+            END
+
+            boosted = TRUE
+        END
+
+        IF thread^.PriorityFloor < priority THEN
+            // Raise the priority floor.
+
+            thread^.PriorityFloor = priority
+
+            IF thread^.Priority < thread^.PriorityFloor THEN
+                // Raise the priority.
+
+                KiSetPriorityThread (
+                    prb, // prb
+                    thread, // thread
+                    thread^.PriorityFloor, // priority
+                )
+            END
+
+            boosted = TRUE
+        END
+
+#IF BLD_MP
+        KiReleaseReadyQueueElevated ( prb )
+#END
+    END
+
+    RETURN boosted
+END
+
+FN KiLowerPriorityFloorThread (
+    IN thread : ^KeThread,
+    IN floor : UWORD,
+    IN interactivityfloor : UWORD,
+)
+
+    // Lower the priority floor of a thread.
+    // Thread lock is held.
+
+    prb := KI_CURRENT_PRB
+
+    KeAssert ( prb^.CurrentThread == thread )
+
+    KiAcquireReadyQueueElevated ( prb )
+
+    thread^.PriorityFloor = floor
+
+    IF floor < thread^.BasePriority THEN
+        floor = thread^.BasePriority
+    END
+
+    IF floor < thread^.Priority THEN
+        // Set new priority.
+
+        KiSetPriorityThread (
+            prb, // prb
+            thread, // thread
+            floor, // priority
+        )
+    END
+
+    // Apply the new interactivity floor.
+
+    IF KiIsInteractiveForFloor ( thread ) AND NOT interactivityfloor THEN
+        // No longer interactive.
+
+        KiClearInteractiveForFloor ( thread )
+
+        IF NOT KiIsInteractiveForOtherThanFloor ( thread ) THEN
+            // We weren't interactive in our own right either, which means we
+            // may need to be preempted by someone who is.
+
+            // Remember "thread" is the current thread, on this processor.
+
+            KiCheckInteractivityInternal (
+                prb, // prb
+                thread, // current
+                TRUE, // oldinteractivity
+                FALSE, // newinteractivity
+            )
+        END
+    END
+
+    KiReleaseReadyQueueElevated ( prb )
 END
 
 #IF BLD_MP
