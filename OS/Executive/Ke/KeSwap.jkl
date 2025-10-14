@@ -645,11 +645,17 @@ FN KeDetachProcess (
 
     oldprocess^.ResidentThreadCount = oldcount - 1
 
+    // XXX The memory barrier below is probably not necessary because the
+    //     implied barrier from acquiring the swap state spinlock above,
+    //     and releasing the process lock and acquiring the swap state spinlock
+    //     in KeUninitializeThread, should be sufficient to avoid pathological
+    //     cases.
+    //
     // Perform a memory barrier to ensure the load of ResidentThreadCount and
     // ThreadCount are not reordered with respect to one another, which could
     // lead to problems below due to a race with KeUninitializeThread.
-
-    KeMemoryBarrier ()
+    //
+    // KeMemoryBarrier ()
 
     IF oldprocess^.ThreadCount != 0 AND
         oldcount == 1 THEN
