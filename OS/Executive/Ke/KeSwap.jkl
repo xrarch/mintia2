@@ -460,7 +460,7 @@ FN KiInsertSwapCandidateListFunc (
 )
 
     KeAssert ( KeCurrentThread () == thread )
-    KeAssert ( thread^.SwapCandidatePrb != NULLPTR )
+    KeAssert ( thread^.SwapCandidatePrb == NULLPTR )
 
     // Insert the thread in the swap candidate list for the current processor.
 
@@ -644,6 +644,12 @@ FN KeDetachProcess (
     KeAssert ( oldcount != 0 )
 
     oldprocess^.ResidentThreadCount = oldcount - 1
+
+    // Perform a memory barrier to ensure the load of ResidentThreadCount and
+    // ThreadCount are not reordered with respect to one another, which could
+    // lead to problems below.
+
+    KeMemoryBarrier ()
 
     IF oldprocess^.ThreadCount != 0 AND
         oldcount == 1 THEN
