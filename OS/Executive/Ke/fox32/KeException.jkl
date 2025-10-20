@@ -647,6 +647,14 @@ FN KiFaultCrash (
     IN ecause : UWORD,
 )
 
+    prb := KI_CURRENT_PRB_LOCAL
+
+    IF prb^.FrozenContext THEN
+        RtlPrint ( "CPU%d OLD CONTEXT: 0x%p\n", prb^.FrozenContext )
+    END
+
+    prb^.FrozenContext = context
+
     KeCrash (
         "EFLAGS=%02x BADADDR=%08x EPC=%08x ECAUSE=%s\n", // fmt
         context^.Eflags,
