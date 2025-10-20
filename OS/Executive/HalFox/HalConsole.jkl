@@ -14,7 +14,7 @@ HalpWidth := 0
 HalpHeight := 0
 
 #DEFINE HAL_CONSOLE_FG 0xFFFFFFFF
-#DEFINE HAL_CONSOLE_BG 0xFF880000
+#DEFINE HAL_CONSOLE_BG 0xFF674764
 
 FN HalpDrawCharacter (
     IN c : UWORD,
@@ -386,6 +386,23 @@ FN HalSetConsolePosition (
 
     HalpCursorX = x
     HalpCursorY = y
+END
+
+FN HalCenterPrint (
+    IN str : ^UBYTE,
+)
+
+    len := RtlMeasureString ( str )
+
+    pad := (HalpWidth / 2) - (len / 2)
+
+    WHILE pad DO
+        RtlPrint ( " " )
+
+        pad -= 1
+    END
+
+    RtlPrint ( "%s", str )
 END
 
 #SECTION "INITtext"

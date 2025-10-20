@@ -19,8 +19,8 @@ PUBLIC HalpConsoleLock : HalSpinlock
 
 #END
 
-#DEFINE HAL_CONSOLE_FG 0xFF
-#DEFINE HAL_CONSOLE_BG 0x04
+#DEFINE HAL_CONSOLE_FG 0x00
+#DEFINE HAL_CONSOLE_BG 0xFF
 
 FN HalpDrawCharacter (
     IN c : UWORD,
@@ -404,6 +404,23 @@ FN HalSetConsolePosition (
 
     HalpCursorX = x
     HalpCursorY = y
+END
+
+FN HalCenterPrint (
+    IN str : ^UBYTE,
+)
+
+    len := RtlMeasureString ( str )
+
+    pad := (HalpWidth / 2) - (len / 2)
+
+    WHILE pad DO
+        RtlPrint ( " " )
+
+        pad -= 1
+    END
+
+    RtlPrint ( "%s", str )
 END
 
 #SECTION "INITtext"

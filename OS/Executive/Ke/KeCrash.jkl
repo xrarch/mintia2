@@ -31,24 +31,6 @@ KiCrashPrints : UBYTE = FALSE
 
 #DEFINE PLATFORM_FULL_NAME_STR ( STRCAT ( STRCAT "\"" PLATFORM_FULL_NAME ) "\"" )
 
-PRIVATE FN CenterPrint (
-    IN str : ^UBYTE,
-    IN width : UWORD,
-)
-
-    len := RtlMeasureString ( str )
-
-    pad := (width / 2) - (len / 2)
-
-    WHILE pad DO
-        RtlPrint ( " " )
-
-        pad -= 1
-    END
-
-    RtlPrint ( "%s", str )
-END
-
 FN KiCrashPutCharacter (
     IN byte : UBYTE,
 )
@@ -364,8 +346,8 @@ FN KiDoCrashPrints (
 
     HalSetConsolePosition ( 0, height - 2 )
 
-    CenterPrint ( "An error occurred! Please take a screenshot and report the issue.\n", width )
-    CenterPrint ( "The repository can be found at http://www.github.com/xrarch/mintia2.", width )
+    HalCenterPrint ( "An error occurred! Please take a screenshot and report the issue.\n" )
+    HalCenterPrint ( "The repository can be found at http://www.github.com/xrarch/mintia2." )
 
     HalSetConsolePosition ( 0, 0 )
 END
