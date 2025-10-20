@@ -3,40 +3,51 @@
 
 PixBuff : ^UBYTE
 PixPitch : UWORD
-EXPORT PixWidth : UWORD
-EXPORT PixHeight : UWORD
+PixWidth : UWORD
+PixHeight : UWORD
+ViewX : UWORD
+ViewY : UWORD
+PUBLIC ViewWidth : UWORD
+PUBLIC ViewHeight : UWORD
 
-FN FillScreen(IN Color : UWORD)
-    
-    i : ULONG
-    
+#DEFINE VIEW_WIDTH 320
+#DEFINE VIEW_HEIGHT 240
+
 #IF ( STRCMP PLATFORM "fox32" )
-    RtlFillMemoryWithUlong(PixBuff, PixPitch * PixHeight, Color)
+
+#MACRO PixelPointer ( x, y ) [NOTHING (CAST PixBuff + (y) * PixPitch + (x) * 4 TO ^ULONG)]
 
 #ELSEIF ( STRCMP PLATFORM "XRstation" )
-    // This is basically just a memset.
-    Ulg : ULONG
-    Ulg = (Color << 24) | (Color << 16) | (Color << 8) | Color
-    
-    RtlFillMemoryWithUlong(PixBuff, PixPitch * PixHeight, Ulg)
+
+#MACRO PixelPointer ( x, y ) [NOTHING (CAST PixBuff + (y) * PixPitch + (x) TO ^UBYTE)]
+
 #END
 
+FN FillScreen(IN Color : UWORD)
+    y := 0
+
+    WHILE y < ViewHeight DO
+        x := 0
+
+        WHILE x < ViewWidth DO
+            SetPixel(Color, x, y)
+
+            x += 1
+        END
+
+        y += 1
+    END
 END
 
 FN SetPixel(IN Color : UWORD, IN x : WORD, IN y : WORD)
-    IF x < 0 OR y < 0 OR x >= PixWidth OR y >= PixHeight THEN
+    IF x < 0 OR y < 0 OR x >= ViewWidth OR y >= ViewHeight THEN
         LEAVE
     END
 
-#IF ( STRCMP PLATFORM "fox32" )
-    Place := CAST PixBuff + y * PixPitch + x * 4 TO ^ULONG
-    Place[0] = Color
+    x += ViewX
+    y += ViewY
 
-#ELSEIF ( STRCMP PLATFORM "XRstation" )
-    Place := CAST PixBuff + y * PixPitch + x TO ^UBYTE
-    Place[0] = Color
-#END
-
+    PixelPointer(x, y)[0] = Color
 END
 
 FN InitGraphics()
@@ -44,6 +55,23 @@ FN InitGraphics()
     PixBuff   = CAST KeLoaderBlock.BootFbBase TO ^UBYTE
     PixWidth  = KeLoaderBlock.BootFbWidth
     PixHeight = KeLoaderBlock.BootFbHeight
+
+    // Set up the view we do the fireworks through.
+
+    ViewWidth = VIEW_WIDTH
+
+    IF PixWidth < VIEW_WIDTH THEN
+        ViewWidth = PixWidth
+    END
+
+    ViewHeight = VIEW_HEIGHT
+
+    IF PixHeight < VIEW_HEIGHT THEN
+        ViewHeight = PixHeight
+    END
+
+    ViewX = (PixWidth - ViewWidth) / 2
+    ViewY = (PixHeight - ViewHeight) / 2
     
     // KeLoaderBlock doesn't provide a pitch, so it seems we'll have to assume the
     // pitch is equal to the width.
