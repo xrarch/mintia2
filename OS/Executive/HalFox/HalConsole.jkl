@@ -394,7 +394,11 @@ FN HalCenterPrint (
 
     len := RtlMeasureString ( str )
 
-    pad := (HalpWidth / 2) - (len / 2)
+    IF str[len - 1] == '\n' THEN
+        len -= 1
+    END
+
+    pad := (HalpWidth - len) / 2
 
     WHILE pad DO
         RtlPrint ( " " )

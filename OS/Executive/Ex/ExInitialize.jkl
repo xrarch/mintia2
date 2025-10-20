@@ -8,7 +8,7 @@
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 #INCLUDE "<ll>/System/OsBootFlags.hjk"
 
-EXTERN FN FwtMain ()
+FNPTR KtMainF ()
 
 PUBLIC ExZeroPageWorker : KeThread
 PUBLIC ExZeroPageWorkerStack : UBYTE[(KE_STACK_PAGES << RTL_PAGE_SHIFT) + 32]
@@ -153,9 +153,13 @@ FN (KeStartThreadF) ExpInitializeExecutive (
 
     PsInitializeStage1 ()
 
-#IF BLD_TEST
-    FwtMain ()
-#END
+    // Perform kernel tests.
+
+    IF KeLoaderBlock.KtMain THEN
+        ktmain := CAST KeLoaderBlock.KtMain TO KtMainF
+
+        ktmain ()
+    END
 
     // The Executive is initialized, become the ZPW.
 

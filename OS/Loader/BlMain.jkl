@@ -76,6 +76,22 @@ FN BlMain () : UWORD
         END
     END
 
+    IF BlGetExistenceArg ( "-tests" ) THEN
+        // Load the kernel tests.
+
+        tests := BlLoadDll ( "ktests.sys" )
+
+        IF tests THEN
+            IF NOT BlLookupSymbol (
+                tests, // dll
+                "KtMain", // name
+                OUT BlInfoBlock.KtMain, // value
+            ) THEN
+                BlInfoBlock.KtMain = NULLPTR
+            END
+        END
+    END
+
     // Start the system.
 
     RtlPrint ( "Starting the system...\n\n" )

@@ -1,0 +1,18 @@
+TARGET "KernelTests"
+	FILE "<bld>/mintia/ktests.sys"
+
+	DRIVER_TARGET
+
+	LIBDIR "<sdk>/Rtl/Headers"
+	LIBDIR "../Headers"
+	
+	INCDIR "../Executive/Include"
+
+	SOURCES "."
+
+	#IF ( == BLD_BITS 32 )
+		LINKOPT "-pabase:0x80200000"
+	#ELSE
+		#ERROR "Somebody must set up appropriate bases for the 64-bit platforms\n"
+	#END
+END
