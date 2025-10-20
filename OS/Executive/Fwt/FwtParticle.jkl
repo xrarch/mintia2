@@ -16,11 +16,21 @@ FN (KeStartThreadF) FwtParticleThread (
 
     interval : RtlUquad
 
+#IF ( STRCMP PLATFORM "fox32" )
+    // Because the timer interrupt on fox32 is just the vblank interrupt, a
+    // delay of 1ms will always sync with vblank, making fireworks smooth.
+
+    RtlSetUquadToUlong (
+        &interval, // uquad
+        1, // ulong
+    )
+#ELSE
     RtlSetUquadToUlong (
         &interval, // uquad
         FWT_INTERVAL_MS, // ulong
     )
-    
+#END
+
     thisfwd : ^FwtData
     thisfwd = CAST context1 TO ^FwtData
     
@@ -49,7 +59,7 @@ FN (KeStartThreadF) FwtParticleThread (
 
     vely := FWT_MUL_FP_FP_SM (
         FwtSin ( angle ), // fp1
-        FwtRandFpSign(), // fp2
+        FwtRandFpSign (), // fp2
     ) * ExplosionRange
     
     expirein := 2000 + FwtRand () % 1000
@@ -104,6 +114,21 @@ FN (KeStartThreadF) FwtExplodeableThread (
 
     interval : RtlUquad
     
+#IF ( STRCMP PLATFORM "fox32" )
+    // Because the timer interrupt on fox32 is just the vblank interrupt, a
+    // delay of 1ms will always sync with vblank, making fireworks smooth.
+
+    RtlSetUquadToUlong (
+        &interval, // uquad
+        1, // ulong
+    )
+#ELSE
+    RtlSetUquadToUlong (
+        &interval, // uquad
+        FWT_INTERVAL_MS, // ulong
+    )
+#END
+
     fwd : FwtData
     
     offsetx := CAST ( FwtViewWidth * 400 / 1024 ) TO WORD
@@ -118,12 +143,12 @@ FN (KeStartThreadF) FwtExplodeableThread (
     vely : WORD = -FWT_INT_TO_FP ( CAST 100 + FwtRand () % 100 TO WORD )
 
     color := FwtRandomColor ()
+
     explosionrange := FwtRand () % 100 + 100
     
     expirein := 500 + FwtRand () % 500
 
     i := 0
-    t := 0
 
     WHILE i < expirein DO
         FwtSetPixel (
@@ -132,24 +157,13 @@ FN (KeStartThreadF) FwtExplodeableThread (
             y, // y
         )
 
-        RtlSetUquadToUlong (
-            &interval, // uquad
-            FWT_INTERVAL_MS + (t != 0), // ulong
-        )
-
-        t += 1
-
-        IF t == 3 THEN
-            t = 0
-        END
-
         KeSleep (
             &interval, // interval
             KE_KERNEL_MODE, // waitmode
             FALSE, // alertable
         )
 
-        i += interval.Low
+        i += FWT_INTERVAL_MS
 
         FwtSetPixel (
             FWT_BACKGROUND_COLOR, // color
@@ -159,15 +173,15 @@ FN (KeStartThreadF) FwtExplodeableThread (
 
         // Update the particle
 
-        actx += velx * interval.Low / 1000
-        acty += vely * interval.Low / 1000
+        actx += velx * FWT_INTERVAL_MS / 1000
+        acty += vely * FWT_INTERVAL_MS / 1000
         
         x = FWT_FP_TO_INT ( actx )
         y = FWT_FP_TO_INT ( acty )
         
         // Gravity
 
-        vely += FWT_INT_TO_FP ( FWT_GRAVITY_AMT ) * interval.Low / 1000
+        vely += FWT_INT_TO_FP ( FWT_GRAVITY_AMT ) * FWT_INTERVAL_MS / 1000
     END
     
     // Explode it.
