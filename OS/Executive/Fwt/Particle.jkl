@@ -1,138 +1,225 @@
+//
+// Worker thread routines for the fireworks test.
+//
+
 #INCLUDE "Fwt.hjk"
 
-#DEFINE GRAVITY_AMT 10
+#DEFINE FWT_GRAVITY_AMT 10
+#DEFINE FWT_INTERVAL_MS 16
 
-FN (KeStartThreadF) T_Particle(
+FN (KeStartThreadF) FwtParticleThread (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
+
+    // Main loop for a fireworks particle thread.
+
     interval : RtlUquad
-    interval.High = 0
+
+    RtlSetUquadToUlong (
+        &interval, // uquad
+        FWT_INTERVAL_MS, // ulong
+    )
     
-    thisfwd : ^FireworkData
-    thisfwd = CAST context1 TO ^FireworkData
+    thisfwd : ^FwtData
+    thisfwd = CAST context1 TO ^FwtData
     
-    Angle := Rand() % (1 << FIXED_POINT)
+    angle := FwtRand() % (1 << FWT_FIXED_POINT)
     
-    // back the data up from thisfwd
-    x := thisfwd^.x
-    y := thisfwd^.y
+    // Back the data up from thisfwd.
+
+    x := thisfwd^.X
+    y := thisfwd^.Y
     ExplosionRange := thisfwd^.ExplosionRange
     
-    // and free it
-    MmFreePool(thisfwd, 'Fire')
+    // And free it.
+
+    MmFreePool (
+        thisfwd, // ptr
+        'Fire', // tag
+    )
     
-    actX := INT_TO_FP(x)
-    actY := INT_TO_FP(y)
-    velX := MUL_FP_FP_SM(Cos(Angle), RandFPSign()) * ExplosionRange
-    velY := MUL_FP_FP_SM(Sin(Angle), RandFPSign()) * ExplosionRange
+    actx := FWT_INT_TO_FP ( x )
+    acty := FWT_INT_TO_FP ( y )
+
+    velx := FWT_MUL_FP_FP_SM (
+        FwtCos ( angle ), // fp1
+        FwtRandFpSign (), // fp2
+    ) * ExplosionRange
+
+    vely := FWT_MUL_FP_FP_SM (
+        FwtSin ( angle ), // fp1
+        FwtRandFpSign(), // fp2
+    ) * ExplosionRange
     
-    expireIn := 2000 + Rand() % 1000
-    color := RandomColor()
+    expirein := 2000 + FwtRand () % 1000
+    color := FwtRandomColor ()
+
     i := 0
     t := 0
-    WHILE i < expireIn DO
-        SetPixel(color, x, y)
+
+    WHILE i < expirein DO
+        FwtSetPixel (
+            color, // color
+            x, // x
+            y, // y
+        )
+
+        KeSleep (
+            &interval, // interval
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+        )
+
+        i += FWT_INTERVAL_MS
         
-        interval.Low = 16
-        KeSleep(&interval, KE_KERNEL_MODE, FALSE)
-        i += interval.Low
-        
-        SetPixel(BACKGROUND_COLOR, x, y)
+        FwtSetPixel (
+            FWT_BACKGROUND_COLOR, // color
+            x, // x
+            y, // y
+        )
         
         // Update the particle
-        actX += velX * interval.Low / 1000
-        actY += velY * interval.Low / 1000
+
+        actx += velx * FWT_INTERVAL_MS / 1000
+        acty += vely * FWT_INTERVAL_MS / 1000
         
-        x = FP_TO_INT(actX)
-        y = FP_TO_INT(actY)
+        x = FWT_FP_TO_INT ( actx )
+        y = FWT_FP_TO_INT ( acty )
         
         // Gravity
-        velY += INT_TO_FP(GRAVITY_AMT) * interval.Low / 1000
+
+        vely += FWT_INT_TO_FP ( FWT_GRAVITY_AMT ) * FWT_INTERVAL_MS / 1000
     END
     
-    ExitCurrentThread()
+    PsExitThread ()
 END
 
-FN (KeStartThreadF) T_Explodeable(
+FN (KeStartThreadF) FwtExplodeableThread (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
+
+    // Main loop for an explodeable particle thread.
+
     interval : RtlUquad
-    interval.High = 0
     
-    Fwd : FireworkData
+    fwd : FwtData
     
-    OffsetX := CAST (ViewWidth * 400 / 1024) TO WORD
+    offsetx := CAST ( FwtViewWidth * 400 / 1024 ) TO WORD
     
     x : WORD
     y : WORD
-    actX := INT_TO_FP(CAST ViewWidth / 2 TO WORD)
-    actY := INT_TO_FP(CAST ViewHeight - 1 TO WORD)
-    velX : WORD = OffsetX * RandFPSign()
-    velY : WORD = -INT_TO_FP(CAST 100 + Rand() % 100 TO WORD)
-    color := RandomColor()
-    explosionRange := Rand() % 100 + 100
+
+    actx := FWT_INT_TO_FP ( CAST FwtViewWidth / 2 TO WORD )
+    acty := FWT_INT_TO_FP ( CAST FwtViewHeight - 1 TO WORD )
+
+    velx : WORD = offsetx * FwtRandFpSign()
+    vely : WORD = -FWT_INT_TO_FP ( CAST 100 + FwtRand () % 100 TO WORD )
+
+    color := FwtRandomColor ()
+    explosionrange := FwtRand () % 100 + 100
     
-    expireIn := 500 + Rand() % 500
+    expirein := 500 + FwtRand () % 500
+
     i := 0
     t := 0
-    WHILE i < expireIn DO
-        SetPixel(color, x, y)
-        
-        interval.Low = 16 + (t != 0)
+
+    WHILE i < expirein DO
+        FwtSetPixel (
+            color, // color
+            x, // x
+            y, // y
+        )
+
+        RtlSetUquadToUlong (
+            &interval, // uquad
+            FWT_INTERVAL_MS + (t != 0), // ulong
+        )
+
         t += 1
-        IF t == 3 THEN t = 0 END
-        KeSleep(&interval, KE_KERNEL_MODE, FALSE)
+
+        IF t == 3 THEN
+            t = 0
+        END
+
+        KeSleep (
+            &interval, // interval
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+        )
+
         i += interval.Low
-        
-        SetPixel(BACKGROUND_COLOR, x, y)
-        
+
+        FwtSetPixel (
+            FWT_BACKGROUND_COLOR, // color
+            x, // x
+            y, // y
+        )
+
         // Update the particle
-        actX += velX * interval.Low / 1000
-        actY += velY * interval.Low / 1000
+
+        actx += velx * interval.Low / 1000
+        acty += vely * interval.Low / 1000
         
-        x = FP_TO_INT(actX)
-        y = FP_TO_INT(actY)
+        x = FWT_FP_TO_INT ( actx )
+        y = FWT_FP_TO_INT ( acty )
         
         // Gravity
-        velY += INT_TO_FP(GRAVITY_AMT) * interval.Low / 1000
-    
+
+        vely += FWT_INT_TO_FP ( FWT_GRAVITY_AMT ) * interval.Low / 1000
     END
     
-    // Explode it!
-    // This spawns many, many threads! Cause why not, right?!
+    // Explode it.
+    // This spawns many, many threads, for fun.
     
-    
-    PartCount := Rand() % 100 + 100
+    count := FwtRand () % 100 + 100
     i = 0
     
-    WHILE i < PartCount DO
+    WHILE i < count DO
         i += 1
         
-        Data : ^FireworkData = CAST MmAllocatePool(MM_NONPAGED_POOL, SIZEOF FireworkData, 'Fire', FALSE) TO ^FireworkData
+        data := CAST MmAllocatePool (
+            MM_NONPAGED_POOL, // poolindex
+            SIZEOF FwtData, // bytes
+            'Fire', // tag
+            FALSE, // wait
+        ) TO ^FwtData
         
-        IF NOT Data THEN
-            RtlPrint("Fireworks: Out of memory\n")
+        IF NOT data THEN
+            RtlPrint ( "Fireworks: Out of memory\n" )
+
             BREAK
         END
         
-        // Copy data into the FireworkData instance.
-        Data^.x = x
-        Data^.y = y
-        Data^.ExplosionRange = explosionRange
+        // Copy data into the FwtData instance.
+
+        data^.X = x
+        data^.Y = y
+        data^.ExplosionRange = explosionrange
         
-        IF NOT CreateThread(&T_Particle, Data) THEN
-            RtlPrint("Fireworks: Out of system resources\n")
-            MmFreePool(Data, 'Fire')
+        IF NOT FwtCreateThread (
+            &FwtParticleThread, // startroutine
+            data, // fwd
+        ) THEN
+
+            RtlPrint ( "Fireworks: Out of system resources\n" )
+
+            MmFreePool (
+                data, // ptr
+                'Fire', // tag
+            )
         END
     END
     
-    ExitCurrentThread()
+    PsExitThread ()
 END
 
-FN SpawnExplodeable()
-    IF NOT CreateThread(&T_Explodeable, NULLPTR) THEN
+FN FwtSpawnExplodeable ()
+    IF NOT FwtCreateThread (
+        &FwtExplodeableThread, // startroutine
+        NULLPTR, // fwd
+    ) THEN
         RtlPrint("Fireworks: Out of fireworks\n")
     END
 END

@@ -1,56 +1,72 @@
+//
+// Main function for the fireworks test.
+//
+
 #INCLUDE "Fwt.hjk"
 
-FN (KeStartThreadF) MainThreadFunc(
+FN (KeStartThreadF) FwtMainThread (
     IN context1 : UWORD,
     IN context2 : UWORD
 )
 
-    RtlPrint("Fireworks: Main thread up\n")
+    // Main loop for fireworks test.
+
+    RtlPrint ( "Fireworks: Main thread up\n" )
     
     WHILE TRUE DO
-        SpawnCount : WORD
-        i : WORD
-        i = 0
-        SpawnCount = Rand() % 2 + 1
-        
-        WHILE i < SpawnCount DO
-            i += 1
-            SpawnExplodeable()
-        END
-        
-        Interval : RtlUquad
-        Interval.High = 0
-        Interval.Low = CAST 2000 + Rand() % 2000 TO UWORD
-        KeSleep(&Interval, KE_KERNEL_MODE, FALSE)
-    END
+        count := FwtRand () % 2 + 1
 
+        i := 0
+
+        WHILE i < count DO
+            FwtSpawnExplodeable ()
+
+            i += 1
+        END
+
+        interval : RtlUquad
+
+        RtlSetUquadToUlong (
+            &interval, // uquad
+            CAST 2000 + FwtRand() % 2000 TO UWORD, // ulong
+        )
+
+        KeSleep (
+            &interval, // interval
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+        )
+    END
 END
 
-FN PerformFireworksTest()
+FN FwtMain ()
+
+    // Perform the fireworks test.
     
-    MainThread : ^PsThread
+    thread : ^PsThread
     
-    InitGraphics()
-    FillScreen(BACKGROUND_COLOR)
+    FwtInitGraphics ()
+
+    FwtFillScreen ( FWT_BACKGROUND_COLOR )
 
     name : RtlString
 
     RtlInitializeString ( &name, "FireworksMain" )
     
-    status := PsCreateExecutiveThread(
-        &name,           // name
-        &MainThreadFunc, // startfunc
-        NULLPTR,         // context1
-        NULLPTR,         // context2
-        0,               // flags
-        OUT MainThread   // thread
+    status := PsCreateExecutiveThread (
+        &name, // name
+        &FwtMainThread, // startfunc
+        NULLPTR, // context1
+        NULLPTR, // context2
+        0, // flags
+        OUT thread // thread
     )
     
     IF OsError ( status ) THEN
-        RtlPrint("Fireworks: Could not create main thread\n")
+        RtlPrint ( "Fireworks: Could not create main thread\n" )
+
         LEAVE
     END
     
-    ObUnreferenceObject(MainThread)
-
+    ObUnreferenceObject ( thread )
 END

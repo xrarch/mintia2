@@ -1,33 +1,46 @@
+//
+// Thread helper routines for the fireworks test.
+//
+
 #INCLUDE "Fwt.hjk"
 #INCLUDE "<ll>/System/OsProcess.hjk"
 
-FN CreateThread(IN StartRoutine : KeStartThreadF, IN Fwd : ^FireworkData) : UWORD
+FN FwtCreateThread (
+    IN startroutine : KeStartThreadF,
+    IN fwd : ^FwtData,
+) : UWORD
 
-    Thrd : ^PsThread
+    // Private helper routine for creating fireworks threads..
+
+    thread : ^PsThread
     
     name : RtlString
 
     RtlInitializeString ( &name, "FireworksPart" )
 
     status := PsCreateExecutiveThread (
-        &name,             // name
-        StartRoutine,      // startfunc
-        CAST Fwd TO UWORD, // context1
-        NULLPTR,           // context2
-        0,                 // flags
-        OUT Thrd           // thread
+        &name, // name
+        startroutine, // startfunc
+        CAST fwd TO UWORD, // context1
+        NULLPTR, // context2
+        0, // flags
+        OUT thread, // thread
     )
     
     IF OsError ( status ) THEN
         RETURN 0
     END
 
+    // Set priority to something random-ish to exercise priority inherited
+    // locks.
+
     KeSetBasePriorityThread (
-        &Thrd^.Tcb, // thread
+        &thread^.Tcb, // thread
         OS_PRIORITY_DEFAULT + ((KeSharedUserPage^.Uptime.Low / 10) & 3), // pri
         TRUE, // setcurrentpriority
     )
     
-    ObUnreferenceObject(Thrd)
+    ObUnreferenceObject ( thread )
+
     RETURN 1
 END

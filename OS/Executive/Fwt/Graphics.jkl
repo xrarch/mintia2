@@ -1,36 +1,57 @@
+//
+// Graphical helper routines for the fireworks test.
+//
+
 #INCLUDE "Fwt.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
-PixBuff : ^UBYTE
-PixPitch : UWORD
-PixWidth : UWORD
-PixHeight : UWORD
-ViewX : UWORD
-ViewY : UWORD
-PUBLIC ViewWidth : UWORD
-PUBLIC ViewHeight : UWORD
+FwtPixBuffer : ^UBYTE
 
-#DEFINE VIEW_WIDTH 320
-#DEFINE VIEW_HEIGHT 240
+FwtPixPitch : UWORD
+
+FwtPixWidth : UWORD
+FwtPixHeight : UWORD
+
+FwtViewX : UWORD
+FwtViewY : UWORD
+
+PUBLIC FwtViewWidth : UWORD
+PUBLIC FwtViewHeight : UWORD
+
+#DEFINE FWT_VIEW_WIDTH 320
+#DEFINE FWT_VIEW_HEIGHT 240
 
 #IF ( STRCMP PLATFORM "fox32" )
 
-#MACRO PixelPointer ( x, y ) [NOTHING (CAST PixBuff + (y) * PixPitch + (x) * 4 TO ^ULONG)]
+#MACRO FwtPixelPointer ( x, y ) [
+    NOTHING (CAST FwtPixBuffer + (y) * FwtPixPitch + (x) * 4 TO ^ULONG)
+]
 
 #ELSEIF ( STRCMP PLATFORM "XRstation" )
 
-#MACRO PixelPointer ( x, y ) [NOTHING (CAST PixBuff + (y) * PixPitch + (x) TO ^UBYTE)]
+#MACRO FwtPixelPointer ( x, y ) [
+    NOTHING (CAST FwtPixBuffer + (y) * FwtPixPitch + (x) TO ^UBYTE)
+]
 
 #END
 
-FN FillScreen(IN Color : UWORD)
+FN FwtFillScreen (
+    IN color : UWORD,
+)
+    
+    // Fill the screen with the given color.
+
     y := 0
 
-    WHILE y < ViewHeight DO
+    WHILE y < FwtViewHeight DO
         x := 0
 
-        WHILE x < ViewWidth DO
-            SetPixel(Color, x, y)
+        WHILE x < FwtViewWidth DO
+            FwtSetPixel (
+                color, // color
+                x, // x
+                y, // y
+            )
 
             x += 1
         END
@@ -39,48 +60,54 @@ FN FillScreen(IN Color : UWORD)
     END
 END
 
-FN SetPixel(IN Color : UWORD, IN x : WORD, IN y : WORD)
-    IF x < 0 OR y < 0 OR x >= ViewWidth OR y >= ViewHeight THEN
+FN FwtSetPixel (
+    IN color : UWORD,
+    IN x : WORD,
+    IN y : WORD,
+)
+
+    // Set the given pixel on the screen.
+
+    IF x < 0 OR y < 0 OR x >= FwtViewWidth OR y >= FwtViewHeight THEN
         LEAVE
     END
 
-    x += ViewX
-    y += ViewY
+    x += FwtViewX
+    y += FwtViewY
 
-    PixelPointer(x, y)[0] = Color
+    FwtPixelPointer ( x, y ) [0] = color
 END
 
-FN InitGraphics()
+FN FwtInitGraphics ()
 
-    PixBuff   = CAST KeLoaderBlock.BootFbBase TO ^UBYTE
-    PixWidth  = KeLoaderBlock.BootFbWidth
-    PixHeight = KeLoaderBlock.BootFbHeight
+    // Initialize graphics for the fireworks test.
+
+    FwtPixBuffer = CAST KeLoaderBlock.BootFbBase TO ^UBYTE
+    FwtPixWidth = KeLoaderBlock.BootFbWidth
+    FwtPixHeight = KeLoaderBlock.BootFbHeight
 
     // Set up the view we do the fireworks through.
 
-    ViewWidth = VIEW_WIDTH
+    FwtViewWidth = FWT_VIEW_WIDTH
 
-    IF PixWidth < VIEW_WIDTH THEN
-        ViewWidth = PixWidth
+    IF FwtPixWidth < FWT_VIEW_WIDTH THEN
+        FwtViewWidth = FwtPixWidth
     END
 
-    ViewHeight = VIEW_HEIGHT
+    FwtViewHeight = FWT_VIEW_HEIGHT
 
-    IF PixHeight < VIEW_HEIGHT THEN
-        ViewHeight = PixHeight
+    IF FwtPixHeight < FWT_VIEW_HEIGHT THEN
+        FwtViewHeight = FwtPixHeight
     END
 
-    ViewX = (PixWidth - ViewWidth) / 2
-    ViewY = (PixHeight - ViewHeight) / 2
-    
-    // KeLoaderBlock doesn't provide a pitch, so it seems we'll have to assume the
-    // pitch is equal to the width.
+    FwtViewX = (FwtPixWidth - FwtViewWidth) / 2
+    FwtViewY = (FwtPixHeight - FwtViewHeight) / 2
 
 #IF ( STRCMP PLATFORM "fox32" )
-    PixPitch  = PixWidth * 4
+    FwtPixPitch = FwtPixWidth * 4
 
 #ELSEIF ( STRCMP PLATFORM "XRstation" )
-    PixPitch  = PixWidth
+    FwtPixPitch = FwtPixWidth
 #END
 
 END

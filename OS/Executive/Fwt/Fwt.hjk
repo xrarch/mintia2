@@ -1,61 +1,82 @@
+//
+// Header file for the multithreaded fireworks test.
+//
+
 #INCLUDE "<ll>/Rtl.hjk"
 #INCLUDE "<inc>/Ex.hjk"
 #INCLUDE "<inc>/Ps.hjk"
 #INCLUDE "<inc>/Ob.hjk"
 #INCLUDE "<inc>/Mm.hjk"
 
-#DEFINE BACKGROUND_COLOR 0x00
+#DEFINE FWT_BACKGROUND_COLOR 0x00
 
-STRUCT FireworkData
-    x : WORD,
-    y : WORD,
+STRUCT FwtData
+    X : WORD,
+    Y : WORD,
     ExplosionRange : WORD,
 END
 
-EXTERN ViewWidth : UWORD
-EXTERN ViewHeight : UWORD
+EXTERN FwtViewWidth : UWORD
+EXTERN FwtViewHeight : UWORD
 
 // Graphics
-EXTERN FN FillScreen(IN Color : UWORD)
-EXTERN FN SetPixel(IN Color : UWORD, IN x : WORD, IN y : WORD)
-EXTERN FN InitGraphics()
+
+EXTERN FN FwtFillScreen (
+    IN color : UWORD,
+)
+
+EXTERN FN FwtSetPixel (
+    IN color : UWORD,
+    IN x : WORD,
+    IN y : WORD
+)
+
+EXTERN FN FwtInitGraphics ()
 
 // RNG
-EXTERN FN Rand() : WORD
-EXTERN FN RandFP() : WORD
-EXTERN FN RandFPSign() : WORD
-EXTERN FN RandomColor() : UWORD
+
+EXTERN FN FwtRand () : WORD
+EXTERN FN FwtRandFp () : WORD
+EXTERN FN FwtRandFpSign () : WORD
+EXTERN FN FwtRandomColor () : UWORD
 
 // Math
-EXTERN FN Sin(IN Ang : WORD) : WORD
-EXTERN FN Cos(IN Ang : WORD) : WORD
+
+EXTERN FN FwtSin (
+    IN angle : WORD,
+) : WORD
+
+EXTERN FN FwtCos (
+    IN angle : WORD,
+) : WORD
 
 // Threading
-#MACRO ExitCurrentThread () [
-    PsExitThread()
-]
 
-EXTERN FN CreateThread(IN StartRoutine : KeStartThreadF, IN Fwd : ^FireworkData) : UWORD
-EXTERN FN SpawnExplodeable()
+EXTERN FN FwtCreateThread (
+    IN startroutine : KeStartThreadF,
+    IN fwd : ^FwtData,
+) : UWORD
+
+EXTERN FN FwtSpawnExplodeable ()
 
 // Fixed Point
 
-#DEFINE FIXED_POINT 12  // fixedvalue = realvalue * 2^FIXED_POINT
+#DEFINE FWT_FIXED_POINT 12  // fixedvalue = realvalue * 2^FIXED_POINT
 
-#MACRO FP_TO_INT (fp) [
-    ((fp) >> FIXED_POINT)
+#MACRO FWT_FP_TO_INT ( fp ) [
+    ((fp) >> FWT_FIXED_POINT)
 ]
 
-#MACRO INT_TO_FP (int) [
-    ((int) << FIXED_POINT)
+#MACRO FWT_INT_TO_FP ( int ) [
+    ((int) << FWT_FIXED_POINT)
 ]
 
-#MACRO MUL_FP_FP (fp1, fp2) [
-    // This is crap, but since we can't do 64-bit multiply, it's fine for now
-    (((fp1) >> (FIXED_POINT / 2)) * ((fp2) >> (FIXED_POINT / 2)))
+#MACRO FWT_MUL_FP_FP ( fp1, fp2 ) [
+    // This is bad, but since we can't do 64-bit multiply, it's fine for now
+    (((fp1) >> (FWT_FIXED_POINT / 2)) * ((fp2) >> (FWT_FIXED_POINT / 2)))
 ]
 
 // Intended for when fp2 is small and fp1 is maybe big
-#MACRO MUL_FP_FP_SM (fp1, fp2) [
-    ((fp2) * ((fp1) >> FIXED_POINT)) + (((fp1 & ((1 << FIXED_POINT) - 1)) * (fp2)) >> FIXED_POINT)
+#MACRO FWT_MUL_FP_FP_SM ( fp1, fp2 ) [
+    ((fp2) * ((fp1) >> FWT_FIXED_POINT)) + (((fp1 & ((1 << FWT_FIXED_POINT) - 1)) * (fp2)) >> FWT_FIXED_POINT)
 ]
