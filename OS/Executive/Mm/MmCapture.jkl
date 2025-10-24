@@ -302,17 +302,19 @@ FN MmAllocateAndChargeSysBuffer (
         TRUE, // wait
     )
 
-    IF NOT ptr THEN
-        MmUnchargePoolQuota (
-            PsQuotaBlock ( PsCurrentProcess () ), // quotablock
-            quota, // charge
-            poolindex, // poolindex
-        )
-
-        RETURN OS_STATUS_NO_MEMORY
+    IF ptr THEN
+        RETURN OS_STATUS_SUCCESS
     END
 
-    RETURN OS_STATUS_SUCCESS
+    // Failed.
+
+    MmUnchargePoolQuota (
+        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+        quota, // charge
+        poolindex, // poolindex
+    )
+
+    RETURN OS_STATUS_NO_MEMORY
 END
 
 #SECTION "PAGEtext"
