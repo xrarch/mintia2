@@ -18,11 +18,7 @@ FN (KeStartThreadF) MmZeroPageWorker (
     // than a threshold of free pages. Then, zero them out and place them on
     // the zeroed page list.
 
-    partition := CAST context1 TO ^MiPartition
-
-    IF NOT partition THEN
-        partition = MiSystemPartition
-    END
+    partition := PsCurrentPartition ()
 
     zerobatch : ^MiPfe[MI_ZERO_BATCH]
 

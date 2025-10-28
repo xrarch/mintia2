@@ -2,6 +2,11 @@
 // Implementation of pool caches for the MINTIA Executive.
 //
 // A "slabs and magazines" type cache is implemented, inspired by Solaris.
+// Magazines provide a per-cpu caching mechanism.
+//
+// It is recommended that for best performance on NUMA systems, pool caches
+// be duplicated per NUMA node, because the slab caches and depots are not
+// automatically duplicated on that basis.
 //
 
 #INCLUDE "Mi.hjk"
@@ -63,8 +68,6 @@ STRUCT MiPoolCache
     Context : ^VOID,
 
     MagazineType : ^MiMagazineType,
-
-    Node : ^MiNode,
 END
 
 #DEFINE MI_PCPCPU_SIZE [((SIZEOF MiPoolCachePerCpu + KE_CACHE_ALIGN - 1) &
@@ -232,8 +235,8 @@ FN MiExtendSlabCache (
     // Returns a pointer to the first (free) block in the new slab, or NULLPTR
     // if there's a failure.
 
-    slab := MmAllocatePool (
-        // scache^.Node, // node
+    slab := MmAllocatePoolEx (
+        scache^.Node, // node
         scache^.PoolIndex, // poolindex
         scache^.SlabSize, // bytes
         scache^.Tag, // tag
@@ -435,8 +438,6 @@ EXPORT FN MmCreatePoolCache (
     // Save the name of the cache.
 
     cache^.Name = name
-
-    cache^.Node = node
 
     // Save constructor, destructor, and context used for both.
 
@@ -761,7 +762,7 @@ EXPORT FN MmDeletePoolCache (
 
     // Delete a pool cache.
 
-    node := cache^.Node
+    node := cache^.Slabs.Node
 
     // Remove from global list.
 
@@ -903,7 +904,7 @@ EXPORT FN MmAllocateFromPoolCache (
         // Call the constructor.
 
         IF OsError ( cache^.Constructor (
-            cache^.Node, // node
+            cache^.Slabs.Node, // node
             block, // ptr
             cache^.Context, // context
             wait, // wait
@@ -966,6 +967,14 @@ EXPORT FN MmFreeToPoolCache (
         )
 
         GOTO Retry
+    END
+
+    IF PsCurrentNode () != cache^.Slabs.Node THEN
+        // This is a CPU foreign to the preferred NUMA node of the pool cache.
+        // Bypass the magazine layer since it won't do any good to have some
+        // foreign CPU take up magazines in another NUMA node's pool cache.
+
+        GOTO BypassMagazines
     END
 
     // Allocate a new magazine into the CPU layer.
@@ -1044,6 +1053,8 @@ EXPORT FN MmFreeToPoolCache (
 
         GOTO Retry
     END
+
+@BypassMagazines
 
     MiUnlockMagazineCache ( percpu, ipl )
 

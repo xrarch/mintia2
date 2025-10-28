@@ -40,7 +40,18 @@ EXTERN FN MmFreeKernelStack (
     IN kstack : ^VOID,
 )
 
-EXTERN FN MmAllocatePool (
+#MACRO MmAllocatePool ( poolindex, bytes, tag, wait ) [
+    MmAllocatePoolEx (
+        NULLPTR, // node
+        poolindex, // poolindex
+        bytes, // bytes
+        tag, // tag
+        wait, // wait
+    )
+]
+
+EXTERN FN MmAllocatePoolEx (
+    IN node : ^MiNode,
     IN poolindex : UWORD,
     IN bytes : UWORD,
     IN tag : ULONG,

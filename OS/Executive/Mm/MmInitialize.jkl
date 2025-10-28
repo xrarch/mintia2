@@ -426,6 +426,11 @@ FN MmInitializeStage1 ()
 
     RtlPrint ( "MmInitialize: %u KB\n", membytes / 1024 )
 
+    // Set the idle process's partition to the system partition.
+
+    KeIdleProcess.Partition = sys
+    KeIdleProcess.Node = MiBootNode
+
     // Determine system size.
 
     MiSetPartitionSize ( sys )
@@ -440,7 +445,7 @@ FN MmInitializeStage1 ()
 
     // Initialize the quick map pages.
 
-    MiInitializeQuickPages ()
+    MiInitializeQuickPages ( MiBootNode )
 
     // Initialize commit to something acceptable before creation of the
     // pagefiles.
@@ -464,11 +469,6 @@ FN MmInitializeStage1 ()
     // Idle process has no real handle table.
 
     KeIdleProcess.Paged^.HandleTable.QuotaBlock = &MiSystemQuota
-
-    // Set the idle process's partition to the system partition.
-
-    KeIdleProcess.Partition = sys
-    KeIdleProcess.Node = MiBootNode
 
     // Reclaim boot time memory. Nothing in "loader space" is safe to access
     // after this point.

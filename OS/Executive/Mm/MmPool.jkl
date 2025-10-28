@@ -1037,7 +1037,8 @@ FN MiFreePageAligned (
     )
 END
 
-EXPORT FN MmAllocatePool (
+EXPORT FN MmAllocatePoolEx (
+    IN node : ^MiNode,
     IN poolindex : UWORD,
     IN bytes : UWORD,
     IN tag : ULONG,
@@ -1047,6 +1048,10 @@ EXPORT FN MmAllocatePool (
     // Allocate a block of memory from the specified pool.
 
     KeAssert ( bytes != 0 )
+
+    IF NOT node THEN
+        node = PsCurrentNode ()
+    END
 
     thread : ^PsThread = NULLPTR
     savewait := wait
@@ -1067,7 +1072,7 @@ EXPORT FN MmAllocatePool (
 
 @Retry
 
-    pool := MiBootNode^.PoolTable[poolindex]
+    pool := node^.PoolTable[poolindex]
 
     ptr : ^VOID
 

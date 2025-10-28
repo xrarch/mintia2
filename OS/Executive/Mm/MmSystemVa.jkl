@@ -297,7 +297,7 @@ FN MiInitializeSystemVa (
 
     // Remember the base of the quick pages.
 
-    MiQuickPteBase =
+    node^.QuickPteBase =
         MiPteAddress ( base + (dsize << RTL_PAGE_SHIFT) )
 END
 
@@ -379,7 +379,7 @@ FN MiFindDynamicSpaceNode (
 
     spacenode : ^MiDynamicSpaceNode
 
-    // We could hold this lock exclusive but that would violate our codebase
+    // We could hold this lock shared but that would violate our codebase
     // policy that a shared lock is never taken subordinate to an exclusive
     // lock. There are many imaginable situations where that could occur here.
 
@@ -654,10 +654,7 @@ FN MiReleaseDynamicSpace (
 
     // Free the node.
 
-    MiFreeDynamicSpaceNode (
-        node, // node
-        spacenode, // spacenode
-    )
+    MiFreeDynamicSpaceNode ( node, spacenode )
 
     // Free the space.
 

@@ -13,38 +13,36 @@ END
 #DEFINE MI_QUICK_PTE_BLOCK_SIZE [((SIZEOF MiQuickPteBlock + KE_CACHE_ALIGN - 1) &
     ~(KE_CACHE_ALIGN - 1))]
 
-PUBLIC MiQuickPteBase : ^MiPte
-
-PUBLIC MiQuickPteBlocks : ^MiQuickPteBlock
-
 #ENTERSECTION "INITtext"
 
 #SECTION "INITtext"
-FN MiInitializeQuickPages ()
+FN MiInitializeQuickPages (
+    IN node : ^MiNode,
+)
 
     // Initialize the quick page mappings.
 
     procs := KeQueryProcessorCount ()
 
-    MiQuickPteBlocks = MmAllocatePool (
+    node^.QuickPteBlocks = MmAllocatePool (
         MM_NONPAGED_POOL, // poolindex
         MI_QUICK_PTE_BLOCK_SIZE * procs, // bytes
         'Quic', // tag
         FALSE, // wait
     )
 
-    IF NOT MiQuickPteBlocks THEN
+    IF NOT node^.QuickPteBlocks THEN
         KeCrash ( "Failed to allocate quick PTE blocks\n" )
     END
 
     i := 0
 
     WHILE i < procs DO
-        block := MiQuickPteBlocks + (i * MI_QUICK_PTE_BLOCK_SIZE)
+        block := node^.QuickPteBlocks + (i * MI_QUICK_PTE_BLOCK_SIZE)
 
         block^.NextIndex = 0
 
-        block^.BasePte = MiQuickPteBase +
+        block^.BasePte = node^.QuickPteBase +
             ((i * MI_QUICK_PER_CPU) * SIZEOF MiPte)
 
         j := 0
@@ -73,6 +71,8 @@ FN MmUseQuickPte (
 
     thread := KeCurrentThread ()
 
+    node := PsCurrentNode ()
+
     // Mask KAPCs. Otherwise one could be dispatched while we've claimed a quick
     // PTE, and then a complicated self-deadlock could occur below.
 
@@ -90,7 +90,7 @@ FN MmUseQuickPte (
 
     // Trylock all of this processor's quick PTEs.
 
-    block := MiQuickPteBlocks + (id * MI_QUICK_PTE_BLOCK_SIZE)
+    block := node^.QuickPteBlocks + (id * MI_QUICK_PTE_BLOCK_SIZE)
 
     i := 0
 

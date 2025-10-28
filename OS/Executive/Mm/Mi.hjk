@@ -172,9 +172,9 @@ EXTERN FN MiInitializePools (
 
 #DEFINE MI_QUICK_PER_CPU 4
 
-EXTERN FN MiInitializeQuickPages ()
-
-EXTERN MiQuickPteBase : ^MiPte
+EXTERN FN MiInitializeQuickPages (
+    IN node : ^MiNode,
+)
 
 #DEFINE MI_BLOCK_FOR_PAGES_THRESHOLD 4
 
@@ -434,9 +434,7 @@ STRUCT MiDeferredFlush
 END
 
 STRUCT MiNode
-    DeferredFlushTable : MiDeferredFlush[MI_DEFERRED_FLUSH_PAIRS],
-    DeferredFlushIndex : UWORD,
-    DeferredFlushPages : UWORD,
+    PoolTable : ^MiPool[MM_MAXIMUM_POOL],
 
     DynamicSpaceRoot : RtlAvlNode,
     DynamicSpaceLock : KeLock,
@@ -445,24 +443,31 @@ STRUCT MiNode
     DynamicSpaceHint : UWORD,
     DynamicSpaceBase : ^VOID,
 
+    DeferredFlushIndex : UWORD,
+    DeferredFlushPages : UWORD,
+
     SpaceNodeCache : ^MiPoolCache,
+
+    QuickPteBase : ^MiPte,
+
+    QuickPteBlocks : ^MiQuickPteBlock,
+
+    Id : UBYTE,
 
     PoolSpace : MiChunkSpace,
     CacheSpace : MiChunkSpace,
 
+    Partition : MiPartition,
+
     PoolRecords : MiPool[MM_MAXIMUM_POOL],
 
-    PoolTable : ^MiPool[MM_MAXIMUM_POOL],
+    MagazineTypeTable : MiMagazineType[MI_MAGAZINE_MAX],
 
     PoolCacheSlabs : MiSlabCache,
-
-    MagazineTypeTable : MiMagazineType[MI_MAGAZINE_MAX],
 
     PoolCacheList : RtlListEntry,
 
     PoolCacheListLock : KeLock,
 
-    Id : UBYTE,
-
-    Partition : MiPartition,
+    DeferredFlushTable : MiDeferredFlush[MI_DEFERRED_FLUSH_PAIRS],
 END
