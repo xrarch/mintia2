@@ -21,7 +21,7 @@ FN MmInitializeProcess (
         partition = parentprocess^.Partition
     END
 
-    IF partition^.Node != &partition^.Node^.Partition THEN
+    IF partition != &partition^.Node^.Partition THEN
         // This is not a partition inherent to a NUMA node so we need to up the
         // refcount. NUMA node partitions are eternal and don't have refcounts,
         // so we can't do this in that case.
@@ -75,7 +75,7 @@ FN MmDeleteProcess (
 
     partition := process^.Partition
 
-    IF partition^.Node != &partition^.Node^.Partition THEN
+    IF partition != &partition^.Node^.Partition THEN
         // Unreference the partition object.
 
         // Only do this after every page frame the process might possibly have

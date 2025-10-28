@@ -543,6 +543,8 @@ FN BlInitializePfnDatabase ()
     END
 END
 
+BlTemporaryFakeNumaBitmapArray : ^UBYTE[1]
+
 FN BlInitializeMemory ()
 
     // Initialize the descriptor list.
@@ -716,10 +718,14 @@ FN BlInitializeMemory ()
 
     // Allocate a bitmap for dynamic space.
 
+    // XXX The Executive expects a pointer to an array of pointers to dynamic
+    //     space bitmaps, one for each NUMA node. System initialization does not
+    //     yet support NUMA so we sort of hack it.
+
     pages = ((BlInfoBlock.DynamicSpaceSize / 8) + RTL_PAGE_SIZE - 1) >>
         RTL_PAGE_SHIFT
 
-    BlInfoBlock.DynamicSpaceBitmap = BlAllocateMappedRange (
+    bmp := BlAllocateMappedRange (
         pages, // pages
         BL_KERNEL_STRUCTURES, // prefva
         FALSE, // fixed
@@ -727,13 +733,16 @@ FN BlInitializeMemory ()
         OUT desc, // desc
     )
 
-    IF NOT BlInfoBlock.DynamicSpaceBitmap THEN
+    IF NOT bmp THEN
         BlCrash ( "Failed to allocate dynamic space bitmap\n" )
     END
 
     RtlFillMemoryWithUlong (
-        BlInfoBlock.DynamicSpaceBitmap, // ptr
+        bmp, // ptr
         pages << RTL_PAGE_SHIFT, // sz
         0, // ulong
     )
+
+    BlTemporaryFakeNumaBitmapArray[0] = bmp
+    BlInfoBlock.DynamicSpaceBitmaps = &BlTemporaryFakeNumaBitmapArray[0]
 END

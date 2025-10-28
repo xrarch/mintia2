@@ -158,7 +158,13 @@ EXTERN MiCacheSpace : MiChunkSpace
 
 EXTERN MiCacheSpaceChunkPages : UWORD
 
-EXTERN FN MiInitializeSystemVa ()
+EXTERN FN MiInitializeSystemVa (
+    IN node : ^MiNode,
+)
+
+EXTERN FN MiInitializeSpaceNodeAllocation (
+    IN node : ^MiNode,
+)
 
 EXTERN FN MiInitializePools (
     IN node : ^MiNode,
@@ -187,6 +193,10 @@ UNION MiDynamicSpaceNodeUnion
     Pool : MiDynamicSpacePoolNode,
 END
 
+// XXX The sanity of using a pool cache for this depends on the
+//     MiDynamicSpaceNode being small enough to not trigger page-aligned
+//     pool allocation when slabs are created for it.
+
 STRUCT MiDynamicSpaceNode
     Entry : RtlAvlNode,
     
@@ -201,22 +211,26 @@ EXTERN FN MiFindDynamicSpaceNode (
 ) : ^MiDynamicSpaceNode
 
 EXTERN FN MiAllocateDynamicPages (
+    IN node : ^MiNode,
     IN pages : UWORD,
 ) : ^VOID
 
 EXTERN FN MiReleaseDynamicPages (
+    IN node : ^MiNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN flush : UWORD,
 )
 
 EXTERN FN MiAllocateDynamicSpace (
+    IN node : ^MiNode,
     IN pages : UWORD,
     IN wait : UWORD,
 ) : ^MiDynamicSpaceNode
 
 EXTERN FN MiReleaseDynamicSpace (
-    IN node : ^MiDynamicSpaceNode,
+    IN node : ^MiNode,
+    IN spacenode : ^MiDynamicSpaceNode,
     IN flush : UWORD,
 )
 
@@ -397,6 +411,7 @@ STRUCT MiPool
     Lock : KeLock,
 
     Partition : ^MiPartition,
+    Node : ^MiNode,
 
     GetMemory : MiPoolGetMemoryF,
     ReturnMemory : MiPoolReturnMemoryF,
@@ -411,8 +426,29 @@ STRUCT MiPool
     Flags : UBYTE,
 END
 
+#DEFINE MI_DEFERRED_FLUSH_PAIRS 64
+
+STRUCT MiDeferredFlush
+    Ptr : ^VOID,
+    Pages : UWORD,
+END
+
 STRUCT MiNode
-    Partition : MiPartition,
+    DeferredFlushTable : MiDeferredFlush[MI_DEFERRED_FLUSH_PAIRS],
+    DeferredFlushIndex : UWORD,
+    DeferredFlushPages : UWORD,
+
+    DynamicSpaceRoot : RtlAvlNode,
+    DynamicSpaceLock : KeLock,
+    DynamicSpaceTreeLock : KeLock,
+    DynamicSpaceBitmap : RtlBitmapHeader,
+    DynamicSpaceHint : UWORD,
+    DynamicSpaceBase : ^VOID,
+
+    SpaceNodeCache : ^MiPoolCache,
+
+    PoolSpace : MiChunkSpace,
+    CacheSpace : MiChunkSpace,
 
     PoolRecords : MiPool[MM_MAXIMUM_POOL],
 
@@ -425,4 +461,8 @@ STRUCT MiNode
     PoolCacheList : RtlListEntry,
 
     PoolCacheListLock : KeLock,
+
+    Id : UBYTE,
+
+    Partition : MiPartition,
 END

@@ -76,3 +76,10 @@ TYPE MiPte : ULONG
 // Assumes two-way 32KB I+D cache.
 
 #DEFINE MI_COLOR_COUNT 4
+
+// NUMA not supported on xr17032.
+// On an architecture where it IS supported, this macro may do something like
+// subtract the base of dynamic space from the pointer and convert some pointer
+// bits into a NUMA node ID.
+
+#MACRO MiNumaNodeFromDynamicSpacePointer ( ptr ) [ MiBootNode ]

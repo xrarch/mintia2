@@ -29,7 +29,10 @@ FN MmCreateKernelStack (
 
     // Allocate the required system space.
 
-    kstack = MiAllocateDynamicPages ( KE_STACK_PAGES + 1 )
+    kstack = MiAllocateDynamicPages (
+        process^.Node, // node
+        KE_STACK_PAGES + 1, // pages
+    )
 
     IF NOT kstack THEN
         // Couldn't acquire them.
@@ -113,6 +116,7 @@ FN MmCreateKernelStack (
 @Error2
 
     MiReleaseDynamicPages (
+        process^.Node, // node
         kstack - RTL_PAGE_SIZE, // ptr
         KE_STACK_PAGES + 1, // pages
         FALSE, // flush
@@ -175,6 +179,7 @@ FN MmFreeKernelStack (
     // Release the system space containing the stack.
 
     MiReleaseDynamicPages (
+        process^.Node, // node
         kstack - RTL_PAGE_SIZE, // ptr
         KE_STACK_PAGES + 1, // pages
         TRUE, // flush

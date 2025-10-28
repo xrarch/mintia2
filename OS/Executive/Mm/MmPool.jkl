@@ -39,7 +39,9 @@ END
 
 #DEFINE MI_POOL_FLAG_USE_PRIVILEGED_MEM 1
 
-FN MiAllocateExtensionSpace () : ^MiPoolExtension
+FN MiAllocateExtensionSpace (
+    IN node : ^MiNode,
+) : ^MiPoolExtension
 
     // Allocate space for a pool extension.
 
@@ -47,7 +49,7 @@ FN MiAllocateExtensionSpace () : ^MiPoolExtension
 
     WHILE TRUE DO
         ext := CAST MiAllocateChunkSpace (
-            &MiPoolSpace, // chunkspace
+            &node^.PoolSpace, // chunkspace
         ) TO ^MiPoolExtension
 
         IF ext THEN
@@ -76,6 +78,7 @@ FN MiAllocateExtensionSpace () : ^MiPoolExtension
 END
 
 FN MiFreeExtensionSpace (
+    IN node : ^MiNode,
     IN ext : ^MiPoolExtension,
     IN flush : UWORD,
 )
@@ -97,7 +100,7 @@ FN MiFreeExtensionSpace (
 #END
 
     MiFreeChunkSpace (
-        &MiPoolSpace, // chunkspace
+        &node^.PoolSpace, // chunkspace
         ext, // ptr
         flush, // flush
     )
@@ -259,6 +262,7 @@ FN MiInitializePool (
     pool^.BytesUsedPeak = 0
     pool^.Flags = 0
     pool^.Partition = &node^.Partition
+    pool^.Node = node
 
     i := 0
 
@@ -343,6 +347,10 @@ FN MiInitializePools (
     // Initialize pool cache.
 
     MiInitializePoolCache ( node )
+
+    // Initialize system space node allocation.
+
+    MiInitializeSpaceNodeAllocation ( node )
 END
 
 #SECTION "INITtext"
@@ -480,7 +488,7 @@ FN MiAllocateFromPool (
 
     // No sufficient block. We need to allocate a new pool extension.
 
-    ext := MiAllocateExtensionSpace ()
+    ext := MiAllocateExtensionSpace ( pool^.Node )
 
     IF NOT pool^.GetMemory (
         pool^.Partition, // partition
@@ -493,6 +501,7 @@ FN MiAllocateFromPool (
         // Failed to allocate a pool extension.
 
         MiFreeExtensionSpace (
+            pool^.Node, // node
             ext, // extension
             FALSE, // flush
         )
@@ -873,6 +882,7 @@ FN MiFreeToPool (
         )
 
         MiFreeExtensionSpace (
+            pool^.Node, // node
             ext, // extension
             TRUE, // flush
         )
@@ -936,25 +946,26 @@ FN MiAllocatePageAligned (
 
     // First acquire some room in dynamic space.
 
-    node := MiAllocateDynamicSpace (
+    spacenode := MiAllocateDynamicSpace (
+        pool^.Node, // node
         bytes, // pages
         wait, // wait
     )
 
-    IF NOT node THEN
+    IF NOT spacenode THEN
         RETURN NULLPTR
     END
 
     // Initialize the node as a page aligned pool node.
 
-    node^.U.Pool.Pool = pool
-    node^.U.Pool.Tag = tag
+    spacenode^.U.Pool.Pool = pool
+    spacenode^.U.Pool.Tag = tag
 
     // Call the pool callback to initialize the allocation.
 
     IF NOT pool^.GetMemory (
         pool^.Partition, // partition
-        node^.StartVa, // ptr
+        spacenode^.StartVa, // ptr
         bytes, // pages
         pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
         wait, // wait
@@ -966,14 +977,15 @@ FN MiAllocatePageAligned (
         // into it.
 
         MiReleaseDynamicSpace (
-            node, // node
+            pool^.Node, // node
+            spacenode, // spacenode
             FALSE, // flush
         )
 
         RETURN NULLPTR
     END
 
-    RETURN node^.StartVa
+    RETURN spacenode^.StartVa
 END
 
 FN MiFreePageAligned (
@@ -985,14 +997,14 @@ FN MiFreePageAligned (
 
     // Look up the dynamic space node.
 
-    node := MiFindDynamicSpaceNode ( ptr )
+    spacenode := MiFindDynamicSpaceNode ( ptr )
 
-    KeAssert ( node != NULLPTR )
-    KeAssert ( node^.StartVa == ptr )
+    KeAssert ( spacenode != NULLPTR )
+    KeAssert ( spacenode^.StartVa == ptr )
 
-    IF node^.U.Pool.Tag != tag THEN
+    IF spacenode^.U.Pool.Tag != tag THEN
         KeCrash ( "MiFreePageAligned: wrong tag %x on %p, expected %x\n",
-            node^.StartVa, node^.U.Pool.Tag, tag )
+            spacenode^.StartVa, spacenode^.U.Pool.Tag, tag )
     END
 
     // Uninitialize the allocation.
@@ -1003,23 +1015,24 @@ FN MiFreePageAligned (
 
     RtlFillMemoryWithUlong (
         ptr, // ptr
-        node^.EndVa - node^.StartVa, // sz
+        spacenode^.EndVa - spacenode^.StartVa, // sz
         0xFAAAAAAA, // ulong
     )
 #END
 
-    pool := node^.U.Pool.Pool
+    pool := spacenode^.U.Pool.Pool
 
     pool^.ReturnMemory (
         pool^.Partition, // partition
         ptr, // ptr
-        (node^.EndVa - node^.StartVa) >> RTL_PAGE_SHIFT, // pages
+        (spacenode^.EndVa - spacenode^.StartVa) >> RTL_PAGE_SHIFT, // pages
     )
 
     // Free the dynamic space.
 
     MiReleaseDynamicSpace (
-        node, // node
+        pool^.Node, // node
+        spacenode, // spacenode
         TRUE, // flush
     )
 END
