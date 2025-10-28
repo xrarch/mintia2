@@ -552,8 +552,8 @@ FN MiWaitForPages (
         )
 
         IF status == OS_STATUS_WAIT_TIMEOUT THEN
-            IF partition == MiSystemPartition THEN
-                // If the system partition is deadlocked, this is a fatal
+            IF partition == &partition^.Node^.Partition THEN
+                // If a node partition is deadlocked, this is a fatal
                 // condition.
 
                 KeCrash (
@@ -709,9 +709,9 @@ END
 
 FN MmGetSystemSize () : UWORD
 
-    // Get the size of the system partition.
+    // Get the size of the current node.
 
-    RETURN MiSystemPartition^.SizeLevel
+    RETURN PsCurrentPartition ()^.SizeLevel
 END
 
 #SECTION "PAGEtext"

@@ -8,11 +8,10 @@
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 #INCLUDE "<ll>/Xlo.hjk"
 
+// TMP
 MiBootNodeStatic : MiNode
 
 PUBLIC MiBootNode : ^MiNode
-
-PUBLIC MiSystemPartition : ^MiPartition
 
 PUBLIC MiPfnDatabase : ^MiPfe
 
@@ -56,7 +55,7 @@ FN MmJettisonUnusedResources ()
     listhead := &KeLoaderBlock.ResourceListHead
     listentry := listhead^.Next
 
-    partition := MiSystemPartition
+    partition := &MiBootNode^.Partition
 
     WHILE listentry != listhead DO
         rsrc := CONTAINEROF listentry TO BlResource.Entry
@@ -292,7 +291,7 @@ FN MiReclaimMemory ()
 
     // Reclaim physical memory regions.
 
-    sys := MiSystemPartition
+    sys := &MiBootNode^.Partition
 
     listhead = &KeLoaderBlock.DescriptorListHead
     listentry = listhead^.Next
@@ -341,7 +340,7 @@ FN MiInitializeZeroedPage ()
     // Allocate the constantly zeroed page frame.
 
     MiConstantZeroPfe = MiAllocatePage (
-        MiSystemPartition, // partition
+        &MiBootNode^.Partition, // partition
         TRUE, // zeroed
         TRUE, // low
         0, // color
@@ -360,11 +359,10 @@ FN MmInitializeStage1 ()
 
     KeAssert ( SIZEOF MiPfe <= MI_PFE_SIZE )
 
+    // TMP
     MiBootNode = &MiBootNodeStatic
 
-    MiSystemPartition = &MiBootNodeStatic.Partition
-
-    sys := MiSystemPartition
+    sys := &MiBootNodeStatic.Partition
 
     // Copy the address of the PFN database.
 
