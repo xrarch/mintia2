@@ -44,9 +44,9 @@ FN (KeStartThreadF) FwtParticleThread (
     
     // And free it.
 
-    MmFreePool (
+    MmFreeToPoolCache (
+        FwtDataCache, // cache
         thisfwd, // ptr
-        'Fire', // tag
     )
     
     actx := FWT_INT_TO_FP ( x )
@@ -193,12 +193,10 @@ FN (KeStartThreadF) FwtExplodeableThread (
     WHILE i < count DO
         i += 1
         
-        data := CAST MmAllocatePool (
-            MM_NONPAGED_POOL, // poolindex
-            SIZEOF FwtData, // bytes
-            'Fire', // tag
+        data : ^FwtData = MmAllocateFromPoolCache (
+            FwtDataCache, // cache
             FALSE, // wait
-        ) TO ^FwtData
+        )
         
         IF NOT data THEN
             RtlPrint ( "FwtExplodeableThread: Out of memory\n" )

@@ -4,28 +4,6 @@
 
 #INCLUDE "Mi.hjk"
 
-// This is the shift for the minimum block size (i.e. 1 << 5 = 32).
-
-#DEFINE MI_BLOCK_SIZE_SHIFT 5
-#DEFINE MI_BLOCK_MIN_SIZE [(1 << MI_BLOCK_SIZE_SHIFT)]
-#DEFINE MI_BLOCK_SIZE_MASK [(MI_BLOCK_MIN_SIZE - 1)]
-
-// We track block sizes in units of minimum block sizes. Since we store this in
-// a byte, the maximum block size is the minimum block size times 256 (or,
-// shifted left by 8). Actually, here we use 6 (1 << 6 = 64 units max) to keep
-// the size of the pool structures, and time spent scanning list heads down.
-
-#DEFINE MI_BLOCK_MAX_UNITS_SHIFT 6
-#DEFINE MI_BLOCK_MAX_SIZE_SHIFT [(MI_BLOCK_SIZE_SHIFT + MI_BLOCK_MAX_UNITS_SHIFT)]
-#DEFINE MI_BLOCK_MAX_SIZE [(1 << MI_BLOCK_MAX_SIZE_SHIFT)]
-#DEFINE MI_BLOCK_MAX_SIZE_MASK [(MI_BLOCK_MAX_SIZE - 1)]
-
-// The maximum request size is four units less than the maximum size.
-// This avoids some weird edge cases. It's also more time-efficient to use the
-// page-aligned allocator for larger requests.
-
-#DEFINE MI_BLOCK_MAX_REQUEST_UNITS [((1 << MI_BLOCK_MAX_UNITS_SHIFT) - 4)]
-
 #DEFINE MI_FULL_BLOCKS_PER_EXTENSION [(RTL_PAGE_SIZE / MI_BLOCK_MAX_SIZE - 1)]
 
 #DEFINE MI_BLOCK_LOG_BUCKETS [(MI_BLOCK_MAX_UNITS_SHIFT + 1)]
@@ -42,6 +20,12 @@ STRUCT MiBlock
     Size : UBYTE,
 
     Tag : ULONG,
+
+#IF ( == RTL_ALIGN_SHIFT 4 )
+    AlignToSixteen1 : ULONG,
+    AlignToSixteen2 : ULONG,
+#END
+
 END
 
 STRUCT MiFreeBlock
@@ -365,6 +349,10 @@ FN MiInitializePools ()
     MiPoolTable[MM_NONPAGED_POOL] = &MiPoolRecords[MM_NONPAGED_POOL]
     MiPoolTable[MM_PAGED_POOL] = &MiPoolRecords[MM_NONPAGED_POOL]
     MiPoolTable[MM_PRIVILEGED_POOL] = &MiPoolRecords[MM_PRIVILEGED_POOL]
+
+    // Initialize pool cache.
+
+    MiInitializePoolCache ()
 END
 
 #SECTION "INITtext"
@@ -1063,7 +1051,7 @@ EXPORT FN MmAllocatePool (
 
     ptr : ^VOID
 
-    IF bytes < (MI_BLOCK_MAX_REQUEST_UNITS << MI_BLOCK_SIZE_SHIFT) THEN
+    IF bytes < MI_BLOCK_MAX_REQUEST_SIZE THEN
         // Allocate from the small block pool.
 
         ptr = MiAllocateFromPool (
@@ -1180,7 +1168,7 @@ FN MmGetOverheadOfBytes (
         RETURN 0
     END
 
-    IF bytes >= (MI_BLOCK_MAX_REQUEST_UNITS << MI_BLOCK_SIZE_SHIFT) THEN
+    IF bytes >= MI_BLOCK_MAX_REQUEST_SIZE THEN
         // Page-aligned charge.
 
         RETURN (bytes + RTL_PAGE_OFFSET_MASK) & RTL_PAGE_NUMBER_MASK

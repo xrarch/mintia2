@@ -310,3 +310,30 @@ EXTERN FN MiInitializeMdlZones ()
 #MACRO MiVirtualAddressColor ( vaddr ) [
     ((vaddr >> RTL_PAGE_SHIFT) & (MI_COLOR_COUNT - 1))
 ]
+
+EXTERN FN MiInitializePoolCache ()
+
+// Internal pool constants
+
+// This is the shift for the minimum block size (i.e. 1 << 5 = 32).
+
+#DEFINE MI_BLOCK_SIZE_SHIFT 5
+#DEFINE MI_BLOCK_MIN_SIZE [(1 << MI_BLOCK_SIZE_SHIFT)]
+#DEFINE MI_BLOCK_SIZE_MASK [(MI_BLOCK_MIN_SIZE - 1)]
+
+// We track block sizes in units of minimum block sizes. Since we store this in
+// a byte, the maximum block size is the minimum block size times 256 (or,
+// shifted left by 8). Actually, here we use 6 (1 << 6 = 64 units max) to keep
+// the size of the pool structures, and time spent scanning list heads down.
+
+#DEFINE MI_BLOCK_MAX_UNITS_SHIFT 6
+#DEFINE MI_BLOCK_MAX_SIZE_SHIFT [(MI_BLOCK_SIZE_SHIFT + MI_BLOCK_MAX_UNITS_SHIFT)]
+#DEFINE MI_BLOCK_MAX_SIZE [(1 << MI_BLOCK_MAX_SIZE_SHIFT)]
+#DEFINE MI_BLOCK_MAX_SIZE_MASK [(MI_BLOCK_MAX_SIZE - 1)]
+
+// The maximum request size is four units less than the maximum size.
+// This avoids some weird edge cases. It's also more time-efficient to use the
+// page-aligned allocator for larger requests.
+
+#DEFINE MI_BLOCK_MAX_REQUEST_UNITS [((1 << MI_BLOCK_MAX_UNITS_SHIFT) - 4)]
+#DEFINE MI_BLOCK_MAX_REQUEST_SIZE [(MI_BLOCK_MAX_REQUEST_UNITS << MI_BLOCK_SIZE_SHIFT)]

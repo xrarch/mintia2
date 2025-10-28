@@ -3,7 +3,6 @@
 //
 
 #INCLUDE "Mi.hjk"
-#INCLUDE "../../Loader/Headers/Loader.hjk"
 
 STRUCT MiQuickPteBlock
     Locks : KeLock[MI_QUICK_PER_CPU],
@@ -25,7 +24,7 @@ FN MiInitializeQuickPages ()
 
     // Initialize the quick page mappings.
 
-    procs := KeLoaderBlock.ProcessorCount
+    procs := KeQueryProcessorCount ()
 
     MiQuickPteBlocks = MmAllocatePool (
         MM_NONPAGED_POOL, // poolindex

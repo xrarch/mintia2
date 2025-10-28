@@ -1,0 +1,1140 @@
+//
+// Implementation of pool caches for the MINTIA Executive.
+//
+// A "slabs and magazines" type cache is implemented, inspired by Solaris.
+//
+
+#INCLUDE "Mi.hjk"
+
+STRUCT MiSlabCache
+    Size : UWORD,
+
+    Lock : KeLock,
+
+    FreeListHead : RtlListEntry,
+
+    Tag : ULONG,
+    SlabSize : ULONG,
+    ActiveSlabCount : ULONG,
+
+    BlocksPerSlab : UBYTE,
+    PoolIndex : UBYTE,
+END
+
+#DEFINE MI_HEADER_FITS_IN_ALIGNMENT [
+    (SIZEOF MiSlabHeader <= (RTL_ALIGN_BYTES - SIZEOF ^VOID))
+]
+
+#DEFINE MI_MAX_SMALL_BLOCKS_PER_SLAB 16
+#DEFINE MI_MAX_BIG_BLOCKS_PER_SLAB 8
+
+#DEFINE MI_SMALL_POOL_BLOCK [(MI_BLOCK_MAX_REQUEST_SIZE / 5)]
+
+STRUCT MiSlabHeader
+    References : ULONG,
+END
+
+#MACRO MiLockSlabCache ( scache ) [
+    KeAcquireApcLockExclusive ( &(scache)^.Lock )
+]
+
+#MACRO MiUnlockSlabCache ( scache, ipl ) [
+    KeReleaseApcLock ( &(scache)^.Lock, ipl )
+]
+
+STRUCT MiPoolCachePerCpu
+    MagLock : KeLock,
+
+    Loaded : ^^VOID,
+    Previous : ^^VOID,
+
+    Rounds : BYTE,
+    PreviousRounds : BYTE,
+
+    MagazineSize : UBYTE,
+END
+
+STRUCT MiDepotList
+    Head : ^^VOID,
+
+    Total : ULONG,
+    Min : ULONG,
+    ReapLimit : ULONG,
+END
+
+STRUCT MiPoolCache
+    DepotLock : KeLock,
+    FullMagazineList : MiDepotList,
+    EmptyMagazineList : MiDepotList,
+
+    Slabs : MiSlabCache,
+
+    MasterListEntry : RtlListEntry,
+
+    Name : ^UBYTE,
+
+    Constructor : MmPoolCacheConstructorF,
+    Destructor : MmPoolCacheDestructorF,
+    Context : ^VOID,
+
+    MagazineType : ^MiMagazineType,
+END
+
+#DEFINE MI_PCPCPU_SIZE [((SIZEOF MiPoolCachePerCpu + KE_CACHE_ALIGN - 1) &
+    ~(KE_CACHE_ALIGN - 1))]
+
+#DEFINE MI_PC_SIZE [((SIZEOF MiPoolCache + KE_CACHE_ALIGN - 1) &
+    ~(KE_CACHE_ALIGN - 1))]
+
+#MACRO MiPoolCachePerCpuById ( cache, id ) [
+    (CAST cache + MI_PC_SIZE + (id * MI_PCPCPU_SIZE) TO ^MiPoolCachePerCpu)
+]
+
+MiPoolCacheSlabs : MiSlabCache
+
+MiMasterPoolCacheList : RtlListEntry
+
+MiPoolCacheListLock : KeLock = KE_INITIAL_LOCK
+
+#MACRO MiLockPoolCacheList () [
+    KeAcquireLockExclusive ( &MiPoolCacheListLock )
+]
+
+#MACRO MiUnlockPoolCacheList () [
+    KeReleaseLock ( &MiPoolCacheListLock )
+]
+
+#MACRO MiLockPoolCacheDepot ( cache ) [
+    KeAcquireApcLockExclusive ( &(cache)^.DepotLock )
+]
+
+#MACRO MiUnlockPoolCacheDepot ( cache, ipl ) [
+    KeReleaseApcLock ( &(cache)^.DepotLock, ipl )
+]
+
+#MACRO MiLockMagazineCache ( pcpcpu ) [
+    KeAcquireApcLockExclusive ( &(pcpcpu)^.MagLock )
+]
+
+#MACRO MiUnlockMagazineCache ( pcpcpu, ipl ) [
+    KeReleaseApcLock ( &(pcpcpu)^.MagLock, ipl )
+]
+
+#MACRO MiInitializeDepotList ( list ) [
+    NOTHING (list)^.Head = NULLPTR
+    NOTHING (list)^.Total = 0
+    NOTHING (list)^.Min = 0
+    NOTHING (list)^.ReapLimit = 0
+]
+
+STRUCT MiMagazineType
+    PoolCache : ^MiPoolCache,
+    Size : UBYTE,
+END
+
+ENUM MiMagazineTypes : UBYTE
+    MI_MAGAZINE_SMALL,
+    MI_MAGAZINE_LARGE,
+
+    MI_MAGAZINE_MAX,
+END
+
+MiMagazineTypeTable : MiMagazineType[MI_MAGAZINE_MAX]
+
+#DEFINE MI_LARGE_MAGAZINE_SIZE 4
+#DEFINE MI_SMALL_MAGAZINE_SIZE 8
+
+#SECTION "PAGEtext"
+FN MiInitializeSlabCache (
+    IN scache : ^MiSlabCache,
+    IN size : UWORD,
+    IN poolindex : UWORD,
+    IN tag : UWORD,
+)
+
+    // Initialize a slab cache.
+
+    // Add a pointer to the block size which will be used as the back-pointer to
+    // the slab header, and round it up.
+
+    IF size < SIZEOF RtlListEntry THEN
+        size = SIZEOF RtlListEntry
+    END
+
+    size = (size + SIZEOF ^VOID + RTL_ALIGN_BYTES - 1) & ~(RTL_ALIGN_BYTES - 1)
+
+    scache^.Size = size
+    scache^.PoolIndex = poolindex
+    scache^.Tag = tag
+    scache^.ActiveSlabCount = 0
+    
+    RtlInitializeList ( &scache^.FreeListHead )
+
+    KeInitializeLock ( &scache^.Lock )
+
+    blocksperslab : UWORD
+    slabsize : UWORD
+
+    // Calculate the maximum size of a slab that we're willing to allocate.
+    // This is configured to try to minimize fragmentation.
+
+    IF size < MI_SMALL_POOL_BLOCK THEN
+        // Size of one block is less than a fifth of the maximum pool request
+        // size. Note that this divisor *must* be smaller than the value of
+        // MI_MAX_BIG_BLOCKS_PER_SLAB or this attempt to minimize fragmentation
+        // will actually worsen it.
+        //
+        // Pack as many as can fit in a maximum request.
+
+        slabsize = size * MI_MAX_SMALL_BLOCKS_PER_SLAB
+
+        IF slabsize >= MI_BLOCK_MAX_REQUEST_SIZE THEN
+            slabsize = MI_BLOCK_MAX_REQUEST_SIZE - 1
+        END
+
+        // RtlPrint ( "small slabsize %d\n", slabsize )
+
+    ELSE
+        // Each slab allocation will trigger a page-aligned pool allocation.
+        // To minimize fragmentation we anticipate this and try to fill each
+        // page to the top.
+
+        slabsize = (size * MI_MAX_BIG_BLOCKS_PER_SLAB + (RTL_PAGE_SIZE - 1))
+            & ~(RTL_PAGE_SIZE - 1)
+
+        // RtlPrint ( "big slabsize %d\n", slabsize )
+    END
+
+    // Calculate how many blocks can fit in the slab.
+    //
+    // First assume 1 block because we do special packing for the header of the
+    // first block to pack both the slab header and back-pointer into the
+    // pre-alignment space.
+
+    blocksperslab = 1
+
+    // First align down.
+
+    blockbytes := slabsize & ~(RTL_ALIGN_BYTES - 1)
+
+    // Now calculate how many bytes are available for blocks.
+    // Remove the bytes for the first block which we optimistically assume can
+    // also contain the slab header within its pre-alignment.
+
+    blockbytes -= size
+
+    IF NOT MI_HEADER_FITS_IN_ALIGNMENT THEN
+        // The slab header doesn't fit in the alignment, so it needs to be
+        // accounted for after all.
+
+        blockbytes -= (SIZEOF MiSlabHeader + (RTL_ALIGN_BYTES - 1))
+            & ~(RTL_ALIGN_BYTES - 1)
+    END
+
+    // Calculate how many blocks can fit in the remaining space.
+
+    blocksperslab += blockbytes / size
+
+    // Calculate the final slab size.
+
+    slabsize = blocksperslab * size
+
+    IF NOT MI_HEADER_FITS_IN_ALIGNMENT THEN
+        // The slab header doesn't fit in the alignment, so it needs to be
+        // accounted for after all.
+
+        slabsize =
+            (slabsize + SIZEOF MiSlabHeader + (RTL_ALIGN_BYTES - 1))
+            & ~(RTL_ALIGN_BYTES - 1)
+    END
+
+    // RtlPrint ( "real slabsize %d blocksperslab %d blocksize %d\n", slabsize, blocksperslab, size )
+
+    scache^.BlocksPerSlab = blocksperslab
+    scache^.SlabSize = slabsize
+END
+
+FN MiExtendSlabCache (
+    IN scache : ^MiSlabCache,
+    IN wait : UWORD,
+) : ^VOID
+
+    // Extend the slab cache. Its lock is held.
+    // Returns a pointer to the first (free) block in the new slab, or NULLPTR
+    // if there's a failure.
+
+    slab := MmAllocatePool (
+        scache^.PoolIndex, // poolindex
+        scache^.SlabSize, // bytes
+        scache^.Tag, // tag
+        wait, // wait
+    )
+
+    // RtlPrint ( "extend %p\n", slab )
+
+    IF NOT slab THEN
+        // Failure.
+
+        RETURN NULLPTR
+    END
+
+    scache^.ActiveSlabCount += 1
+
+    // Initialize the slab header.
+
+    slabheader : ^MiSlabHeader = slab
+    slabheader^.References = 0
+
+    // Initialize each block in the slab.
+
+    block := (slab + SIZEOF MiSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1))
+        & ~(RTL_ALIGN_BYTES - 1)
+
+    firstblock := block
+
+    blocksize := scache^.Size
+
+    i := 0
+    count := scache^.BlocksPerSlab
+
+    WHILE i < count DO
+        // Set back pointer to header.
+
+        (CAST (block - SIZEOF ^VOID) TO ^^MiSlabHeader)^ = slabheader
+
+        // Add to free list.
+
+        RtlInsertAtTailList (
+            &scache^.FreeListHead, // head
+            CAST block TO ^RtlListEntry, // entry
+        )
+
+        i += 1
+        block += blocksize
+    END
+
+    // Return the first block.
+
+    RETURN firstblock
+END
+
+FN MiFreeSlab (
+    IN scache : ^MiSlabCache,
+    IN slab : ^MiSlabHeader,
+)
+
+    // Free a slab.
+
+    // RtlPrint ( "free %p\n", slab )
+
+    scache^.ActiveSlabCount -= 1
+
+    KeAssert ( slab^.References == 0 )
+
+    // First unlink all of the free blocks.
+
+    block := (slab + SIZEOF MiSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1))
+        & ~(RTL_ALIGN_BYTES - 1)
+
+    i := 0
+    count := scache^.BlocksPerSlab
+    blocksize := scache^.Size
+
+    WHILE i < count DO
+        RtlRemoveEntryList ( CAST block TO ^RtlListEntry )
+
+        i += 1
+        block += blocksize
+    END
+
+    // Now free the actual pool allocation.
+
+    MmFreePool (
+        slab, // ptr
+        scache^.Tag, // tag
+    )
+END
+
+FN MiAllocateFromSlabCache (
+    IN scache : ^MiSlabCache,
+    IN wait : UWORD,
+) : ^VOID
+
+    // Allocate a single entry from a slab cache.
+    // Return NULLPTR upon failure.
+
+    ipl := MiLockSlabCache ( scache )
+
+    block := scache^.FreeListHead.Next
+
+    IF block == &scache^.FreeListHead THEN
+        // There are no entries so we need to make more.
+
+        block = MiExtendSlabCache (
+            scache, // scache
+            wait, // wait
+        )
+
+        IF NOT block THEN
+            GOTO Exit
+        END
+    END
+
+    // Increment the reference count on the slab header.
+
+    (CAST (block - SIZEOF ^VOID) TO ^^MiSlabHeader)^^.References += 1
+
+    // Pop the block from the free list.
+
+    RtlRemoveEntryList ( CAST block TO ^RtlListEntry )
+
+@Exit
+
+    MiUnlockSlabCache ( scache, ipl )
+
+    RETURN block
+END
+
+FN MiFreeToSlabCache (
+    IN scache : ^MiSlabCache,
+    IN ptr : ^VOID,
+)
+
+    // Free a block to the given slab cache.
+
+    ipl := MiLockSlabCache ( scache )
+
+    slabheader := (CAST (ptr - SIZEOF ^VOID) TO ^^MiSlabHeader)^
+
+    oldcount := slabheader^.References
+
+    slabheader^.References = oldcount - 1
+
+    // Add to free list.
+
+    RtlInsertAtHeadList (
+        &scache^.FreeListHead, // head
+        CAST ptr TO ^RtlListEntry, // entry
+    )
+
+    IF oldcount == 1 THEN
+        // Free the whole slab.
+
+        MiFreeSlab (
+            scache, // scache
+            slabheader, // slabheader
+        )
+    END
+
+    MiUnlockSlabCache ( scache, ipl )
+END
+
+#SECTION "PAGEtext"
+EXPORT FN MmCreatePoolCache (
+    IN name : ^UBYTE,
+    IN size : UWORD,
+    IN poolindex : UWORD,
+    IN tag : UWORD,
+    IN constructor : MmPoolCacheConstructorF,
+    IN destructor : MmPoolCacheDestructorF,
+    IN context : ^VOID,
+) : ^MiPoolCache
+
+    // Allocate and return a new pool cache structure.
+
+    cache : ^MiPoolCache = MiAllocateFromSlabCache (
+        &MiPoolCacheSlabs, // scache
+        TRUE, // wait
+    )
+
+    IF NOT cache THEN
+        RETURN NULLPTR
+    END
+
+    // Determine the magazine size based on whether the size of each cached
+    // block is smaller or larger than what the slab layer considers a small
+    // pool block.
+
+    IF size < MI_SMALL_POOL_BLOCK THEN
+        cache^.MagazineType = &MiMagazineTypeTable[MI_MAGAZINE_SMALL]
+    ELSE
+        cache^.MagazineType = &MiMagazineTypeTable[MI_MAGAZINE_LARGE]
+    END
+
+    // Save the name of the cache.
+
+    cache^.Name = name
+
+    // Save constructor, destructor, and context used for both.
+
+    cache^.Constructor = constructor
+    cache^.Destructor = destructor
+    cache^.Context = context
+
+    // Initialize the slab cache used for allocating cached blocks.
+
+    MiInitializeSlabCache (
+        &cache^.Slabs, // scache
+        size, // size
+        poolindex, // poolindex
+        tag, // tag
+    )
+
+    KeInitializeLock ( &cache^.DepotLock )
+
+    // Set the depot lists to empty.
+
+    MiInitializeDepotList ( &cache^.FullMagazineList )
+    MiInitializeDepotList ( &cache^.EmptyMagazineList )
+
+    // Insert on global list.
+
+    MiLockPoolCacheList ()
+
+    RtlInsertAtTailList (
+        &MiMasterPoolCacheList, // head
+        &cache^.MasterListEntry, // entry
+    )
+
+    // Initialize the per-CPU caches with the global list lock still held to
+    // synchronize against changes to the magazine type size.
+
+    cpus := KeQueryProcessorCount ()
+
+    i := 0
+
+    percpu := MiPoolCachePerCpuById (
+        cache, // cache
+        0, // id
+    )
+
+    WHILE i < cpus DO
+        KeInitializeLock ( &percpu^.MagLock )
+
+        percpu^.Loaded = NULLPTR
+        percpu^.Previous = NULLPTR
+        percpu^.Rounds = -1
+        percpu^.PreviousRounds = -1
+        percpu^.MagazineSize = cache^.MagazineType^.Size
+
+        i += 1
+        percpu += MI_PCPCPU_SIZE
+    END
+
+    MiUnlockPoolCacheList ()
+
+    RETURN cache
+END
+
+FN MiDestroyAndFreePoolCacheBlock (
+    IN cache : ^MiPoolCache,
+    IN ptr : ^VOID,
+)
+
+    // Destroy and free a constructed cache block.
+
+    IF cache^.Destructor THEN
+        cache^.Destructor (
+            ptr, // ptr
+            cache^.Context, // context
+        )
+    END
+
+    MiFreeToSlabCache (
+        &cache^.Slabs, // scache
+        ptr, // ptr
+    )
+END
+
+FN MiDestroyAndFreeMagazine (
+    IN cache : ^MiPoolCache,
+    IN magazine : ^^VOID,
+    IN rounds : UWORD,
+)
+
+    // Destroy the magazine.
+
+    // Skip over the depot list link.
+
+    magazine += SIZEOF ^VOID
+
+    // Destroy and free each block contained in the magazine.
+
+    i := 0
+
+    WHILE i < rounds DO
+        MiDestroyAndFreePoolCacheBlock (
+            cache, // cache
+            magazine[i], // ptr
+        )
+
+        i += 1
+    END
+
+    // Un-skip depot list link and free magazine.
+
+    MmFreeToPoolCache (
+        cache^.MagazineType^.PoolCache, // cache
+        magazine - SIZEOF ^VOID, // ptr
+    )
+END
+
+FN MiAllocateMagazineFromDepot (
+    IN cache : ^MiPoolCache,
+    IN list : ^MiDepotList,
+) : ^^VOID
+
+    // Allocate a magazine from the depot.
+
+    ipl := MiLockPoolCacheDepot ( cache )
+
+    magazine := list^.Head
+
+    IF magazine THEN
+        list^.Head = magazine^
+
+        list^.Total -= 1
+
+        IF list^.Total < list^.Min THEN
+            // Increase the working set size by decreasing the number of
+            // magazines that can be reaped.
+
+            list^.Min = list^.Total
+        END
+    END
+
+    MiUnlockPoolCacheDepot ( cache, ipl )
+
+    RETURN magazine
+END
+
+FN MiFreeMagazineToDepot (
+    IN cache : ^MiPoolCache,
+    IN list : ^MiDepotList,
+    IN magazine : ^^VOID,
+)
+
+    // Free a magazine to the depot.
+
+    ipl := MiLockPoolCacheDepot ( cache )
+
+    magazine^ = list^.Head
+    list^.Head = magazine
+
+    list^.Total += 1
+
+    MiUnlockPoolCacheDepot ( cache, ipl )
+END
+
+FN MiReapDepotList (
+    IN cache : ^MiPoolCache,
+    IN list : ^MiDepotList,
+    IN rounds : UWORD,
+)
+
+    // Reap magazines from the depot list until it is shrunk to its working set
+    // size. Each magazine has the number of rounds specified.
+
+    reap := list^.ReapLimit
+
+    IF reap > list^.Min THEN
+        // Don't reap more than was actually used since the last reaping.
+
+        reap = list^.Min
+    END
+
+    WHILE reap DO
+        magazine := MiAllocateMagazineFromDepot (
+            cache, // cache
+            list, // list
+        )
+
+        IF NOT magazine THEN
+            BREAK
+        END
+
+        MiDestroyAndFreeMagazine (
+            cache, // cache
+            magazine, // magazine
+            rounds, // rounds
+        )
+
+        reap -= 1
+    END
+END
+
+FN MiReapPoolCacheDepot (
+    IN cache : ^MiPoolCache,
+)
+
+    // Reap magazines from the pool cache depot until all unused entries are
+    // gone.
+
+    MiReapDepotList (
+        cache, // cache
+        &cache^.FullMagazineList, // list
+        cache^.MagazineType^.Size, // rounds
+    )
+
+    MiReapDepotList (
+        cache, // cache
+        &cache^.EmptyMagazineList, // list
+        0, // rounds
+    )
+END
+
+FN MiSetPoolCacheWsToZero (
+    IN cache : ^MiPoolCache,
+)
+
+    // Set pool cache working set size to zero by making all entries reapable.
+
+    ipl := MiLockPoolCacheDepot ( cache )
+
+    cache^.FullMagazineList.Min = cache^.FullMagazineList.Total
+    cache^.FullMagazineList.ReapLimit = cache^.FullMagazineList.Total
+
+    cache^.EmptyMagazineList.Min = cache^.EmptyMagazineList.Total
+    cache^.EmptyMagazineList.ReapLimit = cache^.EmptyMagazineList.Total
+
+    MiUnlockPoolCacheDepot ( cache, ipl )
+END
+
+FN MiUpdatePoolCacheWs (
+    IN cache : ^MiPoolCache,
+)
+
+    // Update the pool cache working set size after a round of reaping.
+
+    ipl := MiLockPoolCacheDepot ( cache )
+
+    cache^.FullMagazineList.ReapLimit = cache^.FullMagazineList.Min
+    cache^.FullMagazineList.Min = cache^.FullMagazineList.Total
+
+    cache^.EmptyMagazineList.ReapLimit = cache^.EmptyMagazineList.Min
+    cache^.EmptyMagazineList.Min = cache^.EmptyMagazineList.Total
+
+    MiUnlockPoolCacheDepot ( cache, ipl )
+END
+
+FN MiPurgeMagazinesPoolCache (
+    IN cache : ^MiPoolCache,
+)
+
+    // Purge the magazines of the given pool cache.
+    // If this is a result of a resize operation then the global cache list
+    // lock is held. If it's the result of an MmDeletePoolCache then no lock is
+    // needed.
+
+    // Purge the per-cpu pieces.
+
+    percpu := MiPoolCachePerCpuById (
+        cache, // cache
+        0, // id
+    )
+
+    cpus := KeQueryProcessorCount ()
+    i := 0
+
+    WHILE i < cpus DO
+        ipl := MiLockMagazineCache ( percpu )
+
+        currentmag := percpu^.Loaded
+        prevmag := percpu^.Previous
+        rounds := CAST percpu^.Rounds TO UWORD
+        prevrounds := CAST percpu^.PreviousRounds TO UWORD
+
+        percpu^.Loaded = NULLPTR
+        percpu^.Previous = NULLPTR
+        percpu^.Rounds = -1
+        percpu^.PreviousRounds = -1
+
+        MiUnlockMagazineCache ( percpu, ipl )
+
+        IF currentmag THEN
+            MiDestroyAndFreeMagazine (
+                cache, // cache
+                currentmag, // magazine
+                rounds, // rounds
+            )
+        END
+
+        IF prevmag THEN
+            MiDestroyAndFreeMagazine (
+                cache, // cache
+                prevmag, // magazine
+                prevrounds, // rounds
+            )
+        END
+
+        i += 1
+        percpu += MI_PCPCPU_SIZE
+    END
+
+    // Set the working set size of the pool cache to zero.
+
+    MiSetPoolCacheWsToZero ( cache )
+
+    // Reap down to the new working set size, which is zero.
+
+    MiReapPoolCacheDepot ( cache )
+END
+
+#SECTION "PAGEtext"
+EXPORT FN MmDeletePoolCache (
+    IN cache : ^MiPoolCache,
+)
+
+    // Delete a pool cache.
+
+    // Remove from global list.
+
+    MiLockPoolCacheList ()
+
+    RtlRemoveEntryList ( &cache^.MasterListEntry )
+
+    MiUnlockPoolCacheList ()
+
+    // Empty out the magazine depot.
+
+    MiPurgeMagazinesPoolCache ( cache )
+
+    // Verify that all slabs are gone.
+
+    KeAssert ( cache^.Slabs.ActiveSlabCount == 0 )
+
+    // Free pool cache to pool cache slab cache.
+    // Say that ten times fast.
+
+    MiFreeToSlabCache (
+        &MiPoolCacheSlabs, // scache
+        cache, // ptr
+    )
+END
+
+FN MiReloadMagazines (
+    IN percpu : ^MiPoolCachePerCpu,
+    IN newloaded : ^^VOID,
+    IN rounds : WORD,
+)
+
+    // Swap the previous and loaded magazines.
+
+    percpu^.Previous = percpu^.Loaded
+    percpu^.PreviousRounds = percpu^.Rounds
+
+    percpu^.Loaded = newloaded
+    percpu^.Rounds = rounds
+END
+
+EXPORT FN MmAllocateFromPoolCache (
+    IN cache : ^MiPoolCache,
+    IN wait : UWORD,
+) : ^VOID
+
+    // Allocate a block from the pool cache.
+
+    block : ^VOID
+    rounds : WORD
+
+    // Acquire a pointer to the pool cache's per-cpu magazine cache.
+
+    percpu := MiPoolCachePerCpuById (
+        cache, // cache
+        KeCurrentProcessorId (), // id
+    )
+
+    ipl := MiLockMagazineCache ( percpu )
+
+@Retry
+
+    // Try to grab a block from the loaded magazine.
+
+    rounds = percpu^.Rounds
+
+    IF rounds > 0 THEN
+        // NOTE: There's an intentional off-by-one index in order to skip
+        //       past the cache link pointer at the start of the magazine.
+
+        block = percpu^.Loaded[rounds]
+        percpu^.Rounds = rounds - 1
+
+        MiUnlockMagazineCache ( percpu, ipl )
+
+        RETURN block
+    END
+
+    // Loaded magazine was empty, try to reload.
+
+    rounds = percpu^.PreviousRounds
+
+    IF rounds > 0 THEN
+        MiReloadMagazines (
+            percpu, // percpu
+            percpu^.Previous, // newloaded
+            rounds, // rounds
+        )
+
+        GOTO Retry
+    END
+
+    // Can't reload the previous magazine, allocate from the depot.
+
+    magazine := MiAllocateMagazineFromDepot (
+        cache, // cache
+        &cache^.FullMagazineList, // list
+    )
+
+    IF magazine THEN
+        // Got a full magazine.
+
+        IF percpu^.Previous THEN
+            // First free the previous magazine to the empty magazine list.
+
+            KeAssert ( percpu^.PreviousRounds == 0 )
+
+            MiFreeMagazineToDepot (
+                cache, // cache
+                &cache^.EmptyMagazineList, // list
+                percpu^.Previous, // magazine
+            )
+        END
+
+        MiReloadMagazines (
+            percpu, // percpu
+            magazine, // newloaded
+            CAST percpu^.MagazineSize TO WORD, // rounds
+        )
+
+        GOTO Retry
+    END
+
+    MiUnlockMagazineCache ( percpu, ipl )
+
+    // Magazine layer wasn't of any help so we need to drop through to the slab
+    // layer of this cache.
+
+    block = MiAllocateFromSlabCache (
+        &cache^.Slabs, // scache
+        wait, // wait
+    )
+
+    IF NOT block THEN
+        RETURN NULLPTR
+    END
+
+    IF cache^.Constructor THEN
+        // Call the constructor.
+
+        IF OsError ( cache^.Constructor (
+            block, // ptr
+            cache^.Context, // context
+            wait, // wait
+        ) ) THEN
+
+            MiFreeToSlabCache (
+                &cache^.Slabs, // scache
+                block, // ptr
+            )
+
+            RETURN NULLPTR
+        END
+    END
+
+    RETURN block
+END
+
+EXPORT FN MmFreeToPoolCache (
+    IN cache : ^MiPoolCache,
+    IN ptr : ^VOID,
+)
+
+    // Free a block to the pool cache.
+
+    rounds : WORD
+
+    // Acquire a pointer to the pool cache's per-cpu magazine cache.
+
+    percpu := MiPoolCachePerCpuById (
+        cache, // cache
+        KeCurrentProcessorId (), // id
+    )
+
+    ipl := MiLockMagazineCache ( percpu )
+
+@Retry
+
+    rounds = percpu^.Rounds
+
+    IF (CAST rounds TO UWORD) < percpu^.MagazineSize THEN
+        // There's room in the loaded magazine.
+        // Do an intentional off-by-one to skip over the depot list link.
+
+        percpu^.Loaded[rounds + 1] = ptr
+
+        percpu^.Rounds = rounds + 1
+
+        MiUnlockMagazineCache ( percpu, ipl )
+
+        LEAVE
+    END
+
+    // Loaded magazine is full. Swap with previous if empty.
+
+    IF percpu^.PreviousRounds == 0 THEN
+        MiReloadMagazines (
+            percpu, // percpu
+            percpu^.Previous, // newloaded
+            0, // rounds
+        )
+
+        GOTO Retry
+    END
+
+    // Allocate a new magazine into the CPU layer.
+
+    magazine := MiAllocateMagazineFromDepot (
+        cache, // cache
+        &cache^.EmptyMagazineList, // list
+    )
+
+    IF magazine THEN
+        // Got an empty magazine to load.
+
+        IF percpu^.Previous THEN
+            // First free the previous magazine to the full magazine list.
+
+            KeAssert ( percpu^.PreviousRounds == percpu^.MagazineSize )
+
+            MiFreeMagazineToDepot (
+                cache, // cache
+                &cache^.FullMagazineList, // list
+                percpu^.Previous, // magazine
+            )
+        END
+
+        // Load it and free the block into it.
+
+        MiReloadMagazines (
+            percpu, // percpu
+            magazine, // newloaded
+            0, // rounds
+        )
+
+        GOTO Retry
+    END
+
+    // The depot is out of empty magazines.
+    // Unlock the magazine cache and allocate a new one.
+
+    magtype := cache^.MagazineType
+
+    MiUnlockMagazineCache ( percpu, ipl )
+
+    magazine = MmAllocateFromPoolCache (
+        magtype^.PoolCache, // cache
+        FALSE, // wait
+    )
+
+    ipl = MiLockMagazineCache ( percpu )
+
+    IF magazine THEN
+        // Got a magazine.
+
+        IF percpu^.MagazineSize != magtype^.Size THEN
+            // The magazine type size was changed.
+            // Retry.
+
+            MiUnlockMagazineCache ( percpu, ipl )
+
+            MmFreeToPoolCache (
+                magtype^.PoolCache, // cache
+                magazine, // ptr
+            )
+
+            ipl = MiLockMagazineCache ( percpu )
+
+            GOTO Retry
+        END
+
+        // Add to the depot and retry.
+
+        MiFreeMagazineToDepot (
+            cache, // cache
+            &cache^.EmptyMagazineList, // list
+            magazine, // magazine
+        )
+
+        GOTO Retry
+    END
+
+    MiUnlockMagazineCache ( percpu, ipl )
+
+    // Failed to get a magazine, our last resort is to just free the block
+    // directly to the slab layer.
+
+    MiDestroyAndFreePoolCacheBlock (
+        cache, // cache
+        ptr, // ptr
+    )
+END
+
+#SECTION "INITtext"
+FN MiInitializeMagazineType (
+    IN magtype : ^MiMagazineType,
+    IN name : ^UBYTE,
+    IN size : UWORD,
+)
+
+    // Initialize a magazine type.
+
+    magtype^.Size = size
+
+    magtype^.PoolCache = MmCreatePoolCache (
+        name, // name
+        (size + 1) * SIZEOF ^VOID, // size
+        MM_NONPAGED_POOL, // poolindex
+        'Magz', // tag
+        NULLPTR, // constructor
+        NULLPTR, // destructor
+        NULLPTR, // context
+    )
+
+#ENTERSECTION "INITtext"
+    IF NOT magtype^.PoolCache THEN
+        KeCrash ( "MiInitializeMagazineType: failed to create pool cache\n" )
+    END
+#LEAVESECTION
+
+END
+
+#SECTION "INITtext"
+FN MiInitializePoolCache ()
+
+    // Initialize the pool cache.
+
+    RtlInitializeList ( &MiMasterPoolCacheList )
+
+    // Initialize a slab cache to allocate pool caches from.
+
+    MiInitializeSlabCache (
+        &MiPoolCacheSlabs, // scache
+        MI_PC_SIZE + KeQueryProcessorCount () * MI_PCPCPU_SIZE, // size
+        MM_NONPAGED_POOL, // poolindex
+        'PoCa', // tag
+    )
+
+    // Initialize the magazine types.
+
+    MiInitializeMagazineType (
+        &MiMagazineTypeTable[MI_MAGAZINE_SMALL], // magtype
+        "Small Block Magazines", // name
+        MI_SMALL_MAGAZINE_SIZE, // size
+    )
+
+    MiInitializeMagazineType (
+        &MiMagazineTypeTable[MI_MAGAZINE_LARGE], // magtype
+        "Large Block Magazines", // name
+        MI_LARGE_MAGAZINE_SIZE, // size
+    )
+END

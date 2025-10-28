@@ -4,6 +4,8 @@
 
 #INCLUDE "Fwt.hjk"
 
+PUBLIC FwtDataCache : ^MiPoolCache
+
 FN (KeStartThreadF) FwtMainThread (
     IN context1 : UWORD,
     IN context2 : UWORD
@@ -45,12 +47,21 @@ FN FwtMain ()
     
     thread : ^PsThread
     
+    FwtDataCache = MmCreatePoolCache (
+        "Fireworks Data", // name
+        SIZEOF FwtData, // size
+        MM_NONPAGED_POOL, // poolindex
+        'FwtD', // tag
+        NULLPTR, // constructor
+        NULLPTR, // destructor
+        NULLPTR, // context
+    )
+
     FwtInitGraphics ()
 
     FwtFillScreen ( FWT_BACKGROUND_COLOR )
 
     name : RtlString
-
     RtlInitializeString ( &name, "FireworksMain" )
     
     status := PsCreateExecutiveThread (
@@ -64,6 +75,8 @@ FN FwtMain ()
     
     IF OsError ( status ) THEN
         RtlPrint ( "FwtMain: Could not create main thread\n" )
+
+        MmDeletePoolCache ( FwtDataCache )
 
         LEAVE
     END
