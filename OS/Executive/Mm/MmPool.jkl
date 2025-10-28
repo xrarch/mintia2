@@ -6,9 +6,6 @@
 
 #DEFINE MI_FULL_BLOCKS_PER_EXTENSION [(RTL_PAGE_SIZE / MI_BLOCK_MAX_SIZE - 1)]
 
-#DEFINE MI_BLOCK_LOG_BUCKETS [(MI_BLOCK_MAX_UNITS_SHIFT + 1)]
-#DEFINE MI_BLOCK_SIZE_BUCKETS [(1 << MI_BLOCK_MAX_UNITS_SHIFT) + 1]
-
 #DEFINE MI_BLOCK_SWIFT_MAGIC 0xC0
 #DEFINE MI_BLOCK_FREE_MAGIC 0xE4
 #DEFINE MI_BLOCK_INVALID_MAGIC 0xA5
@@ -40,39 +37,7 @@ STRUCT MiPoolExtension
     References : ULONG,
 END
 
-FNPTR MiPoolGetMemoryF (
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-    IN low : UWORD,
-    IN wait : UWORD,
-) : UWORD
-
-FNPTR MiPoolReturnMemoryF (
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-)
-
 #DEFINE MI_POOL_FLAG_USE_PRIVILEGED_MEM 1
-
-STRUCT MiPool
-    Lock : KeLock,
-
-    GetMemory : MiPoolGetMemoryF,
-    ReturnMemory : MiPoolReturnMemoryF,
-
-    BytesUsedInternally : UWORD,
-    BytesUsedExternally : UWORD,
-    BytesUsedPeak : UWORD,
-
-    LogListHeads : RtlListEntry[MI_BLOCK_LOG_BUCKETS],
-    SizeListHeads : RtlListEntry[MI_BLOCK_SIZE_BUCKETS],
-
-    Flags : UBYTE,
-END
-
-MiPoolRecords : MiPool[MM_MAXIMUM_POOL]
-
-MiPoolTable : ^MiPool[MM_MAXIMUM_POOL]
 
 FN MiAllocateExtensionSpace () : ^MiPoolExtension
 
@@ -139,6 +104,7 @@ FN MiFreeExtensionSpace (
 END
 
 FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
+    IN partition : ^MiPartition,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
@@ -154,7 +120,7 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
         ptecontents := pte[i]
 
         MiFreePage (
-            MiSystemPartition, // partition
+            partition, // partition
             MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
         )
 
@@ -172,12 +138,13 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
     // Uncharge the commit.
 
     MmUnchargeCommit (
-        MiSystemPartition, // partition
+        partition, // partition
         pages, // pages
     )
 END
 
 FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
+    IN partition : ^MiPartition,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN low : UWORD,
@@ -191,7 +158,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
     // First charge commit for these pages.
 
     MmChargeCommit (
-        MiSystemPartition, // partition
+        partition, // partition
         pages, // pages
         FALSE, // wait
     )
@@ -205,7 +172,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
 @Retry
 
         pfe := MiAllocatePage (
-            MiSystemPartition, // partition
+            partition, // partition
             FALSE, // zeroed
             low, // low
             MiVirtualAddressColor ( ptr ), // color
@@ -216,7 +183,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
                 // Caller said we should wait here for more pages.
 
                 MiWaitForPages (
-                    MiSystemPartition, // partition
+                    partition, // partition
                     low, // low
                 )
 
@@ -227,6 +194,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
 
             IF i THEN
                 MiFreeNonpagedMemory (
+                    partition, // partition
                     ptr, // ptr
                     i, // pages
                 )
@@ -249,6 +217,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
 END
 
 FN (MiPoolReturnMemoryF) MiFreePagedMemory (
+    IN partition : ^MiPartition,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
@@ -259,6 +228,7 @@ FN (MiPoolReturnMemoryF) MiFreePagedMemory (
 END
 
 FN (MiPoolGetMemoryF) MiGetPagedMemory (
+    IN partition : ^MiPartition,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN low : UWORD,
@@ -277,6 +247,7 @@ END
 #SECTION "INITtext"
 FN MiInitializePool (
     IN pool : ^MiPool,
+    IN node : ^MiNode,
 )
 
     // Initialize a pool.
@@ -287,6 +258,7 @@ FN MiInitializePool (
     pool^.BytesUsedExternally = 0
     pool^.BytesUsedPeak = 0
     pool^.Flags = 0
+    pool^.Partition = &node^.Partition
 
     i := 0
 
@@ -308,11 +280,15 @@ END
 #SECTION "INITtext"
 FN MiInitializeNonpagedPool (
     IN pool : ^MiPool,
+    IN node : ^MiNode,
 )
 
     // Initialize a nonpaged pool.
 
-    MiInitializePool ( pool )
+    MiInitializePool (
+        pool, // pool
+        node, // node
+    )
 
     pool^.GetMemory = &MiGetNonpagedMemory
     pool^.ReturnMemory = &MiFreeNonpagedMemory
@@ -321,50 +297,75 @@ END
 #SECTION "INITtext"
 FN MiInitializePagedPool (
     IN pool : ^MiPool,
+    IN node : ^MiNode,
 )
 
     // Initialize a paged pool.
 
-    MiInitializePool ( pool )
+    MiInitializePool (
+        pool, // pool
+        node, // node
+    )
 
     pool^.GetMemory = &MiGetPagedMemory
     pool^.ReturnMemory = &MiFreePagedMemory
 END
 
 #SECTION "INITtext"
-FN MiInitializePools ()
+FN MiInitializePools (
+    IN node : ^MiNode,
+)
 
     // Initialize the system pools as part of stage 1 Mm init.
 
-    MiInitializeNonpagedPool ( &MiPoolRecords[MM_NONPAGED_POOL] )
-    MiInitializeNonpagedPool ( &MiPoolRecords[MM_PRIVILEGED_POOL] )
+    MiInitializeNonpagedPool (
+        &node^.PoolRecords[MM_NONPAGED_POOL], // pool
+        node, // node
+    )
+
+    MiInitializeNonpagedPool (
+        &node^.PoolRecords[MM_PRIVILEGED_POOL], // pool
+        node, // node
+    )
 
     // Allow privileged pool to use privileged memory.
 
-    MiPoolRecords[MM_PRIVILEGED_POOL].Flags |= MI_POOL_FLAG_USE_PRIVILEGED_MEM
+    node^.PoolRecords[MM_PRIVILEGED_POOL].Flags |=
+        MI_POOL_FLAG_USE_PRIVILEGED_MEM
 
     // Set paged pool to point to nonpaged pool for now, since we don't have
     // enough initialized to deal with faults on paged pool yet.
 
-    MiPoolTable[MM_NONPAGED_POOL] = &MiPoolRecords[MM_NONPAGED_POOL]
-    MiPoolTable[MM_PAGED_POOL] = &MiPoolRecords[MM_NONPAGED_POOL]
-    MiPoolTable[MM_PRIVILEGED_POOL] = &MiPoolRecords[MM_PRIVILEGED_POOL]
+    node^.PoolTable[MM_NONPAGED_POOL] = &node^.PoolRecords[MM_NONPAGED_POOL]
+    node^.PoolTable[MM_PAGED_POOL] = &node^.PoolRecords[MM_NONPAGED_POOL]
+    node^.PoolTable[MM_PRIVILEGED_POOL] = &node^.PoolRecords[MM_PRIVILEGED_POOL]
 
     // Initialize pool cache.
 
-    MiInitializePoolCache ( MiBootNode )
+    MiInitializePoolCache ( node )
 END
 
 #SECTION "INITtext"
-FN MiInitializePagedPools ()
+FN MiInitializePagedPools (
+    IN node : ^MiNode,
+)
 
     // Initialize the paged pools as part of stage 2 Mm init.
 
-    MiInitializePagedPool ( &MiPoolRecords[MM_PAGED_POOL] )
-    MiInitializePagedPool ( &MiPoolRecords[MM_PAGE_TRACKING_POOL] )
+    MiInitializePagedPool (
+        &node^.PoolRecords[MM_PAGED_POOL], // pool
+        node, // node
+    )
 
-    MiPoolTable[MM_PAGED_POOL] = &MiPoolRecords[MM_PAGED_POOL]
-    MiPoolTable[MM_PAGE_TRACKING_POOL] = &MiPoolRecords[MM_PAGE_TRACKING_POOL]
+    MiInitializePagedPool (
+        &node^.PoolRecords[MM_PAGE_TRACKING_POOL], // pool
+        node, // node
+    )
+
+    node^.PoolTable[MM_PAGED_POOL] = &node^.PoolRecords[MM_PAGED_POOL]
+
+    node^.PoolTable[MM_PAGE_TRACKING_POOL] =
+        &node^.PoolRecords[MM_PAGE_TRACKING_POOL]
 END
 
 MiEightBitLog : UBYTE[256] = {
@@ -482,6 +483,7 @@ FN MiAllocateFromPool (
     ext := MiAllocateExtensionSpace ()
 
     IF NOT pool^.GetMemory (
+        pool^.Partition, // partition
         ext, // ptr
         1, // pages
         pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
@@ -506,7 +508,7 @@ FN MiAllocateFromPool (
         // Wait for free memory and retry.
 
         MiWaitForPages (
-            MiSystemPartition, // partition
+            pool^.Partition, // partition
             pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
         )
 
@@ -865,6 +867,7 @@ FN MiFreeToPool (
         // Return the extension.
 
         pool^.ReturnMemory (
+            pool^.Partition, // partition
             ext, // ptr
             1, // pages
         )
@@ -950,6 +953,7 @@ FN MiAllocatePageAligned (
     // Call the pool callback to initialize the allocation.
 
     IF NOT pool^.GetMemory (
+        pool^.Partition, // partition
         node^.StartVa, // ptr
         bytes, // pages
         pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
@@ -1004,7 +1008,10 @@ FN MiFreePageAligned (
     )
 #END
 
-    node^.U.Pool.Pool^.ReturnMemory (
+    pool := node^.U.Pool.Pool
+
+    pool^.ReturnMemory (
+        pool^.Partition, // partition
         ptr, // ptr
         (node^.EndVa - node^.StartVa) >> RTL_PAGE_SHIFT, // pages
     )
@@ -1047,7 +1054,7 @@ EXPORT FN MmAllocatePool (
 
 @Retry
 
-    pool := MiPoolTable[poolindex]
+    pool := MiBootNode^.PoolTable[poolindex]
 
     ptr : ^VOID
 

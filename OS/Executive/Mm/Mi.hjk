@@ -160,7 +160,9 @@ EXTERN MiCacheSpaceChunkPages : UWORD
 
 EXTERN FN MiInitializeSystemVa ()
 
-EXTERN FN MiInitializePools ()
+EXTERN FN MiInitializePools (
+    IN node : ^MiNode,
+)
 
 #DEFINE MI_QUICK_PER_CPU 4
 
@@ -374,8 +376,47 @@ ENUM MiMagazineTypes : UBYTE
     MI_MAGAZINE_MAX,
 END
 
+#DEFINE MI_BLOCK_LOG_BUCKETS [(MI_BLOCK_MAX_UNITS_SHIFT + 1)]
+#DEFINE MI_BLOCK_SIZE_BUCKETS [(1 << MI_BLOCK_MAX_UNITS_SHIFT) + 1]
+
+FNPTR MiPoolGetMemoryF (
+    IN partition : ^MiPartition,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+    IN low : UWORD,
+    IN wait : UWORD,
+) : UWORD
+
+FNPTR MiPoolReturnMemoryF (
+    IN partition : ^MiPartition,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
+
+STRUCT MiPool
+    Lock : KeLock,
+
+    Partition : ^MiPartition,
+
+    GetMemory : MiPoolGetMemoryF,
+    ReturnMemory : MiPoolReturnMemoryF,
+
+    BytesUsedInternally : UWORD,
+    BytesUsedExternally : UWORD,
+    BytesUsedPeak : UWORD,
+
+    LogListHeads : RtlListEntry[MI_BLOCK_LOG_BUCKETS],
+    SizeListHeads : RtlListEntry[MI_BLOCK_SIZE_BUCKETS],
+
+    Flags : UBYTE,
+END
+
 STRUCT MiNode
     Partition : MiPartition,
+
+    PoolRecords : MiPool[MM_MAXIMUM_POOL],
+
+    PoolTable : ^MiPool[MM_MAXIMUM_POOL],
 
     PoolCacheSlabs : MiSlabCache,
 

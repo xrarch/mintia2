@@ -46,8 +46,6 @@ FN MmInitializeProcess (
         KeCrash ( "NYI create address space\n" )
     END
 
-    // NYI
-
     RETURN OS_STATUS_SUCCESS
 END
 
@@ -61,7 +59,7 @@ FN MmUninitializeProcess (
     // We uninitialize everything, except for the page directory. We still need
     // that because we might be in the address space of that process right now.
 
-    // NYI
+    KeCrash ( "MmUninitializeProcess NYI\n" )
 END
 
 #SECTION "PAGEtext"
@@ -73,9 +71,11 @@ FN MmDeleteProcess (
 
     // First delete the page directory.
 
-    // NYI
+    KeCrash ( "MmDeleteProcess NYI\n" )
 
-    IF process^.Partition != &MiSystemPartition THEN
+    partition := process^.Partition
+
+    IF partition^.Node != &partition^.Node^.Partition THEN
         // Unreference the partition object.
 
         // Only do this after every page frame the process might possibly have
@@ -95,6 +95,7 @@ FN MmInitializeThread (
 
     // Initialize the thread's virtual memory state.
     // If it's a usermode thread, this involves creating a TEB and user stack.
+    // XXX Or don't, review discussions on runtime responsibility for this
 
     thread^.VmPrivileged = FALSE
 
@@ -113,8 +114,11 @@ FN MmUninitializeThread (
 
     // Uninitialize the thread's virtual memory state.
     // If it's a usermode thread, free its TEB and user stack.
+    // XXX Or don't, review discussions on runtime responsibility for this
 
-    // NYI
+    IF thread^.Paged^.Mode == KE_USER_MODE THEN
+        KeCrash ( "MmUninitializeThread NYI\n" )
+    END
 END
 
 #SECTION "PAGEtext"
