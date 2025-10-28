@@ -6,21 +6,6 @@
 
 #INCLUDE "Mi.hjk"
 
-STRUCT MiSlabCache
-    Size : UWORD,
-
-    Lock : KeLock,
-
-    FreeListHead : RtlListEntry,
-
-    Tag : ULONG,
-    SlabSize : ULONG,
-    ActiveSlabCount : ULONG,
-
-    BlocksPerSlab : UBYTE,
-    PoolIndex : UBYTE,
-END
-
 #DEFINE MI_HEADER_FITS_IN_ALIGNMENT [
     (SIZEOF MiSlabHeader <= (RTL_ALIGN_BYTES - SIZEOF ^VOID))
 ]
@@ -78,6 +63,8 @@ STRUCT MiPoolCache
     Context : ^VOID,
 
     MagazineType : ^MiMagazineType,
+
+    Node : ^MiNode,
 END
 
 #DEFINE MI_PCPCPU_SIZE [((SIZEOF MiPoolCachePerCpu + KE_CACHE_ALIGN - 1) &
@@ -90,18 +77,12 @@ END
     (CAST cache + MI_PC_SIZE + (id * MI_PCPCPU_SIZE) TO ^MiPoolCachePerCpu)
 ]
 
-MiPoolCacheSlabs : MiSlabCache
-
-MiMasterPoolCacheList : RtlListEntry
-
-MiPoolCacheListLock : KeLock = KE_INITIAL_LOCK
-
-#MACRO MiLockPoolCacheList () [
-    KeAcquireLockExclusive ( &MiPoolCacheListLock )
+#MACRO MiLockPoolCacheList ( node ) [
+    KeAcquireLockExclusive ( &(node)^.PoolCacheListLock )
 ]
 
-#MACRO MiUnlockPoolCacheList () [
-    KeReleaseLock ( &MiPoolCacheListLock )
+#MACRO MiUnlockPoolCacheList ( node ) [
+    KeReleaseLock ( &(node)^.PoolCacheListLock )
 ]
 
 #MACRO MiLockPoolCacheDepot ( cache ) [
@@ -127,25 +108,12 @@ MiPoolCacheListLock : KeLock = KE_INITIAL_LOCK
     NOTHING (list)^.ReapLimit = 0
 ]
 
-STRUCT MiMagazineType
-    PoolCache : ^MiPoolCache,
-    Size : UBYTE,
-END
-
-ENUM MiMagazineTypes : UBYTE
-    MI_MAGAZINE_SMALL,
-    MI_MAGAZINE_LARGE,
-
-    MI_MAGAZINE_MAX,
-END
-
-MiMagazineTypeTable : MiMagazineType[MI_MAGAZINE_MAX]
-
 #DEFINE MI_LARGE_MAGAZINE_SIZE 4
 #DEFINE MI_SMALL_MAGAZINE_SIZE 8
 
 #SECTION "PAGEtext"
 FN MiInitializeSlabCache (
+    IN node : ^MiNode,
     IN scache : ^MiSlabCache,
     IN size : UWORD,
     IN poolindex : UWORD,
@@ -167,6 +135,7 @@ FN MiInitializeSlabCache (
     scache^.PoolIndex = poolindex
     scache^.Tag = tag
     scache^.ActiveSlabCount = 0
+    scache^.Node = node
     
     RtlInitializeList ( &scache^.FreeListHead )
 
@@ -264,6 +233,7 @@ FN MiExtendSlabCache (
     // if there's a failure.
 
     slab := MmAllocatePool (
+        // scache^.Node, // node
         scache^.PoolIndex, // poolindex
         scache^.SlabSize, // bytes
         scache^.Tag, // tag
@@ -431,6 +401,7 @@ END
 
 #SECTION "PAGEtext"
 EXPORT FN MmCreatePoolCache (
+    IN node : ^MiNode,
     IN name : ^UBYTE,
     IN size : UWORD,
     IN poolindex : UWORD,
@@ -443,7 +414,7 @@ EXPORT FN MmCreatePoolCache (
     // Allocate and return a new pool cache structure.
 
     cache : ^MiPoolCache = MiAllocateFromSlabCache (
-        &MiPoolCacheSlabs, // scache
+        &node^.PoolCacheSlabs, // scache
         TRUE, // wait
     )
 
@@ -456,14 +427,16 @@ EXPORT FN MmCreatePoolCache (
     // pool block.
 
     IF size < MI_SMALL_POOL_BLOCK THEN
-        cache^.MagazineType = &MiMagazineTypeTable[MI_MAGAZINE_SMALL]
+        cache^.MagazineType = &node^.MagazineTypeTable[MI_MAGAZINE_SMALL]
     ELSE
-        cache^.MagazineType = &MiMagazineTypeTable[MI_MAGAZINE_LARGE]
+        cache^.MagazineType = &node^.MagazineTypeTable[MI_MAGAZINE_LARGE]
     END
 
     // Save the name of the cache.
 
     cache^.Name = name
+
+    cache^.Node = node
 
     // Save constructor, destructor, and context used for both.
 
@@ -474,6 +447,7 @@ EXPORT FN MmCreatePoolCache (
     // Initialize the slab cache used for allocating cached blocks.
 
     MiInitializeSlabCache (
+        node, // node
         &cache^.Slabs, // scache
         size, // size
         poolindex, // poolindex
@@ -489,10 +463,10 @@ EXPORT FN MmCreatePoolCache (
 
     // Insert on global list.
 
-    MiLockPoolCacheList ()
+    MiLockPoolCacheList ( node )
 
     RtlInsertAtTailList (
-        &MiMasterPoolCacheList, // head
+        &node^.PoolCacheList, // head
         &cache^.MasterListEntry, // entry
     )
 
@@ -521,7 +495,7 @@ EXPORT FN MmCreatePoolCache (
         percpu += MI_PCPCPU_SIZE
     END
 
-    MiUnlockPoolCacheList ()
+    MiUnlockPoolCacheList ( node )
 
     RETURN cache
 END
@@ -787,13 +761,15 @@ EXPORT FN MmDeletePoolCache (
 
     // Delete a pool cache.
 
+    node := cache^.Node
+
     // Remove from global list.
 
-    MiLockPoolCacheList ()
+    MiLockPoolCacheList ( node )
 
     RtlRemoveEntryList ( &cache^.MasterListEntry )
 
-    MiUnlockPoolCacheList ()
+    MiUnlockPoolCacheList ( node )
 
     // Empty out the magazine depot.
 
@@ -807,7 +783,7 @@ EXPORT FN MmDeletePoolCache (
     // Say that ten times fast.
 
     MiFreeToSlabCache (
-        &MiPoolCacheSlabs, // scache
+        &node^.PoolCacheSlabs, // scache
         cache, // ptr
     )
 END
@@ -927,6 +903,7 @@ EXPORT FN MmAllocateFromPoolCache (
         // Call the constructor.
 
         IF OsError ( cache^.Constructor (
+            cache^.Node, // node
             block, // ptr
             cache^.Context, // context
             wait, // wait
@@ -1081,6 +1058,7 @@ END
 
 #SECTION "INITtext"
 FN MiInitializeMagazineType (
+    IN node : ^MiNode,
     IN magtype : ^MiMagazineType,
     IN name : ^UBYTE,
     IN size : UWORD,
@@ -1091,6 +1069,7 @@ FN MiInitializeMagazineType (
     magtype^.Size = size
 
     magtype^.PoolCache = MmCreatePoolCache (
+        node, // node
         name, // name
         (size + 1) * SIZEOF ^VOID, // size
         MM_NONPAGED_POOL, // poolindex
@@ -1109,16 +1088,21 @@ FN MiInitializeMagazineType (
 END
 
 #SECTION "INITtext"
-FN MiInitializePoolCache ()
+FN MiInitializePoolCache (
+    IN node : ^MiNode,
+)
 
     // Initialize the pool cache.
 
-    RtlInitializeList ( &MiMasterPoolCacheList )
+    KeInitializeLock ( &node^.PoolCacheListLock )
+
+    RtlInitializeList ( &node^.PoolCacheList )
 
     // Initialize a slab cache to allocate pool caches from.
 
     MiInitializeSlabCache (
-        &MiPoolCacheSlabs, // scache
+        node, // node
+        &node^.PoolCacheSlabs, // scache
         MI_PC_SIZE + KeQueryProcessorCount () * MI_PCPCPU_SIZE, // size
         MM_NONPAGED_POOL, // poolindex
         'PoCa', // tag
@@ -1127,13 +1111,15 @@ FN MiInitializePoolCache ()
     // Initialize the magazine types.
 
     MiInitializeMagazineType (
-        &MiMagazineTypeTable[MI_MAGAZINE_SMALL], // magtype
+        node, // node
+        &node^.MagazineTypeTable[MI_MAGAZINE_SMALL], // magtype
         "Small Block Magazines", // name
         MI_SMALL_MAGAZINE_SIZE, // size
     )
 
     MiInitializeMagazineType (
-        &MiMagazineTypeTable[MI_MAGAZINE_LARGE], // magtype
+        node, // node
+        &node^.MagazineTypeTable[MI_MAGAZINE_LARGE], // magtype
         "Large Block Magazines", // name
         MI_LARGE_MAGAZINE_SIZE, // size
     )

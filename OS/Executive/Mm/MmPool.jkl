@@ -154,7 +154,7 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
         ptecontents := pte[i]
 
         MiFreePage (
-            &MiSystemPartition, // partition
+            MiSystemPartition, // partition
             MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
         )
 
@@ -172,7 +172,7 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
     // Uncharge the commit.
 
     MmUnchargeCommit (
-        &MiSystemPartition, // partition
+        MiSystemPartition, // partition
         pages, // pages
     )
 END
@@ -191,7 +191,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
     // First charge commit for these pages.
 
     MmChargeCommit (
-        &MiSystemPartition, // partition
+        MiSystemPartition, // partition
         pages, // pages
         FALSE, // wait
     )
@@ -205,7 +205,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
 @Retry
 
         pfe := MiAllocatePage (
-            &MiSystemPartition, // partition
+            MiSystemPartition, // partition
             FALSE, // zeroed
             low, // low
             MiVirtualAddressColor ( ptr ), // color
@@ -216,7 +216,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
                 // Caller said we should wait here for more pages.
 
                 MiWaitForPages (
-                    &MiSystemPartition, // partition
+                    MiSystemPartition, // partition
                     low, // low
                 )
 
@@ -352,7 +352,7 @@ FN MiInitializePools ()
 
     // Initialize pool cache.
 
-    MiInitializePoolCache ()
+    MiInitializePoolCache ( MiBootNode )
 END
 
 #SECTION "INITtext"
@@ -506,7 +506,7 @@ FN MiAllocateFromPool (
         // Wait for free memory and retry.
 
         MiWaitForPages (
-            &MiSystemPartition, // partition
+            MiSystemPartition, // partition
             pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
         )
 

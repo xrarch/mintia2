@@ -93,10 +93,14 @@ STRUCT MiPartition
 
     CommitLock : KeLock,
 
+    Node : ^MiNode,
+
     SizeLevel : UBYTE,
 END
 
-EXTERN MiSystemPartition : MiPartition
+EXTERN MiSystemPartition : ^MiPartition
+
+EXTERN MiBootNode : ^MiNode
 
 EXTERN MiPfnDatabase : ^MiPfe
 
@@ -120,6 +124,7 @@ EXTERN MiSystemSize : UWORD
 
 EXTERN FN MiInitializePartitionStage1 (
     IN partition : ^MiPartition,
+    IN node : ^MiNode,
 )
 
 EXTERN FN MiSetPartitionSize (
@@ -311,7 +316,9 @@ EXTERN FN MiInitializeMdlZones ()
     ((vaddr >> RTL_PAGE_SHIFT) & (MI_COLOR_COUNT - 1))
 ]
 
-EXTERN FN MiInitializePoolCache ()
+EXTERN FN MiInitializePoolCache (
+    IN node : ^MiNode,
+)
 
 // Internal pool constants
 
@@ -337,3 +344,44 @@ EXTERN FN MiInitializePoolCache ()
 
 #DEFINE MI_BLOCK_MAX_REQUEST_UNITS [((1 << MI_BLOCK_MAX_UNITS_SHIFT) - 4)]
 #DEFINE MI_BLOCK_MAX_REQUEST_SIZE [(MI_BLOCK_MAX_REQUEST_UNITS << MI_BLOCK_SIZE_SHIFT)]
+
+STRUCT MiSlabCache
+    Size : UWORD,
+
+    Lock : KeLock,
+
+    FreeListHead : RtlListEntry,
+
+    Node : ^MiNode,
+
+    Tag : ULONG,
+    SlabSize : ULONG,
+    ActiveSlabCount : ULONG,
+
+    BlocksPerSlab : UBYTE,
+    PoolIndex : UBYTE,
+END
+
+STRUCT MiMagazineType
+    PoolCache : ^MiPoolCache,
+    Size : UBYTE,
+END
+
+ENUM MiMagazineTypes : UBYTE
+    MI_MAGAZINE_SMALL,
+    MI_MAGAZINE_LARGE,
+
+    MI_MAGAZINE_MAX,
+END
+
+STRUCT MiNode
+    Partition : MiPartition,
+
+    PoolCacheSlabs : MiSlabCache,
+
+    MagazineTypeTable : MiMagazineType[MI_MAGAZINE_MAX],
+
+    PoolCacheList : RtlListEntry,
+
+    PoolCacheListLock : KeLock,
+END

@@ -8,7 +8,11 @@
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 #INCLUDE "<ll>/Xlo.hjk"
 
-PUBLIC MiSystemPartition : MiPartition
+MiBootNodeStatic : MiNode
+
+PUBLIC MiBootNode : ^MiNode
+
+PUBLIC MiSystemPartition : ^MiPartition
 
 PUBLIC MiPfnDatabase : ^MiPfe
 
@@ -52,7 +56,7 @@ FN MmJettisonUnusedResources ()
     listhead := &KeLoaderBlock.ResourceListHead
     listentry := listhead^.Next
 
-    partition := &MiSystemPartition
+    partition := MiSystemPartition
 
     WHILE listentry != listhead DO
         rsrc := CONTAINEROF listentry TO BlResource.Entry
@@ -288,7 +292,7 @@ FN MiReclaimMemory ()
 
     // Reclaim physical memory regions.
 
-    sys := &MiSystemPartition
+    sys := MiSystemPartition
 
     listhead = &KeLoaderBlock.DescriptorListHead
     listentry = listhead^.Next
@@ -337,7 +341,7 @@ FN MiInitializeZeroedPage ()
     // Allocate the constantly zeroed page frame.
 
     MiConstantZeroPfe = MiAllocatePage (
-        &MiSystemPartition, // partition
+        MiSystemPartition, // partition
         TRUE, // zeroed
         TRUE, // low
         0, // color
@@ -356,7 +360,11 @@ FN MmInitializeStage1 ()
 
     KeAssert ( SIZEOF MiPfe <= MI_PFE_SIZE )
 
-    sys := &MiSystemPartition
+    MiBootNode = &MiBootNodeStatic
+
+    MiSystemPartition = &MiBootNodeStatic.Partition
+
+    sys := MiSystemPartition
 
     // Copy the address of the PFN database.
 
@@ -364,7 +372,10 @@ FN MmInitializeStage1 ()
 
     // Initialize the integral data structures of the system partition.
 
-    MiInitializePartitionStage1 ( sys )
+    MiInitializePartitionStage1 (
+        sys, // partition
+        MiBootNode, // node
+    )
 
     // Walk the memory descriptor list.
 
@@ -456,7 +467,8 @@ FN MmInitializeStage1 ()
 
     // Set the idle process's partition to the system partition.
 
-    KeIdleProcess.Partition = &MiSystemPartition
+    KeIdleProcess.Partition = sys
+    KeIdleProcess.Node = MiBootNode
 
     // Reclaim boot time memory. Nothing in "loader space" is safe to access
     // after this point.

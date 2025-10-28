@@ -78,6 +78,7 @@ STRUCT PsProcess
     Paged : ^PsPagedProcess,
 
     Partition : ^MiPartition,
+    Node : ^MiNode,
 
     TerminationEvent : KeEvent,
 
@@ -212,6 +213,14 @@ EXTERN KeIdleProcess : PsProcess
 
 #MACRO PsQuotaBlock ( process ) [
     ((process)^.Paged^.HandleTable.QuotaBlock)
+]
+
+#MACRO PsCurrentPartition () [
+    (PsCurrentProcess()^.Partition)
+]
+
+#MACRO PsCurrentNode () [
+    (PsCurrentProcess()^.Node)
 ]
 
 EXTERN FN PsBlockRundownProcess (

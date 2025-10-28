@@ -239,7 +239,7 @@ FN MiInitializeSystemVa ()
     //
     //                    Maximum size on 32-bit is capped at 256MB.
 
-    size := MiSystemPartition.SizeLevel
+    size := MiSystemPartition^.SizeLevel
 
     KeAssert ( SIZEOF MiChunkEntry <= SIZEOF MiPte )
 
@@ -617,7 +617,7 @@ FN MiAllocateDynamicSpace (
         // Caller requested wait upon being unable to allocate a node.
 
         MiWaitForPages (
-            &MiSystemPartition, // partition
+            MiSystemPartition, // partition
             FALSE, // low
         )
 

@@ -21,7 +21,11 @@ FN MmInitializeProcess (
         partition = parentprocess^.Partition
     END
 
-    IF partition != &MiSystemPartition THEN
+    IF partition^.Node != &partition^.Node^.Partition THEN
+        // This is not a partition inherent to a NUMA node so we need to up the
+        // refcount. NUMA node partitions are eternal and don't have refcounts,
+        // so we can't do this in that case.
+
         ObReferenceObject ( partition )
     END
 
@@ -31,6 +35,7 @@ FN MmInitializeProcess (
     // Set the partition object.
 
     process^.Partition = partition
+    process^.Node = partition^.Node
 
     IF NOT PsSystemProcess THEN
         // This is the system process, so give it the system page directory.

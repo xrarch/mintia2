@@ -23,11 +23,14 @@ END
 
 FN MiInitializePartitionStage1 (
     IN partition : ^MiPartition,
+    IN node : ^MiNode,
 )
 
     // Perform the first part of initialization for a memory partition.
     // This is split in two so that we can use it while initializing the system
     // partition.
+
+    partition^.Node = node
 
     // Initialize the locks.
 
@@ -549,7 +552,7 @@ FN MiWaitForPages (
         )
 
         IF status == OS_STATUS_WAIT_TIMEOUT THEN
-            IF partition == &MiSystemPartition THEN
+            IF partition == MiSystemPartition THEN
                 // If the system partition is deadlocked, this is a fatal
                 // condition.
 
@@ -708,7 +711,7 @@ FN MmGetSystemSize () : UWORD
 
     // Get the size of the system partition.
 
-    RETURN MiSystemPartition.SizeLevel
+    RETURN MiSystemPartition^.SizeLevel
 END
 
 #SECTION "PAGEtext"
