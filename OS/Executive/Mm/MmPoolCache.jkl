@@ -674,16 +674,11 @@ FN MiUpdatePoolCacheWs (
     MiUnlockPoolCacheDepot ( cache, ipl )
 END
 
-FN MiPurgeMagazinesPoolCache (
+FN MiPurgeCpuMagazinesPoolCache (
     IN cache : ^MiPoolCache,
 )
 
-    // Purge the magazines of the given pool cache.
-    // If this is a result of a resize operation then the global cache list
-    // lock is held. If it's the result of an MmDeletePoolCache then no lock is
-    // needed.
-
-    // Purge the per-cpu pieces.
+    // Purge the per-CPU magazine caches.
 
     percpu := MiPoolCachePerCpuById (
         cache, // cache
@@ -727,6 +722,18 @@ FN MiPurgeMagazinesPoolCache (
         i += 1
         percpu += MI_PCPCPU_SIZE
     END
+END
+
+FN MiPurgeMagazinesPoolCache (
+    IN cache : ^MiPoolCache,
+)
+
+    // Purge the magazines of the given pool cache.
+    // If this is a result of a resize operation then the global cache list
+    // lock is held. If it's the result of an MmDeletePoolCache then no lock is
+    // needed.
+
+    MiPurgeCpuMagazinesPoolCache ( cache )
 
     // Set the working set size of the pool cache to zero.
 
@@ -1088,11 +1095,10 @@ FN MiAdjustPoolCaches (
         cache := CONTAINEROF listentry TO MiPoolCache.MasterListEntry
 
         IF purge THEN
-            MiPurgeMagazinesPoolCache ( cache )
-
-        ELSE
-            MiAdjustPoolCache ( cache )
+            MiPurgeCpuMagazinesPoolCache ( cache )
         END
+
+        MiAdjustPoolCache ( cache )
 
         listentry = listentry^.Next
     END
@@ -1101,7 +1107,7 @@ FN MiAdjustPoolCaches (
 END
 
 #DEFINE MI_POOL_ADJUSTMENT_INTERVAL_MS 5000
-#DEFINE MI_POOL_PURGE_INTERVAL_MS 60000
+#DEFINE MI_POOL_PURGE_INTERVAL_MS 10000
 
 FN MiEnqueuePoolCacheAdjustment (
     IN node : ^MiNode,
@@ -1139,6 +1145,12 @@ FN (ExWorkItemF) MiAdjustPoolCachesWorker (
 
     IF purge THEN
         context2 = 0
+
+        IF node^.Partition.AvailablePageCount >=
+            node^.Partition.SufficientPageCount THEN
+
+            purge = 0
+        END
     END
 
     MiAdjustPoolCaches (
