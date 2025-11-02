@@ -37,6 +37,11 @@ FN (ExWorkItemF) MiChuckPagedPoolCacheWorker (
         )
     END
 
+    // Language-level BARRIER to stop the compiler from reordering the below
+    // store above any of the work above.
+
+    BARRIER
+
     node^.PgPoolCacheChuckActive = FALSE
 END
 
@@ -129,6 +134,12 @@ FN MmBalanceManager ()
 
                 IF NOT node^.PgPoolCacheChuckActive THEN
                     node^.PgPoolCacheChuckActive = TRUE
+
+                    // Language BARRIER to stop the above write from being
+                    // reordered by the compiler after the below work item
+                    // enqueue.
+
+                    BARRIER
 
                     ExEnqueueWorkItem (
                         &node^.PgPoolCacheChuckItem, // item

@@ -2,6 +2,16 @@
 // Implements support for Partition objects.
 //
 
+// Partial NUMA support is implemented throughout the memory manager, mostly to
+// make it easier to add full NUMA support later. Some things that would need
+// doing in order to make it really great:
+//
+//  o Splitting the worker thread pool to be per-node.
+//  o Splitting the object and thread reaper lists to be per-node.
+//  o Splitting the object allocation caches (possibly by remodeling ObType to
+//    be itself a per-node thing).
+//  o Splitting the IO packet allocation caches and other caches.
+
 #INCLUDE "Mi.hjk"
 
 FN MiInitializeAvailablePageList (
