@@ -23,6 +23,8 @@ FN (ExWorkItemF) MiChuckPagedPoolCacheWorker (
 
     IF node == MiBootNode THEN
         // Also aggressively reap threads and objects.
+        // TODO: Make the reaper lists for these things per-node.
+        //       The worker thread pool should also be made per-node.
 
         PsReaperWorker (
             0, // context1
@@ -120,7 +122,7 @@ FN MmBalanceManager ()
         ELSEIF status == 1 THEN
             // Memory is low.
 
-            IF &node^.Partition == partition THEN
+            IF MiIsPartitionPhysical ( partition ) THEN
                 // Enqueue a work item to chuck the paged pool caches from the
                 // context of another thread, since this one cannot fault on
                 // paged pool.
