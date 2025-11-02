@@ -13,104 +13,21 @@ STRUCT PspThreadContext
     Flags : ULONG,
 END
 
-#DEFINE PSP_TURNSTILE_EXTENSION 16
+PUBLIC PspTurnstileCache : ^MiPoolCache
 
-PspTurnstileLock : KeLock = KE_INITIAL_LOCK
+#MACRO PspAllocateTurnstile () [
+    MmAllocateFromPoolCache (
+        PspTurnstileCache, // cache
+        TRUE, // wait
+    )
+]
 
-PUBLIC PspTurnstileZone : MmZoneHeader
-
-#SECTION "PAGEtext"
-FN PspAllocateTurnstile () : ^KiTurnstile
-
-    // Allocate a turnstile from the free list.
-
-    KeAcquireLockExclusive ( &PspTurnstileLock )
-
-    turnstile := CAST MmAllocateZone (
-        &PspTurnstileZone, // zone
-    ) TO ^KiTurnstile
-
-    IF NOT turnstile THEN
-        // Allocate a new hunk of turnstiles.
-        // Do this outside the turnstile list lock to avoid deadlocking with the
-        // thread reaper.
-
-        KeReleaseLock ( &PspTurnstileLock )
-
-        hunk := MmAllocatePool (
-            MM_NONPAGED_POOL, // poolindex
-            SIZEOF KiTurnstile * PSP_TURNSTILE_EXTENSION +
-            MM_ZONE_OVERHEAD, // bytes
-            'Turn', // tag
-            TRUE, // wait
-        )
-
-        KeAcquireLockExclusive ( &PspTurnstileLock )
-
-        // Try to grab one again.
-
-        turnstile = MmAllocateZone (
-            &PspTurnstileZone, // zone
-        )
-
-        IF turnstile THEN
-            // Someone else extended it. No need to waste memory on our
-            // extension.
-
-            IF hunk THEN
-                MmFreePool (
-                    hunk, // ptr
-                    'Turn', // tag
-                )
-            END
-
-            GOTO Exit
-        END
-
-        IF NOT hunk THEN
-            // We failed to allocate a hunk and also failed on the second
-            // attempt to get a turnstile from the zone, so just bail and
-            // return NULLPTR.
-
-            GOTO Exit
-        END
-
-        // Extend the zone starting from the second turnstile in the hunk.
-        // We take the first for ourselves.
-
-        MmExtendZone (
-            &PspTurnstileZone, // zone
-            hunk + SIZEOF KiTurnstile, // hunk
-            SIZEOF KiTurnstile * (PSP_TURNSTILE_EXTENSION - 1) +
-            MM_ZONE_OVERHEAD, // bytes
-        )
-
-        turnstile = hunk
-    END
-
-@Exit
-
-    KeReleaseLock ( &PspTurnstileLock )
-
-    RETURN turnstile
-END
-
-#SECTION "PAGEtext"
-FN PspFreeTurnstile (
-    IN turnstile : ^KiTurnstile,
-)
-
-    // Free a turnstile to the free list.
-
-    KeAcquireLockExclusive ( &PspTurnstileLock )
-
-    MmFreeZone (
-        &PspTurnstileZone, // zone
+#MACRO PspFreeTurnstile ( turnstile ) [
+    MmFreeToPoolCache (
+        PspTurnstileCache, // cache
         turnstile, // ptr
     )
-
-    KeReleaseLock ( &PspTurnstileLock )
-END
+]
 
 #SECTION "PAGEtext"
 FN PspPerformEagerThreadCleanup (

@@ -240,12 +240,24 @@ FN PsInitializeStage1 ()
 
     // Stage 1 initialization for Ps.
 
-    // Initialize the turnstile zone.
+    // Initialize the turnstile cache.
 
-    MmInitializeZone (
-        &PspTurnstileZone, // zone
-        SIZEOF KiTurnstile, // blocksize
+#LEAVESECTION
+
+    PspTurnstileCache = MmCreatePoolCache (
+        PsCurrentNode (), // node
+        "Turnstile Cache", // name
+        SIZEOF KiTurnstile, // size
+        MM_NONPAGED_POOL, // poolindex
+        'Turn', // tag
     )
+
+#ENTERSECTION "INITtext"
+
+    IF NOT PspTurnstileCache THEN
+        KeCrash ( "%sfailed to create turnstile cache\n",
+            "PsInitializeStage1: " )
+    END
 
     // Initialize the PID/TID table.
 

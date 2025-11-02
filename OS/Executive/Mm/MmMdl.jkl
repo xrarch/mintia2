@@ -5,13 +5,14 @@
 #INCLUDE "Mi.hjk"
 
 #DEFINE MI_SMALL_PAGES 8
-#DEFINE MI_SMALL_MDLS 40
 
-MiSmallMdlZone : MmZoneHeader
+MiSmallMdlCache : ^MmPoolCache
 
 #ENTERSECTION "INITtext"
 
-FN MiInitializeMdlZones ()
+FN MiInitializeMdlCache (
+    IN node : ^MiNode,
+)
 
     // Initialize the zones we use for quickly allocating MDLs.
 
@@ -22,27 +23,17 @@ FN MiInitializeMdlZones ()
         mdlsize * MI_SMALL_MDLS + MM_ZONE_OVERHEAD )
 #END
 
-    hunk := MmAllocatePool (
+    node^.MdlCache = MmCreatePoolCache (
+        node, // node
+        "Mdl Cache", // name
+        mdlsize, // size
         MM_NONPAGED_POOL, // poolindex
-        mdlsize * MI_SMALL_MDLS + MM_ZONE_OVERHEAD, // bytes
         'MDLz', // tag
-        FALSE, // wait
     )
 
-    IF NOT hunk THEN
-        KeCrash ( "MiInitializeMdlZones: failed to create zones\n" )
+    IF NOT node^.MdlCache THEN
+        KeCrash ( "MiInitializeMdlCache: failed to create cache\n" )
     END
-
-    MmInitializeZone (
-        &MiSmallMdlZone, // zone
-        mdlsize, // blocksize
-    )
-
-    MmExtendZone (
-        &MiSmallMdlZone, // zone
-        hunk, // hunk
-        mdlsize * MI_SMALL_MDLS + MM_ZONE_OVERHEAD, // bytes
-    )
 END
 
 #LEAVESECTION

@@ -71,43 +71,6 @@ EXTERN FN MmGetOverheadOfBytes (
     IN bytes : UWORD,
 ) : UWORD
 
-STRUCT MmZoneHeader
-    BlockSize : UWORD,
-    FreeListHead : ^MiFreeZoneBlock,
-    ChunkListHead : ^MiZoneChunk,
-END
-
-STRUCT MiZoneChunk
-    Next : ^MiZoneChunk,
-END
-
-#DEFINE MM_ZONE_OVERHEAD [(SIZEOF MiZoneChunk)]
-
-EXTERN FN MmInitializeZone (
-    IN zone : ^MmZoneHeader,
-    IN blocksize : UWORD,
-)
-
-EXTERN FN MmExtendZone (
-    IN zone : ^MmZoneHeader,
-    IN hunk : ^VOID,
-    IN bytes : UWORD,
-)
-
-EXTERN FN MmEmptyZone (
-    IN zone : ^MmZoneHeader,
-    IN tag : UWORD,
-)
-
-EXTERN FN MmAllocateZone (
-    IN zone : ^MmZoneHeader,
-) : ^VOID
-
-EXTERN FN MmFreeZone (
-    IN zone : ^MmZoneHeader,
-    IN ptr : ^VOID,
-)
-
 EXTERN FN MmChargeCommit (
     IN partition : ^MiPartition,
     IN pages : UWORD,

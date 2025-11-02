@@ -4,17 +4,11 @@
 
 #INCLUDE "Iop.hjk"
 
-IopPacketZones : MmZoneHeader[IO_PACKET_TYPE_MAX]
+IopPacketCaches : ^MiPoolCache[IO_PACKET_TYPE_MAX]
 
-IopPacketZoneLock : KeLock = KE_INITIAL_LOCK
+IopLocationCache : ^MiPoolCache
 
-IopLocationZone : MmZoneHeader
-
-IopLocationZoneLock : KeLock = KE_INITIAL_LOCK
-
-IopTrampolineZone : MmZoneHeader
-
-IopTrampolineZoneLock : KeLock = KE_INITIAL_LOCK
+IopTrampolineCache : ^MiPoolCache
 
 IopPacketSize : UBYTE[IO_PACKET_TYPE_MAX] = {
     [IO_PACKET_TYPE_NORMAL] = SIZEOF IoPacket,
@@ -23,40 +17,24 @@ IopPacketSize : UBYTE[IO_PACKET_TYPE_MAX] = {
 
 #ENTERSECTION "INITtext"
 
-FN IopInitPacketZone (
-    IN zone : ^MmZoneHeader,
+FN IopInitPacketCache (
+    IN cache : ^^MiPoolCache,
     IN packetsize : UWORD,
-    IN count : UWORD,
 )
 
-    // Initialize a packet zone and populate it with packets.
+    // Initialize a packet cache.
 
-#IF 0
-    RtlPrint ( "IopInitPacketZone: zonesize %u\n",
-        packetsize * count + MM_ZONE_OVERHEAD )
-#END
-
-    hunk := MmAllocatePool (
+    cache^ = MmCreatePoolCache (
+        PsCurrentNode (), // node
+        "Packet Cache", // name
+        packetsize, // size
         MM_NONPAGED_POOL, // poolindex
-        packetsize * count + MM_ZONE_OVERHEAD, // bytes
         'IOPz', // tag
-        FALSE, // wait
     )
 
-    IF NOT hunk THEN
-        KeCrash ( "IopInitPacketZone: failed to create zones\n" )
+    IF NOT cache^ THEN
+        KeCrash ( "IopInitPacketCache: failed to create caches\n" )
     END
-
-    MmInitializeZone (
-        zone, // zone
-        packetsize, // blocksize
-    )
-
-    MmExtendZone (
-        zone, // zone
-        hunk, // hunk
-        packetsize * count + MM_ZONE_OVERHEAD, // bytes
-    )
 END
 
 FN IopInitPacketZones ()
@@ -64,59 +42,32 @@ FN IopInitPacketZones ()
     // Initialize the packet zones, for fast allocation of common packet sizes
     // without hitting pool.
 
-    normalcount : UWORD
-    asynccount : UWORD
-    locationcount : UWORD
-    trampolinecount : UWORD
+    // Create normal cache.
 
-    systemsize := MmGetSystemSize ()
-
-    IF systemsize <= MM_TINY_SYSTEM THEN
-        normalcount = 5
-        asynccount = 4
-
-    ELSEIF systemsize <= MM_MEDIUM_SYSTEM THEN
-        normalcount = 10
-        asynccount = 8
-
-    ELSE
-        normalcount = 64
-        asynccount = 24
-    END
-
-    trampolinecount = normalcount
-    locationcount = normalcount * 2
-
-    // Create normal zone.
-
-    IopInitPacketZone (
-        &IopPacketZones[IO_PACKET_TYPE_NORMAL], // zone
+    IopInitPacketCache (
+        &IopPacketCaches[IO_PACKET_TYPE_NORMAL], // cache
         SIZEOF IoPacket, // headersize
-        normalcount, // count
     )
 
-    // Create user async zone.
+    // Create user async cache.
 
-    IopInitPacketZone (
-        &IopPacketZones[IO_PACKET_TYPE_USERASYNC], // zone
+    IopInitPacketCache (
+        &IopPacketCaches[IO_PACKET_TYPE_USERASYNC], // cache
         SIZEOF IoUserAsyncPacket, // headersize
-        asynccount, // count
     )
 
-    // Create location zone.
+    // Create location cache.
 
-    IopInitPacketZone (
-        &IopLocationZone, // zone
+    IopInitPacketCache (
+        &IopLocationCache, // cache
         SIZEOF IoLocation, // headersize
-        locationcount, // count
     )
 
-    // Create trampoline zone.
+    // Create trampoline cache.
 
-    IopInitPacketZone (
-        &IopTrampolineZone, // zone
+    IopInitPacketCache (
+        &IopTrampolineCache, // cache
         SIZEOF IoTrampoline, // headersize
-        trampolinecount, // count
     )
 END
 
@@ -135,16 +86,12 @@ FN IopFreeLocation (
     END
 
     IF location^.Flags & IOP_LOCATION_FROM_ZONE THEN
-        // Return to zone.
+        // Return to cache.
 
-        KeAcquireLockExclusive ( &IopLocationZoneLock )
-
-        MmFreeZone (
-            &IopLocationZone, // zone
+        MmFreeToPoolCache (
+            IopLocationCache, // cache
             location, // ptr
         )
-
-        KeReleaseLock ( &IopLocationZoneLock )
 
         LEAVE
     END
@@ -183,15 +130,16 @@ EXPORT FN IoCreateLocation (
         ELSE
             // Try to allocate from the location zone.
 
-            KeAcquireLockExclusive ( &IopLocationZoneLock )
+            location = MmAllocateFromPoolCache (
+                IopLocationCache, // cache
+                TRUE, // wait
+            )
 
-            location = MmAllocateZone ( &IopLocationZone )
-
-            KeReleaseLock ( &IopLocationZoneLock )
-
-            IF location THEN
-                location^.Flags = IOP_LOCATION_FROM_ZONE
+            IF NOT location THEN
+                RETURN NULLPTR
             END
+
+            location^.Flags = IOP_LOCATION_FROM_ZONE
         END
     END
 
@@ -245,28 +193,13 @@ FN IoAllocatePacket (
     // We acquire this lock APC-safe because it can also be taken by async IO
     // completion APCs when they finally free the packet.
 
-    ipl := KeAcquireApcLockExclusive ( &IopPacketZoneLock )
+    packet : ^IoPacket = MmAllocateFromPoolCache (
+        IopPacketCaches[ioptype], // cache
+        TRUE, // wait
+    )
 
-    packet : ^IoPacket = MmAllocateZone ( &IopPacketZones[ioptype] )
-
-    KeReleaseApcLock ( &IopPacketZoneLock, ipl )
-
-    IF packet THEN
-        iopflags |= IO_PACKET_FROM_ZONE
-
-    ELSE
-        // Try to pool-allocate the packet.
-
-        packet = MmAllocatePool (
-            MM_NONPAGED_POOL, // poolindex
-            IopPacketSize[ioptype], // bytes
-            'Iop ', // tag
-            TRUE, // wait
-        )
-
-        IF NOT packet THEN
-            RETURN NULLPTR
-        END
+    IF NOT packet THEN
+        RETURN NULLPTR
     END
 
     // Initialize the packet.
@@ -327,26 +260,9 @@ FN IoFreePacket (
 
     // Free a packet back to the appropriate zone or pool.
 
-    IF packet^.IopFlags & IO_PACKET_FROM_ZONE THEN
-        // Release to zone.
-
-        ipl := KeAcquireApcLockExclusive ( &IopPacketZoneLock )
-
-        MmFreeZone (
-            &IopPacketZones[packet^.Type], // zone
-            packet, // ptr
-        )
-
-        KeReleaseApcLock ( &IopPacketZoneLock, ipl )
-
-        LEAVE
-    END
-
-    // Release to pool.
-
-    MmFreePool (
+    MmFreeToPoolCache (
+        IopPacketCaches[packet^.Type], // cache
         packet, // ptr
-        'Iop ', // tag
     )
 END
 
@@ -446,26 +362,10 @@ FN IopBounceOnTrampoline (
     IF trampoline^.InternalFlags & IOP_TRAMPOLINE_DONT_FREE == 0 THEN
         // Free the trampoline.
 
-        IF trampoline^.InternalFlags & IOP_TRAMPOLINE_FROM_ZONE THEN
-            // Free to the zone.
-
-            KeAcquireLockExclusive ( &IopTrampolineZoneLock )
-
-            MmFreeZone (
-                &IopTrampolineZone, // zone
-                trampoline, // ptr
-            )
-
-            KeReleaseLock ( &IopTrampolineZoneLock )
-
-        ELSE
-            // Free to pool.
-
-            MmFreePool (
-                trampoline, // ptr
-                'IoTr', // tag
-            )
-        END
+        MmFreeToPoolCache (
+            IopTrampolineCache, // cache
+            trampoline, // ptr
+        )
     END
 
     RETURN status
@@ -666,30 +566,13 @@ EXPORT FN IoEnqueuePacket (
         // Nested I/O request.
         // Have to allocate a trampoline out of line.
 
-        KeAcquireLockExclusive ( &IopTrampolineZoneLock )
+        trampoline = MmAllocateFromPoolCache (
+            IopTrampolineCache, // cache
+            TRUE, // wait
+        )
 
-        trampoline = MmAllocateZone ( &IopTrampolineZone )
-
-        KeReleaseLock ( &IopTrampolineZoneLock )
-
-        IF trampoline THEN
-            trampoline^.InternalFlags = IOP_TRAMPOLINE_FROM_ZONE
-
-        ELSE
-            // Allocate from pool.
-
-            trampoline = MmAllocatePool (
-                MM_NONPAGED_POOL, // poolindex
-                SIZEOF IoTrampoline, // bytes
-                'IoTr', // tag
-                TRUE, // wait
-            )
-
-            IF NOT trampoline THEN
-                RETURN OS_STATUS_NO_MEMORY
-            END
-
-            trampoline^.InternalFlags = 0
+        IF NOT trampoline THEN
+            RETURN OS_STATUS_NO_MEMORY
         END
     END
 
