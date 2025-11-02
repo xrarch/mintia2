@@ -1135,6 +1135,14 @@ EXPORT FN KeWaitForSingleObject (
             RETURN 0
         END
 
+        // Enqueue our wait block to the object, at the tail to promote
+        // fairness.
+
+        RtlInsertAtTailList (
+            &object^.WaitListHead, // head
+            &singlewaitblock^.Entry, // entry
+        )
+
     ELSE
         // This is a balanced queue. If there's a pending item, grab it.
 
@@ -1165,14 +1173,15 @@ EXPORT FN KeWaitForSingleObject (
 
             RETURN 0
         END
+
+        // Enqueue our wait block to the object, at the head to promote cache
+        // affinity.
+
+        RtlInsertAtHeadList (
+            &object^.WaitListHead, // head
+            &singlewaitblock^.Entry, // entry
+        )
     END
-
-    // Enqueue our wait block to the object.
-
-    RtlInsertAtTailList (
-        &object^.WaitListHead, // head
-        &singlewaitblock^.Entry, // entry
-    )
 
     // Increment waiter count.
 
