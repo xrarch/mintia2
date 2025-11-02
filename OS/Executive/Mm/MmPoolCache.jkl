@@ -63,7 +63,6 @@ STRUCT MiPoolCache
 
     Name : ^UBYTE,
 
-
     MagazineType : ^MiMagazineType,
 END
 
@@ -588,6 +587,8 @@ FN MiReapDepotList (
         reap = list^.Min
     END
 
+    // rept := 0
+
     WHILE reap DO
         magazine := MiAllocateMagazineFromDepot (
             cache, // cache
@@ -604,8 +605,11 @@ FN MiReapDepotList (
             rounds, // rounds
         )
 
+        // rept += 1
         reap -= 1
     END
+
+    // RtlPrint ( "[%d rept] ", rept )
 END
 
 FN MiReapPoolCacheDepot (
@@ -649,7 +653,7 @@ FN MiUpdatePoolCacheWs (
     IN cache : ^MiPoolCache,
 )
 
-    // Update the pool cache working set size after a round of reaping.
+    // Update the pool cache working set size before a round of reaping.
 
     ipl := MiLockPoolCacheDepot ( cache )
 
@@ -1040,6 +1044,80 @@ FN MiInitializeMagazineType (
 
 END
 
+FN MiAdjustPoolCache (
+    IN cache : ^MiPoolCache,
+)
+
+    // Adjust a pool cache.
+    // This involves reaping the working set.
+
+    MiUpdatePoolCacheWs ( cache )
+
+    MiReapPoolCacheDepot ( cache )
+END
+
+FN MiAdjustPoolCaches (
+    IN node : ^MiNode,
+)
+
+    // Adjust all of the pool caches on the given node.
+
+    MiLockPoolCacheList ( node )
+
+    listhead := &node^.PoolCacheList
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        cache := CONTAINEROF listentry TO MiPoolCache.MasterListEntry
+
+        MiAdjustPoolCache ( cache )
+
+        listentry = listentry^.Next
+    END
+
+    MiUnlockPoolCacheList ( node )
+END
+
+#DEFINE MI_POOL_ADJUSTMENT_INTERVAL_MS 5000
+
+FN MiEnqueuePoolCacheAdjustment (
+    IN node : ^MiNode,
+)
+
+    // Enqueue the pool cache adjustment item.
+
+    interval : RtlUquad
+
+    RtlSetUquadToUlong (
+        &interval, // interval
+        MI_POOL_ADJUSTMENT_INTERVAL_MS, // ulong
+    )
+
+    ExEnqueueTimedWorkItem (
+        &node^.PoolCacheAdjustmentItem, // item
+        EX_HIGH_WORK_PRIORITY, // priority
+        &interval, // interval
+        CAST node TO UWORD, // context1
+        0, // context2
+    )
+END
+
+FN (ExWorkItemF) MiAdjustPoolCachesWorker (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Called periodically to adjust the pool caches on a node.
+
+    // RtlPrint ( "adjust " )
+
+    node := CAST context1 TO ^MiNode
+
+    MiAdjustPoolCaches ( node )
+
+    MiEnqueuePoolCacheAdjustment ( node )
+END
+
 #SECTION "INITtext"
 FN MiInitializePoolCache (
     IN node : ^MiNode,
@@ -1076,4 +1154,15 @@ FN MiInitializePoolCache (
         "Large Block Magazines", // name
         MI_LARGE_MAGAZINE_SIZE, // size
     )
+
+    // Initialize the adjustment item.
+
+    ExInitializeTimedWorkItem (
+        &node^.PoolCacheAdjustmentItem, // item
+        &MiAdjustPoolCachesWorker, // routine
+    )
+
+    // And set it pending for the first time.
+
+    MiEnqueuePoolCacheAdjustment ( node )
 END
