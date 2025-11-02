@@ -8,8 +8,7 @@
 
 MiSmallMdlCache : ^MmPoolCache
 
-#ENTERSECTION "INITtext"
-
+#SECTION "INITtext"
 FN MiInitializeMdlCache (
     IN node : ^MiNode,
 )
@@ -25,18 +24,19 @@ FN MiInitializeMdlCache (
 
     node^.MdlCache = MmCreatePoolCache (
         node, // node
-        "Mdl Cache", // name
+        "Mdls", // name
         mdlsize, // size
         MM_NONPAGED_POOL, // poolindex
         'MDLz', // tag
     )
 
+#ENTERSECTION "INITtext"
     IF NOT node^.MdlCache THEN
         KeCrash ( "MiInitializeMdlCache: failed to create cache\n" )
     END
-END
-
 #LEAVESECTION
+
+END
 
 FN MmCompleteMdl (
     IN mdl : ^MmMdlHeader,

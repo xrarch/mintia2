@@ -8,6 +8,122 @@ PUBLIC ObpDeferredDeletionList : KeCustodyList
 
 PUBLIC ObpDeferredDeletionTimedWorkItem : ExTimedWorkItem
 
+#MACRO ObpCalculatePagedBlockSize ( bodysize ) [
+    (SIZEOF ObHeader + SIZEOF ObpCommonHeader + (bodysize))
+]
+
+#MACRO ObpCalculateNpBlockSize ( bodysize ) [
+    (SIZEOF ObpCommonHeader + (bodysize))
+]
+
+#MACRO ObpCalculateNpHeaderSize ( pgsize ) [
+    (SIZEOF ObHeader + (pgsize))
+]
+
+#ENTERSECTION "INITtext"
+FN ObInitializeType (
+    IN type : ^ObType,
+) : OsStatus
+
+    // Initialize an object type.
+
+    error := "ObInitializeType: %s: %s"
+
+    npsize : UWORD
+    psize : UWORD
+
+    IF type^.IsPaged THEN
+        npsize = 0
+        psize = ObpCalculatePagedBlockSize ( type^.TypicalBodySize )
+
+    ELSE
+        npsize = ObpCalculateNpBlockSize ( type^.TypicalBodySize )
+        psize = ObpCalculateNpHeaderSize ( type^.TypicalPgBodySize )
+    END
+
+    type^.CachedPgBodySize = psize
+    type^.CachedNpBodySize = npsize
+
+    typenamelen := RtlMeasureString ( type^.Name )
+    name : ^UBYTE
+
+    IF npsize THEN
+        name = MmAllocatePool (
+            MM_NONPAGED_POOL, // poolindex
+            typenamelen + 2 + 1, // bytes
+            'PcNm', // tag
+            TRUE, // wait
+        )
+
+        IF NOT name THEN
+            KeCrash ( error, type^.Name, "failed to allocate np name\n" )
+        END
+
+        RtlCopyString (
+            name, // dest
+            type^.Name, // src
+            -1, // bufsize
+        )
+
+        name[typenamelen] = 'N'
+        name[typenamelen + 1] = 'p'
+        name[typenamelen + 2] = 0
+
+        type^.NpPartCache = MmCreatePoolCache (
+            PsCurrentNode (), // node
+            name, // name
+            npsize, // size
+            MM_NONPAGED_POOL, // poolindex
+            type^.Tag, // tag
+        )
+
+        IF NOT type^.NpPartCache THEN
+            KeCrash ( error, type^.Name, "failed to allocate np cache\n" )
+        END
+    END
+
+    IF psize THEN
+        name = MmAllocatePool (
+            MM_NONPAGED_POOL, // poolindex
+            typenamelen + 2 + 1, // bytes
+            'PcNm', // tag
+            TRUE, // wait
+        )
+
+        IF NOT name THEN
+            KeCrash ( error, type^.Name, "failed to allocate pg name\n" )
+        END
+
+        RtlCopyString (
+            name, // dest
+            type^.Name, // src
+            -1, // bufsize
+        )
+
+        name[typenamelen] = 'P'
+        name[typenamelen + 1] = 'g'
+        name[typenamelen + 2] = 0
+
+        type^.PgPartCache = MmCreatePoolCache (
+            PsCurrentNode (), // node
+            name, // name
+            psize, // size
+            MM_PAGED_POOL, // poolindex
+            type^.Tag, // tag
+        )
+
+        IF NOT type^.PgPartCache THEN
+            KeCrash ( error, type^.Name, "failed to allocate pg cache\n" )
+        END
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+#LEAVESECTION
+
+#DEFINE OBP_PG_FROM_CACHE 1
+#DEFINE OBP_NP_FROM_CACHE 2
+
 #SECTION "PAGEtext"
 FN ObAllocateObject (
     IN obparams : ^ObParameters,
@@ -21,17 +137,17 @@ FN ObAllocateObject (
     psize : UWORD
     npsize : UWORD
 
-    IF obparams^.Type^.IsPaged THEN
-        npsize = 0
+    type := obparams^.Type
 
-        psize = SIZEOF ObHeader +
-            SIZEOF ObpCommonHeader +
-            obparams^.BodySize
+    internalflags := 0
+
+    IF type^.IsPaged THEN
+        npsize = 0
+        psize = ObpCalculatePagedBlockSize ( obparams^.BodySize )
 
     ELSE
-        npsize = obparams^.BodySize + SIZEOF ObpCommonHeader
-
-        psize = SIZEOF ObHeader + obparams^.PagedBodySize
+        npsize = ObpCalculateNpBlockSize ( obparams^.BodySize )
+        psize = ObpCalculateNpHeaderSize ( obparams^.PagedBodySize )
     END
 
     // Charge pool quota.
@@ -66,12 +182,24 @@ FN ObAllocateObject (
     nppart := NULLPTR
 
     IF npsize THEN
-        nppart = MmAllocatePool (
-            MM_NONPAGED_POOL, // poolindex
-            npsize, // bytes
-            obparams^.Type^.Tag, // tag
-            TRUE, // wait
-        )
+        IF npsize <= type^.CachedNpBodySize THEN
+            // Use a pool cache.
+
+            internalflags |= OBP_NP_FROM_CACHE
+
+            nppart = MmAllocateFromPoolCache (
+                type^.NpPartCache, // cache
+                TRUE, // wait
+            )
+        
+        ELSE
+            nppart = MmAllocatePool (
+                MM_NONPAGED_POOL, // poolindex
+                npsize, // bytes
+                type^.Tag, // tag
+                TRUE, // wait
+            )
+        END
 
         IF NOT nppart THEN
             status = OS_STATUS_NO_MEMORY
@@ -83,12 +211,24 @@ FN ObAllocateObject (
     pgpart := NULLPTR
 
     IF psize THEN
-        pgpart = MmAllocatePool (
-            MM_PAGED_POOL, // poolindex
-            psize, // bytes
-            obparams^.Type^.Tag, // tag
-            TRUE, // wait
-        )
+        IF psize <= type^.CachedPgBodySize THEN
+            // Use a pool cache.
+
+            internalflags |= OBP_PG_FROM_CACHE
+
+            pgpart = MmAllocateFromPoolCache (
+                type^.PgPartCache, // cache
+                TRUE, // wait
+            )
+        
+        ELSE
+            pgpart = MmAllocatePool (
+                MM_PAGED_POOL, // poolindex
+                psize, // bytes
+                type^.Tag, // tag
+                TRUE, // wait
+            )
+        END
 
         IF NOT pgpart THEN
             status = OS_STATUS_NO_MEMORY
@@ -100,7 +240,7 @@ FN ObAllocateObject (
     header : ^ObHeader
     commonheader : ^ObpCommonHeader
 
-    IF obparams^.Type^.IsPaged THEN
+    IF type^.IsPaged THEN
         header = pgpart
         commonheader = pgpart + SIZEOF ObHeader
 
@@ -119,6 +259,7 @@ FN ObAllocateObject (
     header^.QuotaBlock = quotablock
 
     header^.Flags = obparams^.Flags
+    header^.InternalFlags = internalflags
 
     ObMoveCredentials (
         &header^.Permissions.Cred, // dest
@@ -132,16 +273,16 @@ FN ObAllocateObject (
 
     header^.NamespaceEntry = NULLPTR
 
-    header^.Type = obparams^.Type
+    header^.Type = type
 
     KeInitializeLock ( &header^.Lock )
 
     object = commonheader + SIZEOF ObpCommonHeader
 
-    IF obparams^.Type^.Initialize THEN
+    IF type^.Initialize THEN
         // Call the initialization callback.
 
-        status = obparams^.Type^.Initialize (
+        status = type^.Initialize (
             object, // object
             obparams^.Context, // context
         )
@@ -160,10 +301,18 @@ FN ObAllocateObject (
 @Error3
 
     IF nppart THEN
-        MmFreePool (
-            nppart, // ptr
-            obparams^.Type^.Tag, // tag
-        )
+        IF internalflags & OBP_NP_FROM_CACHE THEN
+            MmFreeToPoolCache (
+                type^.NpPartCache, // cache
+                nppart, // ptr
+            )
+
+        ELSE
+            MmFreePool (
+                nppart, // ptr
+                type^.Tag, // tag
+            )
+        END
     END
 
 @Error2
@@ -206,29 +355,54 @@ FN ObFreeObject (
     pquota := header^.PagedQuotaCharge
     npquota := header^.NonpagedQuotaCharge
     type := header^.Type
+    flags := header^.InternalFlags
 
     // Free the object parts.
 
     IF type^.IsPaged THEN
         // Only a single part.
 
-        MmFreePool (
-            header, // ptr
-            type^.Tag, // tag
-        )
+        IF flags & OBP_PG_FROM_CACHE THEN
+            MmFreeToPoolCache (
+                type^.PgPartCache, // cache
+                header, // ptr
+            )
+
+        ELSE
+            MmFreePool (
+                header, // ptr
+                type^.Tag, // tag
+            )
+        END
 
     ELSE
         // Two parts.
 
-        MmFreePool (
-            header, // ptr
-            type^.Tag, // tag
-        )
+        IF flags & OBP_PG_FROM_CACHE THEN
+            MmFreeToPoolCache (
+                type^.PgPartCache, // cache
+                header, // ptr
+            )
 
-        MmFreePool (
-            object - SIZEOF ObpCommonHeader, // ptr
-            type^.Tag, // tag
-        )
+        ELSE
+            MmFreePool (
+                header, // ptr
+                type^.Tag, // tag
+            )
+        END
+
+        IF flags & OBP_NP_FROM_CACHE THEN
+            MmFreeToPoolCache (
+                type^.NpPartCache, // cache
+                object - SIZEOF ObpCommonHeader, // ptr
+            )
+
+        ELSE
+            MmFreePool (
+                object - SIZEOF ObpCommonHeader, // ptr
+                type^.Tag, // tag
+            )
+        END
     END
 
     // Uncharge quota.

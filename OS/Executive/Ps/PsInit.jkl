@@ -240,13 +240,29 @@ FN PsInitializeStage1 ()
 
     // Stage 1 initialization for Ps.
 
+    // Initialize the process type.
+
+    ObInitializeType ( &PsProcessType )
+
+    // Initialize the thread type.
+
+    ObInitializeType ( &PsThreadType )
+
+    // Initialize the job type.
+
+    ObInitializeType ( &PsJobType )
+
+    // Initialize the group type.
+
+    ObInitializeType ( &PsGroupType )
+
     // Initialize the turnstile cache.
 
 #LEAVESECTION
 
     PspTurnstileCache = MmCreatePoolCache (
         PsCurrentNode (), // node
-        "Turnstile Cache", // name
+        "Turnstiles", // name
         SIZEOF KiTurnstile, // size
         MM_NONPAGED_POOL, // poolindex
         'Turn', // tag

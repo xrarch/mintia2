@@ -45,6 +45,9 @@ FNPTR ObTypeInitializeF (
 STRUCT ObType
     Name : ^UBYTE,
 
+    NpPartCache : ^MiPoolCache,
+    PgPartCache : ^MiPoolCache,
+
     Open : ObTypeOpenF,
     Close : ObTypeCloseF,
     Delete : ObTypeDeleteF,
@@ -56,6 +59,12 @@ STRUCT ObType
     WaitOffset : ULONG,
     TypeIdentifier : ULONG,
     Tag : ULONG,
+
+    TypicalBodySize : ULONG,
+    TypicalPgBodySize : ULONG,
+
+    CachedNpBodySize : ULONG,
+    CachedPgBodySize : ULONG,
 
     IsPaged : UBYTE,
 END
@@ -81,12 +90,14 @@ STRUCT ObHeader
 
     Permissions : ObPermissions,
 
+    HandleCount : UWORD,
+
     Flags : ULONG,
 
     PagedQuotaCharge : ULONG,
     NonpagedQuotaCharge : ULONG,
 
-    HandleCount : UWORD,
+    InternalFlags : UBYTE,
 END
 
 STRUCT ObpCommonHeader
@@ -223,6 +234,10 @@ EXTERN FN ObReferenceByHandle (
     IN type : ^ObType,
     OUT object : ^VOID,
     OUT access : UWORD,
+) : OsStatus
+
+EXTERN FN ObInitializeType (
+    IN type : ^ObType,
 ) : OsStatus
 
 EXTERN FN ObDeferredDeletionWorker ()

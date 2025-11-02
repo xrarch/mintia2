@@ -36,7 +36,6 @@ FN (ObTypeInitializeF) ExpInitializeEventObject (
     )
 END
 
-#SECTION "PAGEtext"
 PUBLIC ExEventType : ObType = {
     [Name] = "Event", // name
 
@@ -45,6 +44,8 @@ PUBLIC ExEventType : ObType = {
     [WaitOffset] = OFFSETOF ExEvent.Event,
     [TypeIdentifier] = OS_EVENT_TYPE,
     [Tag] = 'Evnt',
+
+    [TypicalBodySize] = SIZEOF ExEvent,
 
     [IsPaged] = FALSE,
 }
@@ -266,4 +267,12 @@ FN OsReadEvent (
     ObUnreferenceObject ( event )
 
     RETURN status
+END
+
+#SECTION "INITtext"
+FN ExpInitializeEvents ()
+
+    // Initialize the event object type.
+
+    ObInitializeType ( &ExEventType )
 END

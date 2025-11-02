@@ -5,17 +5,27 @@
 
 #INCLUDE "Exp.hjk"
 
-ExpEventCounterList : RtlListEntry
-ExpEventCounterCount := 0
-ExpEventCounterLock : KeLock = KE_INITIAL_LOCK
+ExpEventCounterCache : ^MiPoolCache
 
-#DEFINE EXP_EVENT_COUNTER_MAX 32
-
+#SECTION "INITtext"
 FN ExpInitializeEventCounters ()
 
     // Initialize the event counter list.
 
-    RtlInitializeList ( &ExpEventCounterList )
+    ExpEventCounterCache = MmCreatePoolCache (
+        PsCurrentNode (), // node
+        "Event Counters", // name
+        SIZEOF ExEventCounter, // size
+        MM_NONPAGED_POOL, // poolindex
+        'EvCn', // tag
+    )
+
+#ENTERSECTION "INITtext"
+    IF NOT ExpEventCounterCache THEN
+        KeCrash ( "ExpInitializeEventCounters: failed to create cache\n" )
+    END
+#LEAVESECTION
+
 END
 
 FN ExAllocateEventCounter (
@@ -24,36 +34,8 @@ FN ExAllocateEventCounter (
 
     // Allocate an event counter.
 
-    counter : ^ExEventCounter
-
-    // First try to get one off the list.
-
-    ipl := KeAcquireApcLockExclusive ( &ExpEventCounterLock )
-
-    IF NOT RtlEmptyList ( &ExpEventCounterList ) THEN
-        counter = CONTAINEROF ExpEventCounterList.Next TO ExEventCounter.Free
-
-        KeAssert ( counter^.Used.References == 0 )
-
-        RtlRemoveEntryList ( &counter^.Free )
-
-        ExpEventCounterCount -= 1
-
-        KeReleaseApcLock ( &ExpEventCounterLock, ipl )
-
-        counter^.Used.References = 1
-
-        RETURN counter
-    END
-
-    KeReleaseApcLock ( &ExpEventCounterLock, ipl )
-
-    // Allocate and initialize a new event counter.
-
-    counter = MmAllocatePool (
-        MM_NONPAGED_POOL, // poolindex
-        SIZEOF ExEventCounter, // bytes
-        'EvCn', // tag
+    counter : ^ExEventCounter = MmAllocateFromPoolCache (
+        ExpEventCounterCache, // cache
         wait, // wait
     )
 
@@ -103,28 +85,9 @@ FN ExUnreferenceEventCounter (
     IF oldcount == 1 THEN
         // This was the last user of this event counter. Put it on the list.
 
-        ipl := KeAcquireApcLockExclusive ( &ExpEventCounterLock )
-
-        IF ExpEventCounterCount >= EXP_EVENT_COUNTER_MAX THEN
-            // Nevermind, we have plenty. Just free it now.
-
-            KeReleaseApcLock ( &ExpEventCounterLock, ipl )
-
-            MmFreePool (
-                counter, // ptr
-                'EvCn', // tag
-            )
-
-            LEAVE
-        END
-
-        RtlInsertAtHeadList (
-            &ExpEventCounterList, // head
-            &counter^.Free, // entry
+        MmFreeToPoolCache (
+            ExpEventCounterCache, // cache
+            counter, // ptr
         )
-
-        ExpEventCounterCount += 1
-
-        KeReleaseApcLock ( &ExpEventCounterLock, ipl )
     END
 END

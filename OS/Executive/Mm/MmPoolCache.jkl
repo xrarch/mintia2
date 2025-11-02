@@ -488,8 +488,6 @@ EXPORT FN MmCreatePoolCache (
     RETURN cache
 END
 
-#IF BLD_MP
-
 FN MiDestroyAndFreeMagazine (
     IN cache : ^MiPoolCache,
     IN magazine : ^^VOID,
@@ -609,7 +607,9 @@ FN MiReapDepotList (
         reap -= 1
     END
 
-    // RtlPrint ( "[%d rept] ", rept )
+    // IF rept THEN
+    //     RtlPrint ( "[%s %d] ", cache^.Name, rept )
+    // END
 END
 
 FN MiReapPoolCacheDepot (
@@ -1058,6 +1058,7 @@ END
 
 FN MiAdjustPoolCaches (
     IN node : ^MiNode,
+    IN purge : UWORD,
 )
 
     // Adjust all of the pool caches on the given node.
@@ -1070,7 +1071,12 @@ FN MiAdjustPoolCaches (
     WHILE listentry != listhead DO
         cache := CONTAINEROF listentry TO MiPoolCache.MasterListEntry
 
-        MiAdjustPoolCache ( cache )
+        IF purge THEN
+            MiPurgeMagazinesPoolCache ( cache )
+
+        ELSE
+            MiAdjustPoolCache ( cache )
+        END
 
         listentry = listentry^.Next
     END
@@ -1079,9 +1085,11 @@ FN MiAdjustPoolCaches (
 END
 
 #DEFINE MI_POOL_ADJUSTMENT_INTERVAL_MS 5000
+#DEFINE MI_POOL_PURGE_INTERVAL_MS 60000
 
 FN MiEnqueuePoolCacheAdjustment (
     IN node : ^MiNode,
+    IN counter : UWORD,
 )
 
     // Enqueue the pool cache adjustment item.
@@ -1098,7 +1106,7 @@ FN MiEnqueuePoolCacheAdjustment (
         EX_HIGH_WORK_PRIORITY, // priority
         &interval, // interval
         CAST node TO UWORD, // context1
-        0, // context2
+        counter + MI_POOL_ADJUSTMENT_INTERVAL_MS, // context2
     )
 END
 
@@ -1109,13 +1117,23 @@ FN (ExWorkItemF) MiAdjustPoolCachesWorker (
 
     // Called periodically to adjust the pool caches on a node.
 
-    // RtlPrint ( "adjust " )
-
     node := CAST context1 TO ^MiNode
 
-    MiAdjustPoolCaches ( node )
+    purge := context2 >= MI_POOL_PURGE_INTERVAL_MS
 
-    MiEnqueuePoolCacheAdjustment ( node )
+    IF purge THEN
+        context2 = 0
+    END
+
+    MiAdjustPoolCaches (
+        node, // node
+        purge, // purge
+    )
+
+    MiEnqueuePoolCacheAdjustment (
+        node, // node
+        context2, // counter
+    )
 END
 
 #SECTION "INITtext"
@@ -1164,5 +1182,5 @@ FN MiInitializePoolCache (
 
     // And set it pending for the first time.
 
-    MiEnqueuePoolCacheAdjustment ( node )
+    MiEnqueuePoolCacheAdjustment ( node, 0 )
 END

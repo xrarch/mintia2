@@ -177,7 +177,6 @@ FN (ObTypeInitializeF) ExpInitializeModuleObject (
     RETURN OS_STATUS_SUCCESS
 END
 
-#SECTION "PAGEtext"
 PUBLIC ExModuleType : ObType = {
     [Name] = "Module",
 
@@ -187,6 +186,8 @@ PUBLIC ExModuleType : ObType = {
 
     [TypeIdentifier] = OS_MODULE_TYPE,
     [Tag] = 'Modu',
+
+    [TypicalBodySize] = SIZEOF ExLoadedModule,
 
     [IsPaged] = FALSE,
 }
@@ -229,6 +230,10 @@ END
 FN ExpInitializeModules ()
 
     // Initialize the loadable modules package.
+
+    // Initialize the module type.
+
+    ObInitializeType ( &ExModuleType )
 
     // Create a "known module" for the kernel itself.
 

@@ -15,26 +15,29 @@ IopPacketSize : UBYTE[IO_PACKET_TYPE_MAX] = {
     [IO_PACKET_TYPE_USERASYNC] = SIZEOF IoUserAsyncPacket,
 }
 
-#ENTERSECTION "INITtext"
-
+#SECTION "INITtext"
 FN IopInitPacketCache (
     IN cache : ^^MiPoolCache,
     IN packetsize : UWORD,
+    IN name : ^UBYTE,
 )
 
     // Initialize a packet cache.
 
     cache^ = MmCreatePoolCache (
         PsCurrentNode (), // node
-        "Packet Cache", // name
+        name, // name
         packetsize, // size
         MM_NONPAGED_POOL, // poolindex
         'IOPz', // tag
     )
 
+#ENTERSECTION "INITtext"
     IF NOT cache^ THEN
         KeCrash ( "IopInitPacketCache: failed to create caches\n" )
     END
+#LEAVESECTION
+
 END
 
 FN IopInitPacketZones ()
@@ -47,6 +50,7 @@ FN IopInitPacketZones ()
     IopInitPacketCache (
         &IopPacketCaches[IO_PACKET_TYPE_NORMAL], // cache
         SIZEOF IoPacket, // headersize
+        "Packet Headers", // name
     )
 
     // Create user async cache.
@@ -54,6 +58,7 @@ FN IopInitPacketZones ()
     IopInitPacketCache (
         &IopPacketCaches[IO_PACKET_TYPE_USERASYNC], // cache
         SIZEOF IoUserAsyncPacket, // headersize
+        "Async Packet Headers", // name
     )
 
     // Create location cache.
@@ -61,6 +66,7 @@ FN IopInitPacketZones ()
     IopInitPacketCache (
         &IopLocationCache, // cache
         SIZEOF IoLocation, // headersize
+        "Packet Locations", // name
     )
 
     // Create trampoline cache.
@@ -68,10 +74,9 @@ FN IopInitPacketZones ()
     IopInitPacketCache (
         &IopTrampolineCache, // cache
         SIZEOF IoTrampoline, // headersize
+        "Trampolines", // name
     )
 END
-
-#LEAVESECTION
 
 FN IopFreeLocation (
     IN location : ^IoLocation,
