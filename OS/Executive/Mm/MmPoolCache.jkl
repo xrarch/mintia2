@@ -32,6 +32,8 @@ END
     KeReleaseApcLock ( &(scache)^.Lock, ipl )
 ]
 
+#IF BLD_MP
+
 STRUCT MiPoolCachePerCpu
     MagLock : KeLock,
 
@@ -52,22 +54,23 @@ STRUCT MiDepotList
     ReapLimit : ULONG,
 END
 
-STRUCT MiPoolCache
-    DepotLock : KeLock,
-    FullMagazineList : MiDepotList,
-    EmptyMagazineList : MiDepotList,
+#END
 
+STRUCT MiPoolCache
     Slabs : MiSlabCache,
 
     MasterListEntry : RtlListEntry,
 
     Name : ^UBYTE,
 
-    Constructor : MmPoolCacheConstructorF,
-    Destructor : MmPoolCacheDestructorF,
-    Context : ^VOID,
-
+#IF BLD_MP
     MagazineType : ^MiMagazineType,
+
+    DepotLock : KeLock,
+    FullMagazineList : MiDepotList,
+    EmptyMagazineList : MiDepotList,
+#END
+
 END
 
 #DEFINE MI_PCPCPU_SIZE [((SIZEOF MiPoolCachePerCpu + KE_CACHE_ALIGN - 1) &
@@ -409,9 +412,6 @@ EXPORT FN MmCreatePoolCache (
     IN size : UWORD,
     IN poolindex : UWORD,
     IN tag : UWORD,
-    IN constructor : MmPoolCacheConstructorF,
-    IN destructor : MmPoolCacheDestructorF,
-    IN context : ^VOID,
 ) : ^MiPoolCache
 
     // Allocate and return a new pool cache structure.
@@ -425,25 +425,9 @@ EXPORT FN MmCreatePoolCache (
         RETURN NULLPTR
     END
 
-    // Determine the magazine size based on whether the size of each cached
-    // block is smaller or larger than what the slab layer considers a small
-    // pool block.
-
-    IF size < MI_SMALL_POOL_BLOCK THEN
-        cache^.MagazineType = &node^.MagazineTypeTable[MI_MAGAZINE_SMALL]
-    ELSE
-        cache^.MagazineType = &node^.MagazineTypeTable[MI_MAGAZINE_LARGE]
-    END
-
     // Save the name of the cache.
 
     cache^.Name = name
-
-    // Save constructor, destructor, and context used for both.
-
-    cache^.Constructor = constructor
-    cache^.Destructor = destructor
-    cache^.Context = context
 
     // Initialize the slab cache used for allocating cached blocks.
 
@@ -455,12 +439,24 @@ EXPORT FN MmCreatePoolCache (
         tag, // tag
     )
 
+#IF BLD_MP
+    // Determine the magazine size based on whether the size of each cached
+    // block is smaller or larger than what the slab layer considers a small
+    // pool block.
+
+    IF size < MI_SMALL_POOL_BLOCK THEN
+        cache^.MagazineType = &node^.MagazineTypeTable[MI_MAGAZINE_SMALL]
+    ELSE
+        cache^.MagazineType = &node^.MagazineTypeTable[MI_MAGAZINE_LARGE]
+    END
+
     KeInitializeLock ( &cache^.DepotLock )
 
     // Set the depot lists to empty.
 
     MiInitializeDepotList ( &cache^.FullMagazineList )
     MiInitializeDepotList ( &cache^.EmptyMagazineList )
+#END
 
     // Insert on global list.
 
@@ -471,6 +467,7 @@ EXPORT FN MmCreatePoolCache (
         &cache^.MasterListEntry, // entry
     )
 
+#IF BLD_MP
     // Initialize the per-CPU caches with the global list lock still held to
     // synchronize against changes to the magazine type size.
 
@@ -495,31 +492,14 @@ EXPORT FN MmCreatePoolCache (
         i += 1
         percpu += MI_PCPCPU_SIZE
     END
+#END
 
     MiUnlockPoolCacheList ( node )
 
     RETURN cache
 END
 
-FN MiDestroyAndFreePoolCacheBlock (
-    IN cache : ^MiPoolCache,
-    IN ptr : ^VOID,
-)
-
-    // Destroy and free a constructed cache block.
-
-    IF cache^.Destructor THEN
-        cache^.Destructor (
-            ptr, // ptr
-            cache^.Context, // context
-        )
-    END
-
-    MiFreeToSlabCache (
-        &cache^.Slabs, // scache
-        ptr, // ptr
-    )
-END
+#IF BLD_MP
 
 FN MiDestroyAndFreeMagazine (
     IN cache : ^MiPoolCache,
@@ -538,8 +518,8 @@ FN MiDestroyAndFreeMagazine (
     i := 0
 
     WHILE i < rounds DO
-        MiDestroyAndFreePoolCacheBlock (
-            cache, // cache
+        MiFreeToSlabCache (
+            &cache^.Slabs, // scache
             magazine[i], // ptr
         )
 
@@ -755,6 +735,51 @@ FN MiPurgeMagazinesPoolCache (
     MiReapPoolCacheDepot ( cache )
 END
 
+FN MiReloadMagazines (
+    IN percpu : ^MiPoolCachePerCpu,
+    IN newloaded : ^^VOID,
+    IN rounds : WORD,
+)
+
+    // Swap the previous and loaded magazines.
+
+    percpu^.Previous = percpu^.Loaded
+    percpu^.PreviousRounds = percpu^.Rounds
+
+    percpu^.Loaded = newloaded
+    percpu^.Rounds = rounds
+END
+
+#SECTION "INITtext"
+FN MiInitializeMagazineType (
+    IN node : ^MiNode,
+    IN magtype : ^MiMagazineType,
+    IN name : ^UBYTE,
+    IN size : UWORD,
+)
+
+    // Initialize a magazine type.
+
+    magtype^.Size = size
+
+    magtype^.PoolCache = MmCreatePoolCache (
+        node, // node
+        name, // name
+        (size + 1) * SIZEOF ^VOID, // size
+        MM_NONPAGED_POOL, // poolindex
+        'Magz', // tag
+    )
+
+#ENTERSECTION "INITtext"
+    IF NOT magtype^.PoolCache THEN
+        KeCrash ( "MiInitializeMagazineType: failed to create pool cache\n" )
+    END
+#LEAVESECTION
+
+END
+
+#END
+
 #SECTION "PAGEtext"
 EXPORT FN MmDeletePoolCache (
     IN cache : ^MiPoolCache,
@@ -772,9 +797,11 @@ EXPORT FN MmDeletePoolCache (
 
     MiUnlockPoolCacheList ( node )
 
+#IF BLD_MP
     // Empty out the magazine depot.
 
     MiPurgeMagazinesPoolCache ( cache )
+#END
 
     // Verify that all slabs are gone.
 
@@ -789,28 +816,16 @@ EXPORT FN MmDeletePoolCache (
     )
 END
 
-FN MiReloadMagazines (
-    IN percpu : ^MiPoolCachePerCpu,
-    IN newloaded : ^^VOID,
-    IN rounds : WORD,
-)
-
-    // Swap the previous and loaded magazines.
-
-    percpu^.Previous = percpu^.Loaded
-    percpu^.PreviousRounds = percpu^.Rounds
-
-    percpu^.Loaded = newloaded
-    percpu^.Rounds = rounds
-END
-
 EXPORT FN MmAllocateFromPoolCache (
     IN cache : ^MiPoolCache,
     IN wait : UWORD,
 ) : ^VOID
 
     // Allocate a block from the pool cache.
+    // On MP, this uses the magazine layer. On UP, it goes directly to the slab
+    // cache.
 
+#IF BLD_MP
     block : ^VOID
     rounds : WORD
 
@@ -887,39 +902,15 @@ EXPORT FN MmAllocateFromPoolCache (
     END
 
     MiUnlockMagazineCache ( percpu, ipl )
+#END
 
     // Magazine layer wasn't of any help so we need to drop through to the slab
     // layer of this cache.
 
-    block = MiAllocateFromSlabCache (
+    RETURN MiAllocateFromSlabCache (
         &cache^.Slabs, // scache
         wait, // wait
     )
-
-    IF NOT block THEN
-        RETURN NULLPTR
-    END
-
-    IF cache^.Constructor THEN
-        // Call the constructor.
-
-        IF OsError ( cache^.Constructor (
-            cache^.Slabs.Node, // node
-            block, // ptr
-            cache^.Context, // context
-            wait, // wait
-        ) ) THEN
-
-            MiFreeToSlabCache (
-                &cache^.Slabs, // scache
-                block, // ptr
-            )
-
-            RETURN NULLPTR
-        END
-    END
-
-    RETURN block
 END
 
 EXPORT FN MmFreeToPoolCache (
@@ -928,7 +919,10 @@ EXPORT FN MmFreeToPoolCache (
 )
 
     // Free a block to the pool cache.
+    // On MP, this uses the magazine layer. On UP, it goes directly to the slab
+    // cache.
 
+#IF BLD_MP
     rounds : WORD
 
     // Acquire a pointer to the pool cache's per-cpu magazine cache.
@@ -1057,45 +1051,15 @@ EXPORT FN MmFreeToPoolCache (
 @BypassMagazines
 
     MiUnlockMagazineCache ( percpu, ipl )
+#END
 
     // Failed to get a magazine, our last resort is to just free the block
     // directly to the slab layer.
 
-    MiDestroyAndFreePoolCacheBlock (
-        cache, // cache
+    MiFreeToSlabCache (
+        &cache^.Slabs, // scache
         ptr, // ptr
     )
-END
-
-#SECTION "INITtext"
-FN MiInitializeMagazineType (
-    IN node : ^MiNode,
-    IN magtype : ^MiMagazineType,
-    IN name : ^UBYTE,
-    IN size : UWORD,
-)
-
-    // Initialize a magazine type.
-
-    magtype^.Size = size
-
-    magtype^.PoolCache = MmCreatePoolCache (
-        node, // node
-        name, // name
-        (size + 1) * SIZEOF ^VOID, // size
-        MM_NONPAGED_POOL, // poolindex
-        'Magz', // tag
-        NULLPTR, // constructor
-        NULLPTR, // destructor
-        NULLPTR, // context
-    )
-
-#ENTERSECTION "INITtext"
-    IF NOT magtype^.PoolCache THEN
-        KeCrash ( "MiInitializeMagazineType: failed to create pool cache\n" )
-    END
-#LEAVESECTION
-
 END
 
 #SECTION "INITtext"
@@ -1114,11 +1078,16 @@ FN MiInitializePoolCache (
     MiInitializeSlabCache (
         node, // node
         &node^.PoolCacheSlabs, // scache
+#IF BLD_MP
         MI_PC_SIZE + KeQueryProcessorCount () * MI_PCPCPU_SIZE, // size
+#ELSE
+        SIZEOF MiPoolCache, // size
+#END
         MM_NONPAGED_POOL, // poolindex
         'PoCa', // tag
     )
 
+#IF BLD_MP
     // Initialize the magazine types.
 
     MiInitializeMagazineType (
@@ -1134,4 +1103,6 @@ FN MiInitializePoolCache (
         "Large Block Magazines", // name
         MI_LARGE_MAGAZINE_SIZE, // size
     )
+#END
+
 END
