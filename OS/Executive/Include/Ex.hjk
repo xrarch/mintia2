@@ -138,8 +138,16 @@ STRUCT ExWorkItem
 END
 
 ENUM ExWorkQueuePriority : UBYTE
+    // These priorities can be used for pretty much anything.
+
     EX_LOW_WORK_PRIORITY,
     EX_HIGH_WORK_PRIORITY,
+
+    // This priority is reserved for nonpaged work such as page-out IO
+    // completion. These worker threads may NEVER block on memory allocation.
+    // They are VM-privileged.
+
+    EX_NONPAGED_WORK_PRIORITY,
 
     EX_MAX_WORK_PRIORITY,
 END

@@ -10,14 +10,22 @@ FN MmPageFault (
     IN usermode : UWORD,
 ) : OsStatus
 
-    // TEMP
+    thread := PsCurrentThread ()
 
+    // TEMP
     RtlPrint ( "fault on %x\n", address )
 
     IF writing THEN
         RETURN OS_STATUS_WRITE_FAULT
     ELSE
         RETURN OS_STATUS_READ_FAULT
+    END
+
+    IF thread^.VmPrivileged THEN
+        // A VM-privileged thread must never take a page fault or deadlock could
+        // result.
+
+        KeCrash ( "VM-privileged thread faulted upon %p\n", address )
     END
 END
 

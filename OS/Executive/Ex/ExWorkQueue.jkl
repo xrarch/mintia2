@@ -134,6 +134,11 @@ END
 ExpWorkPriorities : UBYTE[EX_MAX_WORK_PRIORITY] = {
     [EX_LOW_WORK_PRIORITY] = OS_PRIORITY_LOW_REALTIME,
     [EX_HIGH_WORK_PRIORITY] = OS_PRIORITY_MED_REALTIME,
+    [EX_NONPAGED_WORK_PRIORITY] = OS_PRIORITY_MED_REALTIME,
+}
+
+ExpWorkVmPrivileged : UBYTE[EX_MAX_WORK_PRIORITY] = {
+    [EX_NONPAGED_WORK_PRIORITY] = TRUE,
 }
 
 FN ExpInitializeWorkQueues ()
@@ -164,18 +169,22 @@ FN ExpInitializeWorkQueues ()
     systemsize := MmGetSystemSize ()
 
     IF systemsize <= MM_TINY_SYSTEM THEN
+        workthreads[EX_NONPAGED_WORK_PRIORITY] = 1
         workthreads[EX_HIGH_WORK_PRIORITY] = 1
         workthreads[EX_LOW_WORK_PRIORITY] = 1
 
     ELSEIF systemsize <= MM_SMALL_SYSTEM THEN
+        workthreads[EX_NONPAGED_WORK_PRIORITY] = 1
         workthreads[EX_HIGH_WORK_PRIORITY] = 2
         workthreads[EX_LOW_WORK_PRIORITY] = 3
 
     ELSEIF systemsize <= MM_MEDIUM_SYSTEM THEN
+        workthreads[EX_NONPAGED_WORK_PRIORITY] = 2
         workthreads[EX_HIGH_WORK_PRIORITY] = 3
         workthreads[EX_LOW_WORK_PRIORITY] = 5
 
     ELSE
+        workthreads[EX_NONPAGED_WORK_PRIORITY] = 2
         workthreads[EX_HIGH_WORK_PRIORITY] = 4
         workthreads[EX_LOW_WORK_PRIORITY] = 7
     END
@@ -222,6 +231,8 @@ FN ExpInitializeWorkQueues ()
                 ExpWorkPriorities[j], // priority
                 TRUE, // setcurrentpriority
             )
+
+            thread^.VmPrivileged = ExpWorkVmPrivileged[j]
 
             // Remove the reference we got by virtue of creating the thread.
 
