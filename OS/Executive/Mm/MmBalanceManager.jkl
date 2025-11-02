@@ -1,0 +1,151 @@
+//
+// Implements the Balance Manager for the MINTIA Executive.
+//
+
+#INCLUDE "Mi.hjk"
+
+#INCLUDE "<ll>/System/OsProcess.hjk"
+
+FN (ExWorkItemF) MiChuckPagedPoolCacheWorker (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Called from the context of a worker thread to chuck out the paged pool
+    // cache for a node.
+
+    node := CAST context1 TO ^MiNode
+
+    MiAdjustPoolCaches (
+        &node^.PgPoolCacheList, // list
+        TRUE, // purge
+    )
+
+    IF node == MiBootNode THEN
+        // Also aggressively reap threads and objects.
+
+        PsReaperWorker (
+            0, // context1
+            0, // context2
+        )
+
+        ObDeferredDeletionWorker (
+            0, // context1
+            0, // context2
+        )
+    END
+
+    node^.PgPoolCacheChuckActive = FALSE
+END
+
+FN MmBalanceManager ()
+
+    // Responsible for:
+    // o Kernel thread stack swapping.
+    // o Process swapping.
+    // o Working set trimming.
+    // o Pool cache adjustment.
+
+    thread := PsCurrentThread ()
+
+    thread^.VmPrivileged = TRUE
+
+    KeSetBasePriorityThread (
+        &thread^.Tcb, // thread
+        OS_PRIORITY_MED_REALTIME, // priority
+        TRUE, // setcurrentpriority
+    )
+
+    partition := PsCurrentPartition ()
+    node := PsCurrentNode ()
+
+    IF &node^.Partition == partition THEN
+        node^.PgPoolCacheChuckActive = FALSE
+
+        ExInitializeWorkItem (
+            &node^.PgPoolCacheChuckItem, // item
+            &MiChuckPagedPoolCacheWorker, // routine
+        )
+    END
+
+    timer : KeTimer
+
+    interval : RtlUquad
+
+    RtlSetUquadToUlong (
+        &interval, // uquad
+        1000, // ms
+    )
+
+    KeInitializeTimer (
+        &timer, // timer
+        NULLPTR, // dpc
+        "ExBalanceManagerTimer", // name
+    )
+
+    waittable : ^VOID[2]
+    waittable[0] = &timer
+    waittable[1] = &partition^.LowMemoryEvent
+
+    status : OsStatus = 0
+
+    WHILE TRUE DO
+        IF status == 0 THEN
+            // The timer expired so we have to re-enqueue it.
+
+            KeEnqueueTimer (
+                &timer, // timer
+                &interval, // interval
+                0, // context1
+                0, // context2
+            )
+        END
+
+        status = KeWaitForObjects (
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+            NULLPTR, // timeout
+            2, // objectcount
+            &waittable[0], // objecttable
+            NULLPTR, // waitblocktable
+        )
+
+        KeAssert ( NOT OsError ( status ) )
+
+        IF status == 0 THEN
+            // The timer expired.
+
+            // RtlPrint ( "Timer %d! ", KeCurrentProcessorId () )
+
+        ELSEIF status == 1 THEN
+            // Memory is low.
+
+            IF &node^.Partition == partition THEN
+                // Enqueue a work item to chuck the paged pool caches from the
+                // context of another thread, since this one cannot fault on
+                // paged pool.
+
+                IF NOT node^.PgPoolCacheChuckActive THEN
+                    node^.PgPoolCacheChuckActive = TRUE
+
+                    ExEnqueueWorkItem (
+                        &node^.PgPoolCacheChuckItem, // item
+                        EX_HIGH_WORK_PRIORITY, // priority
+                        CAST node TO UWORD, // context1
+                        0, // context2
+                    )
+                END
+
+                // Immediately chuck the nonpaged pool caches from the context
+                // of this thread.
+
+                MiAdjustPoolCaches (
+                    &node^.NpPoolCacheList, // list
+                    TRUE, // purge
+                )
+            END
+
+            // RtlPrint ( "Low! " )
+        END
+    END
+END

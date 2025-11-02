@@ -68,8 +68,11 @@ FN KeProcessCustodyList (
         1, // newvalue
     ) TO ^VOID
 
-    KeAssert ( object != 1 )
-    KeAssert ( object != NULLPTR )
+    IF object == 1 THEN
+        // Someone else is already processing it.
+
+        LEAVE
+    END
 
     WHILE object DO
         nextobject := (CAST object TO ^^VOID)^

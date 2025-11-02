@@ -361,6 +361,11 @@ EXTERN FN MiInitializePoolCache (
 #DEFINE MI_BLOCK_MAX_REQUEST_UNITS [((1 << MI_BLOCK_MAX_UNITS_SHIFT) - 4)]
 #DEFINE MI_BLOCK_MAX_REQUEST_SIZE [(MI_BLOCK_MAX_REQUEST_UNITS << MI_BLOCK_SIZE_SHIFT)]
 
+EXTERN FN MiAdjustPoolCaches (
+    IN list : ^MiPoolCacheList,
+    IN purge : UWORD,
+)
+
 STRUCT MiSlabCache
     Size : UWORD,
 
@@ -426,6 +431,11 @@ STRUCT MiPool
     Flags : UBYTE,
 END
 
+STRUCT MiPoolCacheList
+    Head : RtlListEntry,
+    MasterListLock : KeLock,
+END
+
 #DEFINE MI_DEFERRED_FLUSH_PAIRS 64
 
 STRUCT MiDeferredFlush
@@ -468,9 +478,11 @@ STRUCT MiNode
 
     PoolCacheSlabs : MiSlabCache,
 
-    PoolCacheList : RtlListEntry,
+    NpPoolCacheList : MiPoolCacheList,
+    PgPoolCacheList : MiPoolCacheList,
 
-    PoolCacheListLock : KeLock,
+    PgPoolCacheChuckItem : ExWorkItem,
+    PgPoolCacheChuckActive : ULONG,
 
     DeferredFlushTable : MiDeferredFlush[MI_DEFERRED_FLUSH_PAIRS],
 END

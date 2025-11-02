@@ -76,12 +76,12 @@ END
     (CAST cache + MI_PC_SIZE + (id * MI_PCPCPU_SIZE) TO ^MiPoolCachePerCpu)
 ]
 
-#MACRO MiLockPoolCacheList ( node ) [
-    KeAcquireLockExclusive ( &(node)^.PoolCacheListLock )
+#MACRO MiLockPoolCacheList ( list ) [
+    KeAcquireLockExclusive ( &(list)^.MasterListLock )
 ]
 
-#MACRO MiUnlockPoolCacheList ( node ) [
-    KeReleaseLock ( &(node)^.PoolCacheListLock )
+#MACRO MiUnlockPoolCacheList ( list ) [
+    KeReleaseLock ( &(list)^.MasterListLock )
 ]
 
 #MACRO MiLockPoolCacheDepot ( cache ) [
@@ -451,10 +451,18 @@ EXPORT FN MmCreatePoolCache (
 
     // Insert on global list.
 
-    MiLockPoolCacheList ( node )
+    list : ^MiPoolCacheList
+
+    IF poolindex == MM_NONPAGED_POOL THEN
+        list = &node^.NpPoolCacheList
+    ELSE
+        list = &node^.PgPoolCacheList
+    END
+
+    MiLockPoolCacheList ( list )
 
     RtlInsertAtTailList (
-        &node^.PoolCacheList, // head
+        &list^.Head, // head
         &cache^.MasterListEntry, // entry
     )
 
@@ -483,7 +491,7 @@ EXPORT FN MmCreatePoolCache (
         percpu += MI_PCPCPU_SIZE
     END
 
-    MiUnlockPoolCacheList ( node )
+    MiUnlockPoolCacheList ( list )
 
     RETURN cache
 END
@@ -740,11 +748,19 @@ EXPORT FN MmDeletePoolCache (
 
     // Remove from global list.
 
-    MiLockPoolCacheList ( node )
+    list : ^MiPoolCacheList
+
+    IF cache^.Slabs.PoolIndex == MM_NONPAGED_POOL THEN
+        list = &node^.NpPoolCacheList
+    ELSE
+        list = &node^.PgPoolCacheList
+    END
+
+    MiLockPoolCacheList ( list )
 
     RtlRemoveEntryList ( &cache^.MasterListEntry )
 
-    MiUnlockPoolCacheList ( node )
+    MiUnlockPoolCacheList ( list )
 
     // Empty out the magazine depot.
 
@@ -1057,15 +1073,15 @@ FN MiAdjustPoolCache (
 END
 
 FN MiAdjustPoolCaches (
-    IN node : ^MiNode,
+    IN list : ^MiPoolCacheList,
     IN purge : UWORD,
 )
 
     // Adjust all of the pool caches on the given node.
 
-    MiLockPoolCacheList ( node )
+    MiLockPoolCacheList ( list )
 
-    listhead := &node^.PoolCacheList
+    listhead := &list^.Head
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
@@ -1081,7 +1097,7 @@ FN MiAdjustPoolCaches (
         listentry = listentry^.Next
     END
 
-    MiUnlockPoolCacheList ( node )
+    MiUnlockPoolCacheList ( list )
 END
 
 #DEFINE MI_POOL_ADJUSTMENT_INTERVAL_MS 5000
@@ -1126,7 +1142,12 @@ FN (ExWorkItemF) MiAdjustPoolCachesWorker (
     END
 
     MiAdjustPoolCaches (
-        node, // node
+        &node^.PgPoolCacheList, // list
+        purge, // purge
+    )
+
+    MiAdjustPoolCaches (
+        &node^.NpPoolCacheList, // list
         purge, // purge
     )
 
@@ -1136,6 +1157,11 @@ FN (ExWorkItemF) MiAdjustPoolCachesWorker (
     )
 END
 
+#MACRO MiInitializePoolCacheList ( list ) [
+    KeInitializeLock ( &(list)^.MasterListLock )
+    RtlInitializeList ( &(list)^.Head )
+]
+
 #SECTION "INITtext"
 FN MiInitializePoolCache (
     IN node : ^MiNode,
@@ -1143,9 +1169,8 @@ FN MiInitializePoolCache (
 
     // Initialize the pool cache.
 
-    KeInitializeLock ( &node^.PoolCacheListLock )
-
-    RtlInitializeList ( &node^.PoolCacheList )
+    MiInitializePoolCacheList ( &node^.PgPoolCacheList )
+    MiInitializePoolCacheList ( &node^.NpPoolCacheList )
 
     // Initialize a slab cache to allocate pool caches from.
 
