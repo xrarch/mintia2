@@ -48,10 +48,11 @@
 
 FN KiIndicateActiveFunc (
     IN thread : ^KeThread,
-    IN queue : ^KeBalancedQueue,
 )
 
     // Long path.
+
+    queue := thread^.BalancedQueue
 
     KiComputeQueueRemovalLockAddress ( lock, queue )
 
@@ -70,10 +71,11 @@ END
 
 FN KiIndicateDeactivatedFunc (
     IN thread : ^KeThread,
-    IN queue : ^KeBalancedQueue,
 )
 
     // Long path.
+
+    queue := thread^.BalancedQueue
 
     KiComputeQueueRemovalLockAddress ( lock, queue )
 
@@ -100,10 +102,7 @@ END
         // Indicate that we're active again.
 
 #IF BLD_MP
-        KiIndicateActiveFunc (
-            thread, // thread
-            (thread)^.BalancedQueue, // queue
-        )
+        KiIndicateActiveFunc ( thread )
 #ELSE
         (thread)^.BalancedQueue^.ActiveThreadCount += 1
 #END
@@ -118,10 +117,7 @@ END
         // Indicate that we're deactivated again.
 
 #IF BLD_MP
-        KiIndicateDeactivatedFunc (
-            thread, // thread
-            (thread)^.BalancedQueue, // queue
-        )
+        KiIndicateDeactivatedFunc ( thread )
 #ELSE
         KiWakeBalancedQueue ( (thread)^.BalancedQueue )
 #END
