@@ -78,7 +78,7 @@ FN HalpInitializeLsic (
     prb^.IrqDispatchTable[2] = int
 
 #IF BLD_MP
-    // Initialize the IPI interrupt object.
+    // Initialize the synchronous IPI interrupt object.
 
     int = &prb^.IpiInterrupt1
 
@@ -93,11 +93,16 @@ FN HalpInitializeLsic (
         procid, // procid
     )
 
+    // Override the high level handler to bypass all the unnecessary general
+    // interrupt stuff and just directly call the kernel's IPI service routine.
+
     int^.Handler = &KiServiceIpi
 
     // Manually insert in PRB.
 
     prb^.IrqDispatchTable[1] = int
+
+    // Initialize the asynchronous IPI interrupt object.
 
     int = &prb^.IpiInterrupt2
 
@@ -111,6 +116,10 @@ FN HalpInitializeLsic (
         FALSE, // sharevector
         procid, // procid
     )
+
+    // Override the high level handler to do absolutely nothing, because no
+    // action is required upon an asynchronous IPI other than to process
+    // software interrupts on the way out.
 
     int^.Handler = &HalpDismissInterrupt
 
