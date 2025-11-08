@@ -327,14 +327,6 @@ END
 
 #IF BLD_MP
 
-// On XR/station, we use IRQ1 (the highest priority IRQ supported by the
-// interrupt controller) for the synchronous IPI and IRQ63 for the async IPI.
-
-HalpIpiTypeToIrq : UBYTE[KI_IPI_TYPE_MAX] = {
-    [KI_IPI_SYNCHRONOUS] = 1,
-    [KI_IPI_ASYNCHRONOUS] = 63,
-}
-
 FN HalTriggerIpi (
     IN target : ^KiPrb,
     IN type : UWORD,
@@ -347,7 +339,16 @@ FN HalTriggerIpi (
     // Write the IPI interrupt into the LSIC interrupt pending register for the
     // target processor. This will atomically OR it in.
 
-    lsic^.Pending0 = 1 << HalpIpiTypeToIrq[type]
+    // On XR/station, we use IRQ1 (the highest priority IRQ supported by the
+    // interrupt controller) for the synchronous IPI and IRQ63 for the async
+    // IPI.
+
+    IF type == KI_IPI_SYNCHRONOUS THEN
+        lsic^.Pending0 = 1 << 1
+
+    ELSE
+        lsic^.Pending1 = 1 << 31
+    END
 END
 
 FN HalBroadcastIpi (
