@@ -69,7 +69,10 @@ EXPORT FN KiFreezeOtherProcessors ()
     WHILE j < KI_FREEZE_RETRY DO
         prb := CAST KeLoaderBlock.VirtualPrbBase TO ^KiPrb
 
-        HalBroadcastIpi ( myprb )
+        HalBroadcastIpi (
+            myprb, // target
+            KI_IPI_SYNCHRONOUS, // type
+        )
 
         // Now wait for everyone except for me to freeze.
 
@@ -211,7 +214,10 @@ FN KiExecuteOnOtherProcessor (
 
     // 3. Trigger the IPI.
 
-    HalTriggerIpi ( target )
+    HalTriggerIpi (
+        target, // target
+        KI_IPI_SYNCHRONOUS, // type
+    )
 
     // 4. Spin-wait for execution of our callback.
 
@@ -372,7 +378,10 @@ FN KiExecuteOnEveryoneElse (
                 1 << index, // bitset
             )
 
-            HalTriggerIpi ( targetprb )
+            HalTriggerIpi (
+                targetprb, // target
+                KI_IPI_SYNCHRONOUS, // type
+            )
         END
 
 @Next
@@ -399,7 +408,8 @@ FN KiExecuteOnEveryoneElse (
     )
 END
 
-FN KiServiceIpi (
+FN (KeInterruptF) KiServiceIpi (
+    IN interrupt : ^KeInterrupt,
     IN context : ^OsContext,
 )
 

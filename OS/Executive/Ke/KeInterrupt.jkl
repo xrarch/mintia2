@@ -57,6 +57,7 @@ EXPORT FN KeInitializeInterrupt (
     procid = 0
 #END
 
+    interrupt^.Handler = &HalHandleDeviceInterrupt
     interrupt^.Routine = routine
     interrupt^.Context = context
     interrupt^.Vector = vector
@@ -108,10 +109,9 @@ KiNextWorkBalanceMs : WORD = KI_WORK_BALANCE_INTERVAL
 
 #END
 
-FN KiClockTick (
-    IN intervalms : UWORD,
-    IN usermode : UWORD,
-    IN previpl : UWORD,
+FN (KeInterruptF) KiClockTick (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
 )
 
     // Called from interrupt context by the interval timer.
@@ -129,34 +129,36 @@ FN KiClockTick (
         LEAVE
     END
 
+    previpl := context^.OldIpl
+
     // Increment count of clock ticks on this processor.
 
-    RtlAddUlongToUquad ( &prb^.ClockTicks, intervalms )
+    RtlAddUlongToUquad ( &prb^.ClockTicks, HAL_TIMER_INTERVAL )
 
     // Update time spent at previous IPL on this processor.
 
-    RtlAddUlongToUquad ( &prb^.IplTimes[previpl], intervalms )
+    RtlAddUlongToUquad ( &prb^.IplTimes[previpl], HAL_TIMER_INTERVAL )
 
     IF prb^.DpcActive THEN
         // Update time spent executing DPCs on this processor.
 
-        RtlAddUlongToUquad ( &prb^.DpcTimeMs, intervalms )
+        RtlAddUlongToUquad ( &prb^.DpcTimeMs, HAL_TIMER_INTERVAL )
 
     ELSEIF thread THEN
-        IF usermode THEN
+        IF OsWasUsermodeContext ( context ) THEN
             // Update time this thread has spent in usermode.
 
-            RtlAddUlongToUquad ( &thread^.UserTimeMs, intervalms )
+            RtlAddUlongToUquad ( &thread^.UserTimeMs, HAL_TIMER_INTERVAL )
 
         ELSEIF previpl == KI_IPL_DPC THEN
             // Update time this thread has spent at elevated IPL.
 
-            RtlAddUlongToUquad ( &thread^.DpcTimeMs, intervalms )
+            RtlAddUlongToUquad ( &thread^.DpcTimeMs, HAL_TIMER_INTERVAL )
 
         ELSE
             // Update time this thread has spent in the system.
 
-            RtlAddUlongToUquad ( &thread^.SystemTimeMs, intervalms )
+            RtlAddUlongToUquad ( &thread^.SystemTimeMs, HAL_TIMER_INTERVAL )
         END
     END
 
@@ -189,7 +191,7 @@ FN KiClockTick (
         )
 
 #IF BLD_MP
-        KiNextWorkBalanceMs -= intervalms
+        KiNextWorkBalanceMs -= HAL_TIMER_INTERVAL
 
         IF KiNextWorkBalanceMs <= 0 THEN
             // Enqueue the work balance DPC.
@@ -229,7 +231,7 @@ FN KiClockTick (
 
     // Increment the time that the current thread ran for.
 
-    thread^.RunMs += intervalms << KI_TICK_SHIFT
+    thread^.RunMs += HAL_TIMER_INTERVAL << KI_TICK_SHIFT
 
     // Update the interactivity score.
     // If an update must be made to the thread's interactivity, it is deferred
@@ -250,7 +252,7 @@ FN KiClockTick (
         LEAVE
     END
 
-    q -= intervalms
+    q -= HAL_TIMER_INTERVAL
 
     // If quantum has run down, request a quantum end interrupt at IPLDPC.
 

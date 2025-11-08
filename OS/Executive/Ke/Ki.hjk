@@ -161,6 +161,13 @@ FNPTR KiIpiF (
     IN context2 : UWORD,
 )
 
+ENUM KiIpiType : UBYTE
+    KI_IPI_SYNCHRONOUS,
+    KI_IPI_ASYNCHRONOUS,
+
+    KI_IPI_TYPE_MAX,
+END
+
 EXTERN KiMaximumBalanceIterations : ULONG
 
 #END
@@ -276,7 +283,8 @@ STRUCT KiPrb
     IdleThread : KeThread,
 
 #IF BLD_MP
-    IpiInterrupt : KeInterrupt,
+    IpiInterrupt1 : KeInterrupt,
+    IpiInterrupt2 : KeInterrupt,
 #END
 
     ClockTicks : RtlUquad,
@@ -451,10 +459,9 @@ EXTERN FN (KeDpcF) KiTimerExpiration (
     IN context2 : UWORD,
 )
 
-EXTERN FN KiClockTick (
-    IN intervalms : UWORD,
-    IN usermode : UWORD,
-    IN previpl : UWORD,
+EXTERN FN (KeInterruptF) KiClockTick (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
 )
 
 EXTERN FN KiSatisfyObject (
@@ -533,7 +540,8 @@ EXTERN FN KiFreezeOtherProcessors ()
 
 EXTERN FN KiUnfreezeOtherProcessors ()
 
-EXTERN FN KiServiceIpi (
+EXTERN FN (KeInterruptF) KiServiceIpi (
+    IN interrupt : ^KeInterrupt,
     IN context : ^OsContext,
 )
 
@@ -562,7 +570,10 @@ EXTERN FN KiExecuteOnEveryoneElse (
     IF oldvalue & KiPendingIpl ( ipl ) == 0 THEN
         // We just set it, so we should send an IPI to get him to check it.
 
-        HalTriggerIpi ( targetprb )
+        HalTriggerIpi (
+            targetprb, // target
+            KI_IPI_ASYNCHRONOUS, // type
+        )
     END
 ]
 

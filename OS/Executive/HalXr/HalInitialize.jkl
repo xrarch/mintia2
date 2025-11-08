@@ -49,7 +49,7 @@ FN HalpInitializeLsic (
     // Configure the mask to enable IPIs and the timer.
 
     lsic^.Mask0 = 0xFFFFFFF9
-    lsic^.Mask1 = 0xFFFFFFFF
+    lsic^.Mask1 = 0x7FFFFFFF
     BARRIER
 
     // Initialize the timer interrupt object.
@@ -58,7 +58,7 @@ FN HalpInitializeLsic (
 
     KeInitializeInterrupt (
         int, // interrupt
-        &HalpTimerInterrupt, // routine
+        &KiClockTick, // routine
         0, // context
         2, // vector
         KI_IPL_CLOCK, // ipl
@@ -67,6 +67,12 @@ FN HalpInitializeLsic (
         procid, // procid
     )
 
+#IF BLD_MP
+    // Override the high level handler to the special optimized one.
+
+    int^.Handler = &HalpHandlePerCpuInterrupt
+#END
+
     // Manually insert in PRB.
 
     prb^.IrqDispatchTable[2] = int
@@ -74,11 +80,11 @@ FN HalpInitializeLsic (
 #IF BLD_MP
     // Initialize the IPI interrupt object.
 
-    int = &prb^.IpiInterrupt
+    int = &prb^.IpiInterrupt1
 
     KeInitializeInterrupt (
         int, // interrupt
-        &HalpIpiInterrupt, // routine
+        0, // routine
         0, // context
         1, // vector
         KI_IPL_IPI, // ipl
@@ -87,9 +93,28 @@ FN HalpInitializeLsic (
         procid, // procid
     )
 
+    int^.Handler = &KiServiceIpi
+
     // Manually insert in PRB.
 
     prb^.IrqDispatchTable[1] = int
+
+    int = &prb^.IpiInterrupt2
+
+    KeInitializeInterrupt (
+        int, // interrupt
+        0, // routine
+        0, // context
+        63, // vector
+        KI_IPL_IPI, // ipl
+        FALSE, // edgetriggered
+        FALSE, // sharevector
+        procid, // procid
+    )
+
+    int^.Handler = &HalpDismissInterrupt
+
+    prb^.IrqDispatchTable[63] = int
 #END
 
     // Enable interrupts.

@@ -123,9 +123,71 @@ FN HalLowerHardwareIpl (
     END
 END
 
+FN (KeInterruptF) HalHandleDeviceInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+    // Default handler for non-special interrupts.
+
+    KiEnableInterrupts ()
+
+    // Acquire the interrupt object's spinlock. This synchronizes against
+    // other processors which have a driver trying to run code that is
+    // synchronized against their ISR, to access some shared data.
+
+#IF BLD_MP
+    KiAcquireSpinlock ( &interrupt^.Spinlock )
+#END
+
+    // Call the routine.
+
+    interrupt^.Routine (
+        interrupt, // interrupt
+        context, // context
+    )
+
+#IF BLD_MP
+    KiReleaseSpinlock ( &interrupt^.Spinlock )
+#END
+
+    // Disable interrupts.
+
+    KiDisableInterrupts ()
+END
+
+#IF BLD_MP
+
+FN (KeInterruptF) HalpHandlePerCpuInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+    // Optimized handler for per-cpu interrupts.
+    // Namely, the timer interrupt and asynchronous IPI interrupt.
+    // There is no need to take a spinlock for such interrupts so we don't.
+
+    KiEnableInterrupts ()
+
+    // Call the routine.
+
+    interrupt^.Routine (
+        interrupt, // interrupt
+        context, // context
+    )
+
+    // Disable interrupts.
+
+    KiDisableInterrupts ()
+END
+
+#END
+
 FN HalInterrupt (
     IN context : ^OsContext,
 )
+
+    // Called by architecture-specific code in Ke when an interrupt is detected.
 
     prb := KI_CURRENT_PRB_LOCAL
 
@@ -150,35 +212,14 @@ FN HalInterrupt (
 
     oldipl := prb^.Ipl
     prb^.Ipl = int^.Ipl
-
-    // Re-enable interrupts.
-
-    KiEnableInterrupts ()
-
     context^.OldIpl = oldipl
 
-    // Acquire the interrupt object's spinlock. This synchronizes against
-    // other processors which have a driver trying to run code that is
-    // synchronized against their ISR, to access some shared data.
+    // Call the handler.
 
-#IF BLD_MP
-    KiAcquireSpinlock ( &int^.Spinlock )
-#END
-
-    // Call the routine.
-
-    int^.Routine (
+    int^.Handler (
         int, // interrupt
         context, // context
     )
-
-#IF BLD_MP
-    KiReleaseSpinlock ( &int^.Spinlock )
-#END
-
-    // Disable interrupts.
-
-    KiDisableInterrupts ()
 
     // Reset the LSIC IPL.
 
@@ -188,18 +229,6 @@ FN HalInterrupt (
     // Reset the Prb IPL.
 
     prb^.Ipl = oldipl
-END
-
-FN (KeInterruptF) HalpTimerInterrupt (
-    IN interrupt : ^KeInterrupt,
-    IN context : ^OsContext,
-)
-
-    KiClockTick (
-        HAL_TIMER_INTERVAL, // intervalms
-        context^.Rs & OS_XR_RS_OLD_USER, // usermode
-        context^.OldIpl, // previpl
-    )
 END
 
 FN HalEnableInterrupt (
@@ -264,8 +293,17 @@ END
 
 #IF BLD_MP
 
+// On XR/station, we use IRQ1 (the highest priority IRQ supported by the
+// interrupt controller) for the synchronous IPI and IRQ63 for the async IPI.
+
+HalpIpiTypeToIrq : UBYTE[KI_IPI_TYPE_MAX] = {
+    [KI_IPI_SYNCHRONOUS] = 1,
+    [KI_IPI_ASYNCHRONOUS] = 63,
+}
+
 FN HalTriggerIpi (
     IN target : ^KiPrb,
+    IN type : UWORD,
 )
 
     // Acquire the stashed LSIC pointer.
@@ -274,14 +312,13 @@ FN HalTriggerIpi (
 
     // Write the IPI interrupt into the LSIC interrupt pending register for the
     // target processor. This will atomically OR it in.
-    //
-    // The IPI interrupt is IRQ1.
 
-    lsic^.Pending0 = (1 << 1)
+    lsic^.Pending0 = 1 << HalpIpiTypeToIrq[type]
 END
 
 FN HalBroadcastIpi (
     IN except : ^KiPrb,
+    IN type : UWORD,
 )
 
     // Broadcast IPIs to all processors except the one provided, which is
@@ -298,7 +335,10 @@ FN HalBroadcastIpi (
         // Don't IPI the processor if it's me.
 
         IF targetprb != except THEN
-            HalTriggerIpi ( targetprb )
+            HalTriggerIpi (
+                targetprb, // target
+                type, // type
+            )
         END
 
         i += 1
@@ -306,12 +346,12 @@ FN HalBroadcastIpi (
     END
 END
 
-FN (KeInterruptF) HalpIpiInterrupt (
+FN (KeInterruptF) HalpDismissInterrupt (
     IN interrupt : ^KeInterrupt,
     IN context : ^OsContext,
 )
 
-    KiServiceIpi ( context )
+    NOTHING
 END
 
 #END

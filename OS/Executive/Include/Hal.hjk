@@ -2,6 +2,8 @@
 // Generic header file for the Hardware Abstraction Layer (Hal).
 //
 
+#INCLUDE "<inc>/Ke.hjk"
+
 EXTERN FN HalEarlyInitialize ()
 
 EXTERN FN HalDebugWrite (
@@ -45,10 +47,12 @@ EXTERN FN HalPutCharacter (
 
 EXTERN FN HalTriggerIpi (
     IN target : ^KiPrb,
+    IN type : UWORD,
 )
 
 EXTERN FN HalBroadcastIpi (
     IN except : ^KiPrb,
+    IN type : UWORD,
 )
 
 EXTERN FN HalRaiseHardwareIpl (
@@ -61,6 +65,11 @@ EXTERN FN HalLowerHardwareIpl (
 
 EXTERN FN HalProcessorInitialize (
     IN prb : ^KiPrb,
+)
+
+EXTERN FN (KeInterruptF) HalHandleDeviceInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
 )
 
 FNPTR HalStartProcessorF ()

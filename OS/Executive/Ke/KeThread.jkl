@@ -502,7 +502,10 @@ FN KiWakeThreadForSignal (
             // The thread is running in usermode on another processor, so cause
             // an IPI to slurp him up into the kernel to check his signals.
 
-            HalTriggerIpi ( thread^.CurrentPrb )
+            HalTriggerIpi (
+                thread^.CurrentPrb, // target
+                KI_IPI_ASYNCHRONOUS, // type
+            )
         END
 #END
     END

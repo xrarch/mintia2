@@ -282,7 +282,10 @@ EXPORT FN KeEnqueueLapc (
         // The thread is running in usermode on another processor. Cause an IPI
         // to get him to check his lazy APC queue.
 
-        HalTriggerIpi ( thread^.CurrentPrb )
+        HalTriggerIpi (
+            thread^.CurrentPrb, // target
+            KI_IPI_ASYNCHRONOUS, // type
+        )
 #END
     END
 

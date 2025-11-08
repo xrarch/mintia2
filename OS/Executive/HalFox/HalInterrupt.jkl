@@ -51,10 +51,22 @@ FN HalLowerHardwareIpl (
     END
 END
 
+FN (KeInterruptF) HalHandleDeviceInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+    // Default handler for non-special interrupts.
+    // This is unused on fox32 (we just directly call the routine) but is
+    // necessary to link the kernel.
+END
+
 FN HalInterrupt (
     IN context : ^OsContext,
     IN vector : UWORD,
 )
+
+    // Called by architecture-specific code in Ke when an interrupt is detected.
 
     prb := KI_CURRENT_PRB
 
@@ -79,16 +91,4 @@ FN HalInterrupt (
     // Reset the Prb IPL.
 
     prb^.Ipl = oldipl
-END
-
-FN (KeInterruptF) HalpTimerInterrupt (
-    IN interrupt : ^KeInterrupt,
-    IN context : ^OsContext,
-)
-
-    KiClockTick (
-        HAL_TIMER_INTERVAL, // intervalms
-        context^.Eflags & OS_FOX32_EFLAGS_SWAPSP, // usermode
-        context^.OldIpl, // previpl
-    )
 END
