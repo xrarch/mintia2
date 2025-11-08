@@ -389,7 +389,9 @@ FN KiWaitCheck (
         // IPL >= KI_IPL_APC masks out all events, but the caller can request
         // cancellation upon KAPC reception.
 
-        IF alertable == KE_CANCEL_ON_KAPC AND bits & KI_THREAD_PENDING_KAPC THEN
+        IF alertable == KE_CANCEL_ON_KAPC AND
+            bits & KI_THREAD_PENDING_KAPC THEN
+
             // This wait is cancelled when kernel APCs are pending.
             // This allows consumers to use custom wait cleanup logic prior to
             // the execution of pending KAPCs (in particular, the turnstile
