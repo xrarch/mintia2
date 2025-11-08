@@ -44,6 +44,8 @@
     KiReleaseObjectElevated ( object )
 ]
 
+#IF BLD_MP
+
 FN KiIndicateActiveFunc (
     IN thread : ^KeThread,
     IN queue : ^KeBalancedQueue,
@@ -55,34 +57,16 @@ FN KiIndicateActiveFunc (
 
     KiAcquireQueueRemovalElevated ( lock )
 
-#IF BLD_MP
     IF thread^.BalancedQueue THEN
-#END
         KiAcquireObjectElevated ( &queue^.Header )
 
         queue^.ActiveThreadCount += 1
 
         KiReleaseObjectElevated ( &queue^.Header )
-#IF BLD_MP
     END
-#END
 
     KiReleaseQueueRemovalElevated ( lock )
 END
-
-#MACRO KiIndicateActive ( thread, queue ) [
-    // If we're associated with a balanced queue, we have to indicate that we've
-    // awoken.
-
-    IF queue THEN
-        // Indicate that we're active again.
-
-        KiIndicateActiveFunc (
-            thread, // thread
-            queue, // queue
-        )
-    END
-]
 
 FN KiIndicateDeactivatedFunc (
     IN thread : ^KeThread,
@@ -95,32 +79,52 @@ FN KiIndicateDeactivatedFunc (
 
     KiAcquireQueueRemovalElevated ( lock )
 
-#IF BLD_MP
     IF (thread)^.BalancedQueue THEN
-#END
         KiAcquireObjectElevated ( &queue^.Header )
 
         KiWakeBalancedQueue ( queue )
 
         KiReleaseObjectElevated ( &queue^.Header )
-#IF BLD_MP
     END
-#END
 
     KiReleaseQueueRemovalElevated ( lock )
 END
 
-#MACRO KiIndicateDeactivated ( thread, queue ) [
+#END
+
+#MACRO KiIndicateActive ( thread ) [
+    // If we're associated with a balanced queue, we have to indicate that we've
+    // awoken.
+
+    IF (thread)^.BalancedQueue THEN
+        // Indicate that we're active again.
+
+#IF BLD_MP
+        KiIndicateActiveFunc (
+            thread, // thread
+            (thread)^.BalancedQueue, // queue
+        )
+#ELSE
+        (thread)^.BalancedQueue^.ActiveThreadCount += 1
+#END
+    END
+]
+
+#MACRO KiIndicateDeactivated ( thread ) [
     // If we're associated with a balanced queue, we have to indicate that we're
     // blocking.
 
-    IF queue THEN
+    IF (thread)^.BalancedQueue THEN
         // Indicate that we're deactivated again.
 
+#IF BLD_MP
         KiIndicateDeactivatedFunc (
             thread, // thread
-            queue, // queue
+            (thread)^.BalancedQueue, // queue
         )
+#ELSE
+        KiWakeBalancedQueue ( (thread)^.BalancedQueue )
+#END
     END
 ]
 
@@ -177,12 +181,10 @@ FN KiWaitThread (
         KeDequeueTimer ( &thread^.Timeout )
     END
 
-    queue := thread^.BalancedQueue
-
     // If we're associated with a balanced queue, we have to indicate that we're
     // awake now.
 
-    KiIndicateActive ( thread, queue )
+    KiIndicateActive ( thread )
 
     // If we were placed on a list of kernel stack outswap candidates, remove
     // ourselves.
@@ -768,13 +770,11 @@ EXPORT FN KeWaitForObjects (
         )
     END
 
-    queue := thread^.BalancedQueue
-
     // If we're associated with a balanced queue, we have to indicate that we
     // are blocking so that someone else can be awoken. We have to do this
     // before acquiring the thread lock because of lock ordering.
 
-    KiIndicateDeactivated ( thread, queue )
+    KiIndicateDeactivated ( thread )
 
     // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
     // insert ourselves on the current processor's outswap candidate list.
@@ -820,7 +820,7 @@ EXPORT FN KeWaitForObjects (
         // If we're associated with a balanced queue, we indicated that we were
         // deactivated. We have to undo that now.
 
-        KiIndicateActive ( thread, queue )
+        KiIndicateActive ( thread )
 
         // If we were placed on a list of kernel stack outswap candidates, we
         // have to remove ourselves.
@@ -941,13 +941,11 @@ EXPORT FN KeSleep (
         0, // context2
     )
 
-    queue := thread^.BalancedQueue
-
     // If we're associated with a balanced queue, we have to indicate that we
     // are blocking so that someone else can be awoken. We have to do this
     // before acquiring the thread lock because of lock ordering.
 
-    KiIndicateDeactivated ( thread, queue )
+    KiIndicateDeactivated ( thread )
 
     // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
     // insert ourselves on the current processor's outswap candidate list.
@@ -996,7 +994,7 @@ EXPORT FN KeSleep (
         // If we're associated with a balanced queue, we indicated that we were
         // deactivated. We have to undo that now.
 
-        KiIndicateActive ( thread, queue )
+        KiIndicateActive ( thread )
 
         // If we were placed on a list of kernel stack outswap candidates, we
         // have to remove ourselves.
@@ -1224,13 +1222,11 @@ EXPORT FN KeWaitForSingleObject (
         )
     END
 
-    queue := thread^.BalancedQueue
-
     // If we're associated with a balanced queue, we have to indicate that we
     // are blocking so that someone else can be awoken. We have to do this
     // before acquiring the thread lock because of lock ordering.
 
-    KiIndicateDeactivated ( thread, queue )
+    KiIndicateDeactivated ( thread )
 
     // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
     // insert ourselves on the current processor's outswap candidate list.
@@ -1288,7 +1284,7 @@ EXPORT FN KeWaitForSingleObject (
         // If we're associated with a balanced queue, we indicated that we were
         // deactivated. We have to undo that now.
 
-        KiIndicateActive ( thread, queue )
+        KiIndicateActive ( thread )
 
         // If we were placed on a list of kernel stack outswap candidates, we
         // have to remove ourselves.
