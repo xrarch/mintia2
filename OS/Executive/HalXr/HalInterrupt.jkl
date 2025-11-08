@@ -130,6 +130,24 @@ FN (KeInterruptF) HalHandleDeviceInterrupt (
 
     // Default handler for non-special interrupts.
 
+    prb := KI_CURRENT_PRB_LOCAL
+
+    lsic := CAST prb^.LsicBase TO ^HalpLsic
+
+    // Set the LSIC IPL.
+
+    lsic^.Ipl = HalpIplToLsicIpl[interrupt^.Ipl]
+    BARRIER
+
+    // Capture old IPL and set new in Prb.
+
+    oldipl := prb^.Ipl
+    prb^.Ipl = interrupt^.Ipl
+    context^.OldIpl = oldipl
+
+    // Safe to enable interrupts now since we won't re-take the same IRQ after
+    // masking it off.
+
     KiEnableInterrupts ()
 
     // Acquire the interrupt object's spinlock. This synchronizes against
@@ -154,6 +172,15 @@ FN (KeInterruptF) HalHandleDeviceInterrupt (
     // Disable interrupts.
 
     KiDisableInterrupts ()
+
+    // Reset the LSIC IPL.
+
+    lsic^.Ipl = HalpIplToLsicIpl[oldipl]
+    BARRIER
+
+    // Reset the Prb IPL.
+
+    prb^.Ipl = oldipl
 END
 
 #IF BLD_MP
@@ -164,8 +191,26 @@ FN (KeInterruptF) HalpHandlePerCpuInterrupt (
 )
 
     // Optimized handler for per-cpu interrupts.
-    // Namely, the timer interrupt and asynchronous IPI interrupt.
+    // Namely, the timer interrupt.
     // There is no need to take a spinlock for such interrupts so we don't.
+
+    prb := KI_CURRENT_PRB_LOCAL
+
+    lsic := CAST prb^.LsicBase TO ^HalpLsic
+
+    // Set the LSIC IPL.
+
+    lsic^.Ipl = HalpIplToLsicIpl[interrupt^.Ipl]
+    BARRIER
+
+    // Capture old IPL and set new in Prb.
+
+    oldipl := prb^.Ipl
+    prb^.Ipl = interrupt^.Ipl
+    context^.OldIpl = oldipl
+
+    // Safe to enable interrupts now since we won't re-take the same IRQ after
+    // masking it off.
 
     KiEnableInterrupts ()
 
@@ -179,6 +224,15 @@ FN (KeInterruptF) HalpHandlePerCpuInterrupt (
     // Disable interrupts.
 
     KiDisableInterrupts ()
+
+    // Reset the LSIC IPL.
+
+    lsic^.Ipl = HalpIplToLsicIpl[oldipl]
+    BARRIER
+
+    // Reset the Prb IPL.
+
+    prb^.Ipl = oldipl
 END
 
 #END
@@ -203,32 +257,12 @@ FN HalInterrupt (
 
     int := prb^.IrqDispatchTable[vector]
 
-    // Set the LSIC IPL.
-
-    lsic^.Ipl = HalpIplToLsicIpl[int^.Ipl]
-    BARRIER
-
-    // Capture old IPL and set new in Prb.
-
-    oldipl := prb^.Ipl
-    prb^.Ipl = int^.Ipl
-    context^.OldIpl = oldipl
-
     // Call the handler.
 
     int^.Handler (
         int, // interrupt
         context, // context
     )
-
-    // Reset the LSIC IPL.
-
-    lsic^.Ipl = HalpIplToLsicIpl[oldipl]
-    BARRIER
-
-    // Reset the Prb IPL.
-
-    prb^.Ipl = oldipl
 END
 
 FN HalEnableInterrupt (
