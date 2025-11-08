@@ -315,9 +315,17 @@ FN BxInitializeArgs (
     LEAVE
 END
 
+BxBootDiskId : ULONG
+BxRamSize : ULONG
+BxUsableRamSize : ULONG
+
 EXTERN FN BlMain () : UWORD
 
-FN BxEntry ()
+FN BxEntry (
+    IN bootdiskid : UWORD,
+    IN ramsize : UWORD,
+    IN usableramsize : UWORD,
+)
 
     // Clear the BSS section.
 
@@ -326,6 +334,22 @@ FN BxEntry ()
         &_bss_size, // size
         0, // ulong
     )
+
+    // Store the stuff passed in by the ROM.
+
+    IF bootdiskid == 0x80002000 THEN
+        // The boot sector is the old one which trashed the boot disk ID passed
+        // in r0 by overwriting it with this specific value.
+
+        bootdiskid = 0
+        ramsize = 64 * 1024 * 1024
+        usableramsize = 64 * 1024 * 1024
+
+    ELSE
+        BxBootDiskId = bootdiskid
+        BxRamSize = ramsize
+        BxUsableRamSize = usableramsize
+    END
 
     // Reset the fox32 hardware.
 
@@ -740,14 +764,14 @@ FN (BlReadF) BxReadPartition (
     // Set the buffer address.
 
     BxFox32Out (
-        0x80002000 | 0, // port
+        0x80002000 | BxBootDiskId, // port
         physbuf, // value
     )
 
     // Set the sector number.
 
     BxFox32Out (
-        0x80003000 | 0, // port
+        0x80003000 | BxBootDiskId, // port
         (offset / 512) + 4, // value
     )
 
@@ -761,7 +785,8 @@ FN BxInitializeIo (
     RtlFormat (
         &BlInfoBlock.BootDeviceName[0], // dest
         BL_BOOT_NAME_MAX, // bufsize
-        "dks0s0", // fmt
+        "dks%ds0", // fmt
+        BxBootDiskId,
     )
 
     // Register the read function.
@@ -770,11 +795,11 @@ FN BxInitializeIo (
 
     // Initialize size.
 
-    blocks := BxFox32In ( 0x80001000 | 0 )
+    blocks := BxFox32In ( 0x80001000 | BxBootDiskId )
 
     BlBootDevice.Size = blocks / 512
 
-    RtlPrint ( "Fox32 Disk: %u blocks\n", blocks / 512 )
+    RtlPrint ( "Fox32 Disk%d: %u blocks\n", BxBootDiskId, blocks / 512 )
 
     // Stash the parameters of the boot framebuffer.
 

@@ -34,7 +34,16 @@
 #DEFINE INode_Reserved2 88
 #DEFINE INode_ByteSize 92
 
+// Note that fox32rom passes registers like this:
+//   r0/t0: boot disk ID
+//   r1/t1: total RAM size
+//   r2/t2: usable size in r2
+
 AisixFSBoot:
+
+	mov [BootDiskId], r0
+	mov [TotalRamSize], r1
+	mov [UsableRamSize], r2
 
 // get the address of our temporary disk block buffer, which should be right
 // after the end of this program in memory.
@@ -118,6 +127,9 @@ AisixFSBoot:
 
 // jump to the entrypoint
 
+	mov  a0, [BootDiskId]
+	mov  a1, [TotalRamSize]
+	mov  a2, [UsableRamSize]
 	call 0x2004
 
 // it returned, we're done
@@ -152,3 +164,12 @@ ReadBlock:
 
 DiskBlockBuffer:
 	.bytes 512, 0
+
+BootDiskId:
+	.dl 0
+
+TotalRamSize:
+	.dl 0
+
+UsableRamSize:
+	.dl 0

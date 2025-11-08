@@ -11,11 +11,16 @@ start:
 here:
 .bytes (164 - here), 0
 
+// Note that fox32rom passes registers like this:
+//   r0/t0: boot disk ID
+//   r1/t1: total RAM size
+//   r2/t2: usable size in r2
+
 PastThePartitionTable:
-	mov t0, 0x80002000       // command to set the location of the buffer
-	mov t1, 0x80003000       // command to read a sector from a disk into the buffer
-	out t0, 0xA00            // set the memory buffer location
-	out t1, 7                // read the sector into memory
+	mov r3, 0x80002000       // command to set the location of the buffer
+	mov r4, 0x80003000       // command to read a sector from a disk into the buffer
+	out r3, 0xA00            // set the memory buffer location
+	out r4, 7                // read the sector into memory
 
 	jmp 0xA00
 
