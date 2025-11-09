@@ -827,8 +827,9 @@ EXPORT FN MmAllocateFromPoolCache (
     rounds = percpu^.Rounds
 
     IF rounds > 0 THEN
-        // NOTE: There's an intentional off-by-one index in order to skip
-        //       past the cache link pointer at the start of the magazine.
+        // NOTE: The cache link pointer in the zeroth element of the magazine is
+        //       skipped in a subtle way here that shouldn't be confused with an
+        //       off-by-one bug.
 
         block = percpu^.Loaded[rounds]
         percpu^.Rounds = rounds - 1
@@ -918,10 +919,10 @@ EXPORT FN MmFreeToPoolCache (
 
     IF (CAST rounds TO UWORD) < percpu^.MagazineSize THEN
         // There's room in the loaded magazine.
-        // Do an intentional off-by-one to skip over the depot list link.
+        // Make sure to skip over the depot list link, which occupies the zeroth
+        // element of the magazine.
 
         percpu^.Loaded[rounds + 1] = ptr
-
         percpu^.Rounds = rounds + 1
 
         MiUnlockMagazineCache ( percpu, ipl )
