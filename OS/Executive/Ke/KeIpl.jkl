@@ -17,15 +17,22 @@
 #END
 ]
 
-FNPTR KiSoftwareInterruptHandlerF (
-    IN prb : ^KiPrb,
-)
+FNPTR KiSoftwareInterruptHandlerF ()
 
-FN (KiSoftwareInterruptHandlerF) KiApcInterrupt (
-    IN prb : ^KiPrb,
-)
+FN (KiSoftwareInterruptHandlerF) KiNoInterrupt ()
 
+    // Called if no software interrupt is pending on entry to
+    // KiDispatchSoftwareInterrupts.
+
+    NOTHING
+END
+
+FN (KiSoftwareInterruptHandlerF) KiApcInterrupt ()
+
+    // Called if an APC interrupt is pending.
     // Atomically clear the pending APC interrupt.
+
+    prb := KI_CURRENT_PRB_LOCAL
 
     KiAcknowledgeSoftwareInterrupt (
         prb, // prb
@@ -43,11 +50,12 @@ FN (KiSoftwareInterruptHandlerF) KiApcInterrupt (
     KiDisableInterrupts ()
 END
 
-FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
-    IN prb : ^KiPrb,
-)
+FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt ()
 
+    // Called if a DPC interrupt is pending.
     // Atomically clear the pending DPC interrupt.
+
+    prb := KI_CURRENT_PRB
 
     KiAcknowledgeSoftwareInterrupt (
         prb, // prb
@@ -57,8 +65,6 @@ FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt (
     prb^.Ipl = KI_IPL_DPC
 
     KiEnableInterrupts ()
-
-    KiToGlobalPrb ( prb )
 
     IF NOT RtlEmptyList ( &prb^.DpcListHead ) THEN
         KiDispatchDpcQueue ( prb )
@@ -104,7 +110,7 @@ END
 
 #SECTION "text"
 KiSoftwareInterruptPriorityTable : KiSoftwareInterruptHandlerF[8] = {
-    [0] = NULLPTR,
+    [0] = &KiNoInterrupt,
     [1] = &KiApcInterrupt,
     [2] = &KiDpcInterrupt,
     [3] = &KiDpcInterrupt,
@@ -114,13 +120,28 @@ FN KiDispatchSoftwareInterrupts (
     IN newipl : UWORD,
 )
 
+    // Called when a pending software interrupt is detected either while
+    // lowering IPL, or before returning from an interrupt. We need to
+    // loop dispatching software interrupts until no more unmasked ones are
+    // pending.
+
+    mask := 3 << newipl
+
     oldstate := KiDisableInterrupts ()
 
-    prb := KI_CURRENT_PRB_LOCAL
-    pending := prb^.PendingSoftwareInterrupts & (3 << newipl)
+    // Note that there's a race where inbetween the caller noticing unmasked
+    // pending soft ints, and disabling interrupts just now, an interrupt may
+    // have come in that delivered them, meaning we'll observe a "zero" mask in
+    // the pending soft ints mask. We don't check for this and assume it's an
+    // uncommon case (although it does happen, observably). The zeroth entry
+    // in the dispatch table is a no-op routine in order to catch this
+    // harmlessly without wasting branch instructions in the hot path.
 
-    WHILE pending DO
-        KiSoftwareInterruptPriorityTable[pending] ( prb )
+    prb := KI_CURRENT_PRB_LOCAL
+    pending := prb^.PendingSoftwareInterrupts & mask
+
+    WHILE TRUE DO
+        KiSoftwareInterruptPriorityTable[pending] ()
 
 #IF KI_VOLATILE_LOCAL_PRB
         // Recapture the Prb since it might have changed due to activity of the
@@ -129,7 +150,11 @@ FN KiDispatchSoftwareInterrupts (
         prb = KI_CURRENT_PRB_LOCAL
 #END
 
-        pending = prb^.PendingSoftwareInterrupts & (3 << newipl)
+        pending = prb^.PendingSoftwareInterrupts & mask
+
+        IF NOT pending THEN
+            BREAK
+        END
     END
 
     prb^.Ipl = newipl
