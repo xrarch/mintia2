@@ -5,41 +5,27 @@
 #INCLUDE "Mi.hjk"
 
 #SECTION "PAGEtext"
-FN MmCreateKernelStack (
-    IN process : ^PsProcess,
-    OUT kstack : ^VOID,
-) : OsStatus
+FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
+    IN context : ^VOID,
+    IN wait : UWORD,
+) : ^VOID
 
-    // Create a kernel stack.
+    // Allocate a kernel stack by request of the cache layer.
 
-    partition := process^.Partition
-    quotablock := PsQuotaBlock ( process )
-
-    // Charge the process's virtual memory quota for the kernel stack.
-
-    status := MmChargeVmQuota (
-        partition, // partition
-        quotablock, // quotablock
-        KE_STACK_PAGES, // pages
-    )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
+    node := CAST context TO ^MiNode
+    partition := &node^.Partition
 
     // Allocate the required system space.
 
-    kstack = MiAllocateDynamicPages (
-        process^.Node, // node
+    kstack := MiAllocateDynamicPages (
+        node, // node
         KE_STACK_PAGES + 1, // pages
     )
 
     IF NOT kstack THEN
         // Couldn't acquire them.
 
-        status = OS_STATUS_NO_MEMORY
-
-        GOTO Error1
+        RETURN NULLPTR
     END
 
     // Skip the guard page.
@@ -80,9 +66,14 @@ FN MmCreateKernelStack (
                 )
             END
 
-            status = OS_STATUS_NO_MEMORY
+            MiReleaseDynamicPages (
+                node, // node
+                kstack - RTL_PAGE_SIZE, // ptr
+                KE_STACK_PAGES + 1, // pages
+                FALSE, // flush
+            )
 
-            GOTO Error2
+            RETURN NULLPTR
         END
 
         i += 1
@@ -111,41 +102,23 @@ FN MmCreateKernelStack (
         i += 1
     END
 
-    RETURN OS_STATUS_SUCCESS
-
-@Error2
-
-    MiReleaseDynamicPages (
-        process^.Node, // node
-        kstack - RTL_PAGE_SIZE, // ptr
-        KE_STACK_PAGES + 1, // pages
-        FALSE, // flush
-    )
-
-@Error1
-
-    MmUnchargeVmQuota (
-        partition, // partition
-        quotablock, // quotablock
-        KE_STACK_PAGES, // pages
-    )
-
-    RETURN status
+    RETURN kstack
 END
 
 #SECTION "PAGEtext"
-FN MmFreeKernelStack (
-    IN process : ^PsProcess,
-    IN kstack : ^VOID,
+FN (MmPoolCacheFreeF) MiFreeKernelStack (
+    IN context : ^VOID,
+    IN ptr : ^VOID,
 )
 
-    // Free a kernel stack. It must be in an inswapped state.
+    // Free a kernel stack.
 
-    partition := process^.Partition
+    node := CAST context TO ^MiNode
+    partition := &node^.Partition
 
     // Acquire a pointer to the first PTE for this region.
 
-    pte := MiPteAddress ( kstack )
+    pte := MiPteAddress ( ptr )
 
     // Free the kernel stack pages.
 
@@ -179,16 +152,105 @@ FN MmFreeKernelStack (
     // Release the system space containing the stack.
 
     MiReleaseDynamicPages (
-        process^.Node, // node
-        kstack - RTL_PAGE_SIZE, // ptr
+        node, // node
+        ptr - RTL_PAGE_SIZE, // ptr
         KE_STACK_PAGES + 1, // pages
         TRUE, // flush
+    )
+END
+
+#SECTION "INITtext"
+FN MiInitializeKernelStackCache (
+    IN node : ^MiNode,
+)
+
+    // Initialize the zones we use for quickly allocating kernel stacks.
+
+    node^.KernelStackCache = MmCreatePoolCacheEx (
+        node, // node
+        "Kstacks", // name
+        KE_STACK_PAGES * RTL_PAGE_SIZE, // size
+        TRUE, // pageable
+        &MiAllocateKernelStack, // allocfunc
+        &MiFreeKernelStack, // freefunc
+        NULLPTR, // deletefunc
+        node, // context
+    )
+
+#ENTERSECTION "INITtext"
+    IF NOT node^.KernelStackCache THEN
+        KeCrash ( "MiInitializeKernelStackCache: failed to create cache\n" )
+    END
+#LEAVESECTION
+
+END
+
+#SECTION "PAGEtext"
+FN MmCreateKernelStack (
+    IN process : ^PsProcess,
+    OUT kstack : ^VOID,
+) : OsStatus
+
+    // Create a kernel stack.
+
+    // We cache kernel stacks per-node rather than per-partition, so make sure
+    // to do VM accounting relative to the node's integral partition.
+
+    partition := &process^.Node^.Partition
+
+    quotablock := PsQuotaBlock ( process )
+
+    // Charge the process's virtual memory quota for the kernel stack.
+
+    status := MmChargeVmQuota (
+        partition, // partition
+        quotablock, // quotablock
+        KE_STACK_PAGES, // pages
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Allocate it.
+
+    kstack = MmAllocateFromPoolCache (
+        process^.Node^.KernelStackCache, // cache
+        TRUE, // wait
+    )
+
+    IF NOT kstack THEN
+        // Failed to allocate it so uncharge and report an error.
+
+        MmUnchargeVmQuota (
+            partition, // partition
+            quotablock, // quotablock
+            KE_STACK_PAGES, // pages
+        )
+
+        status = OS_STATUS_NO_MEMORY
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN MmFreeKernelStack (
+    IN process : ^PsProcess,
+    IN kstack : ^VOID,
+)
+
+    // Free a kernel stack. It must be in an inswapped state.
+
+    MmFreeToPoolCache (
+        process^.Node^.KernelStackCache, // cache
+        kstack, // ptr
     )
 
     // Uncharge the virtual memory quota consumed by the kernel stack.
 
     MmUnchargeVmQuota (
-        partition, // partition
+        &process^.Node^.Partition, // partition
         PsQuotaBlock ( process ), // quotablock
         KE_STACK_PAGES, // pages
     )
