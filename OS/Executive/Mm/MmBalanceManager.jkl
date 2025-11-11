@@ -16,6 +16,8 @@ FN (ExWorkItemF) MiChuckPagedPoolCacheWorker (
 
     node := CAST context1 TO ^MiNode
 
+    node^.PgPoolCacheChuckActive = FALSE
+
     MiAdjustPoolCaches (
         &node^.PgPoolCacheList, // list
         TRUE, // purge
@@ -36,13 +38,6 @@ FN (ExWorkItemF) MiChuckPagedPoolCacheWorker (
             0, // context2
         )
     END
-
-    // Language-level BARRIER to stop the compiler from reordering the below
-    // store above any of the work above.
-
-    BARRIER
-
-    node^.PgPoolCacheChuckActive = FALSE
 END
 
 FN MmBalanceManager ()

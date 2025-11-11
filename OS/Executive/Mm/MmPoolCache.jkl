@@ -1199,6 +1199,7 @@ FN MiAdjustPoolCaches (
     MiUnlockPoolCacheList ( list )
 END
 
+#DEFINE MI_POOL_ADJUSTMENT_INTERVAL_SHORT_MS 1000
 #DEFINE MI_POOL_ADJUSTMENT_INTERVAL_MS 5000
 #DEFINE MI_POOL_PURGE_INTERVAL_MS 10000
 
@@ -1209,11 +1210,19 @@ FN MiEnqueuePoolCacheAdjustment (
 
     // Enqueue the pool cache adjustment item.
 
+    intervalms := MI_POOL_ADJUSTMENT_INTERVAL_MS
+
+    IF node^.Partition.AvailablePageCount <
+        node^.Partition.SufficientPageCount THEN
+
+        intervalms = MI_POOL_ADJUSTMENT_INTERVAL_SHORT_MS
+    END
+
     interval : RtlUquad
 
     RtlSetUquadToUlong (
         &interval, // interval
-        MI_POOL_ADJUSTMENT_INTERVAL_MS, // ulong
+        intervalms, // ulong
     )
 
     ExEnqueueTimedWorkItem (
@@ -1221,7 +1230,7 @@ FN MiEnqueuePoolCacheAdjustment (
         EX_HIGH_WORK_PRIORITY, // priority
         &interval, // interval
         CAST node TO UWORD, // context1
-        counter + MI_POOL_ADJUSTMENT_INTERVAL_MS, // context2
+        counter + intervalms, // context2
     )
 END
 
@@ -1233,6 +1242,8 @@ FN (ExWorkItemF) MiAdjustPoolCachesWorker (
     // Called periodically to adjust the pool caches on a node.
 
     node := CAST context1 TO ^MiNode
+
+    RtlPrint ( "A" )
 
     purge := context2 >= MI_POOL_PURGE_INTERVAL_MS
 
