@@ -4,8 +4,6 @@
 
 #INCLUDE "Mi.hjk"
 
-#DEFINE MI_FULL_BLOCKS_PER_EXTENSION [(RTL_PAGE_SIZE / MI_BLOCK_MAX_SIZE - 1)]
-
 #DEFINE MI_BLOCK_SWIFT_MAGIC 0xC0
 #DEFINE MI_BLOCK_FREE_MAGIC 0xE4
 #DEFINE MI_BLOCK_INVALID_MAGIC 0xA5
@@ -590,34 +588,6 @@ FN MiAllocateFromPool (
         &newblock^.SizeEntry, // entry
     )
 
-    newblock += newblocksize << MI_BLOCK_SIZE_SHIFT
-
-    i = 0
-
-    WHILE i < MI_FULL_BLOCKS_PER_EXTENSION DO
-        // Initialize this full block.
-
-        newblock^.Block.Magic = MI_BLOCK_FREE_MAGIC
-        newblock^.Block.Size = 1 << MI_BLOCK_MAX_UNITS_SHIFT
-        newblock^.Block.BucketIndex = MI_BLOCK_MAX_UNITS_SHIFT
-        newblock^.Block.LastSize = 0
-
-        // Insert the new block into the buckets indexed by floor-log and size.
-
-        RtlInsertAtHeadList (
-            &pool^.LogListHeads[MI_BLOCK_MAX_UNITS_SHIFT], // head
-            &newblock^.LogEntry, // entry
-        )
-
-        RtlInsertAtHeadList (
-            &pool^.SizeListHeads[1 << MI_BLOCK_MAX_UNITS_SHIFT], // head
-            &newblock^.SizeEntry,
-        )
-
-        newblock += MI_BLOCK_MAX_SIZE
-        i += 1
-    END
-
     // Unlock the pool.
 
     MiReleasePool ( pool, ipl )
@@ -850,25 +820,6 @@ FN MiFreeToPool (
             RtlRemoveEntryList ( &otherblock^.LogEntry )
 
             RtlRemoveEntryList ( &otherblock^.SizeEntry )
-        END
-
-        // Now unlink the full blocks.
-
-        otherblock += MI_BLOCK_MAX_SIZE - MI_BLOCK_MIN_SIZE
-
-        i := 0
-
-        WHILE i < MI_FULL_BLOCKS_PER_EXTENSION DO
-            IF otherblock != block THEN
-                KeAssert ( otherblock^.Block.Magic == MI_BLOCK_FREE_MAGIC )
-
-                RtlRemoveEntryList ( &otherblock^.LogEntry )
-
-                RtlRemoveEntryList ( &otherblock^.SizeEntry )
-            END
-
-            i += 1
-            otherblock += MI_BLOCK_MAX_SIZE
         END
 
         pool^.BytesUsedExternally -= RTL_PAGE_SIZE
