@@ -52,18 +52,31 @@ STRUCT MiDepotList
     ReapLimit : ULONG,
 END
 
+STRUCT MiSlabBackedPoolCacheContext
+    Slabs : MiSlabCache,
+END
+
 STRUCT MiPoolCache
+    Name : ^UBYTE,
+
     DepotLock : KeLock,
+
     FullMagazineList : MiDepotList,
     EmptyMagazineList : MiDepotList,
 
-    Slabs : MiSlabCache,
-
     MasterListEntry : RtlListEntry,
 
-    Name : ^UBYTE,
-
     MagazineType : ^MiMagazineType,
+
+    Allocate : MmPoolCacheAllocateF,
+    Free : MmPoolCacheFreeF,
+    Delete : MmPoolCacheDeleteF,
+
+    Context : ^VOID,
+
+    Node : ^MiNode,
+
+    Pageable : UBYTE,
 END
 
 #DEFINE MI_PCPCPU_SIZE [((SIZEOF MiPoolCachePerCpu + KE_CACHE_ALIGN - 1) &
@@ -324,13 +337,15 @@ FN MiFreeSlab (
     )
 END
 
-FN MiAllocateFromSlabCache (
-    IN scache : ^MiSlabCache,
+FN (MmPoolCacheAllocateF) MiAllocateFromSlabCache (
+    IN context : ^VOID,
     IN wait : UWORD,
 ) : ^VOID
 
     // Allocate a single entry from a slab cache.
     // Return NULLPTR upon failure.
+
+    scache := CAST context TO ^MiSlabCache
 
     ipl := MiLockSlabCache ( scache )
 
@@ -364,12 +379,14 @@ FN MiAllocateFromSlabCache (
     RETURN block
 END
 
-FN MiFreeToSlabCache (
-    IN scache : ^MiSlabCache,
+FN (MmPoolCacheFreeF) MiFreeToSlabCache (
+    IN context : ^VOID,
     IN ptr : ^VOID,
 )
 
     // Free a block to the given slab cache.
+
+    scache := CAST context TO ^MiSlabCache
 
     ipl := MiLockSlabCache ( scache )
 
@@ -399,12 +416,15 @@ FN MiFreeToSlabCache (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmCreatePoolCache (
+EXPORT FN MmCreatePoolCacheEx (
     IN node : ^MiNode,
     IN name : ^UBYTE,
     IN size : UWORD,
-    IN poolindex : UWORD,
-    IN tag : UWORD,
+    IN pageable : UWORD,
+    IN allocfunc : MmPoolCacheAllocateF,
+    IN freefunc : MmPoolCacheFreeF,
+    IN deletefunc : MmPoolCacheDeleteF,
+    IN context : ^VOID,
 ) : ^MiPoolCache
 
     // Allocate and return a new pool cache structure.
@@ -432,15 +452,12 @@ EXPORT FN MmCreatePoolCache (
 
     cache^.Name = name
 
-    // Initialize the slab cache used for allocating cached blocks.
+    cache^.Allocate = allocfunc
+    cache^.Free = freefunc
+    cache^.Delete = deletefunc
+    cache^.Context = context
 
-    MiInitializeSlabCache (
-        node, // node
-        &cache^.Slabs, // scache
-        size, // size
-        poolindex, // poolindex
-        tag, // tag
-    )
+    cache^.Node = node
 
     KeInitializeLock ( &cache^.DepotLock )
 
@@ -453,7 +470,7 @@ EXPORT FN MmCreatePoolCache (
 
     list : ^MiPoolCacheList
 
-    IF poolindex == MM_NONPAGED_POOL THEN
+    IF NOT pageable THEN
         list = &node^.NpPoolCacheList
     ELSE
         list = &node^.PgPoolCacheList
@@ -496,6 +513,79 @@ EXPORT FN MmCreatePoolCache (
     RETURN cache
 END
 
+FN (MmPoolCacheDeleteF) MiDeleteSlabBackedCache (
+    IN context : ^VOID,
+)
+
+    // A slab-backed pool cache is being deleted.
+    // First, make sure all of the slabs are gone.
+
+    scache := CAST context TO ^MiSlabCache
+
+    KeAssert ( scache^.ActiveSlabCount == 0 )
+
+    // Now release the slab cache.
+
+    MiFreeToSlabCache (
+        &scache^.Node^.SlabCacheSlabs, // scache
+        scache, // ptr
+    )
+END
+
+EXPORT FN MmCreatePoolCache (
+    IN node : ^MiNode,
+    IN name : ^UBYTE,
+    IN size : UWORD,
+    IN poolindex : UWORD,
+    IN tag : UWORD,
+) : ^MiPoolCache
+
+    // Create a slab-backed pool cache.
+
+    scache : ^MiSlabCache = MiAllocateFromSlabCache (
+        &node^.SlabCacheSlabs, // scache
+        TRUE, // wait
+    )
+
+    IF NOT scache THEN
+        RETURN NULLPTR
+    END
+
+    // Initialize the slab cache used for allocating cached blocks.
+
+    MiInitializeSlabCache (
+        node, // node
+        scache, // scache
+        size, // size
+        poolindex, // poolindex
+        tag, // tag
+    )
+
+    // Create the pool cache with the appropriate slab callbacks.
+
+    cache := MmCreatePoolCacheEx (
+        node, // node
+        name, // name
+        size, // size
+        poolindex != MM_NONPAGED_POOL, // pageable
+        &MiAllocateFromSlabCache, // allocfunc
+        &MiFreeToSlabCache, // freefunc
+        &MiDeleteSlabBackedCache, // deletefunc
+        scache, // context
+    )
+
+    IF NOT cache THEN
+        // Failed to allocate the pool cache, so release the slab cache.
+
+        MiFreeToSlabCache (
+            &node^.SlabCacheSlabs, // scache
+            scache, // ptr
+        )
+    END
+
+    RETURN cache
+END
+
 FN MiDestroyAndFreeMagazine (
     IN cache : ^MiPoolCache,
     IN magazine : ^^VOID,
@@ -513,8 +603,8 @@ FN MiDestroyAndFreeMagazine (
     i := 0
 
     WHILE i < rounds DO
-        MiFreeToSlabCache (
-            &cache^.Slabs, // scache
+        cache^.Free (
+            cache^.Context, // context
             magazine[i], // ptr
         )
 
@@ -751,13 +841,13 @@ EXPORT FN MmDeletePoolCache (
 
     // Delete a pool cache.
 
-    node := cache^.Slabs.Node
+    node := cache^.Node
 
     // Remove from global list.
 
     list : ^MiPoolCacheList
 
-    IF cache^.Slabs.PoolIndex == MM_NONPAGED_POOL THEN
+    IF NOT cache^.Pageable THEN
         list = &node^.NpPoolCacheList
     ELSE
         list = &node^.PgPoolCacheList
@@ -773,9 +863,11 @@ EXPORT FN MmDeletePoolCache (
 
     MiPurgeMagazinesPoolCache ( cache )
 
-    // Verify that all slabs are gone.
+    // Call the destructor.
 
-    KeAssert ( cache^.Slabs.ActiveSlabCount == 0 )
+    IF cache^.Delete THEN
+        cache^.Delete ( cache^.Context )
+    END
 
     // Free pool cache to pool cache slab cache.
     // Say that ten times fast.
@@ -889,8 +981,8 @@ EXPORT FN MmAllocateFromPoolCache (
     // Magazine layer wasn't of any help so we need to drop through to the slab
     // layer of this cache.
 
-    block = MiAllocateFromSlabCache (
-        &cache^.Slabs, // scache
+    RETURN cache^.Allocate (
+        cache^.Context, // context
         wait, // wait
     )
 END
@@ -942,7 +1034,7 @@ EXPORT FN MmFreeToPoolCache (
         GOTO Retry
     END
 
-    IF PsCurrentNode () != cache^.Slabs.Node THEN
+    IF PsCurrentNode () != cache^.Node THEN
         // This is a CPU foreign to the preferred NUMA node of the pool cache.
         // Bypass the magazine layer since it won't do any good to have some
         // foreign CPU take up magazines in another NUMA node's pool cache.
@@ -1034,8 +1126,8 @@ EXPORT FN MmFreeToPoolCache (
     // Failed to get a magazine, our last resort is to just free the block
     // directly to the slab layer.
 
-    MiFreeToSlabCache (
-        &cache^.Slabs, // scache
+    cache^.Free (
+        cache^.Context, // context
         ptr, // ptr
     )
 END
@@ -1193,6 +1285,16 @@ FN MiInitializePoolCache (
         MI_PC_SIZE + KeQueryProcessorCount () * MI_PCPCPU_SIZE, // size
         MM_NONPAGED_POOL, // poolindex
         'PoCa', // tag
+    )
+
+    // Initialize a slab cache to allocate slab caches from.
+
+    MiInitializeSlabCache (
+        node, // node
+        &node^.SlabCacheSlabs, // scache
+        SIZEOF MiSlabCache, // size
+        MM_NONPAGED_POOL, // poolindex
+        'PoSl', // tag
     )
 
     // Initialize the magazine types.

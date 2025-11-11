@@ -289,6 +289,31 @@ EXTERN FN MmFreeToPoolCache (
     IN ptr : ^VOID,
 )
 
+FNPTR MmPoolCacheAllocateF (
+    IN context : ^VOID,
+    IN wait : UWORD,
+) : ^VOID
+
+FNPTR MmPoolCacheFreeF (
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+)
+
+FNPTR MmPoolCacheDeleteF (
+    IN context : ^VOID,
+)
+
+EXTERN FN MmCreatePoolCacheEx (
+    IN node : ^MiNode,
+    IN name : ^UBYTE,
+    IN size : UWORD,
+    IN pageable : UWORD,
+    IN allocfunc : MmPoolCacheAllocateF,
+    IN freefunc : MmPoolCacheFreeF,
+    IN deletefunc : MmPoolCacheDeleteF,
+    IN context : ^VOID,
+) : ^MiPoolCache
+
 EXTERN FN MmCreatePoolCache (
     IN node : ^MiNode,
     IN name : ^UBYTE,
