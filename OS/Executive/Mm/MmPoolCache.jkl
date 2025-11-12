@@ -237,19 +237,21 @@ END
 
 FN MiExtendSlabCache (
     IN scache : ^MiSlabCache,
+    IN ipl : UWORD,
     IN wait : UWORD,
 ) : ^VOID
 
     // Extend the slab cache. Its lock is held.
-    // Returns a pointer to the first (free) block in the new slab, or NULLPTR
-    // if there's a failure.
+    // Returns TRUE if extended, FALSE otherwise.
+
+@Retry
 
     slab := MmAllocatePoolEx (
         scache^.Node, // node
         scache^.PoolIndex, // poolindex
         scache^.SlabSize, // bytes
         scache^.Tag, // tag
-        wait, // wait
+        FALSE, // wait
     )
 
     // RtlPrint ( "extend %p\n", slab )
@@ -257,7 +259,26 @@ FN MiExtendSlabCache (
     IF NOT slab THEN
         // Failure.
 
-        RETURN NULLPTR
+        IF NOT wait THEN
+            // Caller specified not to wait, so break out.
+
+            RETURN FALSE
+        END
+
+        // We can't wait for pages with a slab cache lock held or we'll deadlock
+        // memory management so instead we first try with wait=FALSE, and failing
+        // that we wait for free pages outside of the lock.
+
+        MiUnlockSlabCache ( scache, ipl )
+
+        MiWaitForPages (
+            &scache^.Node^.Partition, // partition
+            PsCurrentThread()^.VmPrivileged, // low
+        )
+
+        MiLockSlabCache ( scache )
+
+        GOTO Retry
     END
 
     scache^.ActiveSlabCount += 1
@@ -356,6 +377,7 @@ FN (MmPoolCacheAllocateF) MiAllocateFromSlabCache (
 
         block = MiExtendSlabCache (
             scache, // scache
+            ipl, // ipl
             wait, // wait
         )
 
@@ -1199,7 +1221,6 @@ FN MiAdjustPoolCaches (
     MiUnlockPoolCacheList ( list )
 END
 
-#DEFINE MI_POOL_ADJUSTMENT_INTERVAL_SHORT_MS 1000
 #DEFINE MI_POOL_ADJUSTMENT_INTERVAL_MS 5000
 #DEFINE MI_POOL_PURGE_INTERVAL_MS 10000
 
@@ -1211,12 +1232,6 @@ FN MiEnqueuePoolCacheAdjustment (
     // Enqueue the pool cache adjustment item.
 
     intervalms := MI_POOL_ADJUSTMENT_INTERVAL_MS
-
-    IF node^.Partition.AvailablePageCount <
-        node^.Partition.SufficientPageCount THEN
-
-        intervalms = MI_POOL_ADJUSTMENT_INTERVAL_SHORT_MS
-    END
 
     interval : RtlUquad
 
@@ -1242,8 +1257,6 @@ FN (ExWorkItemF) MiAdjustPoolCachesWorker (
     // Called periodically to adjust the pool caches on a node.
 
     node := CAST context1 TO ^MiNode
-
-    RtlPrint ( "A" )
 
     purge := context2 >= MI_POOL_PURGE_INTERVAL_MS
 
