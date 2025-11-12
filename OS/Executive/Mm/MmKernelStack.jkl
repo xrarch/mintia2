@@ -28,10 +28,6 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
         RETURN NULLPTR
     END
 
-    // Skip the guard page.
-
-    kstack += RTL_PAGE_SIZE
-
     pfes : ^MiPfe[KE_STACK_PAGES]
 
     // TEMP: Naive implementation. Full implementation will initialize these
@@ -40,7 +36,7 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
     //       look like at time of writing.
 
     i := 0
-    ptr := kstack
+    ptr := kstack + RTL_PAGE_SIZE
 
     WHILE i < KE_STACK_PAGES DO
         // Allocate a physical page.
@@ -68,7 +64,7 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
 
             MiReleaseDynamicPages (
                 node, // node
-                kstack - RTL_PAGE_SIZE, // ptr
+                kstack, // ptr
                 KE_STACK_PAGES + 1, // pages
                 FALSE, // flush
             )
@@ -82,7 +78,7 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
 
     // Acquire a pointer to the first PTE for this region.
 
-    pte := MiPteAddress ( kstack - RTL_PAGE_SIZE )
+    pte := MiPteAddress ( kstack )
 
     // Set the guard page invalid.
 
@@ -102,7 +98,7 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
         i += 1
     END
 
-    RETURN kstack
+    RETURN kstack + RTL_PAGE_SIZE
 END
 
 #SECTION "PAGEtext"
