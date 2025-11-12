@@ -73,8 +73,6 @@ FN ExFindName (
 
     // Find a name in the string internment buckets.
 
-    node : ^ExName = NULLPTR
-
     // Hash the name.
 
     len := str^.Length
@@ -117,15 +115,6 @@ FN ExFindName (
 
             KeReleaseLock ( &bucket^.Lock )
 
-            IF node THEN
-                // We allocated a node unnecessarily earlier, have to free it.
-
-                MmFreePool (
-                    node, // ptr
-                    'Name', // tag
-                )
-            END
-
             RETURN checknode
         END
 
@@ -136,27 +125,17 @@ FN ExFindName (
         END
     END
 
-    IF NOT node THEN
-        // Have to create a node.
-        // Unlock the bucket across the allocation.
+    node : ^ExName = MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
+        SIZEOF ExName + SIZEOF RtlString + len + 1, // bytes
+        'Name', // tag
+        FALSE, // wait
+    )
 
+    IF NOT node THEN
         KeReleaseLock ( &bucket^.Lock )
 
-        node = MmAllocatePool (
-            MM_PAGED_POOL, // poolindex
-            SIZEOF ExName + SIZEOF RtlString + len + 1, // bytes
-            'Name', // tag
-            TRUE, // wait
-        )
-
-        IF NOT node THEN
-            // Failed to allocate the name.
-
-            RETURN NULLPTR
-        END
-
-        // Retry the lookup. We'll use the node we just allocated if it's still
-        // not there, otherwise we'll free it.
+        MmWaitForPoolMemory ()
 
         GOTO Retry
     END
