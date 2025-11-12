@@ -177,11 +177,14 @@ END
 #SECTION "PAGEtext"
 FN ExCreateHandle (
     IN handletable : ^ExHandleTable,
+    IN lock : ^KeLock,
     OUT handle : UWORD,
     OUT entryptr : ^VOID,
 ) : OsStatus
 
     // Allocate a handle from the handle table.
+
+@Retry
 
     handle = handletable^.FreeListHead
     table := handletable^.Table
@@ -228,17 +231,32 @@ FN ExCreateHandle (
         MM_PAGED_POOL, // poolindex
         newsize, // bytes
         'HnTb', // tag
-        TRUE, // wait
+        lock == NULLPTR, // wait
     )
 
     IF NOT newtable THEN
-        // Uncharge quota.
-
         MmUnchargePoolQuota (
             handletable^.QuotaBlock, // quotablock
             newsize, // charge
             MM_PAGED_POOL, // poolindex
         )
+
+        IF lock THEN
+            // Someone is worried about us blocking for pages with this lock
+            // held, so we do this idiom where we try to do a nonblocking
+            // allocation first, and upon failure, we wait for free pages
+            // without locks and then retry everything.
+
+            KeReleaseLock ( lock )
+
+            MmWaitForPoolMemory ()
+
+            KeAcquireLockExclusive ( lock )
+
+            GOTO Retry
+        END
+
+        // No lock trick we're just out of memory.
 
         RETURN OS_STATUS_NO_MEMORY
     END
