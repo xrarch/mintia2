@@ -61,7 +61,7 @@ FN (KeStartThreadF) MmZeroPageWorker (
 
             ipl := MiAcquireListExclusive ( partition )
 
-            IF MiMemoryMakingInProgress ( partition ) OR
+            IF partition^.AvailablePageCount < partition^.SufficientPageCount OR
                 partition^.FreeList.Count < MI_ZERO_BATCH THEN
 
                 // Don't zero any pages if people are trying to make memory
