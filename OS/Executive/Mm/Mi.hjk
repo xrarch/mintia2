@@ -98,10 +98,6 @@ STRUCT MiPartition
     SizeLevel : UBYTE,
 END
 
-#MACRO MiMemoryMakingInProgress ( partition ) [
-    ((partition)^.LowMemoryEvent.Header.SignalCount)
-]
-
 #MACRO MiIsPartitionPhysical ( partition ) [
     (&(partition)^.Node^.Partition == (partition))
 ]
@@ -400,6 +396,7 @@ EXTERN FN MiInitializePoolCache (
 EXTERN FN MiAdjustPoolCaches (
     IN list : ^MiPoolCacheList,
     IN purge : UWORD,
+    IN empty : UWORD,
 )
 
 STRUCT MiSlabCache

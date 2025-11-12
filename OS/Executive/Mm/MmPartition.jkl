@@ -495,6 +495,10 @@ FN MiFreePage (
     MiNewAvailablePage ( partition, avail )
 END
 
+#DEFINE MI_MIN_LOOPS_FOR_BACKOFF 2
+#DEFINE MI_INITIAL_BACKOFF_MS 5
+#DEFINE MI_MAX_BACKOFF_MS 1000
+
 FN MiWaitForPages (
     IN partition : ^MiPartition,
     IN low : UWORD,
@@ -509,11 +513,18 @@ FN MiWaitForPages (
     // enough fluid pages for its workload, or is missing a pagefile, and has
     // deadlocked.
 
+    // Randomized exponential back-off is performed to mitigate thundering herd.
+    // Some bits of the current thread pointer are used as a seed for xorshift.
+
+    loops := 0
     threshold : UWORD
     event : ^KeEvent
-    timeout : RtlUquad
 
+    timeout : RtlUquad
     RtlSetUquadToUlong ( &timeout, 60000 )
+
+    backoff : RtlUquad
+    backoffms := MI_INITIAL_BACKOFF_MS
 
     IF low THEN
         threshold = 0
@@ -533,6 +544,54 @@ FN MiWaitForPages (
         KeResetEvent ( event )
 
         MiReleaseList ( partition, ipl )
+
+        IF loops >= MI_MIN_LOOPS_FOR_BACKOFF THEN
+            // Perform exponential backoff.
+
+            seed : UWORD
+
+            IF loops == MI_MIN_LOOPS_FOR_BACKOFF THEN
+                // Initialize the xorshift seed which is the low bits of the
+                // current thread pointer shifted right by the natural
+                // alignment and XORed with the VPN and the current uptime.
+                // This tries to improve uniqueness of the seed between each
+                // thread and over time.
+
+                thrd := KeCurrentThread ()
+                seed = (thrd >> RTL_ALIGN_SHIFT) $ (thrd >> RTL_PAGE_SHIFT)
+#IF ( == BLD_BITS 32 )
+                seed $= KeSharedUserPage^.Uptime.Low
+#ELSE
+                seed $= KeSharedUserPage^.Uptime.Quad
+#END
+            END
+
+            // Jitter the backoff interval by the low 3 bits of the seed.
+
+            backoffms += seed & 7
+
+            IF backoffms >= MI_MAX_BACKOFF_MS THEN
+                backoffms = 1 + (seed & 31)
+            END
+
+            RtlSetUquadToUlong ( &backoff, backoffms )
+
+            RtlPrint ( "%d ", backoffms )
+
+            KeSleep (
+                &backoff, // interval
+                KE_KERNEL_MODE, // waitmode
+                FALSE, // alertable
+            )
+
+            // Multiply the backoff interval by two.
+
+            backoffms *= 2
+
+            seed $= seed << 13
+            seed $= seed >> 17
+            seed $= seed << 5
+        END
 
         status := KeWaitForSingleObject (
             KE_KERNEL_MODE, // waitmode
@@ -558,6 +617,8 @@ FN MiWaitForPages (
 
             RETURN TRUE
         END
+
+        loops += 1
 
         ipl = MiAcquireListExclusive ( partition )
     END
