@@ -355,7 +355,13 @@ KeFetchAndSetUlong:
 KeBreakpoint:
 .export KeBreakpoint
     
+    subi sp, sp, 4
+    mov  long [sp], lr
+
     brk
+
+    mov  lr, long [sp]
+    addi sp, sp, 4
 
     ret
 

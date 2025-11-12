@@ -40,11 +40,11 @@ FN (KeDebuggerEntryF) DbgEntrypoint (
 
     DbgCurrentPrb = KI_CURRENT_PRB
 
-    IF NOT DbgCurrentPrb^.FrozenContext THEN
-        DbgCurrentPrb^.FrozenContext = context
+    IF DbgCurrentPrb^.FrozenContext THEN
+        DbgCurrentContext = DbgCurrentPrb^.FrozenContext
+    ELSE
+        DbgCurrentContext = context
     END
-
-    DbgCurrentContext = DbgCurrentPrb^.FrozenContext
 
     DbgPrompt ()
 
