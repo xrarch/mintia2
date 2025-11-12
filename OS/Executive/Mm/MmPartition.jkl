@@ -386,7 +386,7 @@ FN MiAllocatePage (
     mustzero := FALSE
     listentry : ^RtlListEntry
 
-    // Ensure color within range. This allows callers to use a simple counter.
+    // Ensure color within range.
 
     color &= MI_COLOR_COUNT - 1
 
@@ -469,6 +469,8 @@ FN MiAllocatePage (
     MiReleaseList ( partition, ipl )
 
     IF mustzero THEN
+        KeAssert ( pfe != NULLPTR )
+
         MmZeroPage ( MiPfeToPfn ( pfe ) )
     END
 

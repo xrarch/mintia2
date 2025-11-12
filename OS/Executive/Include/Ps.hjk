@@ -115,8 +115,16 @@ STRUCT PsThread
 
     CurrentTrampoline : ^IoTrampoline,
 
-    VmPrivileged : UBYTE,
     UpwardFlowingPacket : UBYTE,
+
+    // NOTE: There is no standard API for setting a thread to be VmPrivileged
+    //       because only a couple of very specialized system threads with
+    //       a well-defined, small set of duties directly twiddle this about
+    //       themselves. This should NOT be used lightly - using it on any
+    //       old thread, ever, will destroy the robustness of the memory
+    //       manager.
+
+    VmPrivileged : UBYTE,
 END
 
 STRUCT PsJob
