@@ -190,28 +190,6 @@ FN MiSetPartitionSize (
     END
 END
 
-#MACRO MiNewAvailablePage ( partition, avail ) [
-    IF (avail) > MI_BLOCK_FOR_PAGES_THRESHOLD AND
-        (partition)^.PageAvailableEvent.Header.SignalCount == 0 THEN
-
-        // Signal the available page event.
-
-        KeSignalEvent (
-            &(partition)^.PageAvailableEvent, // event
-            0, // priorityboost
-        )
-    END
-
-    IF (partition)^.LowPageAvailableEvent.Header.SignalCount == 0 THEN
-        // Signal the low page available event.
-
-        KeSignalEvent (
-            &(partition)^.LowPageAvailableEvent, // event
-            0, // priorityboost
-        )
-    END
-]
-
 FN MiInsertPageIntoList (
     IN list : ^MiAvailablePageList,
     IN pfe : ^MiPfe,

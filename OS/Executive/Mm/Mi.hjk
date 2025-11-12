@@ -98,6 +98,38 @@ STRUCT MiPartition
     SizeLevel : UBYTE,
 END
 
+#MACRO MiMemoryMakingInProgress ( partition ) [
+    ((partition)^.LowMemoryEvent.Header.SignalCount)
+]
+
+#MACRO MiIsPartitionPhysical ( partition ) [
+    (&(partition)^.Node^.Partition == (partition))
+]
+
+#MACRO MiNewAvailablePage ( partition, avail ) [
+    IF (avail) > MI_BLOCK_FOR_PAGES_THRESHOLD AND
+        (partition)^.PageAvailableEvent.Header.SignalCount == 0 THEN
+
+        // Signal the available page event.
+
+        KeSignalEvent (
+            &(partition)^.PageAvailableEvent, // event
+            0, // priorityboost
+        )
+    END
+
+    IF (partition)^.LowPageAvailableEvent.Header.SignalCount == 0 THEN
+        // Signal the low page available event.
+
+        KeSignalEvent (
+            &(partition)^.LowPageAvailableEvent, // event
+            0, // priorityboost
+        )
+    END
+]
+
+EXTERN MmPartitionType : ObType
+
 EXTERN MiBootNode : ^MiNode
 
 EXTERN MiPfnDatabase : ^MiPfe
@@ -492,9 +524,3 @@ STRUCT MiNode
 
     DeferredFlushTable : MiDeferredFlush[MI_DEFERRED_FLUSH_PAIRS],
 END
-
-EXTERN MmPartitionType : ObType
-
-#MACRO MiIsPartitionPhysical ( partition ) [
-    (&(partition)^.Node^.Partition == (partition))
-]

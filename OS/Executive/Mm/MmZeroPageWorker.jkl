@@ -61,7 +61,13 @@ FN (KeStartThreadF) MmZeroPageWorker (
 
             ipl := MiAcquireListExclusive ( partition )
 
-            IF partition^.FreeList.Count < MI_ZERO_BATCH THEN
+            IF MiMemoryMakingInProgress ( partition ) OR
+                partition^.FreeList.Count < MI_ZERO_BATCH THEN
+
+                // Don't zero any pages if people are trying to make memory
+                // right now. We'd only step on their toes by holding pages
+                // hostage at idle priority.
+
                 MiReleaseList ( partition, ipl )
 
                 BREAK
@@ -75,6 +81,12 @@ FN (KeStartThreadF) MmZeroPageWorker (
 
                 i += 1
             END
+
+            // Decrement available pages to reflect the ones we removed from
+            // the zero page list.
+
+            avail := partition^.AvailablePageCount - MI_ZERO_BATCH
+            partition^.AvailablePageCount = avail
 
             MiReleaseList ( partition, ipl )
 
@@ -104,7 +116,17 @@ FN (KeStartThreadF) MmZeroPageWorker (
                 i += 1
             END
 
+            // Increment available pages to reflect the ones added to the zero
+            // page list.
+
+            avail = partition^.AvailablePageCount + MI_ZERO_BATCH
+            partition^.AvailablePageCount = avail
+
             MiReleaseList ( partition, ipl )
+
+            // Wake waiters for available pages.
+
+            MiNewAvailablePage ( partition, avail )
 
             count -= MI_ZERO_BATCH
         END
