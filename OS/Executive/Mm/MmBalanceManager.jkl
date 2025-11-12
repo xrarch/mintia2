@@ -6,24 +6,34 @@
 
 #INCLUDE "<ll>/System/OsProcess.hjk"
 
-FN (ExWorkItemF) MiChuckPagedPoolCacheWorker (
+#DEFINE MI_BALANCE_MANAGER_INTERVAL_MS 1000
+
+#DEFINE MI_POOL_ADJUSTMENT_SHORT_INTERVAL_MS 1000
+#DEFINE MI_POOL_ADJUSTMENT_INTERVAL_MS 5000
+#DEFINE MI_POOL_PURGE_INTERVAL_MS 10000
+
+FN (ExWorkItemF) MiAdjustPagedPoolCacheWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
-    // Called from the context of a worker thread to chuck out the paged pool
-    // cache for a node.
+    // Called from the context of a worker thread to perform periodic adjustment
+    // work that is unsafe to perform in the context of the balance manager.
 
     node := CAST context1 TO ^MiNode
+    partition := &node^.Partition
 
-    node^.PgPoolCacheChuckActive = FALSE
+    node^.PgPoolCacheAdjustActive = FALSE
+
+    empty := partition^.AvailablePageCount < partition^.LowPageCount
 
     MiAdjustPoolCaches (
         &node^.PgPoolCacheList, // list
-        TRUE, // purge
+        context2, // purgepercpu
+        empty, // empty
     )
 
-    IF node == MiBootNode THEN
+    IF empty THEN
         // Also aggressively reap threads and objects.
         // TODO: Make the reaper lists for these things per-node.
         //       The worker thread pool should also be made per-node.
@@ -38,6 +48,38 @@ FN (ExWorkItemF) MiChuckPagedPoolCacheWorker (
             0, // context2
         )
     END
+END
+
+FN MiAdjustAllPoolCachesSafely (
+    IN node : ^MiNode,
+    IN purgepercpu : UWORD,
+    IN empty : UWORD,
+)
+
+    // Adjust all of the pool caches. Called by the balance manager.
+    // To be safe, we need to dispatch paged pool cache adjustment to a worker
+    // thread because the balance manager cannot safely take page faults as it
+    // is a critical memory-making thread.
+
+    IF NOT node^.PgPoolCacheAdjustActive THEN
+        node^.PgPoolCacheAdjustActive = TRUE
+
+        ExEnqueueWorkItem (
+            &node^.PgPoolCacheAdjustItem, // item
+            EX_HIGH_WORK_PRIORITY, // priority
+            CAST node TO UWORD, // context1
+            purgepercpu, // context2
+        )
+    END
+
+    // Immediately chuck the nonpaged pool caches from the context
+    // of this thread.
+
+    MiAdjustPoolCaches (
+        &node^.NpPoolCacheList, // list
+        purgepercpu, // purgepercpu
+        empty, // empty
+    )
 END
 
 FN MmBalanceManager ()
@@ -61,14 +103,18 @@ FN MmBalanceManager ()
     partition := PsCurrentPartition ()
     node := PsCurrentNode ()
 
-    IF &node^.Partition == partition THEN
-        node^.PgPoolCacheChuckActive = FALSE
+    IF MiIsPartitionPhysical ( partition ) THEN
+        node^.PgPoolCacheAdjustActive = FALSE
 
         ExInitializeWorkItem (
-            &node^.PgPoolCacheChuckItem, // item
-            &MiChuckPagedPoolCacheWorker, // routine
+            &node^.PgPoolCacheAdjustItem, // item
+            &MiAdjustPagedPoolCacheWorker, // routine
         )
     END
+
+    ms := 0
+    mssinceadjust := 0
+    mssincepurge := 0
 
     timer : KeTimer
 
@@ -76,7 +122,7 @@ FN MmBalanceManager ()
 
     RtlSetUquadToUlong (
         &interval, // uquad
-        1000, // ms
+        MI_BALANCE_MANAGER_INTERVAL_MS, // ms
     )
 
     KeInitializeTimer (
@@ -116,44 +162,43 @@ FN MmBalanceManager ()
 
         IF status == 0 THEN
             // The timer expired.
+            // Perform periodic adjustment work.
 
-            // RtlPrint ( "Timer %d! ", KeCurrentProcessorId () )
+            ms += MI_BALANCE_MANAGER_INTERVAL_MS
+            dt := ms - mssinceadjust
 
-        ELSEIF status == 1 THEN
-            // Memory is low.
+            IF MiIsPartitionPhysical ( partition ) AND
+                (dt >= MI_POOL_ADJUSTMENT_INTERVAL_MS OR
+                (partition^.AvailablePageCount < partition^.LowPageCount AND
+                dt >= MI_POOL_ADJUSTMENT_SHORT_INTERVAL_MS)) THEN
 
-            IF MiIsPartitionPhysical ( partition ) THEN
-                // Enqueue a work item to chuck the paged pool caches from the
-                // context of another thread, since this one cannot fault on
-                // paged pool.
+                // Adjust pool caches.
 
-                IF NOT node^.PgPoolCacheChuckActive THEN
-                    node^.PgPoolCacheChuckActive = TRUE
+                mssinceadjust = ms
 
-                    // Language BARRIER to stop the above write from being
-                    // reordered by the compiler after the below work item
-                    // enqueue.
+                purge := FALSE
 
-                    BARRIER
+                IF (ms - mssincepurge) >= MI_POOL_PURGE_INTERVAL_MS THEN
+                    mssincepurge = ms
 
-                    ExEnqueueWorkItem (
-                        &node^.PgPoolCacheChuckItem, // item
-                        EX_HIGH_WORK_PRIORITY, // priority
-                        CAST node TO UWORD, // context1
-                        0, // context2
-                    )
+                    IF partition^.AvailablePageCount <
+                        partition^.SufficientPageCount THEN
+
+                        purge = TRUE
+                    END
                 END
 
-                // Immediately chuck the nonpaged pool caches from the context
-                // of this thread.
-
-                MiAdjustPoolCaches (
-                    &node^.NpPoolCacheList, // list
-                    TRUE, // purge
+                MiAdjustAllPoolCachesSafely (
+                    node, // node
+                    purge, // purgepercpu
+                    partition^.AvailablePageCount < partition^.LowPageCount,
                 )
             END
 
-            // RtlPrint ( "Low! " )
+        ELSEIF status == 1 THEN
+            // The low memory event was set.
+            // Trim working sets.
+
         END
     END
 END

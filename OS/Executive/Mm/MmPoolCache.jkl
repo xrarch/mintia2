@@ -1196,7 +1196,8 @@ END
 
 FN MiAdjustPoolCaches (
     IN list : ^MiPoolCacheList,
-    IN purge : UWORD,
+    IN purgepercpu : UWORD,
+    IN empty : UWORD,
 )
 
     // Adjust all of the pool caches on the given node.
@@ -1209,81 +1210,21 @@ FN MiAdjustPoolCaches (
     WHILE listentry != listhead DO
         cache := CONTAINEROF listentry TO MiPoolCache.MasterListEntry
 
-        IF purge THEN
-            MiPurgeCpuMagazinesPoolCache ( cache )
-        END
+        IF empty THEN
+            MiPurgeMagazinesPoolCache ( cache )
 
-        MiAdjustPoolCache ( cache )
+        ELSE
+            IF purgepercpu THEN
+                MiPurgeCpuMagazinesPoolCache ( cache )
+            END
+
+            MiAdjustPoolCache ( cache )
+        END
 
         listentry = listentry^.Next
     END
 
     MiUnlockPoolCacheList ( list )
-END
-
-#DEFINE MI_POOL_ADJUSTMENT_INTERVAL_MS 5000
-#DEFINE MI_POOL_PURGE_INTERVAL_MS 10000
-
-FN MiEnqueuePoolCacheAdjustment (
-    IN node : ^MiNode,
-    IN counter : UWORD,
-)
-
-    // Enqueue the pool cache adjustment item.
-
-    intervalms := MI_POOL_ADJUSTMENT_INTERVAL_MS
-
-    interval : RtlUquad
-
-    RtlSetUquadToUlong (
-        &interval, // interval
-        intervalms, // ulong
-    )
-
-    ExEnqueueTimedWorkItem (
-        &node^.PoolCacheAdjustmentItem, // item
-        EX_HIGH_WORK_PRIORITY, // priority
-        &interval, // interval
-        CAST node TO UWORD, // context1
-        counter + intervalms, // context2
-    )
-END
-
-FN (ExWorkItemF) MiAdjustPoolCachesWorker (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
-)
-
-    // Called periodically to adjust the pool caches on a node.
-
-    node := CAST context1 TO ^MiNode
-
-    purge := context2 >= MI_POOL_PURGE_INTERVAL_MS
-
-    IF purge THEN
-        context2 = 0
-
-        IF node^.Partition.AvailablePageCount >=
-            node^.Partition.SufficientPageCount THEN
-
-            purge = 0
-        END
-    END
-
-    MiAdjustPoolCaches (
-        &node^.PgPoolCacheList, // list
-        purge, // purge
-    )
-
-    MiAdjustPoolCaches (
-        &node^.NpPoolCacheList, // list
-        purge, // purge
-    )
-
-    MiEnqueuePoolCacheAdjustment (
-        node, // node
-        context2, // counter
-    )
 END
 
 #MACRO MiInitializePoolCacheList ( list ) [
@@ -1336,15 +1277,4 @@ FN MiInitializePoolCache (
         "Large Block Magazines", // name
         MI_LARGE_MAGAZINE_SIZE, // size
     )
-
-    // Initialize the adjustment item.
-
-    ExInitializeTimedWorkItem (
-        &node^.PoolCacheAdjustmentItem, // item
-        &MiAdjustPoolCachesWorker, // routine
-    )
-
-    // And set it pending for the first time.
-
-    MiEnqueuePoolCacheAdjustment ( node, 0 )
 END

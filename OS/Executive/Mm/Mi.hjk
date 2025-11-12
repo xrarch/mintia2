@@ -395,7 +395,7 @@ EXTERN FN MiInitializePoolCache (
 
 EXTERN FN MiAdjustPoolCaches (
     IN list : ^MiPoolCacheList,
-    IN purge : UWORD,
+    IN purgepercpu : UWORD,
     IN empty : UWORD,
 )
 
@@ -498,6 +498,7 @@ STRUCT MiNode
     QuickPteBlocks : ^MiQuickPteBlock,
 
     Id : UBYTE,
+    PgPoolCacheAdjustActive : UBYTE,
 
     PoolSpace : MiChunkSpace,
     CacheSpace : MiChunkSpace,
@@ -508,16 +509,13 @@ STRUCT MiNode
 
     MagazineTypeTable : MiMagazineType[MI_MAGAZINE_MAX],
 
-    PoolCacheAdjustmentItem : ExTimedWorkItem,
-
     PoolCacheSlabs : MiSlabCache,
     SlabCacheSlabs : MiSlabCache,
 
     NpPoolCacheList : MiPoolCacheList,
     PgPoolCacheList : MiPoolCacheList,
 
-    PgPoolCacheChuckItem : ExWorkItem,
-    PgPoolCacheChuckActive : ULONG,
+    PgPoolCacheAdjustItem : ExWorkItem,
 
     DeferredFlushTable : MiDeferredFlush[MI_DEFERRED_FLUSH_PAIRS],
 END
