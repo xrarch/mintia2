@@ -104,7 +104,7 @@ FN MiFreeExtensionSpace (
     )
 END
 
-FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
+FN MiFreeNonpagedPoolPages (
     IN partition : ^MiPartition,
     IN ptr : ^VOID,
     IN pages : UWORD,
@@ -114,18 +114,19 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
     // space. The space allocator will deal with flushing the TB.
 
     pte := MiPteAddress ( ptr )
-
     i := 0
 
     WHILE i < pages DO
         ptecontents := pte[i]
 
+        KeAssert ( MiIsPteValid ( ptecontents ) )
+
+        pte[i] = MI_INVALID_KERNEL_PTE
+
         MiFreePage (
             partition, // partition
             MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
         )
-
-        pte[i] = MI_INVALID_KERNEL_PTE
 
 #IF BLD_CHK
         KeFlushMyTbAddress ( ptr )
@@ -135,6 +136,22 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
 
         i += 1
     END
+END
+
+FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
+    IN partition : ^MiPartition,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
+
+    // Free the page frames within this extension and return it to nonpaged
+    // space. The space allocator will deal with flushing the TB.
+
+    MiFreeNonpagedPoolPages (
+        partition, // partition
+        ptr, // ptr
+        pages, // pages
+    )
 
     // Uncharge the commit.
 
@@ -166,6 +183,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
 
     i := 0
     pte := MiPteAddress ( ptr )
+    colorptr := ptr
 
     WHILE i < pages DO
         // Allocate a page frame to place here.
@@ -176,7 +194,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
             partition, // partition
             FALSE, // zeroed
             low, // low
-            MiVirtualAddressColor ( ptr ), // color
+            MiVirtualAddressColor ( colorptr ), // color
         )
 
         IF NOT pfe THEN
@@ -193,13 +211,16 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
 
             // Free everything we just did.
 
-            IF i THEN
-                MiFreeNonpagedMemory (
-                    partition, // partition
-                    ptr, // ptr
-                    i, // pages
-                )
-            END
+            MiFreeNonpagedPoolPages (
+                partition, // partition
+                ptr, // ptr
+                i, // pages
+            )
+
+            MmUnchargeCommit (
+                partition, // partition
+                pages, // pages
+            )
 
             RETURN FALSE
         END
@@ -211,7 +232,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
         pte[i] = MiBuildPoolPte ( MiPfeToPfn ( pfe ) )
 
         i += 1
-        ptr += RTL_PAGE_SIZE
+        colorptr += RTL_PAGE_SIZE
     END
 
     RETURN TRUE
@@ -1153,4 +1174,28 @@ FN MmGetOverheadOfBytes (
     // Small block charge.
 
     RETURN (bytes + SIZEOF MiBlock + MI_BLOCK_SIZE_MASK) & ~MI_BLOCK_SIZE_MASK
+END
+
+FN MmWaitForPoolMemory ()
+
+    // Exported function to wait for free memory on the local node.
+    // Sometimes one wishes to allocate pool while holding a lock that is also
+    // held on a free codepath. This isn't acceptable if that lock is ever taken
+    // by a memory-making thread. As a substitute, this sort of idiom becomes
+    // useful:
+    //
+    // WHILE TRUE DO
+    //     IF MmAllocatePool ( wait=FALSE ) != NULLPTR THEN
+    //         BREAK
+    //     END
+    //
+    //     KeReleaseLock ( &MyImportantLock )
+    //     MmWaitForPoolMemory ()
+    //     KeAcquireLockExclusive ( &MyImportantLock )
+    // END
+
+    MiWaitForPages (
+        &PsCurrentNode()^.Partition, // partition
+        PsCurrentThread()^.VmPrivileged, // low
+    )
 END
