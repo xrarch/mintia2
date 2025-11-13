@@ -628,7 +628,7 @@ FN NsuLookupEntryByPath (
                 KE_KERNEL_MODE, // waitmode
                 FALSE, // alertable
                 NULLPTR, // timeout
-                &event^.Used.Event.Header, // object
+                &event^.Event.Header, // object
             )
 
             // Unreference the event counter.
@@ -1115,11 +1115,11 @@ FN NsuLookupEntryByPath (
 
         NspLockTreeExclusive ()
 
-        IF event^.Used.Event.Header.WaiterCount THEN
+        IF event^.Event.Header.WaiterCount THEN
             // Wake any collided threads.
 
             KeSignalEvent (
-                &event^.Used.Event, // event
+                &event^.Event, // event
                 0, // priorityboost
             )
         END

@@ -44,13 +44,13 @@ FN ExuAllocateEventCounter (
     END
 
     KeInitializeEvent (
-        &counter^.Used.Event, // event
+        &counter^.Event, // event
         "Collision Counter", // name
         TRUE, // notification
         FALSE, // signalstate
     )
 
-    counter^.Used.References = 1
+    counter^.References = 1
 
     RETURN counter
 END
@@ -62,7 +62,7 @@ FN ExuReferenceEventCounter (
     // Increment the refcount of the counter.
 
     oldcount := KeIncrementUlong (
-        &counter^.Used.References, // ptr
+        &counter^.References, // ptr
         1, // inc
     )
 
@@ -76,7 +76,7 @@ FN ExuUnreferenceEventCounter (
     // Decrement the refcount of the counter.
 
     oldcount := KeIncrementUlong (
-        &counter^.Used.References, // ptr
+        &counter^.References, // ptr
         0xFFFFFFFF, // inc
     )
 
