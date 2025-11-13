@@ -1,119 +1,121 @@
 //
-// Public header for I/O management for the MINTIA Executive.
+// Undocumented header for I/O management for the MINTIA Executive.
 //
 
-#INCLUDE "<inc>/Ns.hjk"
+#INCLUDE "<ll>/Executive/Io.hjk"
+
+#INCLUDE "<inc>/Nsu.hjk"
 #INCLUDE "<ll>/System/OsFile.hjk"
 
 #IF ( NOT ( DEFINED IO_INTERNAL ) )
     #DEFINE IO_INTERNAL 0
 #END
 
-EXTERN FN IoInitialize ()
+EXTERN FN IouInitialize ()
 
-FNPTR IoOpenFileObjectF (
-    IN process : ^PsProcess,
-    IN file : ^IoFile,
+FNPTR IouOpenFileObjectF (
+    IN process : ^PsuProcess,
+    IN file : ^IouFile,
     IN access : UWORD,
 ) : OsStatus
 
-FNPTR IoCloseFileObjectF (
-    IN file : ^IoFile,
+FNPTR IouCloseFileObjectF (
+    IN file : ^IouFile,
     IN access : UWORD,
     IN lasthandlecount : UWORD,
 )
 
-FNPTR IoDeleteFileObjectF (
-    IN file : ^IoFile,
+FNPTR IouDeleteFileObjectF (
+    IN file : ^IouFile,
 )
 
-FNPTR IoDeleteFcbF (
-    IN fcb : ^IoFcb,
+FNPTR IouDeleteFcbF (
+    IN fcb : ^IouFcb,
 ) : UWORD
 
-FNPTR IoSetSecurityFcbF (
-    IN fcb : ^IoFcb,
-    IN permissions : ^ObPermissions,
+FNPTR IouSetSecurityFcbF (
+    IN fcb : ^IouFcb,
+    IN permissions : ^ObuPermissions,
 ) : OsStatus
 
-FNPTR IoNamespaceLookupF (
-    IN context : ^NsLookupContext,
+FNPTR IouNamespaceLookupF (
+    IN context : ^NsuLookupContext,
 ) : OsStatus
 
-FNPTR IoPacketBasedCallF (
-    IN packet : ^IoPacket,
-    IN trampoline : ^IoTrampoline,
+FNPTR IouPacketBasedCallF (
+    IN packet : ^IouPacket,
+    IN trampoline : ^IouTrampoline,
 ) : OsStatus
 
-STRUCT IoRecursiveDispatchTable
-    OpenFileObject : IoOpenFileObjectF,
-    CloseFileObject : IoCloseFileObjectF,
-    DeleteFileObject : IoDeleteFileObjectF,
+STRUCT IouRecursiveDispatchTable
+    OpenFileObject : IouOpenFileObjectF,
+    CloseFileObject : IouCloseFileObjectF,
+    DeleteFileObject : IouDeleteFileObjectF,
 
-    DeleteFcb : IoDeleteFcbF,
-    SetSecurityFcb : IoSetSecurityFcbF,
-    NamespaceLookup : IoNamespaceLookupF,
+    DeleteFcb : IouDeleteFcbF,
+    SetSecurityFcb : IouSetSecurityFcbF,
+    NamespaceLookup : IouNamespaceLookupF,
 END
 
-// IoTarget is the common stuff between FCBs and device objects, which can both
+// IouTarget is the common stuff between FCBs and device objects, which can both
 // have I/O targeted to them.
 
-STRUCT IoTarget
-    Dispatch : ^IoPacketBasedCallF,
+STRUCT IouTarget
+    Dispatch : ^IouPacketBasedCallF,
 END
 
-// IoTreeNode MUST be at the start of a structure, specifically an object
+// IouTreeNode MUST be at the start of a structure, specifically an object
 // manager object.
 
-STRUCT IoTreeNode
+STRUCT IouTreeNode
     PlaneEntryListHead : RtlListEntry,
 
-    Name : ^ExName,
+    Name : ^ExuName,
 
     Lock : KeLock,
 END
 
-#MACRO IoInitializeTreeNode ( node ) [
+#MACRO IouInitializeTreeNode ( node ) [
     RtlInitializeList ( &(node)^.PlaneNodeListHead )
 
     KeInitializeLock ( &(node)^.Lock )
 ]
 
-STRUCT IoDevice
-    Node : IoTreeNode,
+STRUCT IouDevice
+    Node : IouTreeNode,
 
-    Target : IoTarget,
+    Target : IouTarget,
 END
 
-STRUCT IoFcb
-    Target : IoTarget,
+STRUCT IouFcb
+    Target : IouTarget,
 
-    Dispatch : ^IoRecursiveDispatchTable,
+    Dispatch : ^IouRecursiveDispatchTable,
 END
 
-STRUCT IoFile
-    Handle : NsHandle,
+STRUCT IouFile
+    Handle : NsuHandle,
 
-    Fcb : ^IoFcb,
+    Fcb : ^IouFcb,
 
     Seek : RtlUquad,
 END
 
-EXTERN FN IoRundownThread (
-    IN thread : ^PsThread,
+EXTERN FN IouRundownThread (
+    IN thread : ^PsuThread,
 )
 
-// Assume the average context size for an IoLocation is 4 UWORDs, which is
+// Assume the average context size for an IouLocation is 4 UWORDs, which is
 // 16 bytes on 32-bit and 32 bytes on 64-bit.
 
 #DEFINE IO_LOCATION_AVERAGE_CONTEXT [(SIZEOF UWORD * 4)]
 
-FNPTR IoLocationCompletionF (
-    IN iol : ^IoLocation,
+FNPTR IouLocationCompletionF (
+    IN iol : ^IouLocation,
 ) : OsStatus
 
-FNPTR IoPacketCompletionF (
-    IN packet : ^IoPacket,
+FNPTR IouPacketCompletionF (
+    IN packet : ^IouPacket,
 ) : OsStatus
 
 // The location was allocated from a zone.
@@ -124,10 +126,10 @@ FNPTR IoPacketCompletionF (
 
 #DEFINE IOP_LOCATION_DONT_FREE 2
 
-STRUCT IoLocation // IOL
+STRUCT IouLocation // IOL
     // Pointer to the packet.
 
-    Packet : ^IoPacket,
+    Packet : ^IouPacket,
 
     // Location list links.
 
@@ -139,7 +141,7 @@ STRUCT IoLocation // IOL
 
     // Optional routine to run in completion context.
 
-    CompletionRoutine : IoLocationCompletionF,
+    CompletionRoutine : IouLocationCompletionF,
 
 #IF IO_INTERNAL
     // Flags related to things like whether the location was allocated from a
@@ -151,12 +153,12 @@ STRUCT IoLocation // IOL
 END
 
 STRUCT IopInlinedLocation
-    Location : IoLocation,
+    Location : IouLocation,
 
     Context : UBYTE[IO_LOCATION_AVERAGE_CONTEXT],
 END
 
-ENUM IoPacketType : UBYTE
+ENUM IouPacketType : UBYTE
     IO_PACKET_TYPE_NORMAL,
     IO_PACKET_TYPE_USERASYNC,
 
@@ -191,7 +193,7 @@ END
 //      break practically every driver. Extending the overall size of the
 //      structs, however, is designed to be fine.
 
-STRUCT IoPacket // aka "IOP"
+STRUCT IouPacket // aka "IOP"
     // Timeout (if any).
 
     Timeout : RtlUquad,
@@ -199,11 +201,11 @@ STRUCT IoPacket // aka "IOP"
     // If this is an associated (fragment) packet, this contains the pointer to
     // the parent IOP.
 
-    ParentPacket : ^IoPacket,
+    ParentPacket : ^IouPacket,
 
     // General completion routine, set by the guy who allocated the packet.
 
-    CompletionRoutine : IoPacketCompletionF,
+    CompletionRoutine : IouPacketCompletionF,
 
     // Pointer to a ref'd event object if user async I/O. Otherwise, just some
     // KeEvent. In either case, signal upon completion if non-null.
@@ -215,7 +217,7 @@ STRUCT IoPacket // aka "IOP"
     // IO_PACKET_AUTO_COMPLETE_MDL is set, the MDL will be unmapped, unpinned,
     // and freed when the IOP completes.
 
-    Mdl : ^MmMdlHeader,
+    Mdl : ^MmuMdlHeader,
 
     // An offset in the MDL to which the transfer should be directed.
 
@@ -229,7 +231,7 @@ STRUCT IoPacket // aka "IOP"
 
     LocationListHead : RtlListEntry,
 
-    // An inlined IoLocation, since having at least one is exceedingly common.
+    // An inlined IouLocation, since having at least one is exceedingly common.
 
     Inlined : IopInlinedLocation,
 
@@ -237,7 +239,7 @@ STRUCT IoPacket // aka "IOP"
     // Contains space for a 32-bit status and 32-bit informational (i.e.
     // length).
 
-    StatusBlock : OsIoStatusBlock,
+    StatusBlock : OsIouStatusBlock,
 
     // Multipurpose kernel-reserved IO flags.
 
@@ -245,10 +247,10 @@ STRUCT IoPacket // aka "IOP"
 
     // Number of associated packets depended upon by this one for completion.
     // It is also biased by one just because this IOP exists, since completion
-    // occurs when IoCount drops to zero and otherwise that count is simply
+    // occurs when IouCount drops to zero and otherwise that count is simply
     // decremented.
 
-    IoCount : ULONG,
+    IouCount : ULONG,
 
     // Status at enqueue time.
 
@@ -262,7 +264,7 @@ STRUCT IoPacket // aka "IOP"
     //  o NORMAL: Synchronous user IO, page-in IO, associated (fragment) IO, etc
     //  o USERASYNC: Asynchronous user IO (needs special completion).
 
-    Type : IoPacketType,
+    Type : IouPacketType,
 
     // Flags pertaining to things like whether the IOP is zone-allocated or
     // pool-allocated, whether the MDL should be freed, etc.
@@ -272,8 +274,8 @@ END
 
 #IF IO_INTERNAL
 
-STRUCT IoUserAsyncPacket
-    Header : IoPacket,
+STRUCT IouUserAsyncPacket
+    Header : IouPacket,
 
     // Things required for user async IO completion.
 
@@ -286,7 +288,7 @@ STRUCT IoUserAsyncPacket
     // A file object pointer is required in order to unreference the target
     // file.
 
-    FileObject : ^IoFile,
+    FileObject : ^IouFile,
 
     // Pointer to the userspace IO status block.
 
@@ -307,66 +309,66 @@ END
 
 #END
 
-#MACRO IoPacketMappedBuffer ( iop ) [
+#MACRO IouPacketMappedBuffer ( iop ) [
     ((iop)^.Mdl^.MappedAddress + (iop)^.OffsetInMdl)
 ]
 
-#MACRO IoPacketVirtualBuffer ( iop ) [
+#MACRO IouPacketVirtualBuffer ( iop ) [
     ((iop)^.Mdl^.VirtualAddress + (iop)^.OffsetInMdl)
 ]
 
-#MACRO IoPacketWasEnqueued ( iop ) [
+#MACRO IouPacketWasEnqueued ( iop ) [
     NOTHING (iop)^.IopFlags |= IO_PACKET_ENQUEUED_BY_DEVICE
 ]
 
-STRUCT IoReadWriteParameters
+STRUCT IouReadWriteParameters
     ByteOffset : RtlUquad,
     Length : ULONG,
     Flags : ULONG,
 END
 
-STRUCT IoIoctlParameters
+STRUCT IouIoctlParameters
     InputBuffer : ^VOID,
     InputLength : ULONG,
     Code : ULONG,
     OutputLength : ULONG,
 END
 
-STRUCT IoCustomParameters
+STRUCT IouCustomParameters
     Word1 : ^VOID,
     Word2 : ^VOID,
     Word3 : ^VOID,
     Word4 : ^VOID,
 END
 
-UNION IoParameters
-    Rw : IoReadWriteParameters,
-    Ioctl : IoIoctlParameters,
-    Custom : IoCustomParameters,
+UNION IouParameters
+    Rw : IouReadWriteParameters,
+    Ioctl : IouIoctlParameters,
+    Custom : IouCustomParameters,
 END
 
 // Don't free the trampoline.
 
 #DEFINE IOP_TRAMPOLINE_DONT_FREE 2
 
-STRUCT IoTrampoline
+STRUCT IouTrampoline
     // Target of the IO operation.
     // This is either an FCB or a device object.
 
-    Target : ^IoTarget,
+    Target : ^IouTarget,
 
     // The function to call next.
 
-    Function : IoPacketBasedCallF,
+    Function : IouPacketBasedCallF,
 
     // Function-specific parameters.
 
-    P : IoParameters,
+    P : IouParameters,
 
 #IF IO_INTERNAL
     // Pointer to the packet related to the IO operation.
 
-    Packet : ^IoPacket,
+    Packet : ^IouPacket,
 
     // Deferred enqueue list links.
 
@@ -379,15 +381,15 @@ STRUCT IoTrampoline
 
 END
 
-EXTERN FN IoCompletePacket (
-    IN packet : ^IoPacket,
+EXTERN FN IouCompletePacket (
+    IN packet : ^IouPacket,
     IN status : OsStatus,
     IN priorityboost : UWORD,
 )
 
-EXTERN IoServicePlane : ^IoPlane
+EXTERN IouServicePlane : ^IouPlane
 
-ENUM IoNodeRelation : UBYTE
+ENUM IouNodeRelation : UBYTE
     IO_RELATION_CHILDREN,
     IO_RELATION_PARENTS,
 

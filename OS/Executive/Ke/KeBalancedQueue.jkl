@@ -9,15 +9,15 @@
 // prevent the processors from being oversubscribed with worker threads.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 
 #IF BLD_MP
 
-PUBLIC KiQueueRemovalLocks : KiSpinlock[KI_QUEUE_REMOVAL_LOCKS]
+PUBLIC KepQueueRemovalLocks : KepSpinlock[KEP_QUEUE_REMOVAL_LOCKS]
 
 #END
 
-FN KiWakeBalancedQueue (
+FN KepWakeBalancedQueue (
     IN queue : ^KeBalancedQueue,
 )
 
@@ -42,7 +42,7 @@ FN KiWakeBalancedQueue (
         // item. If someone else steals it, they'll adjust their timeout and go
         // back to sleep.
 
-        KiSatisfyObject (
+        KepSatisfyObject (
             &queue^.Header, // object
             0, // priorityboost
             FALSE, // all
@@ -51,8 +51,8 @@ FN KiWakeBalancedQueue (
     END
 END
 
-FN KiDisassociateFromBalancedQueue (
-    IN thread : ^KeThread,
+FN KepDisassociateFromBalancedQueue (
+    IN thread : ^KeuThread,
 )
 
     // Disassociate the thread from any balanced queue it is part of.
@@ -62,26 +62,26 @@ FN KiDisassociateFromBalancedQueue (
 
     oldqueue := thread^.BalancedQueue
 
-    KiComputeQueueRemovalLockAddress ( lock, oldqueue )
+    KepComputeQueueRemovalLockAddress ( lock, oldqueue )
 
-    ipl := KiAcquireQueueRemoval ( lock )
+    ipl := KepAcquireQueueRemoval ( lock )
 
     // Since we acquired the queue removal lock, we might have gotten
     // removed from the old queue, so check that we're still associated.
 
     IF thread^.BalancedQueue THEN
-        KiAcquireObjectElevated ( &oldqueue^.Header )
+        KepAcquireObjectElevated ( &oldqueue^.Header )
 
         RtlRemoveEntryList ( &thread^.BalancedQueueEntry )
 
-        KiWakeBalancedQueue ( oldqueue )
+        KepWakeBalancedQueue ( oldqueue )
 
-        KiReleaseObjectElevated ( &oldqueue^.Header )
+        KepReleaseObjectElevated ( &oldqueue^.Header )
 
         thread^.BalancedQueue = NULLPTR
     END
 
-    KiReleaseQueueRemoval ( lock, ipl )
+    KepReleaseQueueRemoval ( lock, ipl )
 END
 
 EXPORT FN KeInitializeBalancedQueue (
@@ -94,10 +94,10 @@ EXPORT FN KeInitializeBalancedQueue (
     // These have a dispatch header, but it should *never* be waited on
     // directly, only KeRemoveFromBalancedQueue should be used.
 
-    KiInitializeDispatchObject (
+    KepInitializeDispatchObject (
         &queue^.Header, // header
         name, // name
-        KI_DISPATCH_BALANCED_QUEUE, // type
+        KEP_DISPATCH_BALANCED_QUEUE, // type
     )
 
     queue^.Header.SignalCount = 0
@@ -114,7 +114,7 @@ EXPORT FN KeInitializeBalancedQueue (
         queue^.MaximumThreadCount = maxthreads
 
     ELSE
-        queue^.MaximumThreadCount = KeLoaderBlock.ProcessorCount
+        queue^.MaximumThreadCount = KeuLoaderBlock.ProcessorCount
     END
 END
 
@@ -129,7 +129,7 @@ EXPORT FN KeInsertIntoBalancedQueue (
 
     // Acquire the object spinlock.
 
-    ipl := KiAcquireObject ( &queue^.Header )
+    ipl := KepAcquireObject ( &queue^.Header )
 
     IF queue^.Header.WaiterCount AND
         queue^.ActiveThreadCount < queue^.MaximumThreadCount THEN
@@ -140,7 +140,7 @@ EXPORT FN KeInsertIntoBalancedQueue (
         // item. If someone else steals it, they'll adjust their timeout and go
         // back to sleep.
 
-        KiSatisfyObject (
+        KepSatisfyObject (
             &queue^.Header, // object
             priorityboost, // priorityboost
             FALSE, // all
@@ -163,7 +163,7 @@ EXPORT FN KeInsertIntoBalancedQueue (
         )
     END
 
-    KiReleaseObject ( &queue^.Header, ipl )
+    KepReleaseObject ( &queue^.Header, ipl )
 END
 
 EXPORT FN KeRemoveFromBalancedQueue (
@@ -177,14 +177,14 @@ EXPORT FN KeRemoveFromBalancedQueue (
     // Remove an item from the balanced queue. If there are too many threads, or
     // there are no items to remove, we block. 
 
-    // Not allowed at >= KI_IPL_APC because the QueueItem field of the thread
+    // Not allowed at >= KEP_IPL_APC because the QueueItem field of the thread
     // struct could get corrupted if this happens in an APC.
 
-    KeAssert ( KiCurrentIpl () < KI_IPL_APC )
+    KeAssert ( KepCurrentIpl () < KEP_IPL_APC )
 
     thread := KeCurrentThread ()
 
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
     IF thread^.BalancedQueue != queue THEN
         // Associate the thread with this queue.
@@ -198,12 +198,12 @@ EXPORT FN KeRemoveFromBalancedQueue (
             // The queue removal spinlock is superior to all the dispatcher
             // locks, so we can awaken threads and so on with it held.
 
-            KiDisassociateFromBalancedQueue ( thread )
+            KepDisassociateFromBalancedQueue ( thread )
         END
 
         thread^.BalancedQueue = queue
 
-        KiAcquireObjectElevated ( &queue^.Header )
+        KepAcquireObjectElevated ( &queue^.Header )
 
         RtlInsertAtTailList (
             &queue^.ThreadListHead, // head
@@ -212,7 +212,7 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
         queue^.ActiveThreadCount += 1
 
-        KiReleaseObjectElevated ( &queue^.Header )
+        KepReleaseObjectElevated ( &queue^.Header )
     END
 
     // The thread is now definitely associated with this queue, and won't become
@@ -225,7 +225,7 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
         // Make a quick check for an entry before trying to wait.
 
-        KiAcquireObjectElevated ( &queue^.Header )
+        KepAcquireObjectElevated ( &queue^.Header )
 
         IF NOT RtlEmptyList ( &queue^.ItemListHead ) AND
             queue^.ActiveThreadCount <= queue^.MaximumThreadCount THEN
@@ -236,17 +236,17 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
             RtlRemoveEntryList ( item )
 
-            KiReleaseObject ( &queue^.Header, ipl )
+            KepReleaseObject ( &queue^.Header, ipl )
 
             RETURN OS_STATUS_SUCCESS
         END
 
-        KiReleaseObjectElevated ( &queue^.Header )
+        KepReleaseObjectElevated ( &queue^.Header )
     END
 
-    KiLowerIpl ( ipl )
+    KepLowerIpl ( ipl )
 
-    status := KeWaitForSingleObject (
+    status := KeuWaitForSingleObject (
         waitmode, // waitmode
         alertable, // alertable
         timeout, // timeout
@@ -264,7 +264,7 @@ EXPORT FN KeRemoveFromBalancedQueue (
     RETURN status
 END
 
-FN KeRundownBalancedQueue (
+FN KeuRundownBalancedQueue (
     IN queue : ^KeBalancedQueue,
 )
 
@@ -272,17 +272,17 @@ FN KeRundownBalancedQueue (
     // would imply a reference, and as it is being deleted, there must be zero
     // references. We have to disassociate all threads from this queue.
 
-    KiComputeQueueRemovalLockAddress ( lock, queue )
+    KepComputeQueueRemovalLockAddress ( lock, queue )
 
-    ipl := KiAcquireQueueRemoval ( lock )
+    ipl := KepAcquireQueueRemoval ( lock )
 
-    KiAcquireObjectElevated ( &queue^.Header )
+    KepAcquireObjectElevated ( &queue^.Header )
 
     head := &queue^.ThreadListHead
     listentry := head^.Next
 
     WHILE listentry != head DO
-        thread := CONTAINEROF listentry TO KeThread.BalancedQueueEntry
+        thread := CONTAINEROF listentry TO KeuThread.BalancedQueueEntry
 
         // No need to remove the thread's list entry, just setting the queue
         // pointer to NULLPTR is sufficient.
@@ -292,7 +292,7 @@ FN KeRundownBalancedQueue (
         listentry = listentry^.Next
     END
 
-    KiReleaseObjectElevated ( &queue^.Header )
+    KepReleaseObjectElevated ( &queue^.Header )
 
-    KiReleaseQueueRemoval ( lock, ipl )
+    KepReleaseQueueRemoval ( lock, ipl )
 END

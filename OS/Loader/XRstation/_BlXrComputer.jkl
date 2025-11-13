@@ -222,7 +222,7 @@ BxEnableVirtualAddressing:
     mov  t0, long [BxPageDirectory]
     rshi t0, t0, 12
     lshi t0, t0, 5
-    ori  t0, t0, (MI_PTE_V | MI_PTE_W | MI_PTE_G | MI_PTE_K)
+    ori  t0, t0, (MMP_PTE_V | MMP_PTE_W | MMP_PTE_G | MMP_PTE_K)
     mtcr dtbpte, t0
 
     rshi t0, a0, 12
@@ -230,7 +230,7 @@ BxEnableVirtualAddressing:
 
     rshi t0, a1, 12
     lshi t0, t0, 5
-    ori  t0, t0, (MI_PTE_V | MI_PTE_W | MI_PTE_G | MI_PTE_K)
+    ori  t0, t0, (MMP_PTE_V | MMP_PTE_W | MMP_PTE_G | MMP_PTE_K)
     mtcr itbpte, t0
 
     // Re-initialize TB replacement indices to 4, to skip over the 4 reserved
@@ -275,7 +275,7 @@ BxStartSystem:
 
     rshi t1, a1, 12
     lshi t1, t1, 5
-    ori  t1, t1, 0x17 // MI_PTE_V | MI_PTE_W | MI_PTE_G | MI_PTE_K
+    ori  t1, t1, 0x17 // MMP_PTE_V | MMP_PTE_W | MMP_PTE_G | MMP_PTE_K
     mtcr dtbpte, t1
 
     mtcr dtbindex, t0
@@ -607,7 +607,7 @@ FN BxInitializeMemoryMapping ()
 
     pdeptr := &BxPageDirectory[0xB0000000 >> 22]
 
-    pdeptr^ = ((BxPageDirectory >> 12) << 5) | MI_PTE_V | MI_PTE_W | MI_PTE_K
+    pdeptr^ = ((BxPageDirectory >> 12) << 5) | MMP_PTE_V | MMP_PTE_W | MMP_PTE_K
 
     // Now we can enable virtual addressing.
 
@@ -722,7 +722,7 @@ FN BxMapPage (
 
         pagetable = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
 
-        newpde := (desc^.StartPfn << 5) | MI_PTE_V | MI_PTE_W | MI_PTE_K
+        newpde := (desc^.StartPfn << 5) | MMP_PTE_V | MMP_PTE_W | MMP_PTE_K
 
         IF vaddr >= BL_KERNEL_SPACE THEN
             RtlFillMemoryWithUlong (
@@ -731,7 +731,7 @@ FN BxMapPage (
                 0x00000010, // ulong
             )
 
-            newpde |= MI_PTE_G
+            newpde |= MMP_PTE_G
 
         ELSE
             RtlFillMemoryWithUlong (
@@ -747,20 +747,20 @@ FN BxMapPage (
     pteptr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
 
 #IF BLD_CHK
-    IF pteptr^ & MI_PTE_V THEN
+    IF pteptr^ & MMP_PTE_V THEN
         BlCrash ( "VPN %x already mapped\n", vaddr >> RTL_PAGE_SHIFT )
     END
 #END
 
     newpte := CAST (phyaddr >> RTL_PAGE_SHIFT) << 5 TO ULONG
-    newpte |= MI_PTE_V | MI_PTE_W | MI_PTE_K
+    newpte |= MMP_PTE_V | MMP_PTE_W | MMP_PTE_K
 
     IF vaddr >= BL_KERNEL_SPACE THEN
-        newpte |= MI_PTE_G
+        newpte |= MMP_PTE_G
     END
 
     IF noncached THEN
-        newpte |= MI_PTE_NC
+        newpte |= MMP_PTE_NC
     END
 
     pteptr^ = newpte
@@ -805,11 +805,11 @@ FN BxRemapCodePage (
     pteaddr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
     pte := pteaddr^
 
-    IF NOT (pte & MI_PTE_V) THEN
+    IF NOT (pte & MMP_PTE_V) THEN
         BlCrash ( "BxRemapCodePage 2\n" )
     END
 
-    pte &= ~(MI_PTE_W)
+    pte &= ~(MMP_PTE_W)
     pteaddr^ = pte
 
     // Purge TB page.
@@ -846,7 +846,7 @@ FN BxVirtualToPfn (
 
     pte := pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
 
-    IF pte & MI_PTE_V THEN
+    IF pte & MMP_PTE_V THEN
         RETURN pte >> 5
     END
 
@@ -887,7 +887,7 @@ FN BxCreateVirtualSpace (
     pde := &BxPageDirectory[base >> 22]
 
     WHILE pagetables DO
-        pde[0] = (pfn << 5) | MI_PTE_V | MI_PTE_W | MI_PTE_K | MI_PTE_G
+        pde[0] = (pfn << 5) | MMP_PTE_V | MMP_PTE_W | MMP_PTE_K | MMP_PTE_G
 
         pfn += 1
         pde += 4
@@ -896,7 +896,7 @@ FN BxCreateVirtualSpace (
 
     // Zero them out through the recursive mapping.
 
-    ptebase := CAST MiPteAddress ( base ) TO ^VOID
+    ptebase := CAST MmpPteAddress ( base ) TO ^VOID
 
     RtlFillMemoryWithUlong (
         ptebase, // ptr
@@ -1091,7 +1091,7 @@ FN BxInitializeIo (
 
     // Map the citron base.
 
-    devaddr := BlMapIoRegion (
+    devaddr := BlMapIouRegion (
         1, // pages
         0xF8000000, // phyaddr
         TRUE, // noncached
@@ -1105,7 +1105,7 @@ FN BxInitializeIo (
 
     // Map the LSIC base.
 
-    devaddr = BlMapIoRegion (
+    devaddr = BlMapIouRegion (
         1, // pages
         0xF8030000, // phyaddr
         TRUE, // noncached
@@ -1119,7 +1119,7 @@ FN BxInitializeIo (
 
     // Map the NVRAM base.
 
-    devaddr = BlMapIoRegion (
+    devaddr = BlMapIouRegion (
         1, // pages
         0xF8001000, // phyaddr
         TRUE, // noncached
@@ -1142,7 +1142,7 @@ FN BxInitializeIo (
 
         fbsize := fwfb^.Width * fwfb^.Height + RTL_PAGE_SIZE - 1
 
-        devaddr = BlMapIoRegion (
+        devaddr = BlMapIouRegion (
             fbsize >> RTL_PAGE_SHIFT, // pages
             fwfb^.Address, // phyaddr
             FALSE, // noncached

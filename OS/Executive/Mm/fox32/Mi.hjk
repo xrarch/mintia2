@@ -4,70 +4,70 @@
 
 // Describes the base address of the virtually linear page table.
 
-#DEFINE MI_TABLE_BASE 0xB0000000
-#DEFINE MI_TABLE_END 0xB0400000
+#DEFINE MMP_TABLE_BASE 0xB0000000
+#DEFINE MMP_TABLE_END 0xB0400000
 
-#DEFINE MI_DIRECTORY_BASE 0xB02C0000
+#DEFINE MMP_DIRECTORY_BASE 0xB02C0000
 
-#DEFINE MI_USER_SPACE_END 0x7FFF0000
-#DEFINE MI_SYSTEM_SPACE 0x80000000
+#DEFINE MMP_USER_SPACE_END 0x7FFF0000
+#DEFINE MMP_SYSTEM_SPACE 0x80000000
 
 // Describes the number of levels in the page table.
 
-#DEFINE MI_TABLE_LEVELS 2
+#DEFINE MMP_TABLE_LEVELS 2
 
 // Describes base and bounds of the three dynamic areas.
 
-#DEFINE MI_POOL_SPACE 0xC0000000
-#DEFINE MI_POOL_SPACE_SIZE [(256 * 1024 * 1024)]
-#DEFINE MI_POOL_SPACE_END 0xD0000000
+#DEFINE MMP_POOL_SPACE 0xC0000000
+#DEFINE MMP_POOL_SPACE_SIZE [(256 * 1024 * 1024)]
+#DEFINE MMP_POOL_SPACE_END 0xD0000000
 
-#DEFINE MI_DYNAMIC_SPACE 0xD0000000
-#DEFINE MI_DYNAMIC_SPACE_SIZE [(256 * 1024 * 1024)]
-#DEFINE MI_DYNAMIC_SPACE_END 0xE0000000
+#DEFINE MMP_DYNAMIC_SPACE 0xD0000000
+#DEFINE MMP_DYNAMIC_SPACE_SIZE [(256 * 1024 * 1024)]
+#DEFINE MMP_DYNAMIC_SPACE_END 0xE0000000
 
-#DEFINE MI_CACHE_SPACE 0xE0000000
-#DEFINE MI_CACHE_SPACE_SIZE [(256 * 1024 * 1024)]
-#DEFINE MI_CACHE_SPACE_END 0xF0000000
+#DEFINE MMP_CACHE_SPACE 0xE0000000
+#DEFINE MMP_CACHE_SPACE_SIZE [(256 * 1024 * 1024)]
+#DEFINE MMP_CACHE_SPACE_END 0xF0000000
 
 // Describes whether the page table gives a "complete" picture of the address
 // space. This is not the case on architectures where there is an architectural
 // mapping of physical memory (such as MIPS) or where the TLB can be used to
 // permanently map pages that are not reflected in the page table.
 
-#DEFINE MI_COMPLETE_TABLE 1
+#DEFINE MMP_COMPLETE_TABLE 1
 
-#DEFINE MI_PTE_V 1
-#DEFINE MI_PTE_W 2
+#DEFINE MMP_PTE_V 1
+#DEFINE MMP_PTE_W 2
 
-#DEFINE MI_INVALID_KERNEL_PTE 0
+#DEFINE MMP_INVALID_KERNEL_PTE 0
 
-TYPE MiPte : ULONG
+TYPE MmpPte : ULONG
 
-#MACRO MiPteAddress ( vaddr ) [
-    (CAST (MI_TABLE_BASE + (((vaddr) >> 12) << 2)) TO ^MiPte)
+#MACRO MmpPteAddress ( vaddr ) [
+    (CAST (MMP_TABLE_BASE + (((vaddr) >> 12) << 2)) TO ^MmpPte)
 ]
 
-#MACRO MiVirtualAddress ( pteaddr ) [
-    (CAST ((((pteaddr) - MI_TABLE_BASE) >> 2) << 12) TO ^VOID)
+#MACRO MmpVirtualAddress ( pteaddr ) [
+    (CAST ((((pteaddr) - MMP_TABLE_BASE) >> 2) << 12) TO ^VOID)
 ]
 
-#MACRO MiIsPteValid ( pte ) [
-    ((pte) & MI_PTE_V == 1)
+#MACRO MmpIsPteValid ( pte ) [
+    ((pte) & MMP_PTE_V == 1)
 ]
 
-#MACRO MiPfnFromPte ( pte ) [
+#MACRO MmpPfnFromPte ( pte ) [
     ((pte) >> 12)
 ]
 
-#MACRO MiBuildPoolPte ( pfn ) [
-    (((pfn) << 12) | (MI_PTE_V | MI_PTE_W))
+#MACRO MmpBuildPoolPte ( pfn ) [
+    (((pfn) << 12) | (MMP_PTE_V | MMP_PTE_W))
 ]
 
 // Assumes no caches.
 
-#DEFINE MI_COLOR_COUNT 1
+#DEFINE MMP_COLOR_COUNT 1
 
 // NUMA not supported on fox32.
 
-#MACRO MiNumaNodeFromDynamicSpacePointer ( ptr ) [ MiBootNode ]
+#MACRO MmpNumaNodeFromDynamicSpacePointer ( ptr ) [ MmpBootNode ]

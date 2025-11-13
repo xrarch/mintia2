@@ -3,19 +3,19 @@
 //
 
 #INCLUDE "Nsp.hjk"
-#INCLUDE "<inc>/Io.hjk"
+#INCLUDE "<inc>/Iou.hjk"
 
-EXTERN IoFileType : ObType
+EXTERN IouFileType : ObuType
 
 #SECTION "PAGEtext"
-FN NsCaptureOpenParameters (
+FN NsuCaptureOpenParameters (
     IN userparams : ^OsOpenParameters,
-    IN sysparams : ^NsOpenParameters,
+    IN sysparams : ^NsuOpenParameters,
 ) : OsStatus
 
     // Copy open parameters into system space.
 
-    status := MmSafeCopyIn (
+    status := MmuSafeCopyIn (
         &sysparams^.Captured, // dest
         userparams, // src
         SIZEOF OsOpenParameters, // sz
@@ -33,7 +33,7 @@ FN NsCaptureOpenParameters (
 
     // Copy in the path.
 
-    status = MmCaptureString (
+    status = MmuCaptureString (
         &sysparams^.Captured.Path, // string
         &sysparams^.Path, // output
         OS_PATH_MAX, // maxlen
@@ -55,58 +55,58 @@ FN NsCaptureOpenParameters (
 
     // Translate the initial handle.
 
-    file : ^IoFile
+    file : ^IouFile
     access : UWORD
 
-    status = ObReferenceByHandle (
+    status = ObuReferenceByHandle (
         sysparams^.Captured.InitialHandle, // handle
-        &IoFileType, // type
+        &IouFileType, // type
         OUT file, // object
         OUT access, // access
     )
 
     IF OsError ( status ) THEN
-        MmFreeCapturedString ( &sysparams^.Path )
+        MmuFreeCapturedString ( &sysparams^.Path )
 
         RETURN status
     END
 
     // Capture the namespace handle stored in the file object.
 
-    NsCopyHandle (
+    NsuCopyHandle (
         &sysparams^.InitialHandle, // dest
         &file^.Handle, // src
     )
 
-    NsReferenceHandle ( &sysparams^.InitialHandle )
+    NsuReferenceHandle ( &sysparams^.InitialHandle )
 
-    ObUnreferenceObject ( file )
+    ObuUnreferenceObject ( file )
 
     RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
-FN NsFreeOpenParameters (
-    IN params : ^NsOpenParameters,
+FN NsuFreeOpenParameters (
+    IN params : ^NsuOpenParameters,
 )
 
     // Free open parameters that were previously copied in from userspace.
 
     IF params^.Path.Data THEN
-        MmFreeCapturedString ( &params^.Path )
+        MmuFreeCapturedString ( &params^.Path )
 
         IF params^.InitialHandle.Entry THEN
             // Unreference the initial handle.
 
-            NsUnreferenceHandle ( &params^.InitialHandle )
+            NsuUnreferenceHandle ( &params^.InitialHandle )
         END
     END
 END
 
 #SECTION "PAGEtext"
-FN NsCreateObject (
-    IN params : ^NsOpenParameters,
-    IN obparams : ^ObParameters,
+FN NsuCreateObject (
+    IN params : ^NsuOpenParameters,
+    IN obparams : ^ObuParameters,
     OUT object : ^VOID,
 ) : OsStatus
 
@@ -114,11 +114,11 @@ FN NsCreateObject (
     // Most instances of file object creation are not a simple case, so that
     // does not call this, but most other things do.
 
-    // 'params' should be a fully initialized NsOpenParameters structure, which
+    // 'params' should be a fully initialized NsuOpenParameters structure, which
     // means it should have been in-copied from userspace and the initial handle
     // should have been resolved. Caller takes care of undoing these things.
 
-    // 'obparams' should have been initialized by the NsInitializeParameters
+    // 'obparams' should have been initialized by the NsuInitializeParameters
     // macro.
 
     IF params^.Path.Data THEN
@@ -127,9 +127,9 @@ FN NsCreateObject (
         params^.Captured.Flags |= OS_OPEN_CREATE
         params^.ResultFlags = 0
 
-        handle : NsHandle
+        handle : NsuHandle
 
-        status := NsLookupEntryByPath (
+        status := NsuLookupEntryByPath (
             params, // params
             &handle, // handle
             &obparams^.Permissions.Cred, // cred
@@ -143,25 +143,25 @@ FN NsCreateObject (
 
         object = handle.Entry^.Object
 
-        ObReferenceObject ( object )
+        ObuReferenceObject ( object )
 
-        NsUnreferenceHandle ( &handle )
+        NsuUnreferenceHandle ( &handle )
 
         RETURN OS_STATUS_SUCCESS
     END
 
-    params^.ResultFlags = NS_RESULT_CREATED
+    params^.ResultFlags = NSU_RESULT_CREATED
 
-    RETURN ObAllocateObject (
+    RETURN ObuAllocateObject (
         obparams, // obparams
         OUT object, // object
     )
 END
 
 #SECTION "PAGEtext"
-FN NsLookupObject (
-    IN params : ^NsOpenParameters,
-    IN type : ^ObType,
+FN NsuLookupObject (
+    IN params : ^NsuOpenParameters,
+    IN type : ^ObuType,
     OUT object : ^VOID,
 ) : OsStatus
 
@@ -175,12 +175,12 @@ FN NsLookupObject (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    handle : NsHandle
+    handle : NsuHandle
 
-    status := NsLookupEntryByPath (
+    status := NsuLookupEntryByPath (
         params, // params
         &handle, // handle
-        PsCurrentCredentials (), // cred
+        PsuCurrentCredentials (), // cred
         NULLPTR, // obparams
         type, // type
     )
@@ -191,17 +191,17 @@ FN NsLookupObject (
 
     object = handle.Entry^.Object
 
-    ObReferenceObject ( object )
+    ObuReferenceObject ( object )
 
-    NsUnreferenceHandle ( &handle )
+    NsuUnreferenceHandle ( &handle )
 
     RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
-FN NsInitializeProcess (
-    IN process : ^PsProcess,
-    IN parentprocess : ^PsProcess,
+FN NsuInitializeProcess (
+    IN process : ^PsuProcess,
+    IN parentprocess : ^PsuProcess,
 )
 
     // Initialize the process for usage by the namespace.
@@ -221,8 +221,8 @@ FN NsInitializeProcess (
 END
 
 #SECTION "PAGEtext"
-FN NsUninitializeProcess (
-    IN process : ^PsProcess,
+FN NsuUninitializeProcess (
+    IN process : ^PsuProcess,
 )
 
     // Uninitialize a process with respect to the namespace.
@@ -231,5 +231,5 @@ FN NsUninitializeProcess (
 
     // Unreference the root handle.
 
-    NsUnreferenceHandle ( &paged^.RootHandle )
+    NsuUnreferenceHandle ( &paged^.RootHandle )
 END

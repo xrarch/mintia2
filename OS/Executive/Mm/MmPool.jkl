@@ -2,13 +2,13 @@
 // Implements system memory pool management.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 
-#DEFINE MI_BLOCK_SWIFT_MAGIC 0xC0
-#DEFINE MI_BLOCK_FREE_MAGIC 0xE4
-#DEFINE MI_BLOCK_INVALID_MAGIC 0xA5
+#DEFINE MMP_BLOCK_SWIFT_MAGIC 0xC0
+#DEFINE MMP_BLOCK_FREE_MAGIC 0xE4
+#DEFINE MMP_BLOCK_INVALID_MAGIC 0xA5
 
-STRUCT MiBlock
+STRUCT MmpBlock
     BucketIndex : UBYTE,
     LastSize : UBYTE,
     Magic : UBYTE,
@@ -23,32 +23,32 @@ STRUCT MiBlock
 
 END
 
-STRUCT MiFreeBlock
-    Block : MiBlock,
+STRUCT MmpFreeBlock
+    Block : MmpBlock,
 
     LogEntry : RtlListEntry,
     SizeEntry : RtlListEntry,
 END
 
-STRUCT MiPoolExtension
-    Pool : ^MiPool,
+STRUCT MmpPoolExtension
+    Pool : ^MmpPool,
     References : ULONG,
 END
 
-#DEFINE MI_POOL_FLAG_USE_PRIVILEGED_MEM 1
+#DEFINE MMP_POOL_FLAG_USE_PRIVILEGED_MEM 1
 
-FN MiAllocateExtensionSpace (
-    IN node : ^MiNode,
-) : ^MiPoolExtension
+FN MmpAllocateExtensionSpace (
+    IN node : ^MmpNode,
+) : ^MmpPoolExtension
 
     // Allocate space for a pool extension.
 
     printed := FALSE
 
     WHILE TRUE DO
-        ext := CAST MiAllocateChunkSpace (
+        ext := CAST MmpAllocateChunkSpace (
             &node^.PoolSpace, // chunkspace
-        ) TO ^MiPoolExtension
+        ) TO ^MmpPoolExtension
 
         IF ext THEN
             RETURN ext
@@ -75,37 +75,37 @@ FN MiAllocateExtensionSpace (
     END
 END
 
-FN MiFreeExtensionSpace (
-    IN node : ^MiNode,
-    IN ext : ^MiPoolExtension,
+FN MmpFreeExtensionSpace (
+    IN node : ^MmpNode,
+    IN ext : ^MmpPoolExtension,
     IN flush : UWORD,
 )
 
     // Free the virtual space for the pool extension.
 
-    pte := MiPteAddress ( ext )
+    pte := MmpPteAddress ( ext )
 
     // Clear the PTE, makes it more likely we'll see it if a bad pointer within
     // this chunk is used later. Due to the TB it's not 100% though.
 
-    pte[0] = MI_INVALID_KERNEL_PTE
+    pte[0] = MMP_INVALID_KERNEL_PTE
 
 #IF BLD_CHK
     // Make it even more likely by at least flushing this page on the current
     // processor.
 
-    KeFlushMyTbAddress ( ext )
+    KeuFlushMyTbAddress ( ext )
 #END
 
-    MiFreeChunkSpace (
+    MmpFreeChunkSpace (
         &node^.PoolSpace, // chunkspace
         ext, // ptr
         flush, // flush
     )
 END
 
-FN MiFreeNonpagedPoolPages (
-    IN partition : ^MiPartition,
+FN MmpFreeNonpagedPoolPages (
+    IN partition : ^MmpPartition,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
@@ -113,23 +113,23 @@ FN MiFreeNonpagedPoolPages (
     // Free the page frames within this extension and return it to nonpaged
     // space. The space allocator will deal with flushing the TB.
 
-    pte := MiPteAddress ( ptr )
+    pte := MmpPteAddress ( ptr )
     i := 0
 
     WHILE i < pages DO
         ptecontents := pte[i]
 
-        KeAssert ( MiIsPteValid ( ptecontents ) )
+        KeAssert ( MmpIsPteValid ( ptecontents ) )
 
-        pte[i] = MI_INVALID_KERNEL_PTE
+        pte[i] = MMP_INVALID_KERNEL_PTE
 
-        MiFreePage (
+        MmpFreePage (
             partition, // partition
-            MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
+            MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ), // pfe
         )
 
 #IF BLD_CHK
-        KeFlushMyTbAddress ( ptr )
+        KeuFlushMyTbAddress ( ptr )
 
         ptr += RTL_PAGE_SIZE
 #END
@@ -138,8 +138,8 @@ FN MiFreeNonpagedPoolPages (
     END
 END
 
-FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
-    IN partition : ^MiPartition,
+FN (MmpPoolReturnMemoryF) MmpFreeNonpagedMemory (
+    IN partition : ^MmpPartition,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
@@ -147,7 +147,7 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
     // Free the page frames within this extension and return it to nonpaged
     // space. The space allocator will deal with flushing the TB.
 
-    MiFreeNonpagedPoolPages (
+    MmpFreeNonpagedPoolPages (
         partition, // partition
         ptr, // ptr
         pages, // pages
@@ -155,14 +155,14 @@ FN (MiPoolReturnMemoryF) MiFreeNonpagedMemory (
 
     // Uncharge the commit.
 
-    MmUnchargeCommit (
+    MmuUnchargeCommit (
         partition, // partition
         pages, // pages
     )
 END
 
-FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
-    IN partition : ^MiPartition,
+FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
+    IN partition : ^MmpPartition,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN low : UWORD,
@@ -175,14 +175,14 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
 
     // First charge commit for these pages.
 
-    MmChargeCommit (
+    MmuChargeCommit (
         partition, // partition
         pages, // pages
         FALSE, // wait
     )
 
     i := 0
-    pte := MiPteAddress ( ptr )
+    pte := MmpPteAddress ( ptr )
     colorptr := ptr
 
     WHILE i < pages DO
@@ -190,18 +190,18 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
 
 @Retry
 
-        pfe := MiAllocatePage (
+        pfe := MmpAllocatePage (
             partition, // partition
             FALSE, // zeroed
             low, // low
-            MiVirtualAddressColor ( colorptr ), // color
+            MmpVirtualAddressColor ( colorptr ), // color
         )
 
         IF NOT pfe THEN
             IF wait THEN
                 // Caller said we should wait here for more pages.
 
-                MiWaitForPages (
+                MmpWaitForPages (
                     partition, // partition
                     low, // low
                 )
@@ -211,13 +211,13 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
 
             // Free everything we just did.
 
-            MiFreeNonpagedPoolPages (
+            MmpFreeNonpagedPoolPages (
                 partition, // partition
                 ptr, // ptr
                 i, // pages
             )
 
-            MmUnchargeCommit (
+            MmuUnchargeCommit (
                 partition, // partition
                 pages, // pages
             )
@@ -229,7 +229,7 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
         // Note that no TB entry exists for this page in any CPU if we've been
         // given it by the pool space allocator.
 
-        pte[i] = MiBuildPoolPte ( MiPfeToPfn ( pfe ) )
+        pte[i] = MmpBuildPoolPte ( MmpPfeToPfn ( pfe ) )
 
         i += 1
         colorptr += RTL_PAGE_SIZE
@@ -238,19 +238,19 @@ FN (MiPoolGetMemoryF) MiGetNonpagedMemory (
     RETURN TRUE
 END
 
-FN (MiPoolReturnMemoryF) MiFreePagedMemory (
-    IN partition : ^MiPartition,
+FN (MmpPoolReturnMemoryF) MmpFreePagedMemory (
+    IN partition : ^MmpPartition,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
 
     // Free an extension for paged pool.
 
-    KeCrash ( "NYI MiFreePagedMemory\n" )
+    KeCrash ( "NYI MmpFreePagedMemory\n" )
 END
 
-FN (MiPoolGetMemoryF) MiGetPagedMemory (
-    IN partition : ^MiPartition,
+FN (MmpPoolGetMemoryF) MmpGetPagedMemory (
+    IN partition : ^MmpPartition,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN low : UWORD,
@@ -259,17 +259,17 @@ FN (MiPoolGetMemoryF) MiGetPagedMemory (
     
     // Allocate an extension for paged pool.
 
-    KeCrash ( "NYI MiGetPagedMemory\n" )
+    KeCrash ( "NYI MmpGetPagedMemory\n" )
 END
 
-#MACRO MiFindPoolExtension ( ptr ) [
-    (CAST (ptr) & RTL_PAGE_NUMBER_MASK TO ^MiPoolExtension)
+#MACRO MmpFindPoolExtension ( ptr ) [
+    (CAST (ptr) & RTL_PAGE_NUMBER_MASK TO ^MmpPoolExtension)
 ]
 
 #SECTION "INITtext"
-FN MiInitializePool (
-    IN pool : ^MiPool,
-    IN node : ^MiNode,
+FN MmpInitializePool (
+    IN pool : ^MmpPool,
+    IN node : ^MmpNode,
 )
 
     // Initialize a pool.
@@ -285,7 +285,7 @@ FN MiInitializePool (
 
     i := 0
 
-    WHILE i < MI_BLOCK_LOG_BUCKETS DO
+    WHILE i < MMP_BLOCK_LOG_BUCKETS DO
         RtlInitializeList ( &pool^.LogListHeads[i] )
 
         i += 1
@@ -293,7 +293,7 @@ FN MiInitializePool (
 
     i = 0
 
-    WHILE i < MI_BLOCK_SIZE_BUCKETS DO
+    WHILE i < MMP_BLOCK_SIZE_BUCKETS DO
         RtlInitializeList ( &pool^.SizeListHeads[i] )
 
         i += 1
@@ -301,101 +301,101 @@ FN MiInitializePool (
 END
 
 #SECTION "INITtext"
-FN MiInitializeNonpagedPool (
-    IN pool : ^MiPool,
-    IN node : ^MiNode,
+FN MmpInitializeNonpagedPool (
+    IN pool : ^MmpPool,
+    IN node : ^MmpNode,
 )
 
     // Initialize a nonpaged pool.
 
-    MiInitializePool (
+    MmpInitializePool (
         pool, // pool
         node, // node
     )
 
-    pool^.GetMemory = &MiGetNonpagedMemory
-    pool^.ReturnMemory = &MiFreeNonpagedMemory
+    pool^.GetMemory = &MmpGetNonpagedMemory
+    pool^.ReturnMemory = &MmpFreeNonpagedMemory
 END
 
 #SECTION "INITtext"
-FN MiInitializePagedPool (
-    IN pool : ^MiPool,
-    IN node : ^MiNode,
+FN MmpInitializePagedPool (
+    IN pool : ^MmpPool,
+    IN node : ^MmpNode,
 )
 
     // Initialize a paged pool.
 
-    MiInitializePool (
+    MmpInitializePool (
         pool, // pool
         node, // node
     )
 
-    pool^.GetMemory = &MiGetPagedMemory
-    pool^.ReturnMemory = &MiFreePagedMemory
+    pool^.GetMemory = &MmpGetPagedMemory
+    pool^.ReturnMemory = &MmpFreePagedMemory
 END
 
 #SECTION "INITtext"
-FN MiInitializePools (
-    IN node : ^MiNode,
+FN MmpInitializePools (
+    IN node : ^MmpNode,
 )
 
     // Initialize the system pools as part of stage 1 Mm init.
 
-    MiInitializeNonpagedPool (
-        &node^.PoolRecords[MM_NONPAGED_POOL], // pool
+    MmpInitializeNonpagedPool (
+        &node^.PoolRecords[MMU_NONPAGED_POOL], // pool
         node, // node
     )
 
-    MiInitializeNonpagedPool (
-        &node^.PoolRecords[MM_PRIVILEGED_POOL], // pool
+    MmpInitializeNonpagedPool (
+        &node^.PoolRecords[MMU_PRIVILEGED_POOL], // pool
         node, // node
     )
 
     // Allow privileged pool to use privileged memory.
 
-    node^.PoolRecords[MM_PRIVILEGED_POOL].Flags |=
-        MI_POOL_FLAG_USE_PRIVILEGED_MEM
+    node^.PoolRecords[MMU_PRIVILEGED_POOL].Flags |=
+        MMP_POOL_FLAG_USE_PRIVILEGED_MEM
 
     // Set paged pool to point to nonpaged pool for now, since we don't have
     // enough initialized to deal with faults on paged pool yet.
 
-    node^.PoolTable[MM_NONPAGED_POOL] = &node^.PoolRecords[MM_NONPAGED_POOL]
-    node^.PoolTable[MM_PAGED_POOL] = &node^.PoolRecords[MM_NONPAGED_POOL]
-    node^.PoolTable[MM_PRIVILEGED_POOL] = &node^.PoolRecords[MM_PRIVILEGED_POOL]
+    node^.PoolTable[MMU_NONPAGED_POOL] = &node^.PoolRecords[MMU_NONPAGED_POOL]
+    node^.PoolTable[MMU_PAGED_POOL] = &node^.PoolRecords[MMU_NONPAGED_POOL]
+    node^.PoolTable[MMU_PRIVILEGED_POOL] = &node^.PoolRecords[MMU_PRIVILEGED_POOL]
 
     // Initialize pool cache.
 
-    MiInitializePoolCache ( node )
+    MmpInitializePoolCache ( node )
 
     // Initialize system space node allocation.
 
-    MiInitializeSpaceNodeAllocation ( node )
+    MmpInitializeSpaceNodeAllocation ( node )
 END
 
 #SECTION "INITtext"
-FN MiInitializePagedPools (
-    IN node : ^MiNode,
+FN MmpInitializePagedPools (
+    IN node : ^MmpNode,
 )
 
     // Initialize the paged pools as part of stage 2 Mm init.
 
-    MiInitializePagedPool (
-        &node^.PoolRecords[MM_PAGED_POOL], // pool
+    MmpInitializePagedPool (
+        &node^.PoolRecords[MMU_PAGED_POOL], // pool
         node, // node
     )
 
-    MiInitializePagedPool (
-        &node^.PoolRecords[MM_PAGE_TRACKING_POOL], // pool
+    MmpInitializePagedPool (
+        &node^.PoolRecords[MMU_PAGE_TRACKING_POOL], // pool
         node, // node
     )
 
-    node^.PoolTable[MM_PAGED_POOL] = &node^.PoolRecords[MM_PAGED_POOL]
+    node^.PoolTable[MMU_PAGED_POOL] = &node^.PoolRecords[MMU_PAGED_POOL]
 
-    node^.PoolTable[MM_PAGE_TRACKING_POOL] =
-        &node^.PoolRecords[MM_PAGE_TRACKING_POOL]
+    node^.PoolTable[MMU_PAGE_TRACKING_POOL] =
+        &node^.PoolRecords[MMU_PAGE_TRACKING_POOL]
 END
 
-MiEightBitLog : UBYTE[256] = {
+MmpEightBitLog : UBYTE[256] = {
     0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
     4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
@@ -414,16 +414,16 @@ MiEightBitLog : UBYTE[256] = {
     7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
 }
 
-#MACRO MiAcquirePool ( pool ) [
+#MACRO MmpAcquirePool ( pool ) [
     KeAcquireApcLockExclusive ( &pool^.Lock )
 ]
 
-#MACRO MiReleasePool ( pool, ipl ) [
+#MACRO MmpReleasePool ( pool, ipl ) [
     KeReleaseApcLock ( &pool^.Lock, ipl )
 ]
 
-FN MiAllocateFromPool (
-    IN pool : ^MiPool,
+FN MmpAllocateFromPool (
+    IN pool : ^MmpPool,
     IN bytes : UWORD,
     IN tag : ULONG,
     IN wait : UWORD,
@@ -432,19 +432,19 @@ FN MiAllocateFromPool (
     // Allocate a block of memory of at least the given number of bytes from the
     // specified pool.
 
-    bytes += SIZEOF MiBlock
+    bytes += SIZEOF MmpBlock
 
-    bytes += MI_BLOCK_SIZE_MASK
-    bytes >>= MI_BLOCK_SIZE_SHIFT
+    bytes += MMP_BLOCK_SIZE_MASK
+    bytes >>= MMP_BLOCK_SIZE_SHIFT
 
-    KeAssert ( bytes <= MI_BLOCK_MAX_REQUEST_UNITS )
+    KeAssert ( bytes <= MMP_BLOCK_MAX_REQUEST_UNITS )
 
     // Bytes now stores size units rather than real bytes.
 
     // We want to start searching in the bucket ceil(log_2(units)).
     // We place blocks in bucket floor(log_2(units)).
 
-    insertindex := MiEightBitLog[bytes]
+    insertindex := MmpEightBitLog[bytes]
 
     bucketindex := insertindex
 
@@ -462,11 +462,11 @@ FN MiAllocateFromPool (
     i := bytes
     max := 1 << bucketindex
 
-    block : ^MiFreeBlock
+    block : ^MmpFreeBlock
 
     // Lock the pool.
 
-    ipl := MiAcquirePool ( pool )
+    ipl := MmpAcquirePool ( pool )
 
     // Search the inbetween lists up to the next power of two.
 
@@ -474,7 +474,7 @@ FN MiAllocateFromPool (
         IF NOT RtlEmptyList ( listhead ) THEN
             // Found a block.
 
-            block = CONTAINEROF listhead^.Next TO MiFreeBlock.SizeEntry
+            block = CONTAINEROF listhead^.Next TO MmpFreeBlock.SizeEntry
 
             KeAssert ( block^.Block.Size == i )
 
@@ -490,11 +490,11 @@ FN MiAllocateFromPool (
     listhead = &pool^.LogListHeads[bucketindex]
     i = bucketindex
 
-    WHILE i < MI_BLOCK_LOG_BUCKETS DO
+    WHILE i < MMP_BLOCK_LOG_BUCKETS DO
         IF NOT RtlEmptyList ( listhead ) THEN
             // Found a block.
 
-            block = CONTAINEROF listhead^.Next TO MiFreeBlock.LogEntry
+            block = CONTAINEROF listhead^.Next TO MmpFreeBlock.LogEntry
 
             KeAssert ( block^.Block.BucketIndex == i )
 
@@ -507,25 +507,25 @@ FN MiAllocateFromPool (
 
     // No sufficient block. We need to allocate a new pool extension.
 
-    ext := MiAllocateExtensionSpace ( pool^.Node )
+    ext := MmpAllocateExtensionSpace ( pool^.Node )
 
     IF NOT pool^.GetMemory (
         pool^.Partition, // partition
         ext, // ptr
         1, // pages
-        pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
+        pool^.Flags & MMP_POOL_FLAG_USE_PRIVILEGED_MEM, // low
         FALSE, // wait
     ) THEN
 
         // Failed to allocate a pool extension.
 
-        MiFreeExtensionSpace (
+        MmpFreeExtensionSpace (
             pool^.Node, // node
             ext, // extension
             FALSE, // flush
         )
 
-        MiReleasePool ( pool, ipl )
+        MmpReleasePool ( pool, ipl )
 
         IF NOT wait THEN
             // Caller requested that we don't wait upon failure.
@@ -535,9 +535,9 @@ FN MiAllocateFromPool (
 
         // Wait for free memory and retry.
 
-        MiWaitForPages (
+        MmpWaitForPages (
             pool^.Partition, // partition
-            pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
+            pool^.Flags & MMP_POOL_FLAG_USE_PRIVILEGED_MEM, // low
         )
 
         GOTO Retry
@@ -549,7 +549,7 @@ FN MiAllocateFromPool (
 
     // Increment pool statistics.
 
-    pool^.BytesUsedInternally += bytes << MI_BLOCK_SIZE_SHIFT
+    pool^.BytesUsedInternally += bytes << MMP_BLOCK_SIZE_SHIFT
 
     IF pool^.BytesUsedInternally > pool^.BytesUsedPeak THEN
         pool^.BytesUsedPeak = pool^.BytesUsedInternally
@@ -570,11 +570,11 @@ FN MiAllocateFromPool (
     // We also assume that the extension header fits within a single block unit
     // (currently 32 bytes).
 
-    block = CAST ext + MI_BLOCK_MIN_SIZE TO ^MiFreeBlock
+    block = CAST ext + MMP_BLOCK_MIN_SIZE TO ^MmpFreeBlock
 
     // Initialize the block we'll be returning to the caller.
 
-    block^.Block.Magic = MI_BLOCK_SWIFT_MAGIC
+    block^.Block.Magic = MMP_BLOCK_SWIFT_MAGIC
     block^.Block.Size = bytes
     block^.Block.BucketIndex = insertindex
     block^.Block.LastSize = 0
@@ -582,17 +582,17 @@ FN MiAllocateFromPool (
 
     // Initialize the new block.
 
-    newblock := block + (bytes << MI_BLOCK_SIZE_SHIFT)
+    newblock := block + (bytes << MMP_BLOCK_SIZE_SHIFT)
 
-    newblocksize := (1 << MI_BLOCK_MAX_UNITS_SHIFT) - 1
+    newblocksize := (1 << MMP_BLOCK_MAX_UNITS_SHIFT) - 1
 
     KeAssert ( bytes <= newblocksize )
 
     newblocksize -= bytes
 
-    newbucketindex := MiEightBitLog[newblocksize]
+    newbucketindex := MmpEightBitLog[newblocksize]
 
-    newblock^.Block.Magic = MI_BLOCK_FREE_MAGIC
+    newblock^.Block.Magic = MMP_BLOCK_FREE_MAGIC
     newblock^.Block.Size = newblocksize
     newblock^.Block.BucketIndex = newbucketindex
     newblock^.Block.LastSize = bytes
@@ -611,15 +611,15 @@ FN MiAllocateFromPool (
 
     // Unlock the pool.
 
-    MiReleasePool ( pool, ipl )
+    MmpReleasePool ( pool, ipl )
 
     // Return the block.
 
-    RETURN block + SIZEOF MiBlock
+    RETURN block + SIZEOF MmpBlock
 
 @FoundBlock
 
-    KeAssert ( block^.Block.Magic == MI_BLOCK_FREE_MAGIC )
+    KeAssert ( block^.Block.Magic == MMP_BLOCK_FREE_MAGIC )
 
     // This block is either perfectly sized, or at least big enough to
     // satisfy the allocation request. In either case, we want to
@@ -633,17 +633,17 @@ FN MiAllocateFromPool (
     // free block belongs, since in any case, we're going to be adding
     // a new allocated block to it.
 
-    ext = MiFindPoolExtension ( block )
+    ext = MmpFindPoolExtension ( block )
     ext^.References += 1
 
     // Set magic to indicate allocated, since in either case we'll be
     // returning this block to the caller.
 
-    block^.Block.Magic = MI_BLOCK_SWIFT_MAGIC
+    block^.Block.Magic = MMP_BLOCK_SWIFT_MAGIC
 
     // Increment pool statistics.
 
-    pool^.BytesUsedInternally += bytes << MI_BLOCK_SIZE_SHIFT
+    pool^.BytesUsedInternally += bytes << MMP_BLOCK_SIZE_SHIFT
 
     IF pool^.BytesUsedInternally > pool^.BytesUsedPeak THEN
         pool^.BytesUsedPeak = pool^.BytesUsedInternally
@@ -673,18 +673,18 @@ FN MiAllocateFromPool (
 
         // Calculate the index of the bucket to place the new block in.
 
-        newbucketindex = MiEightBitLog[newblocksize]
+        newbucketindex = MmpEightBitLog[newblocksize]
 
         // Get a pointer to the new block.
 
-        newblock = block + (bytes << MI_BLOCK_SIZE_SHIFT)
+        newblock = block + (bytes << MMP_BLOCK_SIZE_SHIFT)
 
         // Create new block header.
 
         newblock^.Block.Size = newblocksize
         newblock^.Block.LastSize = bytes
         newblock^.Block.BucketIndex = newbucketindex
-        newblock^.Block.Magic = MI_BLOCK_FREE_MAGIC
+        newblock^.Block.Magic = MMP_BLOCK_FREE_MAGIC
 
         // Insert the new block into the buckets indexed by floor-log and size.
 
@@ -702,23 +702,23 @@ FN MiAllocateFromPool (
         // aligned to a maximum block size, in which case there is no next
         // block.
 
-        newblock += newblocksize << MI_BLOCK_SIZE_SHIFT
+        newblock += newblocksize << MMP_BLOCK_SIZE_SHIFT
 
-        IF newblock & MI_BLOCK_MAX_SIZE_MASK THEN
+        IF newblock & MMP_BLOCK_MAX_SIZE_MASK THEN
             newblock^.Block.LastSize = newblocksize
         END
     END
 
     // Unlock the pool.
 
-    MiReleasePool ( pool, ipl )
+    MmpReleasePool ( pool, ipl )
 
     // Return the block.
 
-    RETURN block + SIZEOF MiBlock
+    RETURN block + SIZEOF MmpBlock
 END
 
-FN MiFreeToPool (
+FN MmpFreeToPool (
     IN ptr : ^VOID,
     IN tag : ULONG,
 )
@@ -726,20 +726,20 @@ FN MiFreeToPool (
     // Free the pool block. We're only passed blocks that were small enough to
     // go in POOLSPACE.
 
-    otherblock : ^MiFreeBlock
+    otherblock : ^MmpFreeBlock
 
     // Acquire a pointer to the block.
 
-    block := CAST ptr - SIZEOF MiBlock TO ^MiFreeBlock
+    block := CAST ptr - SIZEOF MmpBlock TO ^MmpFreeBlock
 
     IF tag != block^.Block.Tag THEN
-        KeCrash ( "MiFreeToPool: wrong tag %x on %p (expected %x)\n",
+        KeCrash ( "MmpFreeToPool: wrong tag %x on %p (expected %x)\n",
             block^.Block.Tag, ptr, tag )
     END
 
     // Acquire a pointer to the pool extension.
 
-    ext := MiFindPoolExtension ( block )
+    ext := MmpFindPoolExtension ( block )
 
     pool := ext^.Pool
 
@@ -749,18 +749,18 @@ FN MiFreeToPool (
 
     // Lock the pool in which the block resides.
 
-    ipl := MiAcquirePool ( pool )
+    ipl := MmpAcquirePool ( pool )
 
-    pool^.BytesUsedInternally -= blocksize << MI_BLOCK_SIZE_SHIFT
+    pool^.BytesUsedInternally -= blocksize << MMP_BLOCK_SIZE_SHIFT
 
     IF block^.Block.LastSize THEN
         // Check the block to the left for merging.
 
-        otherblock = block - (block^.Block.LastSize << MI_BLOCK_SIZE_SHIFT)
+        otherblock = block - (block^.Block.LastSize << MMP_BLOCK_SIZE_SHIFT)
 
         KeAssert ( otherblock^.Block.Size == block^.Block.LastSize )
 
-        IF otherblock^.Block.Magic == MI_BLOCK_FREE_MAGIC THEN
+        IF otherblock^.Block.Magic == MMP_BLOCK_FREE_MAGIC THEN
             // Free! Merge left.
 
             merged = TRUE
@@ -779,7 +779,7 @@ FN MiFreeToPool (
             // Invalidate magic number of old block, since it's now in the
             // middle of this new block.
 
-            block^.Block.Magic = MI_BLOCK_INVALID_MAGIC
+            block^.Block.Magic = MMP_BLOCK_INVALID_MAGIC
 #END
 
             // Set block pointer to left block.
@@ -790,13 +790,13 @@ FN MiFreeToPool (
 
     // Get a pointer to the block to the right.
 
-    otherblock = block + (blocksize << MI_BLOCK_SIZE_SHIFT)
+    otherblock = block + (blocksize << MMP_BLOCK_SIZE_SHIFT)
 
-    IF otherblock & MI_BLOCK_MAX_SIZE_MASK THEN
+    IF otherblock & MMP_BLOCK_MAX_SIZE_MASK THEN
         // A block to the right exists if it's not aligned to the maximum block
         // size.
 
-        IF otherblock^.Block.Magic == MI_BLOCK_FREE_MAGIC THEN
+        IF otherblock^.Block.Magic == MMP_BLOCK_FREE_MAGIC THEN
             // Free! Merge right.
 
             merged = TRUE
@@ -815,7 +815,7 @@ FN MiFreeToPool (
             // Invalidate magic number of old block, since it's now in the
             // middle of the new block.
 
-            otherblock^.Block.Magic = MI_BLOCK_INVALID_MAGIC
+            otherblock^.Block.Magic = MMP_BLOCK_INVALID_MAGIC
 #END
         END
     END
@@ -833,10 +833,10 @@ FN MiFreeToPool (
         // out for the extension header) plus a number of maximum sized blocks.
         // First unlink the partial block.
 
-        otherblock = CAST ext + MI_BLOCK_MIN_SIZE TO ^MiFreeBlock
+        otherblock = CAST ext + MMP_BLOCK_MIN_SIZE TO ^MmpFreeBlock
 
         IF otherblock != block THEN
-            KeAssert ( otherblock^.Block.Magic == MI_BLOCK_FREE_MAGIC )
+            KeAssert ( otherblock^.Block.Magic == MMP_BLOCK_FREE_MAGIC )
 
             RtlRemoveEntryList ( &otherblock^.LogEntry )
 
@@ -853,7 +853,7 @@ FN MiFreeToPool (
             1, // pages
         )
 
-        MiFreeExtensionSpace (
+        MmpFreeExtensionSpace (
             pool^.Node, // node
             ext, // extension
             TRUE, // flush
@@ -861,7 +861,7 @@ FN MiFreeToPool (
 
         // Unlock pool.
 
-        MiReleasePool ( pool, ipl )
+        MmpReleasePool ( pool, ipl )
 
         LEAVE
     END
@@ -869,21 +869,21 @@ FN MiFreeToPool (
     IF merged THEN
         // Re-calculate bucket index and set new fields.
 
-        block^.Block.BucketIndex = MiEightBitLog[blocksize]
+        block^.Block.BucketIndex = MmpEightBitLog[blocksize]
         block^.Block.Size = blocksize
 
         // Set last size of block to our right.
 
-        otherblock = block + (blocksize << MI_BLOCK_SIZE_SHIFT)
+        otherblock = block + (blocksize << MMP_BLOCK_SIZE_SHIFT)
 
-        IF otherblock & MI_BLOCK_MAX_SIZE_MASK THEN
+        IF otherblock & MMP_BLOCK_MAX_SIZE_MASK THEN
             otherblock^.Block.LastSize = blocksize
         END
     END
 
     // Set free magic.
 
-    block^.Block.Magic = MI_BLOCK_FREE_MAGIC
+    block^.Block.Magic = MMP_BLOCK_FREE_MAGIC
 
     // Put on free lists.
 
@@ -899,11 +899,11 @@ FN MiFreeToPool (
 
     // Unlock pool and return.
 
-    MiReleasePool ( pool, ipl )
+    MmpReleasePool ( pool, ipl )
 END
 
-FN MiAllocatePageAligned (
-    IN pool : ^MiPool,
+FN MmpAllocatePageAligned (
+    IN pool : ^MmpPool,
     IN bytes : UWORD,
     IN tag : ULONG,
     IN wait : UWORD,
@@ -918,7 +918,7 @@ FN MiAllocatePageAligned (
 
     // First acquire some room in dynamic space.
 
-    spacenode := MiAllocateDynamicSpace (
+    spacenode := MmpAllocateDynamicSpace (
         pool^.Node, // node
         bytes, // pages
         wait, // wait
@@ -939,7 +939,7 @@ FN MiAllocatePageAligned (
         pool^.Partition, // partition
         spacenode^.StartVa, // ptr
         bytes, // pages
-        pool^.Flags & MI_POOL_FLAG_USE_PRIVILEGED_MEM, // low
+        pool^.Flags & MMP_POOL_FLAG_USE_PRIVILEGED_MEM, // low
         wait, // wait
     ) THEN
         // Caller told us not to wait and we didn't get the page frames we
@@ -948,7 +948,7 @@ FN MiAllocatePageAligned (
         // No need to flush the dynamic space since we didn't map anything
         // into it.
 
-        MiReleaseDynamicSpace (
+        MmpReleaseDynamicSpace (
             pool^.Node, // node
             spacenode, // spacenode
             FALSE, // flush
@@ -960,7 +960,7 @@ FN MiAllocatePageAligned (
     RETURN spacenode^.StartVa
 END
 
-FN MiFreePageAligned (
+FN MmpFreePageAligned (
     IN ptr : ^VOID,
     IN tag : ULONG,
 )
@@ -969,13 +969,13 @@ FN MiFreePageAligned (
 
     // Look up the dynamic space node.
 
-    spacenode := MiFindDynamicSpaceNode ( ptr )
+    spacenode := MmpFindDynamicSpaceNode ( ptr )
 
     KeAssert ( spacenode != NULLPTR )
     KeAssert ( spacenode^.StartVa == ptr )
 
     IF spacenode^.U.Pool.Tag != tag THEN
-        KeCrash ( "MiFreePageAligned: wrong tag %x on %p, expected %x\n",
+        KeCrash ( "MmpFreePageAligned: wrong tag %x on %p, expected %x\n",
             spacenode^.StartVa, spacenode^.U.Pool.Tag, tag )
     END
 
@@ -1002,15 +1002,15 @@ FN MiFreePageAligned (
 
     // Free the dynamic space.
 
-    MiReleaseDynamicSpace (
+    MmpReleaseDynamicSpace (
         pool^.Node, // node
         spacenode, // spacenode
         TRUE, // flush
     )
 END
 
-EXPORT FN MmAllocatePoolEx (
-    IN node : ^MiNode,
+EXPORT FN MmuAllocatePoolEx (
+    IN node : ^MmpNode,
     IN poolindex : UWORD,
     IN bytes : UWORD,
     IN tag : ULONG,
@@ -1022,14 +1022,14 @@ EXPORT FN MmAllocatePoolEx (
     KeAssert ( bytes != 0 )
 
     IF NOT node THEN
-        node = PsCurrentNode ()
+        node = PsuCurrentNode ()
     END
 
-    thread : ^PsThread = NULLPTR
+    thread : ^PsuThread = NULLPTR
     savewait := wait
 
-    IF poolindex == MM_NONPAGED_POOL THEN
-        thread = PsCurrentThread ()
+    IF poolindex == MMU_NONPAGED_POOL THEN
+        thread = PsuCurrentThread ()
 
         // If this is a VM-privileged thread allocating nonpaged pool, override
         // the wait parameter to FALSE, so that we don't deadlock waiting for
@@ -1048,10 +1048,10 @@ EXPORT FN MmAllocatePoolEx (
 
     ptr : ^VOID
 
-    IF bytes < MI_BLOCK_MAX_REQUEST_SIZE THEN
+    IF bytes < MMP_BLOCK_MAX_REQUEST_SIZE THEN
         // Allocate from the small block pool.
 
-        ptr = MiAllocateFromPool (
+        ptr = MmpAllocateFromPool (
             pool, // pool
             bytes, // bytes
             tag, // tag
@@ -1061,7 +1061,7 @@ EXPORT FN MmAllocatePoolEx (
     ELSE
         // Allocate from page aligned pool.
 
-        ptr = MiAllocatePageAligned (
+        ptr = MmpAllocatePageAligned (
             pool, // pool
             bytes, // bytes
             tag, // tag
@@ -1075,7 +1075,7 @@ EXPORT FN MmAllocatePoolEx (
         // privileged pool (which will take from the reserved final page
         // frames if necessary).
 
-        poolindex = MM_PRIVILEGED_POOL
+        poolindex = MMU_PRIVILEGED_POOL
         thread = NULLPTR
         wait = savewait
 
@@ -1100,17 +1100,17 @@ EXPORT FN MmAllocatePoolEx (
     RETURN ptr
 END
 
-EXPORT FN MmFreePool (
+EXPORT FN MmuFreePool (
     IN ptr : ^VOID,
     IN tag : ULONG,
 )
 
     // Free the block of pool.
 
-    IF ptr >= MI_POOL_SPACE AND ptr < MI_POOL_SPACE_END THEN
+    IF ptr >= MMP_POOL_SPACE AND ptr < MMP_POOL_SPACE_END THEN
         // This block resides in small pool.
 
-        MiFreeToPool (
+        MmpFreeToPool (
             ptr, // ptr
             tag, // tag
         )
@@ -1120,30 +1120,30 @@ EXPORT FN MmFreePool (
 
     // Page aligned pool.
 
-    MiFreePageAligned (
+    MmpFreePageAligned (
         ptr, // ptr
         tag, // tag
     )
 END
 
 #SECTION "PAGEtext"
-FN MmGetOverheadOfBlock (
+FN MmuGetOverheadOfBlock (
     IN ptr : ^VOID,
 ) : UWORD
 
     // Return the total bytes overhead consumed by a pool allocation.
 
-    IF ptr >= MI_POOL_SPACE AND ptr < MI_POOL_SPACE_END THEN
+    IF ptr >= MMP_POOL_SPACE AND ptr < MMP_POOL_SPACE_END THEN
         // This block is in small pool.
 
-        block := CAST ptr - SIZEOF MiBlock TO ^MiBlock
+        block := CAST ptr - SIZEOF MmpBlock TO ^MmpBlock
 
-        RETURN block^.Size << MI_BLOCK_SIZE_SHIFT
+        RETURN block^.Size << MMP_BLOCK_SIZE_SHIFT
     END
 
     // Page-aligned.
 
-    node := MiFindDynamicSpaceNode ( ptr )
+    node := MmpFindDynamicSpaceNode ( ptr )
 
     KeAssert ( node != NULLPTR )
     KeAssert ( node^.StartVa == ptr )
@@ -1152,20 +1152,20 @@ FN MmGetOverheadOfBlock (
 END
 
 #SECTION "PAGEtext"
-FN MmGetOverheadOfBytes (
+FN MmuGetOverheadOfBytes (
     IN bytes : UWORD,
 ) : UWORD
 
     // Calculate the total overhead in bytes that the pool allocation for the
     // given number of bytes would consume. This *MUST* match what is returned
-    // by MmGetChargeFromBlock for a pool allocation that really was for this
+    // by MmuGetChargeFromBlock for a pool allocation that really was for this
     // many bytes.
 
     IF bytes == 0 THEN
         RETURN 0
     END
 
-    IF bytes >= MI_BLOCK_MAX_REQUEST_SIZE THEN
+    IF bytes >= MMP_BLOCK_MAX_REQUEST_SIZE THEN
         // Page-aligned charge.
 
         RETURN (bytes + RTL_PAGE_OFFSET_MASK) & RTL_PAGE_NUMBER_MASK
@@ -1173,10 +1173,10 @@ FN MmGetOverheadOfBytes (
 
     // Small block charge.
 
-    RETURN (bytes + SIZEOF MiBlock + MI_BLOCK_SIZE_MASK) & ~MI_BLOCK_SIZE_MASK
+    RETURN (bytes + SIZEOF MmpBlock + MMP_BLOCK_SIZE_MASK) & ~MMP_BLOCK_SIZE_MASK
 END
 
-FN MmWaitForPoolMemory ()
+FN MmuWaitForPoolMemory ()
 
     // Exported function to wait for free memory on the local node.
     // Sometimes one wishes to allocate pool while holding a lock that is also
@@ -1185,17 +1185,17 @@ FN MmWaitForPoolMemory ()
     // useful:
     //
     // WHILE TRUE DO
-    //     IF MmAllocatePool ( wait=FALSE ) != NULLPTR THEN
+    //     IF MmuAllocatePool ( wait=FALSE ) != NULLPTR THEN
     //         BREAK
     //     END
     //
     //     KeReleaseLock ( &MyImportantLock )
-    //     MmWaitForPoolMemory ()
+    //     MmuWaitForPoolMemory ()
     //     KeAcquireLockExclusive ( &MyImportantLock )
     // END
 
-    MiWaitForPages (
-        &PsCurrentNode()^.Partition, // partition
-        PsCurrentThread()^.VmPrivileged, // low
+    MmpWaitForPages (
+        &PsuCurrentNode()^.Partition, // partition
+        PsuCurrentThread()^.VmPrivileged, // low
     )
 END

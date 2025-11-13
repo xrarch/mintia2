@@ -9,30 +9,30 @@
 // automatically duplicated on that basis.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 
-#DEFINE MI_HEADER_FITS_IN_ALIGNMENT [
-    (SIZEOF MiSlabHeader <= (RTL_ALIGN_BYTES - SIZEOF ^VOID))
+#DEFINE MMP_HEADER_FITS_IN_ALIGNMENT [
+    (SIZEOF MmpSlabHeader <= (RTL_ALIGN_BYTES - SIZEOF ^VOID))
 ]
 
-#DEFINE MI_MAX_SMALL_BLOCKS_PER_SLAB 16
-#DEFINE MI_MAX_BIG_BLOCKS_PER_SLAB 8
+#DEFINE MMP_MAX_SMALL_BLOCKS_PER_SLAB 16
+#DEFINE MMP_MAX_BIG_BLOCKS_PER_SLAB 8
 
-#DEFINE MI_SMALL_POOL_BLOCK [(MI_BLOCK_MAX_REQUEST_SIZE / 5)]
+#DEFINE MMP_SMALL_POOL_BLOCK [(MMP_BLOCK_MAX_REQUEST_SIZE / 5)]
 
-STRUCT MiSlabHeader
+STRUCT MmpSlabHeader
     References : ULONG,
 END
 
-#MACRO MiLockSlabCache ( scache ) [
+#MACRO MmpLockSlabCache ( scache ) [
     KeAcquireApcLockExclusive ( &(scache)^.Lock )
 ]
 
-#MACRO MiUnlockSlabCache ( scache, ipl ) [
+#MACRO MmpUnlockSlabCache ( scache, ipl ) [
     KeReleaseApcLock ( &(scache)^.Lock, ipl )
 ]
 
-STRUCT MiPoolCachePerCpu
+STRUCT MmpPoolCachePerCpu
     MagLock : KeLock,
 
     Loaded : ^^VOID,
@@ -44,7 +44,7 @@ STRUCT MiPoolCachePerCpu
     MagazineSize : UBYTE,
 END
 
-STRUCT MiDepotList
+STRUCT MmpDepotList
     Head : ^^VOID,
 
     Total : ULONG,
@@ -52,81 +52,81 @@ STRUCT MiDepotList
     ReapLimit : ULONG,
 END
 
-STRUCT MiSlabBackedPoolCacheContext
-    Slabs : MiSlabCache,
+STRUCT MmpSlabBackedPoolCacheContext
+    Slabs : MmpSlabCache,
 END
 
-STRUCT MiPoolCache
+STRUCT MmpPoolCache
     Name : ^UBYTE,
 
     DepotLock : KeLock,
 
-    FullMagazineList : MiDepotList,
-    EmptyMagazineList : MiDepotList,
+    FullMagazineList : MmpDepotList,
+    EmptyMagazineList : MmpDepotList,
 
     MasterListEntry : RtlListEntry,
 
-    MagazineType : ^MiMagazineType,
+    MagazineType : ^MmpMagazineType,
 
-    Allocate : MmPoolCacheAllocateF,
-    Free : MmPoolCacheFreeF,
-    Delete : MmPoolCacheDeleteF,
+    Allocate : MmuPoolCacheAllocateF,
+    Free : MmuPoolCacheFreeF,
+    Delete : MmuPoolCacheDeleteF,
 
     Context : ^VOID,
 
-    Node : ^MiNode,
+    Node : ^MmpNode,
 
     Pageable : UBYTE,
 END
 
-#DEFINE MI_PCPCPU_SIZE [((SIZEOF MiPoolCachePerCpu + KE_CACHE_ALIGN - 1) &
+#DEFINE MMP_PCPCPU_SIZE [((SIZEOF MmpPoolCachePerCpu + KE_CACHE_ALIGN - 1) &
     ~(KE_CACHE_ALIGN - 1))]
 
-#DEFINE MI_PC_SIZE [((SIZEOF MiPoolCache + KE_CACHE_ALIGN - 1) &
+#DEFINE MMP_PC_SIZE [((SIZEOF MmpPoolCache + KE_CACHE_ALIGN - 1) &
     ~(KE_CACHE_ALIGN - 1))]
 
-#MACRO MiPoolCachePerCpuById ( cache, id ) [
-    (CAST cache + MI_PC_SIZE + (id * MI_PCPCPU_SIZE) TO ^MiPoolCachePerCpu)
+#MACRO MmpPoolCachePerCpuById ( cache, id ) [
+    (CAST cache + MMP_PC_SIZE + (id * MMP_PCPCPU_SIZE) TO ^MmpPoolCachePerCpu)
 ]
 
-#MACRO MiLockPoolCacheList ( list ) [
+#MACRO MmpLockPoolCacheList ( list ) [
     KeAcquireLockExclusive ( &(list)^.MasterListLock )
 ]
 
-#MACRO MiUnlockPoolCacheList ( list ) [
+#MACRO MmpUnlockPoolCacheList ( list ) [
     KeReleaseLock ( &(list)^.MasterListLock )
 ]
 
-#MACRO MiLockPoolCacheDepot ( cache ) [
+#MACRO MmpLockPoolCacheDepot ( cache ) [
     KeAcquireApcLockExclusive ( &(cache)^.DepotLock )
 ]
 
-#MACRO MiUnlockPoolCacheDepot ( cache, ipl ) [
+#MACRO MmpUnlockPoolCacheDepot ( cache, ipl ) [
     KeReleaseApcLock ( &(cache)^.DepotLock, ipl )
 ]
 
-#MACRO MiLockMagazineCache ( pcpcpu ) [
+#MACRO MmpLockMagazineCache ( pcpcpu ) [
     KeAcquireApcLockExclusive ( &(pcpcpu)^.MagLock )
 ]
 
-#MACRO MiUnlockMagazineCache ( pcpcpu, ipl ) [
+#MACRO MmpUnlockMagazineCache ( pcpcpu, ipl ) [
     KeReleaseApcLock ( &(pcpcpu)^.MagLock, ipl )
 ]
 
-#MACRO MiInitializeDepotList ( list ) [
+#MACRO MmpInitializeDepotList ( list ) [
     NOTHING (list)^.Head = NULLPTR
     NOTHING (list)^.Total = 0
     NOTHING (list)^.Min = 0
     NOTHING (list)^.ReapLimit = 0
 ]
 
-#DEFINE MI_LARGE_MAGAZINE_SIZE 4
-#DEFINE MI_SMALL_MAGAZINE_SIZE 8
+#DEFINE MMP_LARGE_MAGAZINE_SIZE 4
+#DEFINE MMP_SMALL_MAGAZINE_SIZE 8
 
 #SECTION "PAGEtext"
-FN MiInitializeSlabCache (
-    IN node : ^MiNode,
-    IN scache : ^MiSlabCache,
+FN MmpInitializeSlabCache (
+    IN node : ^MmpNode,
+    IN scache : ^MmpSlabCache,
     IN size : UWORD,
     IN poolindex : UWORD,
     IN tag : UWORD,
@@ -159,18 +159,18 @@ FN MiInitializeSlabCache (
     // Calculate the maximum size of a slab that we're willing to allocate.
     // This is configured to try to minimize fragmentation.
 
-    IF size < MI_SMALL_POOL_BLOCK THEN
+    IF size < MMP_SMALL_POOL_BLOCK THEN
         // Size of one block is less than a fifth of the maximum pool request
         // size. Note that this divisor *must* be smaller than the value of
-        // MI_MAX_BIG_BLOCKS_PER_SLAB or this attempt to minimize fragmentation
+        // MMP_MAX_BIG_BLOCKS_PER_SLAB or this attempt to minimize fragmentation
         // will actually worsen it.
         //
         // Pack as many as can fit in a maximum request.
 
-        slabsize = size * MI_MAX_SMALL_BLOCKS_PER_SLAB
+        slabsize = size * MMP_MAX_SMALL_BLOCKS_PER_SLAB
 
-        IF slabsize >= MI_BLOCK_MAX_REQUEST_SIZE THEN
-            slabsize = MI_BLOCK_MAX_REQUEST_SIZE - 1
+        IF slabsize >= MMP_BLOCK_MAX_REQUEST_SIZE THEN
+            slabsize = MMP_BLOCK_MAX_REQUEST_SIZE - 1
         END
 
         // RtlPrint ( "small slabsize %d\n", slabsize )
@@ -180,7 +180,7 @@ FN MiInitializeSlabCache (
         // To minimize fragmentation we anticipate this and try to fill each
         // page to the top.
 
-        slabsize = (size * MI_MAX_BIG_BLOCKS_PER_SLAB + (RTL_PAGE_SIZE - 1))
+        slabsize = (size * MMP_MAX_BIG_BLOCKS_PER_SLAB + (RTL_PAGE_SIZE - 1))
             & ~(RTL_PAGE_SIZE - 1)
 
         // RtlPrint ( "big slabsize %d\n", slabsize )
@@ -204,11 +204,11 @@ FN MiInitializeSlabCache (
 
     blockbytes -= size
 
-    IF NOT MI_HEADER_FITS_IN_ALIGNMENT THEN
+    IF NOT MMP_HEADER_FITS_IN_ALIGNMENT THEN
         // The slab header doesn't fit in the alignment, so it needs to be
         // accounted for after all.
 
-        blockbytes -= (SIZEOF MiSlabHeader + (RTL_ALIGN_BYTES - 1))
+        blockbytes -= (SIZEOF MmpSlabHeader + (RTL_ALIGN_BYTES - 1))
             & ~(RTL_ALIGN_BYTES - 1)
     END
 
@@ -220,12 +220,12 @@ FN MiInitializeSlabCache (
 
     slabsize = blocksperslab * size
 
-    IF NOT MI_HEADER_FITS_IN_ALIGNMENT THEN
+    IF NOT MMP_HEADER_FITS_IN_ALIGNMENT THEN
         // The slab header doesn't fit in the alignment, so it needs to be
         // accounted for after all.
 
         slabsize =
-            (slabsize + SIZEOF MiSlabHeader + (RTL_ALIGN_BYTES - 1))
+            (slabsize + SIZEOF MmpSlabHeader + (RTL_ALIGN_BYTES - 1))
             & ~(RTL_ALIGN_BYTES - 1)
     END
 
@@ -235,8 +235,8 @@ FN MiInitializeSlabCache (
     scache^.SlabSize = slabsize
 END
 
-FN MiExtendSlabCache (
-    IN scache : ^MiSlabCache,
+FN MmpExtendSlabCache (
+    IN scache : ^MmpSlabCache,
     IN ipl : UWORD,
     IN wait : UWORD,
 ) : ^VOID
@@ -246,7 +246,7 @@ FN MiExtendSlabCache (
 
 @Retry
 
-    slab := MmAllocatePoolEx (
+    slab := MmuAllocatePoolEx (
         scache^.Node, // node
         scache^.PoolIndex, // poolindex
         scache^.SlabSize, // bytes
@@ -269,14 +269,14 @@ FN MiExtendSlabCache (
         // memory management so instead we first try with wait=FALSE, and failing
         // that we wait for free pages outside of the lock.
 
-        MiUnlockSlabCache ( scache, ipl )
+        MmpUnlockSlabCache ( scache, ipl )
 
-        MiWaitForPages (
+        MmpWaitForPages (
             &scache^.Node^.Partition, // partition
-            PsCurrentThread()^.VmPrivileged, // low
+            PsuCurrentThread()^.VmPrivileged, // low
         )
 
-        MiLockSlabCache ( scache )
+        MmpLockSlabCache ( scache )
 
         GOTO Retry
     END
@@ -285,12 +285,12 @@ FN MiExtendSlabCache (
 
     // Initialize the slab header.
 
-    slabheader : ^MiSlabHeader = slab
+    slabheader : ^MmpSlabHeader = slab
     slabheader^.References = 0
 
     // Initialize each block in the slab.
 
-    block := (slab + SIZEOF MiSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1))
+    block := (slab + SIZEOF MmpSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1))
         & ~(RTL_ALIGN_BYTES - 1)
 
     firstblock := block
@@ -303,7 +303,7 @@ FN MiExtendSlabCache (
     WHILE i < count DO
         // Set back pointer to header.
 
-        (CAST (block - SIZEOF ^VOID) TO ^^MiSlabHeader)^ = slabheader
+        (CAST (block - SIZEOF ^VOID) TO ^^MmpSlabHeader)^ = slabheader
 
         // Add to free list.
 
@@ -321,9 +321,9 @@ FN MiExtendSlabCache (
     RETURN firstblock
 END
 
-FN MiFreeSlab (
-    IN scache : ^MiSlabCache,
-    IN slab : ^MiSlabHeader,
+FN MmpFreeSlab (
+    IN scache : ^MmpSlabCache,
+    IN slab : ^MmpSlabHeader,
 )
 
     // Free a slab.
@@ -336,7 +336,7 @@ FN MiFreeSlab (
 
     // First unlink all of the free blocks.
 
-    block := (slab + SIZEOF MiSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1))
+    block := (slab + SIZEOF MmpSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1))
         & ~(RTL_ALIGN_BYTES - 1)
 
     i := 0
@@ -352,13 +352,13 @@ FN MiFreeSlab (
 
     // Now free the actual pool allocation.
 
-    MmFreePool (
+    MmuFreePool (
         slab, // ptr
         scache^.Tag, // tag
     )
 END
 
-FN (MmPoolCacheAllocateF) MiAllocateFromSlabCache (
+FN (MmuPoolCacheAllocateF) MmpAllocateFromSlabCache (
     IN context : ^VOID,
     IN wait : UWORD,
 ) : ^VOID
@@ -366,16 +366,16 @@ FN (MmPoolCacheAllocateF) MiAllocateFromSlabCache (
     // Allocate a single entry from a slab cache.
     // Return NULLPTR upon failure.
 
-    scache := CAST context TO ^MiSlabCache
+    scache := CAST context TO ^MmpSlabCache
 
-    ipl := MiLockSlabCache ( scache )
+    ipl := MmpLockSlabCache ( scache )
 
     block := scache^.FreeListHead.Next
 
     IF block == &scache^.FreeListHead THEN
         // There are no entries so we need to make more.
 
-        block = MiExtendSlabCache (
+        block = MmpExtendSlabCache (
             scache, // scache
             ipl, // ipl
             wait, // wait
@@ -388,7 +388,7 @@ FN (MmPoolCacheAllocateF) MiAllocateFromSlabCache (
 
     // Increment the reference count on the slab header.
 
-    (CAST (block - SIZEOF ^VOID) TO ^^MiSlabHeader)^^.References += 1
+    (CAST (block - SIZEOF ^VOID) TO ^^MmpSlabHeader)^^.References += 1
 
     // Pop the block from the free list.
 
@@ -396,23 +396,23 @@ FN (MmPoolCacheAllocateF) MiAllocateFromSlabCache (
 
 @Exit
 
-    MiUnlockSlabCache ( scache, ipl )
+    MmpUnlockSlabCache ( scache, ipl )
 
     RETURN block
 END
 
-FN (MmPoolCacheFreeF) MiFreeToSlabCache (
+FN (MmuPoolCacheFreeF) MmpFreeToSlabCache (
     IN context : ^VOID,
     IN ptr : ^VOID,
 )
 
     // Free a block to the given slab cache.
 
-    scache := CAST context TO ^MiSlabCache
+    scache := CAST context TO ^MmpSlabCache
 
-    ipl := MiLockSlabCache ( scache )
+    ipl := MmpLockSlabCache ( scache )
 
-    slabheader := (CAST (ptr - SIZEOF ^VOID) TO ^^MiSlabHeader)^
+    slabheader := (CAST (ptr - SIZEOF ^VOID) TO ^^MmpSlabHeader)^
 
     oldcount := slabheader^.References
 
@@ -428,30 +428,30 @@ FN (MmPoolCacheFreeF) MiFreeToSlabCache (
     IF oldcount == 1 THEN
         // Free the whole slab.
 
-        MiFreeSlab (
+        MmpFreeSlab (
             scache, // scache
             slabheader, // slabheader
         )
     END
 
-    MiUnlockSlabCache ( scache, ipl )
+    MmpUnlockSlabCache ( scache, ipl )
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmCreatePoolCacheEx (
-    IN node : ^MiNode,
+EXPORT FN MmuCreatePoolCacheEx (
+    IN node : ^MmpNode,
     IN name : ^UBYTE,
     IN size : UWORD,
     IN pageable : UWORD,
-    IN allocfunc : MmPoolCacheAllocateF,
-    IN freefunc : MmPoolCacheFreeF,
-    IN deletefunc : MmPoolCacheDeleteF,
+    IN allocfunc : MmuPoolCacheAllocateF,
+    IN freefunc : MmuPoolCacheFreeF,
+    IN deletefunc : MmuPoolCacheDeleteF,
     IN context : ^VOID,
-) : ^MiPoolCache
+) : ^MmpPoolCache
 
     // Allocate and return a new pool cache structure.
 
-    cache : ^MiPoolCache = MiAllocateFromSlabCache (
+    cache : ^MmpPoolCache = MmpAllocateFromSlabCache (
         &node^.PoolCacheSlabs, // scache
         TRUE, // wait
     )
@@ -464,10 +464,10 @@ EXPORT FN MmCreatePoolCacheEx (
     // block is smaller or larger than what the slab layer considers a small
     // pool block.
 
-    IF size < MI_SMALL_POOL_BLOCK THEN
-        cache^.MagazineType = &node^.MagazineTypeTable[MI_MAGAZINE_SMALL]
+    IF size < MMP_SMALL_POOL_BLOCK THEN
+        cache^.MagazineType = &node^.MagazineTypeTable[MMP_MAGAZINE_SMALL]
     ELSE
-        cache^.MagazineType = &node^.MagazineTypeTable[MI_MAGAZINE_LARGE]
+        cache^.MagazineType = &node^.MagazineTypeTable[MMP_MAGAZINE_LARGE]
     END
 
     // Save the name of the cache.
@@ -485,12 +485,12 @@ EXPORT FN MmCreatePoolCacheEx (
 
     // Set the depot lists to empty.
 
-    MiInitializeDepotList ( &cache^.FullMagazineList )
-    MiInitializeDepotList ( &cache^.EmptyMagazineList )
+    MmpInitializeDepotList ( &cache^.FullMagazineList )
+    MmpInitializeDepotList ( &cache^.EmptyMagazineList )
 
     // Insert on global list.
 
-    list : ^MiPoolCacheList
+    list : ^MmpPoolCacheList
 
     IF NOT pageable THEN
         list = &node^.NpPoolCacheList
@@ -498,7 +498,7 @@ EXPORT FN MmCreatePoolCacheEx (
         list = &node^.PgPoolCacheList
     END
 
-    MiLockPoolCacheList ( list )
+    MmpLockPoolCacheList ( list )
 
     RtlInsertAtTailList (
         &list^.Head, // head
@@ -512,7 +512,7 @@ EXPORT FN MmCreatePoolCacheEx (
 
     i := 0
 
-    percpu := MiPoolCachePerCpuById (
+    percpu := MmpPoolCachePerCpuById (
         cache, // cache
         0, // id
     )
@@ -527,44 +527,44 @@ EXPORT FN MmCreatePoolCacheEx (
         percpu^.MagazineSize = cache^.MagazineType^.Size
 
         i += 1
-        percpu += MI_PCPCPU_SIZE
+        percpu += MMP_PCPCPU_SIZE
     END
 
-    MiUnlockPoolCacheList ( list )
+    MmpUnlockPoolCacheList ( list )
 
     RETURN cache
 END
 
-FN (MmPoolCacheDeleteF) MiDeleteSlabBackedCache (
+FN (MmuPoolCacheDeleteF) MmpDeleteSlabBackedCache (
     IN context : ^VOID,
 )
 
     // A slab-backed pool cache is being deleted.
     // First, make sure all of the slabs are gone.
 
-    scache := CAST context TO ^MiSlabCache
+    scache := CAST context TO ^MmpSlabCache
 
     KeAssert ( scache^.ActiveSlabCount == 0 )
 
     // Now release the slab cache.
 
-    MiFreeToSlabCache (
+    MmpFreeToSlabCache (
         &scache^.Node^.SlabCacheSlabs, // scache
         scache, // ptr
     )
 END
 
-EXPORT FN MmCreatePoolCache (
-    IN node : ^MiNode,
+EXPORT FN MmuCreatePoolCache (
+    IN node : ^MmpNode,
     IN name : ^UBYTE,
     IN size : UWORD,
     IN poolindex : UWORD,
     IN tag : UWORD,
-) : ^MiPoolCache
+) : ^MmpPoolCache
 
     // Create a slab-backed pool cache.
 
-    scache : ^MiSlabCache = MiAllocateFromSlabCache (
+    scache : ^MmpSlabCache = MmpAllocateFromSlabCache (
         &node^.SlabCacheSlabs, // scache
         TRUE, // wait
     )
@@ -575,7 +575,7 @@ EXPORT FN MmCreatePoolCache (
 
     // Initialize the slab cache used for allocating cached blocks.
 
-    MiInitializeSlabCache (
+    MmpInitializeSlabCache (
         node, // node
         scache, // scache
         size, // size
@@ -585,21 +585,21 @@ EXPORT FN MmCreatePoolCache (
 
     // Create the pool cache with the appropriate slab callbacks.
 
-    cache := MmCreatePoolCacheEx (
+    cache := MmuCreatePoolCacheEx (
         node, // node
         name, // name
         size, // size
-        poolindex != MM_NONPAGED_POOL, // pageable
-        &MiAllocateFromSlabCache, // allocfunc
-        &MiFreeToSlabCache, // freefunc
-        &MiDeleteSlabBackedCache, // deletefunc
+        poolindex != MMU_NONPAGED_POOL, // pageable
+        &MmpAllocateFromSlabCache, // allocfunc
+        &MmpFreeToSlabCache, // freefunc
+        &MmpDeleteSlabBackedCache, // deletefunc
         scache, // context
     )
 
     IF NOT cache THEN
         // Failed to allocate the pool cache, so release the slab cache.
 
-        MiFreeToSlabCache (
+        MmpFreeToSlabCache (
             &node^.SlabCacheSlabs, // scache
             scache, // ptr
         )
@@ -608,8 +608,8 @@ EXPORT FN MmCreatePoolCache (
     RETURN cache
 END
 
-FN MiDestroyAndFreeMagazine (
-    IN cache : ^MiPoolCache,
+FN MmpDestroyAndFreeMagazine (
+    IN cache : ^MmpPoolCache,
     IN magazine : ^^VOID,
     IN rounds : UWORD,
 )
@@ -635,20 +635,20 @@ FN MiDestroyAndFreeMagazine (
 
     // Un-skip depot list link and free magazine.
 
-    MmFreeToPoolCache (
+    MmuFreeToPoolCache (
         cache^.MagazineType^.PoolCache, // cache
         magazine - SIZEOF ^VOID, // ptr
     )
 END
 
-FN MiAllocateMagazineFromDepot (
-    IN cache : ^MiPoolCache,
-    IN list : ^MiDepotList,
+FN MmpAllocateMagazineFromDepot (
+    IN cache : ^MmpPoolCache,
+    IN list : ^MmpDepotList,
 ) : ^^VOID
 
     // Allocate a magazine from the depot.
 
-    ipl := MiLockPoolCacheDepot ( cache )
+    ipl := MmpLockPoolCacheDepot ( cache )
 
     magazine := list^.Head
 
@@ -665,32 +665,32 @@ FN MiAllocateMagazineFromDepot (
         END
     END
 
-    MiUnlockPoolCacheDepot ( cache, ipl )
+    MmpUnlockPoolCacheDepot ( cache, ipl )
 
     RETURN magazine
 END
 
-FN MiFreeMagazineToDepot (
-    IN cache : ^MiPoolCache,
-    IN list : ^MiDepotList,
+FN MmpFreeMagazineToDepot (
+    IN cache : ^MmpPoolCache,
+    IN list : ^MmpDepotList,
     IN magazine : ^^VOID,
 )
 
     // Free a magazine to the depot.
 
-    ipl := MiLockPoolCacheDepot ( cache )
+    ipl := MmpLockPoolCacheDepot ( cache )
 
     magazine^ = list^.Head
     list^.Head = magazine
 
     list^.Total += 1
 
-    MiUnlockPoolCacheDepot ( cache, ipl )
+    MmpUnlockPoolCacheDepot ( cache, ipl )
 END
 
-FN MiReapDepotList (
-    IN cache : ^MiPoolCache,
-    IN list : ^MiDepotList,
+FN MmpReapDepotList (
+    IN cache : ^MmpPoolCache,
+    IN list : ^MmpDepotList,
     IN rounds : UWORD,
 )
 
@@ -708,7 +708,7 @@ FN MiReapDepotList (
     // rept := 0
 
     WHILE reap DO
-        magazine := MiAllocateMagazineFromDepot (
+        magazine := MmpAllocateMagazineFromDepot (
             cache, // cache
             list, // list
         )
@@ -717,7 +717,7 @@ FN MiReapDepotList (
             BREAK
         END
 
-        MiDestroyAndFreeMagazine (
+        MmpDestroyAndFreeMagazine (
             cache, // cache
             magazine, // magazine
             rounds, // rounds
@@ -732,33 +732,33 @@ FN MiReapDepotList (
     // END
 END
 
-FN MiReapPoolCacheDepot (
-    IN cache : ^MiPoolCache,
+FN MmpReapPoolCacheDepot (
+    IN cache : ^MmpPoolCache,
 )
 
     // Reap magazines from the pool cache depot until all unused entries are
     // gone.
 
-    MiReapDepotList (
+    MmpReapDepotList (
         cache, // cache
         &cache^.FullMagazineList, // list
         cache^.MagazineType^.Size, // rounds
     )
 
-    MiReapDepotList (
+    MmpReapDepotList (
         cache, // cache
         &cache^.EmptyMagazineList, // list
         0, // rounds
     )
 END
 
-FN MiSetPoolCacheWsToZero (
-    IN cache : ^MiPoolCache,
+FN MmpSetPoolCacheWsToZero (
+    IN cache : ^MmpPoolCache,
 )
 
     // Set pool cache working set size to zero by making all entries reapable.
 
-    ipl := MiLockPoolCacheDepot ( cache )
+    ipl := MmpLockPoolCacheDepot ( cache )
 
     cache^.FullMagazineList.Min = cache^.FullMagazineList.Total
     cache^.FullMagazineList.ReapLimit = cache^.FullMagazineList.Total
@@ -766,16 +766,16 @@ FN MiSetPoolCacheWsToZero (
     cache^.EmptyMagazineList.Min = cache^.EmptyMagazineList.Total
     cache^.EmptyMagazineList.ReapLimit = cache^.EmptyMagazineList.Total
 
-    MiUnlockPoolCacheDepot ( cache, ipl )
+    MmpUnlockPoolCacheDepot ( cache, ipl )
 END
 
-FN MiUpdatePoolCacheWs (
-    IN cache : ^MiPoolCache,
+FN MmpUpdatePoolCacheWs (
+    IN cache : ^MmpPoolCache,
 )
 
     // Update the pool cache working set size before a round of reaping.
 
-    ipl := MiLockPoolCacheDepot ( cache )
+    ipl := MmpLockPoolCacheDepot ( cache )
 
     cache^.FullMagazineList.ReapLimit = cache^.FullMagazineList.Min
     cache^.FullMagazineList.Min = cache^.FullMagazineList.Total
@@ -783,16 +783,16 @@ FN MiUpdatePoolCacheWs (
     cache^.EmptyMagazineList.ReapLimit = cache^.EmptyMagazineList.Min
     cache^.EmptyMagazineList.Min = cache^.EmptyMagazineList.Total
 
-    MiUnlockPoolCacheDepot ( cache, ipl )
+    MmpUnlockPoolCacheDepot ( cache, ipl )
 END
 
-FN MiPurgeCpuMagazinesPoolCache (
-    IN cache : ^MiPoolCache,
+FN MmpPurgeCpuMagazinesPoolCache (
+    IN cache : ^MmpPoolCache,
 )
 
     // Purge the per-CPU magazine caches.
 
-    percpu := MiPoolCachePerCpuById (
+    percpu := MmpPoolCachePerCpuById (
         cache, // cache
         0, // id
     )
@@ -801,7 +801,7 @@ FN MiPurgeCpuMagazinesPoolCache (
     i := 0
 
     WHILE i < cpus DO
-        ipl := MiLockMagazineCache ( percpu )
+        ipl := MmpLockMagazineCache ( percpu )
 
         currentmag := percpu^.Loaded
         prevmag := percpu^.Previous
@@ -813,10 +813,10 @@ FN MiPurgeCpuMagazinesPoolCache (
         percpu^.Rounds = -1
         percpu^.PreviousRounds = -1
 
-        MiUnlockMagazineCache ( percpu, ipl )
+        MmpUnlockMagazineCache ( percpu, ipl )
 
         IF currentmag THEN
-            MiDestroyAndFreeMagazine (
+            MmpDestroyAndFreeMagazine (
                 cache, // cache
                 currentmag, // magazine
                 rounds, // rounds
@@ -824,7 +824,7 @@ FN MiPurgeCpuMagazinesPoolCache (
         END
 
         IF prevmag THEN
-            MiDestroyAndFreeMagazine (
+            MmpDestroyAndFreeMagazine (
                 cache, // cache
                 prevmag, // magazine
                 prevrounds, // rounds
@@ -832,33 +832,33 @@ FN MiPurgeCpuMagazinesPoolCache (
         END
 
         i += 1
-        percpu += MI_PCPCPU_SIZE
+        percpu += MMP_PCPCPU_SIZE
     END
 END
 
-FN MiPurgeMagazinesPoolCache (
-    IN cache : ^MiPoolCache,
+FN MmpPurgeMagazinesPoolCache (
+    IN cache : ^MmpPoolCache,
 )
 
     // Purge the magazines of the given pool cache.
     // If this is a result of a resize operation then the global cache list
-    // lock is held. If it's the result of an MmDeletePoolCache then no lock is
+    // lock is held. If it's the result of an MmuDeletePoolCache then no lock is
     // needed.
 
-    MiPurgeCpuMagazinesPoolCache ( cache )
+    MmpPurgeCpuMagazinesPoolCache ( cache )
 
     // Set the working set size of the pool cache to zero.
 
-    MiSetPoolCacheWsToZero ( cache )
+    MmpSetPoolCacheWsToZero ( cache )
 
     // Reap down to the new working set size, which is zero.
 
-    MiReapPoolCacheDepot ( cache )
+    MmpReapPoolCacheDepot ( cache )
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmDeletePoolCache (
-    IN cache : ^MiPoolCache,
+EXPORT FN MmuDeletePoolCache (
+    IN cache : ^MmpPoolCache,
 )
 
     // Delete a pool cache.
@@ -867,7 +867,7 @@ EXPORT FN MmDeletePoolCache (
 
     // Remove from global list.
 
-    list : ^MiPoolCacheList
+    list : ^MmpPoolCacheList
 
     IF NOT cache^.Pageable THEN
         list = &node^.NpPoolCacheList
@@ -875,15 +875,15 @@ EXPORT FN MmDeletePoolCache (
         list = &node^.PgPoolCacheList
     END
 
-    MiLockPoolCacheList ( list )
+    MmpLockPoolCacheList ( list )
 
     RtlRemoveEntryList ( &cache^.MasterListEntry )
 
-    MiUnlockPoolCacheList ( list )
+    MmpUnlockPoolCacheList ( list )
 
     // Empty out the magazine depot.
 
-    MiPurgeMagazinesPoolCache ( cache )
+    MmpPurgeMagazinesPoolCache ( cache )
 
     // Call the destructor.
 
@@ -894,14 +894,14 @@ EXPORT FN MmDeletePoolCache (
     // Free pool cache to pool cache slab cache.
     // Say that ten times fast.
 
-    MiFreeToSlabCache (
+    MmpFreeToSlabCache (
         &node^.PoolCacheSlabs, // scache
         cache, // ptr
     )
 END
 
-FN MiReloadMagazines (
-    IN percpu : ^MiPoolCachePerCpu,
+FN MmpReloadMagazines (
+    IN percpu : ^MmpPoolCachePerCpu,
     IN newloaded : ^^VOID,
     IN rounds : WORD,
 )
@@ -915,8 +915,8 @@ FN MiReloadMagazines (
     percpu^.Rounds = rounds
 END
 
-EXPORT FN MmAllocateFromPoolCache (
-    IN cache : ^MiPoolCache,
+EXPORT FN MmuAllocateFromPoolCache (
+    IN cache : ^MmpPoolCache,
     IN wait : UWORD,
 ) : ^VOID
 
@@ -927,12 +927,12 @@ EXPORT FN MmAllocateFromPoolCache (
 
     // Acquire a pointer to the pool cache's per-cpu magazine cache.
 
-    percpu := MiPoolCachePerCpuById (
+    percpu := MmpPoolCachePerCpuById (
         cache, // cache
         KeCurrentProcessorId (), // id
     )
 
-    ipl := MiLockMagazineCache ( percpu )
+    ipl := MmpLockMagazineCache ( percpu )
 
 @Retry
 
@@ -948,7 +948,7 @@ EXPORT FN MmAllocateFromPoolCache (
         block = percpu^.Loaded[rounds]
         percpu^.Rounds = rounds - 1
 
-        MiUnlockMagazineCache ( percpu, ipl )
+        MmpUnlockMagazineCache ( percpu, ipl )
 
         RETURN block
     END
@@ -958,7 +958,7 @@ EXPORT FN MmAllocateFromPoolCache (
     rounds = percpu^.PreviousRounds
 
     IF rounds > 0 THEN
-        MiReloadMagazines (
+        MmpReloadMagazines (
             percpu, // percpu
             percpu^.Previous, // newloaded
             rounds, // rounds
@@ -969,7 +969,7 @@ EXPORT FN MmAllocateFromPoolCache (
 
     // Can't reload the previous magazine, allocate from the depot.
 
-    magazine := MiAllocateMagazineFromDepot (
+    magazine := MmpAllocateMagazineFromDepot (
         cache, // cache
         &cache^.FullMagazineList, // list
     )
@@ -982,14 +982,14 @@ EXPORT FN MmAllocateFromPoolCache (
 
             KeAssert ( percpu^.PreviousRounds == 0 )
 
-            MiFreeMagazineToDepot (
+            MmpFreeMagazineToDepot (
                 cache, // cache
                 &cache^.EmptyMagazineList, // list
                 percpu^.Previous, // magazine
             )
         END
 
-        MiReloadMagazines (
+        MmpReloadMagazines (
             percpu, // percpu
             magazine, // newloaded
             CAST percpu^.MagazineSize TO WORD, // rounds
@@ -998,7 +998,7 @@ EXPORT FN MmAllocateFromPoolCache (
         GOTO Retry
     END
 
-    MiUnlockMagazineCache ( percpu, ipl )
+    MmpUnlockMagazineCache ( percpu, ipl )
 
     // Magazine layer wasn't of any help so we need to drop through to the slab
     // layer of this cache.
@@ -1009,8 +1009,8 @@ EXPORT FN MmAllocateFromPoolCache (
     )
 END
 
-EXPORT FN MmFreeToPoolCache (
-    IN cache : ^MiPoolCache,
+EXPORT FN MmuFreeToPoolCache (
+    IN cache : ^MmpPoolCache,
     IN ptr : ^VOID,
 )
 
@@ -1020,12 +1020,12 @@ EXPORT FN MmFreeToPoolCache (
 
     // Acquire a pointer to the pool cache's per-cpu magazine cache.
 
-    percpu := MiPoolCachePerCpuById (
+    percpu := MmpPoolCachePerCpuById (
         cache, // cache
         KeCurrentProcessorId (), // id
     )
 
-    ipl := MiLockMagazineCache ( percpu )
+    ipl := MmpLockMagazineCache ( percpu )
 
 @Retry
 
@@ -1039,7 +1039,7 @@ EXPORT FN MmFreeToPoolCache (
         percpu^.Loaded[rounds + 1] = ptr
         percpu^.Rounds = rounds + 1
 
-        MiUnlockMagazineCache ( percpu, ipl )
+        MmpUnlockMagazineCache ( percpu, ipl )
 
         LEAVE
     END
@@ -1047,7 +1047,7 @@ EXPORT FN MmFreeToPoolCache (
     // Loaded magazine is full. Swap with previous if empty.
 
     IF percpu^.PreviousRounds == 0 THEN
-        MiReloadMagazines (
+        MmpReloadMagazines (
             percpu, // percpu
             percpu^.Previous, // newloaded
             0, // rounds
@@ -1056,7 +1056,7 @@ EXPORT FN MmFreeToPoolCache (
         GOTO Retry
     END
 
-    IF PsCurrentNode () != cache^.Node THEN
+    IF PsuCurrentNode () != cache^.Node THEN
         // This is a CPU foreign to the preferred NUMA node of the pool cache.
         // Bypass the magazine layer since it won't do any good to have some
         // foreign CPU take up magazines in another NUMA node's pool cache.
@@ -1066,7 +1066,7 @@ EXPORT FN MmFreeToPoolCache (
 
     // Allocate a new magazine into the CPU layer.
 
-    magazine := MiAllocateMagazineFromDepot (
+    magazine := MmpAllocateMagazineFromDepot (
         cache, // cache
         &cache^.EmptyMagazineList, // list
     )
@@ -1079,7 +1079,7 @@ EXPORT FN MmFreeToPoolCache (
 
             KeAssert ( percpu^.PreviousRounds == percpu^.MagazineSize )
 
-            MiFreeMagazineToDepot (
+            MmpFreeMagazineToDepot (
                 cache, // cache
                 &cache^.FullMagazineList, // list
                 percpu^.Previous, // magazine
@@ -1088,7 +1088,7 @@ EXPORT FN MmFreeToPoolCache (
 
         // Load it and free the block into it.
 
-        MiReloadMagazines (
+        MmpReloadMagazines (
             percpu, // percpu
             magazine, // newloaded
             0, // rounds
@@ -1102,14 +1102,14 @@ EXPORT FN MmFreeToPoolCache (
 
     magtype := cache^.MagazineType
 
-    MiUnlockMagazineCache ( percpu, ipl )
+    MmpUnlockMagazineCache ( percpu, ipl )
 
-    magazine = MmAllocateFromPoolCache (
+    magazine = MmuAllocateFromPoolCache (
         magtype^.PoolCache, // cache
         FALSE, // wait
     )
 
-    ipl = MiLockMagazineCache ( percpu )
+    ipl = MmpLockMagazineCache ( percpu )
 
     IF magazine THEN
         // Got a magazine.
@@ -1118,21 +1118,21 @@ EXPORT FN MmFreeToPoolCache (
             // The magazine type size was changed.
             // Retry.
 
-            MiUnlockMagazineCache ( percpu, ipl )
+            MmpUnlockMagazineCache ( percpu, ipl )
 
-            MmFreeToPoolCache (
+            MmuFreeToPoolCache (
                 magtype^.PoolCache, // cache
                 magazine, // ptr
             )
 
-            ipl = MiLockMagazineCache ( percpu )
+            ipl = MmpLockMagazineCache ( percpu )
 
             GOTO Retry
         END
 
         // Add to the depot and retry.
 
-        MiFreeMagazineToDepot (
+        MmpFreeMagazineToDepot (
             cache, // cache
             &cache^.EmptyMagazineList, // list
             magazine, // magazine
@@ -1143,7 +1143,7 @@ EXPORT FN MmFreeToPoolCache (
 
 @BypassMagazines
 
-    MiUnlockMagazineCache ( percpu, ipl )
+    MmpUnlockMagazineCache ( percpu, ipl )
 
     // Failed to get a magazine, our last resort is to just free the block
     // directly to the slab layer.
@@ -1155,9 +1155,9 @@ EXPORT FN MmFreeToPoolCache (
 END
 
 #SECTION "INITtext"
-FN MiInitializeMagazineType (
-    IN node : ^MiNode,
-    IN magtype : ^MiMagazineType,
+FN MmpInitializeMagazineType (
+    IN node : ^MmpNode,
+    IN magtype : ^MmpMagazineType,
     IN name : ^UBYTE,
     IN size : UWORD,
 )
@@ -1166,115 +1166,115 @@ FN MiInitializeMagazineType (
 
     magtype^.Size = size
 
-    magtype^.PoolCache = MmCreatePoolCache (
+    magtype^.PoolCache = MmuCreatePoolCache (
         node, // node
         name, // name
         (size + 1) * SIZEOF ^VOID, // size
-        MM_NONPAGED_POOL, // poolindex
+        MMU_NONPAGED_POOL, // poolindex
         'Magz', // tag
     )
 
 #ENTERSECTION "INITtext"
     IF NOT magtype^.PoolCache THEN
-        KeCrash ( "MiInitializeMagazineType: failed to create pool cache\n" )
+        KeCrash ( "MmpInitializeMagazineType: failed to create pool cache\n" )
     END
 #LEAVESECTION
 
 END
 
-FN MiAdjustPoolCache (
-    IN cache : ^MiPoolCache,
+FN MmpAdjustPoolCache (
+    IN cache : ^MmpPoolCache,
 )
 
     // Adjust a pool cache.
     // This involves reaping the working set.
 
-    MiUpdatePoolCacheWs ( cache )
+    MmpUpdatePoolCacheWs ( cache )
 
-    MiReapPoolCacheDepot ( cache )
+    MmpReapPoolCacheDepot ( cache )
 END
 
-FN MiAdjustPoolCaches (
-    IN list : ^MiPoolCacheList,
+FN MmpAdjustPoolCaches (
+    IN list : ^MmpPoolCacheList,
     IN purgepercpu : UWORD,
     IN empty : UWORD,
 )
 
     // Adjust all of the pool caches on the given node.
 
-    MiLockPoolCacheList ( list )
+    MmpLockPoolCacheList ( list )
 
     listhead := &list^.Head
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
-        cache := CONTAINEROF listentry TO MiPoolCache.MasterListEntry
+        cache := CONTAINEROF listentry TO MmpPoolCache.MasterListEntry
 
         IF empty THEN
-            MiPurgeMagazinesPoolCache ( cache )
+            MmpPurgeMagazinesPoolCache ( cache )
 
         ELSE
             IF purgepercpu THEN
-                MiPurgeCpuMagazinesPoolCache ( cache )
+                MmpPurgeCpuMagazinesPoolCache ( cache )
             END
 
-            MiAdjustPoolCache ( cache )
+            MmpAdjustPoolCache ( cache )
         END
 
         listentry = listentry^.Next
     END
 
-    MiUnlockPoolCacheList ( list )
+    MmpUnlockPoolCacheList ( list )
 END
 
-#MACRO MiInitializePoolCacheList ( list ) [
+#MACRO MmpInitializePoolCacheList ( list ) [
     KeInitializeLock ( &(list)^.MasterListLock )
     RtlInitializeList ( &(list)^.Head )
 ]
 
 #SECTION "INITtext"
-FN MiInitializePoolCache (
-    IN node : ^MiNode,
+FN MmpInitializePoolCache (
+    IN node : ^MmpNode,
 )
 
     // Initialize the pool cache.
 
-    MiInitializePoolCacheList ( &node^.PgPoolCacheList )
-    MiInitializePoolCacheList ( &node^.NpPoolCacheList )
+    MmpInitializePoolCacheList ( &node^.PgPoolCacheList )
+    MmpInitializePoolCacheList ( &node^.NpPoolCacheList )
 
     // Initialize a slab cache to allocate pool caches from.
 
-    MiInitializeSlabCache (
+    MmpInitializeSlabCache (
         node, // node
         &node^.PoolCacheSlabs, // scache
-        MI_PC_SIZE + KeQueryProcessorCount () * MI_PCPCPU_SIZE, // size
-        MM_NONPAGED_POOL, // poolindex
+        MMP_PC_SIZE + KeQueryProcessorCount () * MMP_PCPCPU_SIZE, // size
+        MMU_NONPAGED_POOL, // poolindex
         'PoCa', // tag
     )
 
     // Initialize a slab cache to allocate slab caches from.
 
-    MiInitializeSlabCache (
+    MmpInitializeSlabCache (
         node, // node
         &node^.SlabCacheSlabs, // scache
-        SIZEOF MiSlabCache, // size
-        MM_NONPAGED_POOL, // poolindex
+        SIZEOF MmpSlabCache, // size
+        MMU_NONPAGED_POOL, // poolindex
         'PoSl', // tag
     )
 
     // Initialize the magazine types.
 
-    MiInitializeMagazineType (
+    MmpInitializeMagazineType (
         node, // node
-        &node^.MagazineTypeTable[MI_MAGAZINE_SMALL], // magtype
+        &node^.MagazineTypeTable[MMP_MAGAZINE_SMALL], // magtype
         "Small Block Magazines", // name
-        MI_SMALL_MAGAZINE_SIZE, // size
+        MMP_SMALL_MAGAZINE_SIZE, // size
     )
 
-    MiInitializeMagazineType (
+    MmpInitializeMagazineType (
         node, // node
-        &node^.MagazineTypeTable[MI_MAGAZINE_LARGE], // magtype
+        &node^.MagazineTypeTable[MMP_MAGAZINE_LARGE], // magtype
         "Large Block Magazines", // name
-        MI_LARGE_MAGAZINE_SIZE, // size
+        MMP_LARGE_MAGAZINE_SIZE, // size
     )
 END

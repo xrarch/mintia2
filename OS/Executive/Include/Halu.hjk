@@ -1,0 +1,106 @@
+//
+// Undocumented header file for the Hal component of the MINTIA Executive.
+//
+
+#INCLUDE "<ll>/Executive/Hal.hjk"
+
+#INCLUDE "<inc>/Keu.hjk"
+
+EXTERN FN HaluEarlyInitialize ()
+
+EXTERN FN HaluDebugWrite (
+    IN byte : UWORD,
+)
+
+EXTERN FN HaluDebugRead () : UWORD
+
+EXTERN FN HaluSetDebugConsole (
+    IN new : UWORD,
+) : UWORD
+
+EXTERN FN HaluCrashConsole ()
+
+EXTERN FN HaluQueryTime (
+    IN time : ^RtlUquad,
+)
+
+EXTERN FN HaluQueryConsoleSize (
+    OUT width : UWORD,
+    OUT height : UWORD,
+)
+
+EXTERN FN HaluQueryConsolePosition (
+    OUT x : UWORD,
+    OUT y : UWORD,
+)
+
+EXTERN FN HaluSetConsolePosition (
+    IN x : UWORD,
+    IN y : UWORD,
+)
+
+EXTERN FN HaluCenterPrint (
+    IN str : ^UBYTE,
+)
+
+EXTERN FN HaluPutCharacter (
+    IN byte : UBYTE,
+)
+
+EXTERN FN HaluTriggerIpi (
+    IN target : ^KepPrb,
+    IN type : UWORD,
+)
+
+EXTERN FN HaluBroadcastIpi (
+    IN except : ^KepPrb,
+    IN type : UWORD,
+)
+
+EXTERN FN HaluRaiseHardwareIpl (
+    IN ipl : UWORD,
+) : UWORD
+
+EXTERN FN HaluLowerHardwareIpl (
+    IN ipl : UWORD,
+)
+
+EXTERN FN HaluProcessorInitialize (
+    IN prb : ^KepPrb,
+)
+
+EXTERN FN (KeInterruptF) HaluHandleDeviceInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+FNPTR HaluStartProcessorF ()
+
+EXTERN FN HaluStartProcessors (
+    IN startfunc : HaluStartProcessorF,
+)
+
+#IF ( STRCMP PLATFORM "XRstation" )
+    #DEFINE HALU_TIMER_INTERVAL 2
+    #DEFINE HALU_VECTOR_MAX 64
+
+    #DEFINE HALU_IPL_INTERACTIVE 4
+    #DEFINE HALU_IPL_BOARDS 5
+    #DEFINE HALU_IPL_SERIAL 6
+    #DEFINE HALU_IPL_DISK 7
+
+    #DEFINE HALU_RTC_IS_LOCAL 0
+
+#ELSEIF ( STRCMP PLATFORM "fox32" )
+    // Rounded up from 16.67ms (60Hz) vblank interval.
+
+    #DEFINE HALU_TIMER_INTERVAL 17
+    #DEFINE HALU_VECTOR_MAX 256
+
+    #DEFINE HALU_RTC_IS_LOCAL 1
+
+#ELSE
+    #ERROR "Unknown platform\n"
+#END
+
+#DEFINE HALU_TIMER_HZ ( / 1000 HALU_TIMER_INTERVAL )

@@ -10,7 +10,7 @@ PUBLIC DbgCauseCrash := FALSE
 
 DbgEntryCount : ULONG
 
-FN (KeDebuggerEntryF) DbgEntrypoint (
+FN (KeuDebuggerEntryF) DbgEntrypoint (
     IN context : ^OsContext,
 )
 
@@ -32,13 +32,13 @@ FN (KeDebuggerEntryF) DbgEntrypoint (
         LEAVE
     END
 
-    old := HalSetDebugConsole ( TRUE )
+    old := HaluSetDebugConsole ( TRUE )
 
 #IF BLD_MP
-    KiFreezeOtherProcessors ()
+    KepFreezeOtherProcessors ()
 #END
 
-    DbgCurrentPrb = KI_CURRENT_PRB
+    DbgCurrentPrb = KEP_CURRENT_PRB
 
     IF DbgCurrentPrb^.FrozenContext THEN
         DbgCurrentContext = DbgCurrentPrb^.FrozenContext
@@ -49,10 +49,10 @@ FN (KeDebuggerEntryF) DbgEntrypoint (
     DbgPrompt ()
 
 #IF BLD_MP
-    KiUnfreezeOtherProcessors ()
+    KepUnfreezeOtherProcessors ()
 #END
 
-    HalSetDebugConsole ( old )
+    HaluSetDebugConsole ( old )
 
     KeIncrementUlong (
         &DbgEntryCount, // ptr
@@ -77,7 +77,7 @@ EXPORT FN DbgMain ()
 
     // Now register the debugger prompt entry.
 
-    KeDebuggerEntry = &DbgEntrypoint
+    KeuDebuggerEntry = &DbgEntrypoint
 
     // Announce ourselves.
 

@@ -7,14 +7,14 @@
 // Include the Kernel internal header since the HAL is logically located within
 // it.
 
-#INCLUDE "../Ke/Ki.hjk"
+#INCLUDE "../Ke/Kep.hjk"
 
-TYPE HalSpinlock : ULONG
+TYPE HaluSpinlock : ULONG
 
 #DEFINE HCF_MAGIC 0x664E4C45
 #DEFINE HCF_FLAG_REVERSE 1
 
-STRUCT HalConsoleFont
+STRUCT HaluConsoleFont
     Magic : ULONG,
     Width : ULONG,
     Height : ULONG,
@@ -25,7 +25,7 @@ END
 
 #IF BLD_MP
 
-EXTERN HalpConsoleLock : HalSpinlock
+EXTERN HalpConsoleLock : HaluSpinlock
 
 EXTERN FN HalpAcquireSpinlock (
     IN spinlock : ^VOID,
@@ -50,11 +50,11 @@ EXTERN FN HalpReleaseSpinlock (
 #ELSE
 
 #MACRO HalpAcquireConsole () [
-    KiDisableInterrupts ()
+    KepDisableInterrupts ()
 ]
 
 #MACRO HalpReleaseConsole ( oldstate ) [
-    KiRestoreInterrupts ( oldstate )
+    KepRestoreInterrupts ( oldstate )
 ]
 
 #END

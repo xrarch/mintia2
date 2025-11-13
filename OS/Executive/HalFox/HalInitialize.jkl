@@ -9,15 +9,15 @@
 // a0 - port
 // outputs:
 // a3 - value
-HalFox32In:
-.global HalFox32In
+HaluFox32In:
+.global HaluFox32In
     in   a3, a0
     ret
 
 // a0 - port
 // a1 - value
-HalFox32Out:
-.global HalFox32Out
+HaluFox32Out:
+.global HaluFox32Out
     out  a0, a1
     ret
 
@@ -26,18 +26,18 @@ HalFox32Out:
 #SECTION "INITtext"
 FN HalpInitializeInterrupts ()
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
     // Initialize the timer interrupt object.
 
     int := &prb^.TimerInterrupt
 
-    KeInitializeInterrupt (
+    KeuInitializeInterrupt (
         int, // interrupt
-        &KiClockTick, // routine
+        &KepClockTick, // routine
         0, // context
         0xFF, // vector
-        KI_IPL_CLOCK, // ipl
+        KEP_IPL_CLOCK, // ipl
         FALSE, // edgetriggered
         FALSE, // sharevector
         0, // procid
@@ -49,12 +49,12 @@ FN HalpInitializeInterrupts ()
 
     // Enable interrupts.
 
-    KiEnableInterrupts ()
+    KepEnableInterrupts ()
 END
 
 #SECTION "INITtext"
-FN HalProcessorInitialize (
-    IN prb : ^KiPrb,
+FN HaluProcessorInitialize (
+    IN prb : ^KepPrb,
 )
 
     // Do whatever is needed to initialize the current processor.
@@ -63,7 +63,7 @@ FN HalProcessorInitialize (
 END
 
 #SECTION "INITtext"
-FN HalEarlyInitialize ()
+FN HaluEarlyInitialize ()
 
     // This initialization routine is called before there is a system thread
     // context. Here we have to establish everything required for base line

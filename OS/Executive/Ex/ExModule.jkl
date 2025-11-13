@@ -4,7 +4,7 @@
 
 #INCLUDE "Exp.hjk"
 
-PUBLIC ExExecutiveModule : ^ExLoadedModule
+PUBLIC ExuExecutiveModule : ^ExuLoadedModule
 
 ExpModuleLoadingLock : KeLock = KE_INITIAL_LOCK
 
@@ -13,7 +13,7 @@ ExpKnownModuleLookupTree : RtlAvlNode
 #SECTION "PAGEtext"
 FN ExpLookupKnownModule (
     IN name : ^RtlString,
-) : ^ExKnownModule
+) : ^ExuKnownModule
 
     // Look up a known module by name. Assumes the module loading lock is held.
 
@@ -29,7 +29,7 @@ FN ExpLookupKnownModule (
             RETURN NULLPTR
         END
 
-        knownmodule := CONTAINEROF avlnode TO ExKnownModule.Entry
+        knownmodule := CONTAINEROF avlnode TO ExuKnownModule.Entry
 
         res := CAST RtlCompareRtlString (
             name, // str1
@@ -61,16 +61,16 @@ FN (RtlAvlLessThanF) ExpCompareKnownModuleNames (
     // Compare the names.
 
     RETURN CAST RtlCompareRtlString (
-        &(CONTAINEROF a TO ExKnownModule.Entry)^.Name, // str1
-        &(CONTAINEROF b TO ExKnownModule.Entry)^.Name, // str2
+        &(CONTAINEROF a TO ExuKnownModule.Entry)^.Name, // str1
+        &(CONTAINEROF b TO ExuKnownModule.Entry)^.Name, // str2
     ) TO WORD < 0
 END
 
 #SECTION "PAGEtext"
-FN ExLookupKnownModule (
+FN ExuLookupKnownModule (
     IN name : ^RtlString,
     IN create : UWORD,
-) : ^ExKnownModule
+) : ^ExuKnownModule
 
     // Look up a known module, or register it.
     //
@@ -88,9 +88,9 @@ FN ExLookupKnownModule (
         GOTO Exit
     END
 
-    knownmodule = MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
-        SIZEOF ExKnownModule, // bytes
+    knownmodule = MmuAllocatePool (
+        MMU_PAGED_POOL, // poolindex
+        SIZEOF ExuKnownModule, // bytes
         'KnMo', // tag
         TRUE, // wait
     )
@@ -101,17 +101,17 @@ FN ExLookupKnownModule (
 
     // Initialize the name.
 
-    status := ExDuplicateString (
+    status := ExuDuplicateString (
         &knownmodule^.Name, // outputstring
         name, // inputstring
-        MM_PAGED_POOL, // poolindex
+        MMU_PAGED_POOL, // poolindex
         'KnMs', // tag
     )
 
     IF OsError ( status ) THEN
         // Failed to duplicate the name string.
 
-        MmFreePool (
+        MmuFreePool (
             knownmodule, // ptr
             'KnMo', // tag
         )
@@ -141,7 +141,7 @@ FN ExLookupKnownModule (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) ExpDeleteModuleObject (
+FN (ObuTypeDeleteF) ExpDeleteModuleObject (
     IN object : ^VOID,
 ) : UWORD
 
@@ -154,18 +154,18 @@ FN (ObTypeDeleteF) ExpDeleteModuleObject (
 END
 
 STRUCT ExpModuleContext
-    KnownModule : ^ExKnownModule,
+    KnownModule : ^ExuKnownModule,
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeInitializeF) ExpInitializeModuleObject (
+FN (ObuTypeInitializeF) ExpInitializeModuleObject (
     IN object : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
 
-    // Initialize an ExLoadedModule object.
+    // Initialize an ExuLoadedModule object.
 
-    module := CAST object TO ^ExLoadedModule
+    module := CAST object TO ^ExuLoadedModule
     ctx := CAST context TO ^ExpModuleContext
 
     // Set the known module that this loaded module will be associated with.
@@ -177,7 +177,7 @@ FN (ObTypeInitializeF) ExpInitializeModuleObject (
     RETURN OS_STATUS_SUCCESS
 END
 
-PUBLIC ExModuleType : ObType = {
+PUBLIC ExuModuleType : ObuType = {
     [Name] = "Module",
 
     [Delete] = &ExpDeleteModuleObject,
@@ -187,39 +187,39 @@ PUBLIC ExModuleType : ObType = {
     [TypeIdentifier] = OS_MODULE_TYPE,
     [Tag] = 'Modu',
 
-    [TypicalBodySize] = SIZEOF ExLoadedModule,
+    [TypicalBodySize] = SIZEOF ExuLoadedModule,
 
     [IsPaged] = FALSE,
 }
 
 #SECTION "PAGEtext"
 FN ExpCreateModule (
-    IN knownmodule : ^ExKnownModule,
-    OUT module : ^ExLoadedModule,
+    IN knownmodule : ^ExuKnownModule,
+    OUT module : ^ExuLoadedModule,
 ) : OsStatus
 
-    // Create an ExLoadedModule object.
+    // Create an ExuLoadedModule object.
 
     ctx : ExpModuleContext
 
     ctx.KnownModule = knownmodule
 
-    obparams : ObParameters
+    obparams : ObuParameters
 
-    ObInitializeParameters (
+    ObuInitializeParameters (
         &obparams, // obparams
-        &ExModuleType, // type
+        &ExuModuleType, // type
         &ctx, // context
-        PsSystemCredentials (), // cred
+        PsuSystemCredentials (), // cred
         OS_ACCESS_OWNER_ALL, // access
         0, // flags
-        SIZEOF ExLoadedModule, // bodysize
+        SIZEOF ExuLoadedModule, // bodysize
         0, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
     )
 
-    RETURN ObAllocateObject (
+    RETURN ObuAllocateObject (
         &obparams, // obparams
         OUT module, // object
     )
@@ -233,7 +233,7 @@ FN ExpInitializeModules ()
 
     // Initialize the module type.
 
-    ObInitializeType ( &ExModuleType )
+    ObuInitializeType ( &ExuModuleType )
 
     // Create a "known module" for the kernel itself.
 
@@ -241,7 +241,7 @@ FN ExpInitializeModules ()
 
     RtlInitializeString ( &kernelname, "mpx.sys" )
 
-    knownmodule := ExLookupKnownModule (
+    knownmodule := ExuLookupKnownModule (
         &kernelname, // name
         TRUE, // create
     )
@@ -250,10 +250,10 @@ FN ExpInitializeModules ()
         KeCrash ( "%s: failed to create known module\n", "ExpInitializeModules" )
     END
 
-    // Now create a special ExLoadedModule to represent the executive binary
+    // Now create a special ExuLoadedModule to represent the executive binary
     // and IO classes implemented therein.
 
-    module : ^ExLoadedModule
+    module : ^ExuLoadedModule
 
     status := ExpCreateModule (
         knownmodule, // knownmodule
@@ -270,7 +270,7 @@ FN ExpInitializeModules ()
 
     // Set the special executive module pointer.
 
-    ExExecutiveModule = module
+    ExuExecutiveModule = module
 END
 
 #LEAVESECTION

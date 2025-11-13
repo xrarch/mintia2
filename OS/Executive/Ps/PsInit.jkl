@@ -9,20 +9,20 @@
 PUBLIC PspProcessListLock : KeLock = KE_INITIAL_LOCK
 PUBLIC PspProcessListHead : RtlListEntry
 
-PUBLIC PsActiveProcessCount : UWORD = 0
+PUBLIC PsuActiveProcessCount : UWORD = 0
 
-PUBLIC PsSystemProcess : ^PsProcess
-PUBLIC PsInitialThread : ^PsThread
+PUBLIC PsuSystemProcess : ^PsuProcess
+PUBLIC PsuInitialThread : ^PsuThread
 
-PUBLIC PspReaperTimedWorkItem : ExTimedWorkItem
+PUBLIC PspReaperTimedWorkItem : ExuTimedWorkItem
 
-PspIdleProcessPaged : PsPagedProcess
+PspIdleProcessPaged : PsuPagedProcess
 
-PspIdTable : ExHandleTable
+PspIdTable : ExuHandleTable
 PspIdLock : KeLock = KE_INITIAL_LOCK
 
-#DEFINE PSP_ID_INDEX_SHIFT 10
-#DEFINE PSP_ID_SEQUENCE_MASK [((1 << PSP_ID_INDEX_SHIFT) - 1)]
+#DEFINE PSP_ID_INDEXU_SHIFT 10
+#DEFINE PSP_ID_SEQUENCE_MASK [((1 << PSP_ID_INDEXU_SHIFT) - 1)]
 
 STRUCT PspIdEntry
     Object : ^VOID,
@@ -55,7 +55,7 @@ FN PspCreateId (
 
     PspLockIdExclusive ()
 
-    status := ExCreateHandle (
+    status := ExuCreateHandle (
         &PspIdTable, // handletable
         &PspIdLock, // lock
         OUT id, // handle
@@ -67,7 +67,7 @@ FN PspCreateId (
     END
 
     IF id == 0 THEN
-        KeAssert ( PsSystemProcess == NULLPTR )
+        KeAssert ( PsuSystemProcess == NULLPTR )
 
         // Fix the sequence number to be 1 for the system process so that we
         // never hand out a PID of 0. Why? Just seems nasty to, especially
@@ -78,7 +78,7 @@ FN PspCreateId (
 
     // Bitwise OR the sequence number into the ID.
 
-    id = (id << PSP_ID_INDEX_SHIFT) | (entry^.Sequence & PSP_ID_SEQUENCE_MASK)
+    id = (id << PSP_ID_INDEXU_SHIFT) | (entry^.Sequence & PSP_ID_SEQUENCE_MASK)
 
     // Increment the sequence number.
 
@@ -104,9 +104,9 @@ FN PspDeleteId (
 
     PspLockIdExclusive ()
 
-    ExDeleteHandle (
+    ExuDeleteHandle (
         &PspIdTable, // handletable
-        id >> PSP_ID_INDEX_SHIFT, // handle
+        id >> PSP_ID_INDEXU_SHIFT, // handle
         NULLPTR, // entry
     )
 
@@ -123,9 +123,9 @@ FN PspExchangeId (
 
     PspLockIdExclusive ()
 
-    entry := CAST ExLookupHandle (
+    entry := CAST ExuLookupHandle (
         &PspIdTable, // handletable
-        id >> PSP_ID_INDEX_SHIFT, // handle
+        id >> PSP_ID_INDEXU_SHIFT, // handle
     ) TO ^PspIdEntry
 
     KeAssert ( entry != NULLPTR )
@@ -138,7 +138,7 @@ END
 #SECTION "PAGEtext"
 FN PspReferenceById (
     IN pid : UWORD,
-    IN type : ^ObType,
+    IN type : ^ObuType,
     OUT object : ^VOID,
 ) : OsStatus
 
@@ -148,9 +148,9 @@ FN PspReferenceById (
 
     PspLockIdShared ()
 
-    entry := CAST ExLookupHandle (
+    entry := CAST ExuLookupHandle (
         &PspIdTable, // handletable
-        pid >> PSP_ID_INDEX_SHIFT, // handle
+        pid >> PSP_ID_INDEXU_SHIFT, // handle
     ) TO ^PspIdEntry
 
     IF NOT entry THEN
@@ -173,17 +173,17 @@ FN PspReferenceById (
         GOTO Exit
     END
 
-    IF ObFindHeader ( object )^.Type != type THEN
+    IF ObuFindHeader ( object )^.Type != type THEN
         // Not the correct object type.
 
-        IF ObFindHeader ( object )^.Type == &PsProcessType AND
-            type == &PsGroupType THEN
+        IF ObuFindHeader ( object )^.Type == &PsuProcessType AND
+            type == &PsuGroupType THEN
 
             // We're looking for a process group and this is a process.
             // If it's the group leader then we can find the process group
             // through it.
 
-            paged := (CAST object TO ^PsProcess)^.Paged
+            paged := (CAST object TO ^PsuProcess)^.Paged
 
             KeAcquireLockExclusive ( &paged^.GroupLock )
 
@@ -195,7 +195,7 @@ FN PspReferenceById (
 
                 object = paged^.ProcessGroup
 
-                ObReferenceObject ( object )
+                ObuReferenceObject ( object )
 
                 KeReleaseLock ( &paged^.GroupLock )
 
@@ -210,7 +210,7 @@ FN PspReferenceById (
         GOTO Exit
     END
 
-    IF NOT ObConditionallyReferenceObject ( object ) THEN
+    IF NOT ObuConditionallyReferenceObject ( object ) THEN
         // Object is being deleted.
 
         status = OS_STATUS_INVALID_HANDLE
@@ -225,11 +225,11 @@ END
 
 #ENTERSECTION "INITtext"
 
-FN PsInitializeIdleProcess ()
+FN PsuInitializeIdleProcess ()
 
     // Initialize the idle process enough to bootstrap other stuff.
 
-    idleproc := &KeIdleProcess
+    idleproc := &KeuIdleProcess
 
     idleproc^.Paged = &PspIdleProcessPaged
 
@@ -237,35 +237,35 @@ FN PsInitializeIdleProcess ()
     idleproc^.Paged^.Cred.Gid = OS_SYSTEM_GID
 END
 
-FN PsInitializeStage1 ()
+FN PsuInitializeStage1 ()
 
     // Stage 1 initialization for Ps.
 
     // Initialize the process type.
 
-    ObInitializeType ( &PsProcessType )
+    ObuInitializeType ( &PsuProcessType )
 
     // Initialize the thread type.
 
-    ObInitializeType ( &PsThreadType )
+    ObuInitializeType ( &PsuThreadType )
 
     // Initialize the job type.
 
-    ObInitializeType ( &PsJobType )
+    ObuInitializeType ( &PsuJobType )
 
     // Initialize the group type.
 
-    ObInitializeType ( &PsGroupType )
+    ObuInitializeType ( &PsuGroupType )
 
     // Initialize the turnstile cache.
 
 #LEAVESECTION
 
-    PspTurnstileCache = MmCreatePoolCache (
-        PsCurrentNode (), // node
+    PspTurnstileCache = MmuCreatePoolCache (
+        PsuCurrentNode (), // node
         "Turnstiles", // name
-        SIZEOF KiTurnstile, // size
-        MM_NONPAGED_POOL, // poolindex
+        SIZEOF KepTurnstile, // size
+        MMU_NONPAGED_POOL, // poolindex
         'Turn', // tag
     )
 
@@ -273,7 +273,7 @@ FN PsInitializeStage1 ()
 
     IF NOT PspTurnstileCache THEN
         KeCrash ( "%sfailed to create turnstile cache\n",
-            "PsInitializeStage1: " )
+            "PsuInitializeStage1: " )
     END
 
     // Initialize the PID/TID table.
@@ -282,10 +282,10 @@ FN PsInitializeStage1 ()
     // two pointers, which fits our PspIdEntry structure, since the size of
     // an entry is calculated by (SIZEOF ^VOID * 2) << entrysizelog.
 
-    ExInitializeHandleTable (
+    ExuInitializeHandleTable (
         &PspIdTable, // handletable
         0, // entrysizelog
-        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
     )
 
     // Initialize the global process list.
@@ -294,57 +294,57 @@ FN PsInitializeStage1 ()
 
     // Create the system process.
 
-    params : NsOpenParameters
+    params : NsuOpenParameters
 
     params.Path.Data = NULLPTR
 
     params.Captured.Flags = 0
-    params.Captured.ObFlags = 0
+    params.Captured.ObuFlags = 0
     params.Captured.Permissions = OS_ACCESS_OWNER_ALL
 
     name : RtlString
 
     RtlInitializeString ( &name, "System" )
 
-    status := PsCreateProcessObject (
+    status := PsuCreateProcessObject (
         &params, // params
         NULLPTR, // partition
         &name, // name
         -1, // quotauid
         0, // flags
-        OUT PsSystemProcess, // process
+        OUT PsuSystemProcess, // process
     )
 
     IF OsError ( status ) THEN
         KeCrash ( "%sfailed to create system process (%x)\n",
-            "PsInitializeStage1: ", status )
+            "PsuInitializeStage1: ", status )
     END
 
     // Set the system process's session.
 
-    status = PsSetGroupProcess (
-        PsSystemProcess, // process
+    status = PsuSetGroupProcess (
+        PsuSystemProcess, // process
         NULLPTR, // group
         TRUE, // newsession
     )
 
     IF OsError ( status ) THEN
         KeCrash ( "%sfailed to set system session (%x)\n",
-            "PsInitializeStage1: ", status )
+            "PsuInitializeStage1: ", status )
     END
 
     // Initialize the reaper custody list. Threads are placed on this list when
     // they terminate, to transfer custody to the reaper thread.
 
-    KeInitializeCustodyList (
-        &KeReaperCustodyList, // list
+    KeuInitializeCustodyList (
+        &KeuReaperCustodyList, // list
         &PspActivateReaper, // activateroutine
         0, // context
     )
 
-    ExInitializeTimedWorkItem (
+    ExuInitializeTimedWorkItem (
         &PspReaperTimedWorkItem, // item
-        &PsReaperWorker, // routine
+        &PsuReaperWorker, // routine
     )
 
     // Create the balance manager thread, which will perform stage 2
@@ -352,24 +352,24 @@ FN PsInitializeStage1 ()
 
     RtlInitializeString ( &name, "Balance Manager" )
 
-    status = PsCreateExecutiveThread (
+    status = PsuCreateExecutiveThread (
         &name, // name
-        &ExStartSystemProcess, // startfunc
+        &ExuStartSystemProcess, // startfunc
         0, // context1
         0, // context2
         0, // flags
-        OUT PsInitialThread, // thread
+        OUT PsuInitialThread, // thread
     )
 
     IF OsError ( status ) THEN
-        KeCrash ( "%sfailed to create bal mgr (%x)\n", "PsInitializeStage1: ",
+        KeCrash ( "%sfailed to create bal mgr (%x)\n", "PsuInitializeStage1: ",
             status )
     END
 
-    ObUnreferenceObject ( PsInitialThread )
+    ObuUnreferenceObject ( PsuInitialThread )
 END
 
-FN PsInitializeStage2 ()
+FN PsuInitializeStage2 ()
 
     // Stage 2 initialization for Ps.
 

@@ -6,15 +6,15 @@
 #INCLUDE "Iop.hjk"
 
 #SECTION "PAGEtext"
-FN (ObTypeOpenF) IopOpenFileObject (
-    IN process : ^PsProcess,
+FN (ObuTypeOpenF) IopOpenFileObject (
+    IN process : ^PsuProcess,
     IN object : ^VOID,
     IN access : UWORD,
 ) : OsStatus
 
     // Call the driver's file object open function, if present.
 
-    file := CAST object TO ^IoFile
+    file := CAST object TO ^IouFile
 
     fcb := file^.Fcb
 
@@ -32,7 +32,7 @@ FN (ObTypeOpenF) IopOpenFileObject (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeCloseF) IopCloseFileObject (
+FN (ObuTypeCloseF) IopCloseFileObject (
     IN object : ^VOID,
     IN access : UWORD,
     IN lasthandlecount : UWORD,
@@ -40,7 +40,7 @@ FN (ObTypeCloseF) IopCloseFileObject (
 
     // Call the driver's file object close function, if present.
 
-    file := CAST object TO ^IoFile
+    file := CAST object TO ^IouFile
 
     fcb := file^.Fcb
 
@@ -58,13 +58,13 @@ FN (ObTypeCloseF) IopCloseFileObject (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) IopDeleteFileObject (
+FN (ObuTypeDeleteF) IopDeleteFileObject (
     IN object : ^VOID,
 ) : UWORD
 
     // Delete a file object.
 
-    file := CAST object TO ^IoFile
+    file := CAST object TO ^IouFile
 
     // Call the driver's file object deletion function, if present.
 
@@ -76,21 +76,21 @@ FN (ObTypeDeleteF) IopDeleteFileObject (
 
     // Unreference the namespace handle tracked by the file object.
 
-    NsUnreferenceHandle ( &file^.Handle )
+    NsuUnreferenceHandle ( &file^.Handle )
 
     RETURN TRUE
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeSetSecurityF) IopSetSecurityFileObject (
+FN (ObuTypeSetSecurityF) IopSetSecurityFileObject (
     IN object : ^VOID,
-    IN permissions : ^ObPermissions,
+    IN permissions : ^ObuPermissions,
 ) : OsStatus
 
     // Acquire a pointer to the namespace entry and call the driver's file
     // object security function, if present.
 
-    file := CAST object TO ^IoFile
+    file := CAST object TO ^IouFile
 
     fcb := file^.Fcb
 
@@ -107,13 +107,13 @@ FN (ObTypeSetSecurityF) IopSetSecurityFileObject (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) IopDeleteFcbObject (
+FN (ObuTypeDeleteF) IopDeleteFcbObject (
     IN object : ^VOID,
 ) : UWORD
 
     // Delete an FCB object.
 
-    fcb := CAST object TO ^IoFcb
+    fcb := CAST object TO ^IouFcb
 
     // Call the driver's FCB deletion function, if present.
 
@@ -121,18 +121,18 @@ FN (ObTypeDeleteF) IopDeleteFcbObject (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeNamespaceLookupF) IopNamespaceLookupFcbObject (
-    IN context : ^NsLookupContext,
+FN (ObuTypeNamespaceLookupF) IopNamespaceLookupFcbObject (
+    IN context : ^NsuLookupContext,
 ) : OsStatus
 
     // Lookup a name under this FCB.
 
-    fcb := CAST context^.Object TO ^IoFcb
+    fcb := CAST context^.Object TO ^IouFcb
 
     RETURN fcb^.Dispatch^.NamespaceLookup ( context )
 END
 
-PUBLIC IoFileType : ObType = {
+PUBLIC IouFileType : ObuType = {
     [Name] = "File",
 
     [Open] = &IopOpenFileObject,
@@ -140,26 +140,26 @@ PUBLIC IoFileType : ObType = {
     [Delete] = &IopDeleteFileObject,
     [SetSecurity] = &IopSetSecurityFileObject,
 
-    [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
+    [WaitOffset] = OBU_TYPE_NO_WAIT_OFFSET,
     [TypeIdentifier] = OS_FILE_TYPE,
     [Tag] = 'File',
 
-    [TypicalBodySize] = SIZEOF IoFile,
+    [TypicalBodySize] = SIZEOF IouFile,
 
     [IsPaged] = TRUE,
 }
 
-PUBLIC IoFcbType : ObType = {
+PUBLIC IouFcbType : ObuType = {
     [Name] = "Fcb",
 
     [Delete] = &IopDeleteFcbObject,
     [NamespaceLookup] = &IopNamespaceLookupFcbObject,
 
-    [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
+    [WaitOffset] = OBU_TYPE_NO_WAIT_OFFSET,
     [TypeIdentifier] = OS_FCB_TYPE,
     [Tag] = 'Fcb',
 
-    [TypicalBodySize] = SIZEOF IoFcb,
+    [TypicalBodySize] = SIZEOF IouFcb,
 
     [IsPaged] = FALSE,
 }

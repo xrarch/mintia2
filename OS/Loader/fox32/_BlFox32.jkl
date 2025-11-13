@@ -398,7 +398,7 @@ FN BxMapPage (
 
         pagetable = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
 
-        newpde := (desc^.StartPfn << 12) | MI_PTE_V | MI_PTE_W
+        newpde := (desc^.StartPfn << 12) | MMP_PTE_V | MMP_PTE_W
 
         RtlFillMemoryWithUlong (
             pagetable, // dest
@@ -412,12 +412,12 @@ FN BxMapPage (
     pteptr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
 
 #IF BLD_CHK
-    IF pteptr^ & MI_PTE_V THEN
+    IF pteptr^ & MMP_PTE_V THEN
         BlCrash ( "VPN %x already mapped\n", vaddr >> RTL_PAGE_SHIFT )
     END
 #END
 
-    pteptr^ = CAST phyaddr | MI_PTE_V | MI_PTE_W TO ULONG
+    pteptr^ = CAST phyaddr | MMP_PTE_V | MMP_PTE_W TO ULONG
 END
 
 FN BxMapRange (
@@ -458,7 +458,7 @@ FN BxVirtualToPfn (
 
     pte := pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
 
-    IF pte & MI_PTE_V THEN
+    IF pte & MMP_PTE_V THEN
         RETURN pte >> 12
     END
 
@@ -482,11 +482,11 @@ FN BxRemapCodePage (
     pteaddr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
     pte := pteaddr^
 
-    IF NOT (pte & MI_PTE_V) THEN
+    IF NOT (pte & MMP_PTE_V) THEN
         BlCrash ( "BxRemapCodePage 2\n" )
     END
 
-    pte &= ~(MI_PTE_W)
+    pte &= ~(MMP_PTE_W)
     pteaddr^ = pte
 
     // Purge TB page.
@@ -562,7 +562,7 @@ FN BxInitializeMemoryMapping ()
 
     pdeptr := &BxPageDirectory[0xB0000000 >> 22]
 
-    pdeptr^ = ((BxPageDirectory >> 12) << 12) | MI_PTE_V | MI_PTE_W
+    pdeptr^ = ((BxPageDirectory >> 12) << 12) | MMP_PTE_V | MMP_PTE_W
 
     // Identity-map the first page of the ROM so the fox32 HAL can jump there
     // for resets.
@@ -708,7 +708,7 @@ FN BxCreateVirtualSpace (
     pde := &BxPageDirectory[base >> 22]
 
     WHILE pagetables DO
-        pde[0] = (pfn << 12) | MI_PTE_V | MI_PTE_W
+        pde[0] = (pfn << 12) | MMP_PTE_V | MMP_PTE_W
 
         pfn += 1
         pde += 4
@@ -717,7 +717,7 @@ FN BxCreateVirtualSpace (
 
     // Zero them out through the recursive mapping.
 
-    ptebase := CAST MiPteAddress ( base ) TO ^VOID
+    ptebase := CAST MmpPteAddress ( base ) TO ^VOID
 
     RtlFillMemoryWithUlong (
         ptebase, // ptr
@@ -803,7 +803,7 @@ FN BxInitializeIo (
 
     // Stash the parameters of the boot framebuffer.
 
-    fba := BlMapIoRegion (
+    fba := BlMapIouRegion (
         FRAMEBUFFER_SIZE >> RTL_PAGE_SHIFT, // pages
         FRAMEBUFFER_START, // phyaddr
         FALSE, // noncached

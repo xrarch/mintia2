@@ -12,13 +12,13 @@ FN FwtCreateThread (
 
     // Private helper routine for creating fireworks threads..
 
-    thread : ^PsThread
+    thread : ^PsuThread
     
     name : RtlString
 
     RtlInitializeString ( &name, "FireworksPart" )
 
-    status := PsCreateExecutiveThread (
+    status := PsuCreateExecutiveThread (
         &name, // name
         startroutine, // startfunc
         CAST fwd TO UWORD, // context1
@@ -40,7 +40,7 @@ FN FwtCreateThread (
         TRUE, // setcurrentpriority
     )
     
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 
     RETURN 1
 END

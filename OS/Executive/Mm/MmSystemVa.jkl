@@ -2,20 +2,20 @@
 // Implements system address space allocation for the MINTIA Memory Manager.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
-STRUCT MiChunkEntry
-    Next : ^MiChunkEntry,
+STRUCT MmpChunkEntry
+    Next : ^MmpChunkEntry,
 END
 
-PUBLIC MiCacheSpaceChunkPages : UWORD
+PUBLIC MmpCacheSpaceChunkPages : UWORD
 
-#DEFINE MI_DEFERRED_FLUSH_PAGES 128
+#DEFINE MMP_DEFERRED_FLUSH_PAGES 128
 
 #SECTION "INITtext"
-FN MiInitializeChunkSpace (
-    IN chunkspace : ^MiChunkSpace,
+FN MmpInitializeChunkSpace (
+    IN chunkspace : ^MmpChunkSpace,
     IN base : ^VOID,
     IN entryshift : UWORD,
     IN pages : UWORD,
@@ -37,21 +37,21 @@ FN MiInitializeChunkSpace (
 
     // Link the chunks through the PTEs.
 
-    pte := MiPteAddress ( base )
+    pte := MmpPteAddress ( base )
 
     WHILE entrycount DO
-        entry := CAST pte TO ^MiChunkEntry
+        entry := CAST pte TO ^MmpChunkEntry
 
         entry^.Next = chunkspace^.FreeListHead
         chunkspace^.FreeListHead = entry
 
         entrycount -= 1
-        pte += entrypages * SIZEOF MiPte
+        pte += entrypages * SIZEOF MmpPte
     END
 END
 
-FN MiFlushChunkSpace (
-    IN chunkspace : ^MiChunkSpace,
+FN MmpFlushChunkSpace (
+    IN chunkspace : ^MmpChunkSpace,
 )
 
     // Flush TB entries across all processors for the delayed chunks.
@@ -62,8 +62,8 @@ FN MiFlushChunkSpace (
     max := chunkspace^.PendingFlushCount
 
     WHILE i < max DO
-        chunk := CAST MiPteAddress ( chunkspace^.PendingFlush[i] )
-            TO ^MiChunkEntry
+        chunk := CAST MmpPteAddress ( chunkspace^.PendingFlush[i] )
+            TO ^MmpChunkEntry
 
         chunk^.Next = chunkspace^.FreeListHead
         chunkspace^.FreeListHead = chunk
@@ -81,7 +81,7 @@ FN MiFlushChunkSpace (
         // Chunks are pages, and there's fewer than 16.
         // Flush them individually.
 
-        KeFlushMultipleTb (
+        KeuFlushMultipleTb (
             &chunkspace^.PendingFlush[0], // vaddrtable
             max, // pagecount
         )
@@ -90,12 +90,12 @@ FN MiFlushChunkSpace (
         // Chunks are multiple pages, or there's more than 16.
         // Flush everyone's entire TB. Don't keep global pages.
 
-        KeSweepTb ( FALSE )
+        KeuSweepTb ( FALSE )
     END
 END
 
-FN MiAllocateChunkSpace (
-    IN chunkspace : ^MiChunkSpace,
+FN MmpAllocateChunkSpace (
+    IN chunkspace : ^MmpChunkSpace,
 ) : ^VOID
 
     // Allocate a chunk from the given chunk space.
@@ -117,7 +117,7 @@ FN MiAllocateChunkSpace (
         // There are chunks pending flush.
         // We can flush them and grab the first freed one.
 
-        MiFlushChunkSpace ( chunkspace )
+        MmpFlushChunkSpace ( chunkspace )
 
         chunk = chunkspace^.FreeListHead
     END
@@ -126,11 +126,11 @@ FN MiAllocateChunkSpace (
 
     KeReleaseApcLock ( &chunkspace^.Lock, ipl )
 
-    RETURN MiVirtualAddress ( chunk )
+    RETURN MmpVirtualAddress ( chunk )
 END
 
-FN MiFreeChunkSpace (
-    IN chunkspace : ^MiChunkSpace,
+FN MmpFreeChunkSpace (
+    IN chunkspace : ^MmpChunkSpace,
     IN ptr : ^VOID,
     IN flush : UWORD,
 )
@@ -144,10 +144,10 @@ FN MiFreeChunkSpace (
 
         count := chunkspace^.PendingFlushCount
 
-        IF count == MI_MAXIMUM_CHUNKS_PENDING_FLUSH THEN
+        IF count == MMP_MAXIMUM_CHUNKS_PENDING_FLUSH THEN
             // Full. Flush it.
 
-            MiFlushChunkSpace ( chunkspace )
+            MmpFlushChunkSpace ( chunkspace )
 
             count = 0
         END
@@ -158,7 +158,7 @@ FN MiFreeChunkSpace (
     ELSE
         // Insert directly into the free chunk list.
 
-        chunk := CAST MiPteAddress ( ptr ) TO ^MiChunkEntry
+        chunk := CAST MmpPteAddress ( ptr ) TO ^MmpChunkEntry
 
         chunk^.Next = chunkspace^.FreeListHead
         chunkspace^.FreeListHead = chunk
@@ -170,15 +170,15 @@ END
 #ENTERSECTION "INITtext"
 
 #SECTION "INITtext"
-FN MiInitializeSystemVa (
-    IN node : ^MiNode,
+FN MmpInitializeSystemVa (
+    IN node : ^MmpNode,
 )
 
     // Initialize the system space allocation.
 
     // There are three regions of dynamically managed system space:
     //
-    // MI_POOL_SPACE:     Sized at boot time with enough page tables for a
+    // MMP_POOL_SPACE:     Sized at boot time with enough page tables for a
     //                    quantity of virtual space equivalent to the total
     //                    physical memory in the system.
     //
@@ -188,7 +188,7 @@ FN MiInitializeSystemVa (
     //                    Maximum size on 32-bit is capped at 256MB.
     //
     //
-    // MI_CACHE_SPACE:    Occupies 4x phys mem of virtual space. Page tables are
+    // MMP_CACHE_SPACE:    Occupies 4x phys mem of virtual space. Page tables are
     //                    allocated at boot time. Used to map demand-paged views
     //                    of cached files. Allocated in fixed size chunks,
     //                    varying in size depending on the system size:
@@ -203,13 +203,13 @@ FN MiInitializeSystemVa (
     //                    Maximum size on 32-bit is capped at 256MB.
     //
     //
-    // MI_DYNAMIC_SPACE:  Page tables are allocated at boot time. Allocations
+    // MMP_DYNAMIC_SPACE:  Page tables are allocated at boot time. Allocations
     //                    can be any count of pages. Used to map kernel stacks,
     //                    MDLs, etc.
     //
     //                    An AVL tree is used to allocate this space. The AVL
     //                    nodes (containing parent, left child, right child, and
-    //                    an optional MmObject pointer) are allocated in bulk
+    //                    an optional MmuObject pointer) are allocated in bulk
     //                    from nonpaged pool on-demand and stored in a lookaside
     //                    list.
     //
@@ -217,44 +217,44 @@ FN MiInitializeSystemVa (
 
     size := node^.Partition.SizeLevel
 
-    KeAssert ( SIZEOF MiChunkEntry <= SIZEOF MiPte )
+    KeAssert ( SIZEOF MmpChunkEntry <= SIZEOF MmpPte )
 
     // Initialize nonpaged space.
 
-    base := CAST MI_POOL_SPACE +
-        ((node^.Id * KeLoaderBlock.PoolSpaceSize) << RTL_PAGE_SHIFT) TO ^VOID
+    base := CAST MMP_POOL_SPACE +
+        ((node^.Id * KeuLoaderBlock.PoolSpaceSize) << RTL_PAGE_SHIFT) TO ^VOID
 
-    MiInitializeChunkSpace (
+    MmpInitializeChunkSpace (
         &node^.PoolSpace, // chunkspace
         base, // base
         RTL_PAGE_SHIFT, // entryshift
-        KeLoaderBlock.PoolSpaceSize, // pages
+        KeuLoaderBlock.PoolSpaceSize, // pages
     )
 
     // Initialize cache space.
 
     entryshift : UWORD
 
-    IF size <= MM_TINY_SYSTEM THEN
+    IF size <= MMU_TINY_SYSTEM THEN
         entryshift = 15 // 1 << 15 = 32KB
 
-    ELSEIF size < MM_LARGE_SYSTEM THEN
+    ELSEIF size < MMU_LARGE_SYSTEM THEN
         entryshift = 16 // 1 << 16 = 64KB
 
     ELSE
         entryshift = 18 // 1 << 18 = 256KB
     END
 
-    MiCacheSpaceChunkPages = (1 << entryshift) >> RTL_PAGE_SHIFT
+    MmpCacheSpaceChunkPages = (1 << entryshift) >> RTL_PAGE_SHIFT
 
-    base = CAST MI_CACHE_SPACE +
-        ((node^.Id * KeLoaderBlock.CacheSpaceSize) << RTL_PAGE_SHIFT) TO ^VOID
+    base = CAST MMP_CACHE_SPACE +
+        ((node^.Id * KeuLoaderBlock.CacheSpaceSize) << RTL_PAGE_SHIFT) TO ^VOID
 
-    MiInitializeChunkSpace (
+    MmpInitializeChunkSpace (
         &node^.CacheSpace, // chunkspace
         base, // base
         entryshift, // entryshift
-        KeLoaderBlock.CacheSpaceSize, // pages
+        KeuLoaderBlock.CacheSpaceSize, // pages
     )
 
     // Initialize dynamic space.
@@ -265,8 +265,8 @@ FN MiInitializeSystemVa (
 
     KeInitializeLock ( &node^.DynamicSpaceTreeLock )
 
-    base = CAST MI_DYNAMIC_SPACE +
-        ((node^.Id * KeLoaderBlock.DynamicSpaceSize) << RTL_PAGE_SHIFT) TO ^VOID
+    base = CAST MMP_DYNAMIC_SPACE +
+        ((node^.Id * KeuLoaderBlock.DynamicSpaceSize) << RTL_PAGE_SHIFT) TO ^VOID
 
     node^.DynamicSpaceBase = base
 
@@ -279,9 +279,9 @@ FN MiInitializeSystemVa (
     //     maintain and calculate CPU ID ranges for each NUMA node so it's fine
     //     for now.
 
-    quickpages := KeQueryProcessorCount () * MI_QUICK_PER_CPU
+    quickpages := KeQueryProcessorCount () * MMP_QUICK_PER_CPU
 
-    dsize := KeLoaderBlock.DynamicSpaceSize
+    dsize := KeuLoaderBlock.DynamicSpaceSize
 
     IF dsize < quickpages THEN
         KeCrash ( "Dynamic space too small\n" )
@@ -292,20 +292,20 @@ FN MiInitializeSystemVa (
     RtlInitializeBitmap (
         &node^.DynamicSpaceBitmap, // header
         dsize, // sizeinbits
-        KeLoaderBlock.DynamicSpaceBitmaps[node^.Id], // data
+        KeuLoaderBlock.DynamicSpaceBitmaps[node^.Id], // data
     )
 
     // Remember the base of the quick pages.
 
     node^.QuickPteBase =
-        MiPteAddress ( base + (dsize << RTL_PAGE_SHIFT) )
+        MmpPteAddress ( base + (dsize << RTL_PAGE_SHIFT) )
 END
 
 #LEAVESECTION
 
 #SECTION "INITtext"
-FN MiInitializeSpaceNodeAllocation (
-    IN node : ^MiNode,
+FN MmpInitializeSpaceNodeAllocation (
+    IN node : ^MmpNode,
 )
 
     // Initialize the cache for dynamic space nodes.
@@ -313,14 +313,14 @@ FN MiInitializeSpaceNodeAllocation (
     // they ultimately come from.
 
     // XXX The sanity of using a pool cache for this depends on the
-    //     MiDynamicSpaceNode being small enough to not trigger page-aligned
+    //     MmpDynamicSpaceNode being small enough to not trigger page-aligned
     //     pool allocation when slabs are created for it.
 
-    node^.SpaceNodeCache = MmCreatePoolCache (
+    node^.SpaceNodeCache = MmuCreatePoolCache (
         node, // node
         "Space Nodes", // name
-        SIZEOF MiDynamicSpaceNode, // size
-        MM_NONPAGED_POOL, // poolindex
+        SIZEOF MmpDynamicSpaceNode, // size
+        MMU_NONPAGED_POOL, // poolindex
         'Dyna', // tag
     )
 
@@ -332,8 +332,8 @@ FN MiInitializeSpaceNodeAllocation (
 
 END
 
-FN MiFlushDynamicSpace (
-    IN node : ^MiNode,
+FN MmpFlushDynamicSpace (
+    IN node : ^MmpNode,
 )
 
     // Perform the deferred flushes for dynamic space. Assumes the dynamic space
@@ -353,7 +353,7 @@ FN MiFlushDynamicSpace (
             flush^.Pages, // runlength
         )
 
-        flush += SIZEOF MiDeferredFlush
+        flush += SIZEOF MmpDeferredFlush
         i += 1
     END
 
@@ -362,19 +362,19 @@ FN MiFlushDynamicSpace (
 
     // Now do a global TB flush.
 
-    KeSweepTb ( FALSE )
+    KeuSweepTb ( FALSE )
 END
 
-FN MiFindDynamicSpaceNode (
+FN MmpFindDynamicSpaceNode (
     IN ptr : ^VOID,
-) : ^MiDynamicSpaceNode
+) : ^MmpDynamicSpaceNode
 
     // Find the dynamic space node in which the pointer resides.
     // Returns NULLPTR if no such node exists.
 
-    node := MiNumaNodeFromDynamicSpacePointer ( ptr )
+    node := MmpNumaNodeFromDynamicSpacePointer ( ptr )
 
-    spacenode : ^MiDynamicSpaceNode
+    spacenode : ^MmpDynamicSpaceNode
 
     // We could hold this lock shared but that would violate our codebase
     // policy that a shared lock is never taken subordinate to an exclusive
@@ -391,7 +391,7 @@ FN MiFindDynamicSpaceNode (
             BREAK
         END
 
-        spacenode = CONTAINEROF avlnode TO MiDynamicSpaceNode.Entry
+        spacenode = CONTAINEROF avlnode TO MmpDynamicSpaceNode.Entry
 
         IF ptr < spacenode^.StartVa THEN
             avlnode = avlnode^.Left
@@ -409,35 +409,35 @@ FN MiFindDynamicSpaceNode (
     RETURN spacenode
 END
 
-#MACRO MiAllocateDynamicSpaceNode ( node ) [
-    CAST MmAllocateFromPoolCache (
+#MACRO MmpAllocateDynamicSpaceNode ( node ) [
+    CAST MmuAllocateFromPoolCache (
         (node)^.SpaceNodeCache, // cache
         FALSE, // wait
-    ) TO ^MiDynamicSpaceNode
+    ) TO ^MmpDynamicSpaceNode
 ]
 
-#MACRO MiFreeDynamicSpaceNode ( node, spacenode ) [
-    MmFreeToPoolCache (
+#MACRO MmpFreeDynamicSpaceNode ( node, spacenode ) [
+    MmuFreeToPoolCache (
         (node)^.SpaceNodeCache, // cache
         spacenode, // ptr
     )
 ]
 
-FN (RtlAvlLessThanF) MiCompareDynamicSpaceNodes (
+FN (RtlAvlLessThanF) MmpCompareDynamicSpaceNodes (
     IN a : ^RtlAvlNode,
     IN b : ^RtlAvlNode,
 ) : UWORD
 
     // Return whether A < B.
 
-    node1 := CONTAINEROF a TO MiDynamicSpaceNode.Entry
-    node2 := CONTAINEROF b TO MiDynamicSpaceNode.Entry
+    node1 := CONTAINEROF a TO MmpDynamicSpaceNode.Entry
+    node2 := CONTAINEROF b TO MmpDynamicSpaceNode.Entry
 
     RETURN node1^.StartVa < node2^.StartVa
 END
 
-FN MiAllocateDynamicPages (
-    IN node : ^MiNode,
+FN MmpAllocateDynamicPages (
+    IN node : ^MmpNode,
     IN pages : UWORD,
 ) : ^VOID
 
@@ -464,7 +464,7 @@ FN MiAllocateDynamicPages (
         IF node^.DeferredFlushIndex THEN
             // Try freeing the deferred regions and trying again.
 
-            MiFlushDynamicSpace ( node )
+            MmpFlushDynamicSpace ( node )
         END
 
         // Search again with the lock held, to be absolutely sure it's full.
@@ -516,8 +516,8 @@ FN MiAllocateDynamicPages (
     RETURN CAST node^.DynamicSpaceBase + (index << RTL_PAGE_SHIFT) TO ^VOID
 END
 
-FN MiReleaseDynamicPages (
-    IN node : ^MiNode,
+FN MmpReleaseDynamicPages (
+    IN node : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN flush : UWORD,
@@ -528,10 +528,10 @@ FN MiReleaseDynamicPages (
     ipl := KeAcquireApcLockExclusive ( &node^.DynamicSpaceLock )
 
     IF flush THEN
-        IF node^.DeferredFlushIndex == MI_DEFERRED_FLUSH_PAIRS THEN
+        IF node^.DeferredFlushIndex == MMP_DEFERRED_FLUSH_PAIRS THEN
             // This exceeds the maximum number of regions pending flush.
 
-            MiFlushDynamicSpace ( node )
+            MmpFlushDynamicSpace ( node )
         END
 
         // Add this region to the list of pairs pending flush.
@@ -544,10 +544,10 @@ FN MiReleaseDynamicPages (
         node^.DeferredFlushIndex += 1
         node^.DeferredFlushPages += pages
 
-        IF node^.DeferredFlushPages >= MI_DEFERRED_FLUSH_PAGES THEN
+        IF node^.DeferredFlushPages >= MMP_DEFERRED_FLUSH_PAGES THEN
             // Too many pages pending flush.
 
-            MiFlushDynamicSpace ( node )
+            MmpFlushDynamicSpace ( node )
         END
 
     ELSE
@@ -561,15 +561,15 @@ FN MiReleaseDynamicPages (
     KeReleaseApcLock ( &node^.DynamicSpaceLock, ipl )
 END
 
-FN MiAllocateDynamicSpace (
-    IN node : ^MiNode,
+FN MmpAllocateDynamicSpace (
+    IN node : ^MmpNode,
     IN pages : UWORD,
     IN wait : UWORD,
-) : ^MiDynamicSpaceNode
+) : ^MmpDynamicSpaceNode
 
     // Allocate a region of dynamic space and create an AVL node for lookup.
 
-    ptr := MiAllocateDynamicPages (
+    ptr := MmpAllocateDynamicPages (
         node, // node
         pages, // pages
     )
@@ -580,14 +580,14 @@ FN MiAllocateDynamicSpace (
 
 @Retry
 
-    spacenode := MiAllocateDynamicSpaceNode ( node )
+    spacenode := MmpAllocateDynamicSpaceNode ( node )
 
     IF NOT spacenode THEN
         IF NOT wait THEN
             // Failed to allocate a node instantly and caller told us not to
             // wait.
 
-            MiReleaseDynamicPages (
+            MmpReleaseDynamicPages (
                 node, // node
                 ptr, // ptr
                 pages, // pages
@@ -599,7 +599,7 @@ FN MiAllocateDynamicSpace (
 
         // Caller requested wait upon being unable to allocate a node.
 
-        MiWaitForPages (
+        MmpWaitForPages (
             &node^.Partition, // partition
             FALSE, // low
         )
@@ -617,7 +617,7 @@ FN MiAllocateDynamicSpace (
     RtlInsertAvl (
         &node^.DynamicSpaceRoot, // root
         &spacenode^.Entry, // node
-        &MiCompareDynamicSpaceNodes, // comparisonfunc
+        &MmpCompareDynamicSpaceNodes, // comparisonfunc
     )
 
     // Unlock the tree and return the node.
@@ -627,9 +627,9 @@ FN MiAllocateDynamicSpace (
     RETURN spacenode
 END
 
-FN MiReleaseDynamicSpace (
-    IN node : ^MiNode,
-    IN spacenode : ^MiDynamicSpaceNode,
+FN MmpReleaseDynamicSpace (
+    IN node : ^MmpNode,
+    IN spacenode : ^MmpDynamicSpaceNode,
     IN flush : UWORD,
 )
 
@@ -651,11 +651,11 @@ FN MiReleaseDynamicSpace (
 
     // Free the node.
 
-    MiFreeDynamicSpaceNode ( node, spacenode )
+    MmpFreeDynamicSpaceNode ( node, spacenode )
 
     // Free the space.
 
-    MiReleaseDynamicPages (
+    MmpReleaseDynamicPages (
         node, // node
         ptr, // ptr
         pages, // pages

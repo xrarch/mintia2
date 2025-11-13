@@ -5,28 +5,28 @@
 #INCLUDE "Obp.hjk"
 
 #SECTION "PAGEtext"
-FN (ExHandleTableEnumerationF) ObpDestroyHandle (
-    IN handletable : ^ExHandleTable,
+FN (ExuHandleTableEnumerationF) ObpDestroyHandle (
+    IN handletable : ^ExuHandleTable,
     IN handle : UWORD,
     IN entryptr : ^VOID,
     IN context : UWORD,
 )
 
-    process := CAST context TO ^PsProcess
+    process := CAST context TO ^PsuProcess
 
     // Destroy the handle.
 
-    ObCloseObject (
+    ObuCloseObject (
         process, // process
         handle, // handle
     )
 END
 
 #SECTION "PAGEtext"
-FN ObInitializeProcess (
-    IN parentprocess : ^PsProcess,
-    IN process : ^PsProcess,
-    IN quotablock : ^MiQuotaBlock,
+FN ObuInitializeProcess (
+    IN parentprocess : ^PsuProcess,
+    IN process : ^PsuProcess,
+    IN quotablock : ^MmpQuotaBlock,
 )
 
     // Initialize a process such that the object manager will play nice with it.
@@ -35,7 +35,7 @@ FN ObInitializeProcess (
     // two pointers, which fits our ObpHandleEntry structure, since the size of
     // an entry is calculated by (SIZEOF ^VOID * 2) << entrysizelog.
 
-    ExInitializeHandleTable (
+    ExuInitializeHandleTable (
         &process^.Paged^.HandleTable, // handletable
         0, // entrysizelog
         quotablock, // quotablock
@@ -50,21 +50,21 @@ FN ObInitializeProcess (
     parentcred := &parentprocess^.Paged^.Cred
     mycred := &process^.Paged^.Cred
 
-    ObMoveCredentials (
+    ObuMoveCredentials (
         mycred, // dest
         parentcred, // src
     )
 END
 
 #SECTION "PAGEtext"
-FN ObUninitializeProcess (
-    IN process : ^PsProcess,
+FN ObuUninitializeProcess (
+    IN process : ^PsuProcess,
 )
 
     // Uninitialize a process with respect to the object manager. This involves
     // forcibly closing all of its handles.
 
-    ExDeleteHandleTable (
+    ExuDeleteHandleTable (
         &process^.Paged^.HandleTable, // handletable
         &ObpDestroyHandle, // func
         process, // context
@@ -72,8 +72,8 @@ FN ObUninitializeProcess (
 END
 
 #SECTION "PAGEtext"
-FN ObInsertObject (
-    IN process : ^PsProcess,
+FN ObuInsertObject (
+    IN process : ^PsuProcess,
     IN object : ^VOID,
     IN access : UWORD,
     OUT handle : UWORD,
@@ -100,7 +100,7 @@ FN ObInsertObject (
 
     entry : ^ObpHandleEntry
 
-    status := ExCreateHandle (
+    status := ExuCreateHandle (
         handletable, // handletable
         NULLPTR, // lock
         OUT handle, // handle
@@ -118,7 +118,7 @@ FN ObInsertObject (
     entry^.Object = object
     entry^.Access = access
 
-    header := ObFindHeader ( object )
+    header := ObuFindHeader ( object )
 
     IF header^.Type^.Open THEN
         // Call the open method of the type.
@@ -132,7 +132,7 @@ FN ObInsertObject (
         IF OsError ( status ) THEN
             // The type decided not to let us open this object, so back out.
 
-            ExDeleteHandle (
+            ExuDeleteHandle (
                 handletable, // handletable
                 handle, // handle
                 NULLPTR, // entry
@@ -165,8 +165,8 @@ FN ObInsertObject (
 END
 
 #SECTION "PAGEtext"
-FN ObCloseObject (
-    IN process : ^PsProcess,
+FN ObuCloseObject (
+    IN process : ^PsuProcess,
     IN handle : UWORD,
 ) : OsStatus
 
@@ -186,7 +186,7 @@ FN ObCloseObject (
 
     // Delete the handle.
 
-    IF NOT ExDeleteHandle (
+    IF NOT ExuDeleteHandle (
         handletable, // handletable
         handle, // handle
         &entry, // entry
@@ -204,7 +204,7 @@ FN ObCloseObject (
 
     object := entry.Object
 
-    header := ObFindHeader ( object )
+    header := ObuFindHeader ( object )
 
     // Decrement the handle count.
 
@@ -214,29 +214,29 @@ FN ObCloseObject (
     header^.HandleCount = oldcount - 1
 
     IF oldcount == 1 AND
-        header^.Flags & OB_FLAG_PERMANENT == 0 AND
+        header^.Flags & OBU_FLAG_PERMANENT == 0 AND
         header^.NamespaceEntry THEN
 
         // This was the last handle to a non-permanent object that has a name in
         // the namespace. Remove the name.
 
-        NsUnlinkObject ( object )
+        NsuUnlinkObject ( object )
     END
 
     KeReleaseLock ( &header^.Lock )
 
     // Unreference the object.
 
-    ObUnreferenceObject ( object )
+    ObuUnreferenceObject ( object )
 
     RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
-FN ObReferenceByHandleObject (
-    IN process : ^PsProcess,
+FN ObuReferenceByHandleObject (
+    IN process : ^PsuProcess,
     IN handle : UWORD,
-    IN type : ^ObType,
+    IN type : ^ObuType,
     OUT object : ^VOID,
     OUT access : UWORD,
 ) : OsStatus
@@ -256,7 +256,7 @@ FN ObReferenceByHandleObject (
 
     // Look up the handle.
 
-    entry : ^ObpHandleEntry = ExLookupHandle (
+    entry : ^ObpHandleEntry = ExuLookupHandle (
         handletable, // handletable
         handle, // handle
     )
@@ -272,7 +272,7 @@ FN ObReferenceByHandleObject (
     object = entry^.Object
     access = entry^.Access
 
-    IF type AND ObFindHeader ( object )^.Type != type THEN
+    IF type AND ObuFindHeader ( object )^.Type != type THEN
         // Wrong type.
 
         KeReleaseLock ( &paged^.HandleTableLock )
@@ -282,7 +282,7 @@ FN ObReferenceByHandleObject (
 
     // Reference the object.
 
-    ObReferenceObject ( object )
+    ObuReferenceObject ( object )
 
     // Release the lock and return the object.
 
@@ -292,9 +292,9 @@ FN ObReferenceByHandleObject (
 END
 
 #SECTION "PAGEtext"
-FN ObReferenceByHandle (
+FN ObuReferenceByHandle (
     IN handle : UWORD,
-    IN type : ^ObType,
+    IN type : ^ObuType,
     OUT object : ^VOID,
     OUT access : UWORD,
 ) : OsStatus
@@ -303,34 +303,34 @@ FN ObReferenceByHandle (
     // corresponding object.
 
     IF handle == OS_CURRENT_PROCESS THEN
-        IF type AND type != &PsProcessType THEN
+        IF type AND type != &PsuProcessType THEN
             RETURN OS_STATUS_INVALID_OBJECT_TYPE
         END
 
-        object = PsCurrentProcess ()
+        object = PsuCurrentProcess ()
 
         access = OS_ACCESS_ALL
 
-        ObReferenceObject ( object )
+        ObuReferenceObject ( object )
 
         RETURN OS_STATUS_SUCCESS
 
     ELSEIF handle == OS_CURRENT_THREAD THEN
-        IF type AND type != &PsThreadType THEN
+        IF type AND type != &PsuThreadType THEN
             RETURN OS_STATUS_INVALID_OBJECT_TYPE
         END
 
-        object = PsCurrentThread ()
+        object = PsuCurrentThread ()
 
         access = OS_ACCESS_ALL
 
-        ObReferenceObject ( object )
+        ObuReferenceObject ( object )
 
         RETURN OS_STATUS_SUCCESS
     END
 
-    RETURN ObReferenceByHandleObject (
-        PsCurrentProcess (), // process
+    RETURN ObuReferenceByHandleObject (
+        PsuCurrentProcess (), // process
         handle, // handle
         type, // type
         OUT object, // object
@@ -338,24 +338,24 @@ FN ObReferenceByHandle (
     )
 END
 
-EXTERN ExEventType : ObType
-EXTERN PsJobType : ObType
-EXTERN MmPartitionType : ObType
+EXTERN ExuEventType : ObuType
+EXTERN PsuJobType : ObuType
+EXTERN MmuPartitionType : ObuType
 
 // Any type without an entry in this table is not permitted to be inserted
 // directly into the namespace.
 
-ObpTypeTable : ^ObType[OS_MAX_TYPE] = {
-    [OS_EVENT_TYPE] = &ExEventType,
-    [OS_PROCESS_TYPE] = &PsProcessType,
-    [OS_THREAD_TYPE] = &PsThreadType,
-    [OS_JOB_TYPE] = &PsJobType,
-    [OS_PARTITION_TYPE] = &MmPartitionType,
+ObpTypeTable : ^ObuType[OS_MAX_TYPE] = {
+    [OS_EVENT_TYPE] = &ExuEventType,
+    [OS_PROCESS_TYPE] = &PsuProcessType,
+    [OS_THREAD_TYPE] = &PsuThreadType,
+    [OS_JOBU_TYPE] = &PsuJobType,
+    [OS_PARTITION_TYPE] = &MmuPartitionType,
 }
 
 #SECTION "PAGEtext"
-FN ObOpenObject (
-    IN params : ^NsOpenParameters,
+FN ObuOpenObject (
+    IN params : ^NsuOpenParameters,
     IN type : OsObjectType,
     OUT handle : UWORD,
 ) : OsStatus
@@ -367,7 +367,7 @@ FN ObOpenObject (
     //       and can't be directly opened). We need to make sure that using this
     //       to open a file object works right later.
 
-    obtype : ^ObType = NULLPTR
+    obtype : ^ObuType = NULLPTR
 
     IF type != OS_ANY_TYPE THEN
         IF type >= OS_MAX_TYPE THEN
@@ -383,7 +383,7 @@ FN ObOpenObject (
 
     object : ^VOID
 
-    status := NsLookupObject (
+    status := NsuLookupObject (
         params, // params
         obtype, // type
         OUT object, // event
@@ -393,15 +393,15 @@ FN ObOpenObject (
         RETURN status
     END
 
-    status = ObInsertObject (
-        PsCurrentProcess (), // process
+    status = ObuInsertObject (
+        PsuCurrentProcess (), // process
         object, // object
         params^.Captured.Access, // access
         OUT handle, // handle
     )
 
     IF OsError ( status ) THEN
-        ObUnreferenceObject ( object )
+        ObuUnreferenceObject ( object )
     END
 
     RETURN status
@@ -416,9 +416,9 @@ FN OsOpenObject (
 
     // Open an object, system service.
 
-    sysparams : NsOpenParameters
+    sysparams : NsuOpenParameters
 
-    status := NsCaptureOpenParameters (
+    status := NsuCaptureOpenParameters (
         params, // userparams
         &sysparams, // sysparams
     )
@@ -427,13 +427,13 @@ FN OsOpenObject (
         RETURN status
     END
 
-    status = ObOpenObject (
+    status = ObuOpenObject (
         &sysparams, // params
         type, // type
         OUT handle, // handle
     )
 
-    NsFreeOpenParameters ( &sysparams )
+    NsuFreeOpenParameters ( &sysparams )
 
     RETURN status
 END
@@ -445,8 +445,8 @@ FN OsClose (
 
     // Close the specified handle.
 
-    RETURN ObCloseObject (
-        PsCurrentProcess (), // process
+    RETURN ObuCloseObject (
+        PsuCurrentProcess (), // process
         handle, // handle
     )
 END

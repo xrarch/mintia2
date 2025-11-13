@@ -2,31 +2,31 @@
 // Implements quick-mapping.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 
-STRUCT MiQuickPteBlock
-    Locks : KeLock[MI_QUICK_PER_CPU],
-    BasePte : ^MiPte,
+STRUCT MmpQuickPteBlock
+    Locks : KeLock[MMP_QUICK_PER_CPU],
+    BasePte : ^MmpPte,
     NextIndex : UBYTE,
 END
 
-#DEFINE MI_QUICK_PTE_BLOCK_SIZE [((SIZEOF MiQuickPteBlock + KE_CACHE_ALIGN - 1) &
+#DEFINE MMP_QUICK_PTE_BLOCK_SIZE [((SIZEOF MmpQuickPteBlock + KE_CACHE_ALIGN - 1) &
     ~(KE_CACHE_ALIGN - 1))]
 
 #ENTERSECTION "INITtext"
 
 #SECTION "INITtext"
-FN MiInitializeQuickPages (
-    IN node : ^MiNode,
+FN MmpInitializeQuickPages (
+    IN node : ^MmpNode,
 )
 
     // Initialize the quick page mappings.
 
     procs := KeQueryProcessorCount ()
 
-    node^.QuickPteBlocks = MmAllocatePool (
-        MM_NONPAGED_POOL, // poolindex
-        MI_QUICK_PTE_BLOCK_SIZE * procs, // bytes
+    node^.QuickPteBlocks = MmuAllocatePool (
+        MMU_NONPAGED_POOL, // poolindex
+        MMP_QUICK_PTE_BLOCK_SIZE * procs, // bytes
         'Quic', // tag
         FALSE, // wait
     )
@@ -38,16 +38,16 @@ FN MiInitializeQuickPages (
     i := 0
 
     WHILE i < procs DO
-        block := node^.QuickPteBlocks + (i * MI_QUICK_PTE_BLOCK_SIZE)
+        block := node^.QuickPteBlocks + (i * MMP_QUICK_PTE_BLOCK_SIZE)
 
         block^.NextIndex = 0
 
         block^.BasePte = node^.QuickPteBase +
-            ((i * MI_QUICK_PER_CPU) * SIZEOF MiPte)
+            ((i * MMP_QUICK_PER_CPU) * SIZEOF MmpPte)
 
         j := 0
 
-        WHILE j < MI_QUICK_PER_CPU DO
+        WHILE j < MMP_QUICK_PER_CPU DO
             KeInitializeLock ( &block^.Locks[j] )
 
             j += 1
@@ -60,8 +60,8 @@ END
 
 #LEAVESECTION
 
-FN MmUseQuickPte (
-    IN func : MmUseQuickPteF,
+FN MmuUseQuickPte (
+    IN func : MmuUseQuickPteF,
     IN pfn : UWORD,
     IN context : ^VOID,
 ) : OsStatus
@@ -71,7 +71,7 @@ FN MmUseQuickPte (
 
     thread := KeCurrentThread ()
 
-    node := PsCurrentNode ()
+    node := PsuCurrentNode ()
 
     // Mask KAPCs. Otherwise one could be dispatched while we've claimed a quick
     // PTE, and then a complicated self-deadlock could occur below.
@@ -81,7 +81,7 @@ FN MmUseQuickPte (
     // Disable migration of the current thread to another processor.
     // This will make it so we don't need to do a TB shootdown below.
 
-    old := KeControlMigration (
+    old := KeuControlMigration (
         thread, // thread
         TRUE, // pinned
     )
@@ -90,11 +90,11 @@ FN MmUseQuickPte (
 
     // Trylock all of this processor's quick PTEs.
 
-    block := node^.QuickPteBlocks + (id * MI_QUICK_PTE_BLOCK_SIZE)
+    block := node^.QuickPteBlocks + (id * MMP_QUICK_PTE_BLOCK_SIZE)
 
     i := 0
 
-    WHILE i < MI_QUICK_PER_CPU DO
+    WHILE i < MMP_QUICK_PER_CPU DO
         IF KeTryAcquireLockExclusive ( &block^.Locks[i] ) THEN
             GOTO GotOne
         END
@@ -105,7 +105,7 @@ FN MmUseQuickPte (
     // Failed to trylock a page. Increment a counter and lock whatever
     // it lands on.
 
-    i = block^.NextIndex & (MI_QUICK_PER_CPU - 1)
+    i = block^.NextIndex & (MMP_QUICK_PER_CPU - 1)
     block^.NextIndex = i + 1
 
     // Lock the quick page.
@@ -116,17 +116,17 @@ FN MmUseQuickPte (
 
     // Calculate the PTE and virtual address.
 
-    pte := block^.BasePte + (i * SIZEOF MiPte)
-    vaddr := MiVirtualAddress ( pte )
+    pte := block^.BasePte + (i * SIZEOF MmpPte)
+    vaddr := MmpVirtualAddress ( pte )
 
     // Map the page.
 
-    pte[0] = MiBuildPoolPte ( pfn )
+    pte[0] = MmpBuildPoolPte ( pfn )
 
     // Flush TB. We only need to flush the local TB because we disabled
     // migration of the current thread to any other CPU.
 
-    KeFlushMyTbAddress ( vaddr )
+    KeuFlushMyTbAddress ( vaddr )
 
     // Call provided function.
 
@@ -141,7 +141,7 @@ FN MmUseQuickPte (
 
     // Restore migration.
 
-    KeControlMigration (
+    KeuControlMigration (
         thread, // thread
         old, // pinned
     )
@@ -153,7 +153,7 @@ FN MmUseQuickPte (
     RETURN status
 END
 
-FN (MmUseQuickPteF) MiZeroPageFunc (
+FN (MmuUseQuickPteF) MmpZeroPageFunc (
     IN vaddr : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
@@ -167,14 +167,14 @@ FN (MmUseQuickPteF) MiZeroPageFunc (
     )
 END
 
-FN MmZeroPage (
+FN MmuZeroPage (
     IN pfn : UWORD,
 )
 
     // Zero out a page frame.
 
-    MmUseQuickPte (
-        &MiZeroPageFunc, // func
+    MmuUseQuickPte (
+        &MmpZeroPageFunc, // func
         pfn, // pfn
         NULLPTR, // context
     )

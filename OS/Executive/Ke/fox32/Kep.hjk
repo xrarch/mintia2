@@ -1,0 +1,28 @@
+//
+// Private header file for the Kernel component of the MINTIA Executive.
+//
+
+// Fox32 is always uniprocessor, so the Prb is mapped in a convenient and
+// constant spot with a real page table entry.
+
+#DEFINE KEP_CURRENT_PRB_ADDR 0xFFFFC000
+
+#DEFINE KEP_CURRENT_PRB_LOCAL [(CAST KEP_CURRENT_PRB_ADDR TO ^KepPrb)]
+#DEFINE KEP_CURRENT_PRB [(CAST KEP_CURRENT_PRB_ADDR TO ^KepPrb)]
+#DEFINE KEP_VIRTUAL_PRB 0
+
+#MACRO KepRaiseIpl ( ipl ) [
+    NOTHING KEP_CURRENT_PRB_LOCAL^.Ipl
+
+    KeAssert ( KEP_CURRENT_PRB_LOCAL^.Ipl <= ipl )
+
+    NOTHING KEP_CURRENT_PRB_LOCAL^.Ipl = ipl
+
+    BARRIER
+]
+
+#MACRO KepCurrentIpl () [
+    (KEP_CURRENT_PRB_LOCAL)^.Ipl
+]
+
+#DEFINE KEP_MAXIMUM_PROCESSORS 1

@@ -10,10 +10,10 @@ HalpIplToLsicIpl : UBYTE[32] = {
     [1] = 63,
     [2] = 63,
     [3] = 63,
-    [HAL_IPL_INTERACTIVE] = 47,
-    [HAL_IPL_BOARDS] = 15,
-    [HAL_IPL_SERIAL] = 3,
-    [HAL_IPL_DISK] = 2,
+    [HALU_IPL_INTERACTIVE] = 47,
+    [HALU_IPL_BOARDS] = 15,
+    [HALU_IPL_SERIAL] = 3,
+    [HALU_IPL_DISK] = 2,
     [8] = 2,
     [9] = 2,
     [10] = 2,
@@ -35,34 +35,34 @@ HalpIplToLsicIpl : UBYTE[32] = {
     [26] = 2,
     [27] = 2,
     [28] = 2,
-    [KI_IPL_CLOCK] = 1,
-    [KI_IPL_IPI] = 0,
-    [KI_IPL_HIGH] = 0,
+    [KEP_IPL_CLOCK] = 1,
+    [KEP_IPL_IPI] = 0,
+    [KEP_IPL_HIGH] = 0,
 }
 
-FN HalRaiseHardwareIpl (
+FN HaluRaiseHardwareIpl (
     IN ipl : UWORD,
 ) : UWORD
 
     // Raise the hardware IPL by programming the LSIC.
-    // This isn't part of KiRaiseIpl since that is written in a tightly
+    // This isn't part of KepRaiseIpl since that is written in a tightly
     // optimized manner around the most common usage (changing between software
     // IPLs, which need not reprogram the hardware interrupt masks).
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
     // Disable interrupts so that changes to the software IPL and the LSIC's
     // view of IPL are atomic from the perspective of ISRs, to stop them from
     // getting confused.
 
-    ints := KiDisableInterrupts ()
+    ints := KepDisableInterrupts ()
 
     // Set the new IPL in the Prb.
 
     oldipl := prb^.Ipl
     prb^.Ipl = ipl
 
-    KeAssert ( ipl > KI_IPL_DPC )
+    KeAssert ( ipl > KEP_IPL_DPC )
     KeAssert ( ipl >= oldipl )
 
     // Write the corresponding hardware IPL into the LSIC.
@@ -73,30 +73,30 @@ FN HalRaiseHardwareIpl (
 
     // Restore interrupts.
 
-    KiRestoreInterrupts ( ints )
+    KepRestoreInterrupts ( ints )
 
     RETURN oldipl
 END
 
-FN HalLowerHardwareIpl (
+FN HaluLowerHardwareIpl (
     IN ipl : UWORD,
 )
 
     // Set the hardware IPL by programming the LSIC.
-    // This isn't part of KiLowerIpl since that is written in a tightly
+    // This isn't part of KepLowerIpl since that is written in a tightly
     // optimized manner around the most common usage (changing between software
     // IPLs, which need not reprogram the hardware interrupt masks).
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
     // Disable interrupts so that changes to the software IPL and the LSIC's
     // view of IPL are atomic from the perspective of ISRs, to stop them from
     // getting confused.
 
-    ints := KiDisableInterrupts ()
+    ints := KepDisableInterrupts ()
 
     KeAssert ( ipl <= prb^.Ipl )
-    KeAssert ( prb^.Ipl > KI_IPL_DPC )
+    KeAssert ( prb^.Ipl > KEP_IPL_DPC )
 
     // Write the corresponding hardware IPL into the LSIC.
 
@@ -110,27 +110,27 @@ FN HalLowerHardwareIpl (
 
     // Restore interrupts.
 
-    KiRestoreInterrupts ( ints )
+    KepRestoreInterrupts ( ints )
 
     // We don't need to check this in the disabled interrupts section because if
     // we get a stale PendingSoftwareInterrupts value from another processor, we
-    // will harmlessly call KiDispatchSoftwareInterrupts which does nothing. And
+    // will harmlessly call KepDispatchSoftwareInterrupts which does nothing. And
     // we can't "miss" any since all events that switch us to another processor
     // will cause software interrupt dispatch anyway.
 
     IF prb^.PendingSoftwareInterrupts >> ipl THEN
-        KiDispatchSoftwareInterrupts ( ipl )
+        KepDispatchSoftwareInterrupts ( ipl )
     END
 END
 
-FN (KeInterruptF) HalHandleDeviceInterrupt (
+FN (KeInterruptF) HaluHandleDeviceInterrupt (
     IN interrupt : ^KeInterrupt,
     IN context : ^OsContext,
 )
 
     // Default handler for non-special interrupts.
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
     lsic := CAST prb^.LsicBase TO ^HalpLsic
 
@@ -148,14 +148,14 @@ FN (KeInterruptF) HalHandleDeviceInterrupt (
     // Safe to enable interrupts now since we won't re-take the same IRQ after
     // masking it off.
 
-    KiEnableInterrupts ()
+    KepEnableInterrupts ()
 
     // Acquire the interrupt object's spinlock. This synchronizes against
     // other processors which have a driver trying to run code that is
     // synchronized against their ISR, to access some shared data.
 
 #IF BLD_MP
-    KiAcquireSpinlock ( &interrupt^.Spinlock )
+    KepAcquireSpinlock ( &interrupt^.Spinlock )
 #END
 
     // Call the routine.
@@ -166,12 +166,12 @@ FN (KeInterruptF) HalHandleDeviceInterrupt (
     )
 
 #IF BLD_MP
-    KiReleaseSpinlock ( &interrupt^.Spinlock )
+    KepReleaseSpinlock ( &interrupt^.Spinlock )
 #END
 
     // Disable interrupts.
 
-    KiDisableInterrupts ()
+    KepDisableInterrupts ()
 
     // Reset the LSIC IPL.
 
@@ -194,7 +194,7 @@ FN (KeInterruptF) HalpHandlePerCpuInterrupt (
     // Namely, the timer interrupt.
     // There is no need to take a spinlock for such interrupts so we don't.
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
     lsic := CAST prb^.LsicBase TO ^HalpLsic
 
@@ -212,7 +212,7 @@ FN (KeInterruptF) HalpHandlePerCpuInterrupt (
     // Safe to enable interrupts now since we won't re-take the same IRQ after
     // masking it off.
 
-    KiEnableInterrupts ()
+    KepEnableInterrupts ()
 
     // Call the routine.
 
@@ -223,7 +223,7 @@ FN (KeInterruptF) HalpHandlePerCpuInterrupt (
 
     // Disable interrupts.
 
-    KiDisableInterrupts ()
+    KepDisableInterrupts ()
 
     // Reset the LSIC IPL.
 
@@ -237,13 +237,13 @@ END
 
 #END
 
-FN HalInterrupt (
+FN HaluInterrupt (
     IN context : ^OsContext,
 )
 
     // Called by architecture-specific code in Ke when an interrupt is detected.
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
     lsic := CAST prb^.LsicBase TO ^HalpLsic
 
@@ -265,8 +265,8 @@ FN HalInterrupt (
     )
 END
 
-FN HalEnableInterrupt (
-    IN prb : ^KiPrb,
+FN HaluEnableInterrupt (
+    IN prb : ^KepPrb,
     IN vector : UWORD,
 )
 
@@ -295,8 +295,8 @@ FN HalEnableInterrupt (
     maskptr^ = mask
 END
 
-FN HalDisableInterrupt (
-    IN prb : ^KiPrb,
+FN HaluDisableInterrupt (
+    IN prb : ^KepPrb,
     IN vector : UWORD,
 )
 
@@ -327,8 +327,8 @@ END
 
 #IF BLD_MP
 
-FN HalTriggerIpi (
-    IN target : ^KiPrb,
+FN HaluTriggerIpi (
+    IN target : ^KepPrb,
     IN type : UWORD,
 )
 
@@ -343,7 +343,7 @@ FN HalTriggerIpi (
     // interrupt controller) for the synchronous IPI and IRQ63 for the async
     // IPI.
 
-    IF type == KI_IPI_SYNCHRONOUS THEN
+    IF type == KEP_IPI_SYNCHRONOUS THEN
         lsic^.Pending0 = 1 << 1
 
     ELSE
@@ -351,8 +351,8 @@ FN HalTriggerIpi (
     END
 END
 
-FN HalBroadcastIpi (
-    IN except : ^KiPrb,
+FN HaluBroadcastIpi (
+    IN except : ^KepPrb,
     IN type : UWORD,
 )
 
@@ -360,8 +360,8 @@ FN HalBroadcastIpi (
     // also guaranteed to be the one we're executing on. We have to do this
     // one at a time on XR/station.
 
-    targetprb := CAST KeLoaderBlock.VirtualPrbBase TO ^KiPrb
-    count := KeLoaderBlock.ProcessorCount
+    targetprb := CAST KeuLoaderBlock.VirtualPrbBase TO ^KepPrb
+    count := KeuLoaderBlock.ProcessorCount
     i := 0
 
     // Now send IPIs to all of the processors in the system (other than me).
@@ -370,7 +370,7 @@ FN HalBroadcastIpi (
         // Don't IPI the processor if it's me.
 
         IF targetprb != except THEN
-            HalTriggerIpi (
+            HaluTriggerIpi (
                 targetprb, // target
                 type, // type
             )

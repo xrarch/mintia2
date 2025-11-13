@@ -2,15 +2,15 @@
 // Implements process support in the Memory Manager.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 
 #INCLUDE "<ll>/System/OsProcess.hjk"
 
 #SECTION "PAGEtext"
-FN MmInitializeProcess (
-    IN parentprocess : ^PsProcess,
-    IN process : ^PsProcess,
-    IN partition : ^MiPartition,
+FN MmuInitializeProcess (
+    IN parentprocess : ^PsuProcess,
+    IN process : ^PsuProcess,
+    IN partition : ^MmpPartition,
 ) : OsStatus
 
     // Initialize the process so it can be used by the memory manager.
@@ -21,12 +21,12 @@ FN MmInitializeProcess (
         partition = parentprocess^.Partition
     END
 
-    IF NOT MiIsPartitionPhysical ( partition ) THEN
+    IF NOT MmpIsPartitionPhysical ( partition ) THEN
         // This is not a partition inherent to a NUMA node so we need to up the
         // refcount. NUMA node partitions are eternal and don't have refcounts,
         // so we can't do this in that case.
 
-        ObReferenceObject ( partition )
+        ObuReferenceObject ( partition )
     END
 
     process^.WorkingSetSize = 0
@@ -37,10 +37,10 @@ FN MmInitializeProcess (
     process^.Partition = partition
     process^.Node = partition^.Node
 
-    IF NOT PsSystemProcess THEN
+    IF NOT PsuSystemProcess THEN
         // This is the system process, so give it the system page directory.
 
-        process^.Pcb.PageDirectoryPfn = KeSystemPageDirectoryPfn
+        process^.Pcb.PageDirectoryPfn = KeuSystemPageDirectoryPfn
 
     ELSE
         KeCrash ( "NYI create address space\n" )
@@ -50,8 +50,8 @@ FN MmInitializeProcess (
 END
 
 #SECTION "PAGEtext"
-FN MmUninitializeProcess (
-    IN process : ^PsProcess,
+FN MmuUninitializeProcess (
+    IN process : ^PsuProcess,
 )
 
     // Uninitialize a process that was previously initialized.
@@ -59,37 +59,37 @@ FN MmUninitializeProcess (
     // We uninitialize everything, except for the page directory. We still need
     // that because we might be in the address space of that process right now.
 
-    KeCrash ( "MmUninitializeProcess NYI\n" )
+    KeCrash ( "MmuUninitializeProcess NYI\n" )
 END
 
 #SECTION "PAGEtext"
-FN MmDeleteProcess (
-    IN process : ^PsProcess,
+FN MmuDeleteProcess (
+    IN process : ^PsuProcess,
 )
 
     // Finish deleting a process.
 
     // First delete the page directory.
 
-    KeCrash ( "MmDeleteProcess NYI\n" )
+    KeCrash ( "MmuDeleteProcess NYI\n" )
 
     partition := process^.Partition
 
-    IF NOT MiIsPartitionPhysical ( partition ) THEN
+    IF NOT MmpIsPartitionPhysical ( partition ) THEN
         // Unreference the partition object.
 
         // Only do this after every page frame the process might possibly have
         // ever consumed (including page directory, tables, etc) has been
         // returned.
 
-        ObUnreferenceObject ( process^.Partition )
+        ObuUnreferenceObject ( process^.Partition )
     END
 END
 
 #SECTION "PAGEtext"
-FN MmInitializeThread (
-    IN process : ^PsProcess,
-    IN thread : ^PsThread,
+FN MmuInitializeThread (
+    IN process : ^PsuProcess,
+    IN thread : ^PsuThread,
     IN mode : UWORD,
 ) : OsStatus
 
@@ -100,16 +100,16 @@ FN MmInitializeThread (
     thread^.VmPrivileged = FALSE
 
     IF mode == KE_USER_MODE THEN
-        KeCrash ( "MmInitializeThread NYI\n" )
+        KeCrash ( "MmuInitializeThread NYI\n" )
     END
 
     RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
-FN MmUninitializeThread (
-    IN process : ^PsProcess,
-    IN thread : ^PsThread,
+FN MmuUninitializeThread (
+    IN process : ^PsuProcess,
+    IN thread : ^PsuThread,
 )
 
     // Uninitialize the thread's virtual memory state.
@@ -117,13 +117,13 @@ FN MmUninitializeThread (
     // XXX Or don't, review discussions on runtime responsibility for this
 
     IF thread^.Paged^.Mode == KE_USER_MODE THEN
-        KeCrash ( "MmUninitializeThread NYI\n" )
+        KeCrash ( "MmuUninitializeThread NYI\n" )
     END
 END
 
 #SECTION "PAGEtext"
-FN MmQueryProcess (
-    IN process : ^PsProcess,
+FN MmuQueryProcess (
+    IN process : ^PsuProcess,
     IN query : ^OsProcessQuery,
 )
 

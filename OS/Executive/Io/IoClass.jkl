@@ -5,16 +5,16 @@
 
 #INCLUDE "Iop.hjk"
 
-STRUCT IoClass
+STRUCT IouClass
     Name : RtlString,
 
-    Superclass : ^IoClass,
+    Superclass : ^IouClass,
 
-    Module : ^ExLoadedModule,
+    Module : ^ExuLoadedModule,
 
     Entry : RtlAvlNode,
 
-    DispatchTable : ^IoPacketBasedCallF,
+    DispatchTable : ^IouPacketBasedCallF,
 
     InstantiationCount : ULONG,
     SubclassCount : ULONG,
@@ -26,9 +26,9 @@ IopClassLookupTree : RtlAvlNode
 
 IopClassLock : KeLock = KE_INITIAL_LOCK
 
-FN (IoPacketBasedCallF) IopUninitializedDispatch (
-    IN packet : ^IoPacket,
-    IN trampoline : ^IoTrampoline,
+FN (IouPacketBasedCallF) IopUninitializedDispatch (
+    IN packet : ^IouPacket,
+    IN trampoline : ^IouTrampoline,
 ) : OsStatus
 
     KeCrash ( "Uninitialized dispatch table entry\n" )
@@ -43,15 +43,15 @@ FN (RtlAvlLessThanF) IopCompareClassNames (
     // Compare the class names.
 
     RETURN CAST RtlCompareRtlString (
-        &(CONTAINEROF a TO IoClass.Entry)^.Name, // str1
-        &(CONTAINEROF b TO IoClass.Entry)^.Name, // str2
+        &(CONTAINEROF a TO IouClass.Entry)^.Name, // str1
+        &(CONTAINEROF b TO IouClass.Entry)^.Name, // str2
     ) TO WORD < 0
 END
 
 #SECTION "PAGEtext"
 FN IopLookupClass (
     IN name : ^RtlString,
-) : ^IoClass
+) : ^IouClass
 
     // Look up an IO class by name. Assumes the global class lock is held.
 
@@ -67,7 +67,7 @@ FN IopLookupClass (
             RETURN NULLPTR
         END
 
-        class := CONTAINEROF avlnode TO IoClass.Entry
+        class := CONTAINEROF avlnode TO IouClass.Entry
 
         res := CAST RtlCompareRtlString (
             name, // str1
@@ -91,21 +91,21 @@ FN IopLookupClass (
 END
 
 #SECTION "PAGEtext"
-FN IoCreateClass (
-    IN module : ^ExLoadedModule,
+FN IouCreateClass (
+    IN module : ^ExuLoadedModule,
     IN classname : ^RtlString,
-    IN superclass : ^IoClass,
-    IN dispatchtable : ^IoPacketBasedCallF,
+    IN superclass : ^IouClass,
+    IN dispatchtable : ^IouPacketBasedCallF,
     IN dispatchtablesize : UWORD,
-    OUT class : ^IoClass,
+    OUT class : ^IouClass,
 ) : OsStatus
 
     // Register a new IO class.
     // Returns NULLPTR upon failure.
 
-    class = MmAllocatePool (
-        MM_NONPAGED_POOL, // poolindex
-        SIZEOF IoClass + dispatchtablesize, // bytes
+    class = MmuAllocatePool (
+        MMU_NONPAGED_POOL, // poolindex
+        SIZEOF IouClass + dispatchtablesize, // bytes
         'Clas', // tag
         TRUE, // wait
     )
@@ -127,7 +127,7 @@ FN IoCreateClass (
     // Enough space was allocated at the end of the class object for the
     // dispatch table.
 
-    mydispatch := CAST (class + SIZEOF IoClass) TO ^IoPacketBasedCallF
+    mydispatch := CAST (class + SIZEOF IouClass) TO ^IouPacketBasedCallF
 
     class^.DispatchTable = mydispatch
     class^.DispatchTableSize = dispatchtablesize
@@ -147,9 +147,9 @@ FN IoCreateClass (
             mydispatch^ = superdispatch^
         END
 
-        superdispatch += SIZEOF IoPacketBasedCallF
-        dispatchtable += SIZEOF IoPacketBasedCallF
-        mydispatch += SIZEOF IoPacketBasedCallF
+        superdispatch += SIZEOF IouPacketBasedCallF
+        dispatchtable += SIZEOF IouPacketBasedCallF
+        mydispatch += SIZEOF IouPacketBasedCallF
     END
 
     // Now fill in the entries that are unique to the subclass.
@@ -163,8 +163,8 @@ FN IoCreateClass (
             mydispatch^ = &IopUninitializedDispatch
         END
 
-        dispatchtable += SIZEOF IoPacketBasedCallF
-        mydispatch += SIZEOF IoPacketBasedCallF
+        dispatchtable += SIZEOF IouPacketBasedCallF
+        mydispatch += SIZEOF IouPacketBasedCallF
     END
 
     // Insert into the class lookup tree.
@@ -176,7 +176,7 @@ FN IoCreateClass (
 
         KeReleaseLock ( &IopClassLock )
 
-        MmFreePool (
+        MmuFreePool (
             class, // ptr
             'Clas', // tag
         )
@@ -198,14 +198,14 @@ FN IoCreateClass (
 
     // Increment the reference count of the superclass's module.
 
-    ObReferenceObject ( superclass^.Module )
+    ObuReferenceObject ( superclass^.Module )
 
     RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
-FN IoDeleteClass (
-    IN class : ^IoClass,
+FN IouDeleteClass (
+    IN class : ^IouClass,
 )
 
     // Delete a class.
@@ -231,13 +231,13 @@ FN IoDeleteClass (
 
     // Unreference the superclass's module.
 
-    ObUnreferenceObject ( class^.Superclass^.Module )
+    ObuUnreferenceObject ( class^.Superclass^.Module )
 END
 
 #SECTION "PAGEtext"
-FN IoLoadClassByName (
+FN IouLoadClassByName (
     IN name : ^RtlString,
-) : ^IoClass
+) : ^IouClass
 
     // Load an IO class by name. Returns a referenced pointer to the class or
     // NULLPTR if we don't know what this class is.
@@ -249,7 +249,7 @@ FN IoLoadClassByName (
     class := IopLookupClass ( name )
 
     IF NOT class OR
-        NOT ObConditionallyReferenceObject ( class^.Module ) THEN
+        NOT ObuConditionallyReferenceObject ( class^.Module ) THEN
 
         // Didn't find the class or failed to reference it. If we failed to
         // reference it, then it is actively being deleted (that is, the module
@@ -262,18 +262,18 @@ FN IoLoadClassByName (
         //       class, and load it if found. If we find such a module, retry
         //       the lookup. Otherwise, return NULLPTR.
 
-        KeCrash ( "NYI IoLoadClassByName\n" )
+        KeCrash ( "NYI IouLoadClassByName\n" )
 
         GOTO Retry
     END
 
     KeReleaseLock ( &IopClassLock )
 
-    IF class^.Module^.Flags & EX_MODULE_LOADING THEN
+    IF class^.Module^.Flags & EXU_MODULE_LOADING THEN
         // The module is still loading, so wait for that to finish before we use
         // any of its classes.
 
-        KeCrash ( "NYI IoLoadClassByName 2\n" )
+        KeCrash ( "NYI IouLoadClassByName 2\n" )
     END
 
     // Return the referenced class.

@@ -2,21 +2,21 @@
 // Implements the architecture-specific part of interrupt object support.
 //
 
-#INCLUDE "../Ki.hjk"
+#INCLUDE "../Kep.hjk"
 
 // The exact interface to the HAL for interrupts is private to the architecture.
 
-EXTERN FN HalEnableInterrupt (
-    IN prb : ^KiPrb,
+EXTERN FN HaluEnableInterrupt (
+    IN prb : ^KepPrb,
     IN vector : UWORD,
 )
 
-EXTERN FN HalDisableInterrupt (
-    IN prb : ^KiPrb,
+EXTERN FN HaluDisableInterrupt (
+    IN prb : ^KepPrb,
     IN vector : UWORD,
 )
 
-EXPORT FN KeConnectInterrupt (
+EXPORT FN KeuConnectInterrupt (
     IN interrupt : ^KeInterrupt,
 ) : UWORD
 
@@ -29,7 +29,7 @@ EXPORT FN KeConnectInterrupt (
     //       connected simultaneously.
 
     IF interrupt^.Connected OR
-        interrupt^.Vector >= HAL_VECTOR_MAX OR
+        interrupt^.Vector >= HALU_VECTOR_MAX OR
         interrupt^.ShareVector THEN
 
         // Already connected, or beyond maximum, or shared (which we never do on
@@ -42,16 +42,16 @@ EXPORT FN KeConnectInterrupt (
 
     // Get the Prb for the target processor.
 
-    prb := KiPrbFromNumber ( interrupt^.ProcessorId )
+    prb := KepPrbFromNumber ( interrupt^.ProcessorId )
 
     // Raise IPL.
 
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
 #IF BLD_MP
     // Pin the current thread to the target processor.
 
-    KiPinThread ( prb )
+    KepPinThread ( prb )
 #END
 
     IF prb^.IrqDispatchTable[interrupt^.Vector] THEN
@@ -64,7 +64,7 @@ EXPORT FN KeConnectInterrupt (
 
     // Disable interrupts so it won't come in while we're enabling it.
 
-    oldstate := KiDisableInterrupts ()
+    oldstate := KepDisableInterrupts ()
 
     // Set the interrupt object in the table.
 
@@ -72,14 +72,14 @@ EXPORT FN KeConnectInterrupt (
 
     // Enable the interrupt.
 
-    HalEnableInterrupt (
+    HaluEnableInterrupt (
         prb, // prb
         interrupt^.Vector, // vector
     )
 
     // Restore interrupts.
 
-    KiRestoreInterrupts ( oldstate )
+    KepRestoreInterrupts ( oldstate )
 
     // Set the interrupt object connected.
 
@@ -92,17 +92,17 @@ EXPORT FN KeConnectInterrupt (
 #IF BLD_MP
     // Unpin the thread.
 
-    KiUnpinThread ()
+    KepUnpinThread ()
 #END
 
     // Lower IPL.
 
-    KiLowerIpl ( ipl )
+    KepLowerIpl ( ipl )
 
     RETURN status
 END
 
-EXPORT FN KeDisconnectInterrupt (
+EXPORT FN KeuDisconnectInterrupt (
     IN interrupt : ^KeInterrupt,
 ) : UWORD
 
@@ -118,26 +118,26 @@ EXPORT FN KeDisconnectInterrupt (
 
     // Get the Prb for the target processor.
 
-    prb := KiPrbFromNumber ( interrupt^.ProcessorId )
+    prb := KepPrbFromNumber ( interrupt^.ProcessorId )
 
     // Raise IPL.
 
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
 #IF BLD_MP
     // Pin the current thread to the target processor.
 
-    KiPinThread ( prb )
+    KepPinThread ( prb )
 #END
 
     // Disable interrupts so that the interrupt can't come in while we're
     // disabling it.
 
-    oldstate := KiDisableInterrupts ()
+    oldstate := KepDisableInterrupts ()
 
     // Disable the interrupt.
 
-    HalDisableInterrupt (
+    HaluDisableInterrupt (
         prb, // prb
         interrupt^.Vector, // vector
     )
@@ -148,17 +148,17 @@ EXPORT FN KeDisconnectInterrupt (
 
     // Restore interrupts.
 
-    KiRestoreInterrupts ( oldstate )
+    KepRestoreInterrupts ( oldstate )
 
 #IF BLD_MP
     // Unpin the thread.
 
-    KiUnpinThread ()
+    KepUnpinThread ()
 #END
 
     // Lower IPL.
 
-    KiLowerIpl ( ipl )
+    KepLowerIpl ( ipl )
 
     // Set the interrupt object disconnected.
 

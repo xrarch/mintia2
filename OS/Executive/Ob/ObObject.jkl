@@ -4,12 +4,12 @@
 
 #INCLUDE "Obp.hjk"
 
-PUBLIC ObpDeferredDeletionList : KeCustodyList
+PUBLIC ObpDeferredDeletionList : KeuCustodyList
 
-PUBLIC ObpDeferredDeletionTimedWorkItem : ExTimedWorkItem
+PUBLIC ObpDeferredDeletionTimedWorkItem : ExuTimedWorkItem
 
 #MACRO ObpCalculatePagedBlockSize ( bodysize ) [
-    (SIZEOF ObHeader + SIZEOF ObpCommonHeader + (bodysize))
+    (SIZEOF ObuHeader + SIZEOF ObpCommonHeader + (bodysize))
 ]
 
 #MACRO ObpCalculateNpBlockSize ( bodysize ) [
@@ -17,17 +17,17 @@ PUBLIC ObpDeferredDeletionTimedWorkItem : ExTimedWorkItem
 ]
 
 #MACRO ObpCalculateNpHeaderSize ( pgsize ) [
-    (SIZEOF ObHeader + (pgsize))
+    (SIZEOF ObuHeader + (pgsize))
 ]
 
 #ENTERSECTION "INITtext"
-FN ObInitializeType (
-    IN type : ^ObType,
+FN ObuInitializeType (
+    IN type : ^ObuType,
 ) : OsStatus
 
     // Initialize an object type.
 
-    error := "ObInitializeType: %s: %s"
+    error := "ObuInitializeType: %s: %s"
 
     npsize : UWORD
     psize : UWORD
@@ -48,8 +48,8 @@ FN ObInitializeType (
     name : ^UBYTE
 
     IF npsize THEN
-        name = MmAllocatePool (
-            MM_NONPAGED_POOL, // poolindex
+        name = MmuAllocatePool (
+            MMU_NONPAGED_POOL, // poolindex
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
             TRUE, // wait
@@ -69,11 +69,11 @@ FN ObInitializeType (
         name[typenamelen + 1] = 'p'
         name[typenamelen + 2] = 0
 
-        type^.NpPartCache = MmCreatePoolCache (
-            PsCurrentNode (), // node
+        type^.NpPartCache = MmuCreatePoolCache (
+            PsuCurrentNode (), // node
             name, // name
             npsize, // size
-            MM_NONPAGED_POOL, // poolindex
+            MMU_NONPAGED_POOL, // poolindex
             type^.Tag, // tag
         )
 
@@ -83,8 +83,8 @@ FN ObInitializeType (
     END
 
     IF psize THEN
-        name = MmAllocatePool (
-            MM_NONPAGED_POOL, // poolindex
+        name = MmuAllocatePool (
+            MMU_NONPAGED_POOL, // poolindex
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
             TRUE, // wait
@@ -104,11 +104,11 @@ FN ObInitializeType (
         name[typenamelen + 1] = 'g'
         name[typenamelen + 2] = 0
 
-        type^.PgPartCache = MmCreatePoolCache (
-            PsCurrentNode (), // node
+        type^.PgPartCache = MmuCreatePoolCache (
+            PsuCurrentNode (), // node
             name, // name
             psize, // size
-            MM_PAGED_POOL, // poolindex
+            MMU_PAGED_POOL, // poolindex
             type^.Tag, // tag
         )
 
@@ -125,8 +125,8 @@ END
 #DEFINE OBP_NP_FROM_CACHE 2
 
 #SECTION "PAGEtext"
-FN ObAllocateObject (
-    IN obparams : ^ObParameters,
+FN ObuAllocateObject (
+    IN obparams : ^ObuParameters,
     OUT object : ^VOID,
 ) : OsStatus
 
@@ -152,27 +152,27 @@ FN ObAllocateObject (
 
     // Charge pool quota.
 
-    npquota := MmGetOverheadOfBytes ( npsize ) + obparams^.NpQuotaBias
-    pquota := MmGetOverheadOfBytes ( psize ) + obparams^.PgQuotaBias
+    npquota := MmuGetOverheadOfBytes ( npsize ) + obparams^.NpQuotaBias
+    pquota := MmuGetOverheadOfBytes ( psize ) + obparams^.PgQuotaBias
 
-    process := PsCurrentProcess ()
+    process := PsuCurrentProcess ()
 
-    quotablock := PsQuotaBlock ( process )
+    quotablock := PsuQuotaBlock ( process )
 
-    status := MmChargePoolQuota (
+    status := MmuChargePoolQuota (
         quotablock, // quotablock
         npquota, // charge
-        MM_NONPAGED_POOL, // poolindex
+        MMU_NONPAGED_POOL, // poolindex
     )
 
     IF OsError ( status ) THEN
         RETURN status
     END
 
-    status = MmChargePoolQuota (
+    status = MmuChargePoolQuota (
         quotablock, // quotablock
         pquota, // charge
-        MM_PAGED_POOL, // poolindex
+        MMU_PAGED_POOL, // poolindex
     )
 
     IF OsError ( status ) THEN
@@ -187,14 +187,14 @@ FN ObAllocateObject (
 
             internalflags |= OBP_NP_FROM_CACHE
 
-            nppart = MmAllocateFromPoolCache (
+            nppart = MmuAllocateFromPoolCache (
                 type^.NpPartCache, // cache
                 TRUE, // wait
             )
         
         ELSE
-            nppart = MmAllocatePool (
-                MM_NONPAGED_POOL, // poolindex
+            nppart = MmuAllocatePool (
+                MMU_NONPAGED_POOL, // poolindex
                 npsize, // bytes
                 type^.Tag, // tag
                 TRUE, // wait
@@ -216,14 +216,14 @@ FN ObAllocateObject (
 
             internalflags |= OBP_PG_FROM_CACHE
 
-            pgpart = MmAllocateFromPoolCache (
+            pgpart = MmuAllocateFromPoolCache (
                 type^.PgPartCache, // cache
                 TRUE, // wait
             )
         
         ELSE
-            pgpart = MmAllocatePool (
-                MM_PAGED_POOL, // poolindex
+            pgpart = MmuAllocatePool (
+                MMU_PAGED_POOL, // poolindex
                 psize, // bytes
                 type^.Tag, // tag
                 TRUE, // wait
@@ -237,12 +237,12 @@ FN ObAllocateObject (
         END
     END
 
-    header : ^ObHeader
+    header : ^ObuHeader
     commonheader : ^ObpCommonHeader
 
     IF type^.IsPaged THEN
         header = pgpart
-        commonheader = pgpart + SIZEOF ObHeader
+        commonheader = pgpart + SIZEOF ObuHeader
 
     ELSE
         header = pgpart
@@ -254,14 +254,14 @@ FN ObAllocateObject (
     header^.PagedQuotaCharge = pquota
     header^.NonpagedQuotaCharge = npquota
 
-    MmReferenceQuotaBlock ( quotablock )
+    MmuReferenceQuotaBlock ( quotablock )
 
     header^.QuotaBlock = quotablock
 
     header^.Flags = obparams^.Flags
     header^.InternalFlags = internalflags
 
-    ObMoveCredentials (
+    ObuMoveCredentials (
         &header^.Permissions.Cred, // dest
         &obparams^.Permissions.Cred, // src
     )
@@ -290,7 +290,7 @@ FN ObAllocateObject (
         IF OsError ( status ) THEN
             // Initialization failed so just free everything we did.
 
-            ObFreeObject ( object )
+            ObuFreeObject ( object )
 
             RETURN status
         END
@@ -302,13 +302,13 @@ FN ObAllocateObject (
 
     IF nppart THEN
         IF internalflags & OBP_NP_FROM_CACHE THEN
-            MmFreeToPoolCache (
+            MmuFreeToPoolCache (
                 type^.NpPartCache, // cache
                 nppart, // ptr
             )
 
         ELSE
-            MmFreePool (
+            MmuFreePool (
                 nppart, // ptr
                 type^.Tag, // tag
             )
@@ -317,31 +317,31 @@ FN ObAllocateObject (
 
 @Error2
 
-    MmUnchargePoolQuota (
+    MmuUnchargePoolQuota (
         quotablock, // quotablock
         pquota, // charge
-        MM_PAGED_POOL, // poolindex
+        MMU_PAGED_POOL, // poolindex
     )
 
 @Error1
 
-    MmUnchargePoolQuota (
+    MmuUnchargePoolQuota (
         quotablock, // quotablock
         npquota, // charge
-        MM_NONPAGED_POOL, // poolindex
+        MMU_NONPAGED_POOL, // poolindex
     )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN ObFreeObject (
+FN ObuFreeObject (
     IN object : ^VOID,
 )
 
     // Free an object. Don't call the deletion routine.
 
-    header := ObFindHeader ( object )
+    header := ObuFindHeader ( object )
 
     // Shouldn't be possible because temporary objects are removed from the
     // namespace when their handle count reaches zero, which happened before
@@ -363,13 +363,13 @@ FN ObFreeObject (
         // Only a single part.
 
         IF flags & OBP_PG_FROM_CACHE THEN
-            MmFreeToPoolCache (
+            MmuFreeToPoolCache (
                 type^.PgPartCache, // cache
                 header, // ptr
             )
 
         ELSE
-            MmFreePool (
+            MmuFreePool (
                 header, // ptr
                 type^.Tag, // tag
             )
@@ -379,26 +379,26 @@ FN ObFreeObject (
         // Two parts.
 
         IF flags & OBP_PG_FROM_CACHE THEN
-            MmFreeToPoolCache (
+            MmuFreeToPoolCache (
                 type^.PgPartCache, // cache
                 header, // ptr
             )
 
         ELSE
-            MmFreePool (
+            MmuFreePool (
                 header, // ptr
                 type^.Tag, // tag
             )
         END
 
         IF flags & OBP_NP_FROM_CACHE THEN
-            MmFreeToPoolCache (
+            MmuFreeToPoolCache (
                 type^.NpPartCache, // cache
                 object - SIZEOF ObpCommonHeader, // ptr
             )
 
         ELSE
-            MmFreePool (
+            MmuFreePool (
                 object - SIZEOF ObpCommonHeader, // ptr
                 type^.Tag, // tag
             )
@@ -408,32 +408,32 @@ FN ObFreeObject (
     // Uncharge quota.
 
     IF pquota THEN
-        MmUnchargePoolQuota (
+        MmuUnchargePoolQuota (
             quotablock, // quotablock
             pquota, // charge
-            MM_PAGED_POOL, // poolindex
+            MMU_PAGED_POOL, // poolindex
         )
     END
 
     IF npquota THEN
-        MmUnchargePoolQuota (
+        MmuUnchargePoolQuota (
             quotablock, // quotablock
             npquota, // charge
-            MM_NONPAGED_POOL, // poolindex
+            MMU_NONPAGED_POOL, // poolindex
         )
     END
 
-    MmUnreferenceQuotaBlock ( quotablock )
+    MmuUnreferenceQuotaBlock ( quotablock )
 END
 
 #SECTION "PAGEtext"
-FN ObDeleteObject (
+FN ObuDeleteObject (
     IN object : ^VOID,
 )
 
     // Delete an object. Call the deletion routine.
 
-    header := ObFindHeader ( object )
+    header := ObuFindHeader ( object )
 
     IF header^.Type^.Delete AND
         NOT header^.Type^.Delete ( object ) THEN
@@ -443,16 +443,16 @@ FN ObDeleteObject (
         LEAVE
     END
 
-    ObFreeObject ( object )
+    ObuFreeObject ( object )
 END
 
-EXPORT FN ObReferenceObject (
+EXPORT FN ObuReferenceObject (
     IN object : ^VOID,
 )
 
     // Reference an object by pointer.
 
-    commonheader := ObFindCommonHeader ( object )
+    commonheader := ObuFindCommonHeader ( object )
 
     oldcount := KeIncrementPtr (
         &commonheader^.PointerCount, // ulong
@@ -464,7 +464,7 @@ END
 
 #SECTION "PAGEtext"
 FN ObpEmptyDeferredList (
-    IN paged : ^PsPagedThread,
+    IN paged : ^PsuPagedThread,
 )
 
     // Empty the deferred object deletion list of the thread.
@@ -483,9 +483,9 @@ FN ObpEmptyDeferredList (
         // Free every object in the chain.
 
         WHILE object DO
-            next := ObFindCommonHeader ( object )^.NextToReap
+            next := ObuFindCommonHeader ( object )^.NextToReap
 
-            ObDeleteObject ( object )
+            ObuDeleteObject ( object )
 
             object = next
         END
@@ -493,21 +493,21 @@ FN ObpEmptyDeferredList (
 END
 
 #SECTION "PAGEtext"
-FN (KeProcessCustodyListF) ObpDeferredDeleteObject (
-    IN list : ^KeCustodyList,
+FN (KeuProcessCustodyListF) ObpDeferredDeleteObject (
+    IN list : ^KeuCustodyList,
     IN object : ^VOID,
     IN context : ^VOID,
 )
 
-    // Called to delete an object as a KeProcessCustodyList callback.
+    // Called to delete an object as a KeuProcessCustodyList callback.
 
     commonheader := CONTAINEROF object TO ObpCommonHeader.NextToReap
 
-    ObDeleteObject ( ObFindObjectFromCommonHeader ( commonheader ) )
+    ObuDeleteObject ( ObuFindObjectFromCommonHeader ( commonheader ) )
 END
 
 #SECTION "PAGEtext"
-FN (ExWorkItemF) ObDeferredDeletionWorker (
+FN (ExuWorkItemF) ObuDeferredDeletionWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -515,11 +515,11 @@ FN (ExWorkItemF) ObDeferredDeletionWorker (
     // An object deletion was deferred to worker thread context and WE are that
     // worker thread.
 
-    paged := PsCurrentThread ()^.Paged
+    paged := PsuCurrentThread ()^.Paged
 
     paged^.DeletingObject = TRUE
 
-    KeProcessCustodyList (
+    KeuProcessCustodyList (
         &ObpDeferredDeletionList, // list
         &ObpDeferredDeleteObject, // callback
         NULLPTR, // context
@@ -532,8 +532,8 @@ FN (ExWorkItemF) ObDeferredDeletionWorker (
     paged^.DeletingObject = FALSE
 END
 
-FN (KeCustodyListActivateF) ObpActivateDeletionWorker (
-    IN list : ^KeCustodyList,
+FN (KeuCustodyListActivateF) ObpActivateDeletionWorker (
+    IN list : ^KeuCustodyList,
 )
 
     // The list was previously empty, so we should enqueue the work item.
@@ -547,9 +547,9 @@ FN (KeCustodyListActivateF) ObpActivateDeletionWorker (
         100, // interval
     )
 
-    ExEnqueueTimedWorkItem (
+    ExuEnqueueTimedWorkItem (
         &ObpDeferredDeletionTimedWorkItem, // item
-        EX_HIGH_WORK_PRIORITY, // priority
+        EXU_HIGH_WORK_PRIORITY, // priority
         &interval, // interval
         0, // context1
         0, // context2
@@ -562,23 +562,23 @@ FN ObpDeferDeletion (
 
     // Enqueue deleting this object as some work to the worker thread pool.
 
-    commonheader := ObFindCommonHeader ( object )
+    commonheader := ObuFindCommonHeader ( object )
 
     // Atomically add it to the list.
 
-    KeInsertCustodyList (
+    KeuInsertCustodyList (
         &ObpDeferredDeletionList, // list
         &commonheader^.NextToReap, // link
     )
 END
 
-EXPORT FN ObUnreferenceObject (
+EXPORT FN ObuUnreferenceObject (
     IN object : ^VOID,
 )
 
     // Unreference an object by pointer.
 
-    commonheader := ObFindCommonHeader ( object )
+    commonheader := ObuFindCommonHeader ( object )
 
     oldcount := KeIncrementPtr (
         &commonheader^.PointerCount, // ulong
@@ -590,7 +590,7 @@ EXPORT FN ObUnreferenceObject (
     IF oldcount == 1 THEN
         // Delete it.
 
-        thread := PsCurrentThread ()
+        thread := PsuCurrentThread ()
 
         IF NOT KeAreApcsDeliverable () OR
             thread^.VmPrivileged THEN
@@ -635,22 +635,22 @@ EXPORT FN ObUnreferenceObject (
 
             paged^.DeletingObject = TRUE
 
-            KeIgnoreEvents ()
+            KeuIgnoreEvents ()
 
-            ObDeleteObject ( object )
+            ObuDeleteObject ( object )
 
             IF paged^.DeferredObjectHead THEN
                 ObpEmptyDeferredList ( paged )
             END
 
-            KeAcceptEvents ()
+            KeuAcceptEvents ()
 
             paged^.DeletingObject = FALSE
         END
     END
 END
 
-EXPORT FN ObUnreferenceObjectDeferDelete (
+EXPORT FN ObuUnreferenceObjectDeferDelete (
     IN object : ^VOID,
 )
 
@@ -660,7 +660,7 @@ EXPORT FN ObUnreferenceObjectDeferDelete (
     // thread. This is useful when a lock is held that is also taken in the
     // deletion routine.
 
-    commonheader := ObFindCommonHeader ( object )
+    commonheader := ObuFindCommonHeader ( object )
 
     oldcount := KeIncrementPtr (
         &commonheader^.PointerCount, // ulong
@@ -676,7 +676,7 @@ EXPORT FN ObUnreferenceObjectDeferDelete (
     END
 END
 
-EXPORT FN ObConditionallyReferenceObject (
+EXPORT FN ObuConditionallyReferenceObject (
     IN object : ^VOID,
 ) : UWORD
 
@@ -686,7 +686,7 @@ EXPORT FN ObConditionallyReferenceObject (
     // finally frees the object. Returns TRUE if referenced successfully, FALSE
     // otherwise.
 
-    commonheader := ObFindCommonHeader ( object )
+    commonheader := ObuFindCommonHeader ( object )
 
     oldcount := commonheader^.PointerCount
 
@@ -716,9 +716,9 @@ EXPORT FN ObConditionallyReferenceObject (
 END
 
 #SECTION "PAGEtext"
-FN ObCheckAccess (
-    IN permissions : ^ObPermissions,
-    IN cred : ^ObCredentials,
+FN ObuCheckAccess (
+    IN permissions : ^ObuPermissions,
+    IN cred : ^ObuCredentials,
     IN access : UWORD,
 ) : UWORD
 
@@ -756,11 +756,11 @@ FN ObCheckAccess (
     // As an admin, we can access all objects except those owned by the system
     // user.
 
-    RETURN PsCheckPrivilege ( PsCurrentProcess (), OS_PRIVILEGE_ADMIN )
+    RETURN PsuCheckPrivilege ( PsuCurrentProcess (), OS_PRIVILEGE_ADMIN )
 END
 
 #SECTION "PAGEtext"
-FN ObCheckAccessForCurrent (
+FN ObuCheckAccessForCurrent (
     IN object : ^VOID,
     IN access : UWORD,
 ) : UWORD
@@ -768,9 +768,9 @@ FN ObCheckAccessForCurrent (
     // Check the requested access against the object's permissions, with respect
     // to the current process's credentials.
 
-    RETURN ObCheckAccess (
-        &ObFindHeader ( object )^.Permissions, // permissions
-        PsCurrentCredentials (), // cred
+    RETURN ObuCheckAccess (
+        &ObuFindHeader ( object )^.Permissions, // permissions
+        PsuCurrentCredentials (), // cred
         access, // access
     )
 END

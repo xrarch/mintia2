@@ -3,42 +3,42 @@
 // Executive.
 //
 
-#INCLUDE "Mi.hjk"
-#INCLUDE "<inc>/Ps.hjk"
+#INCLUDE "Mmp.hjk"
+#INCLUDE "<inc>/Psu.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 #INCLUDE "<ll>/Xlo.hjk"
 
 // TMP
-MiBootNodeStatic : MiNode
+MmpBootNodeStatic : MmpNode
 
-PUBLIC MiBootNode : ^MiNode
+PUBLIC MmpBootNode : ^MmpNode
 
-PUBLIC MiPfnDatabase : ^MiPfe
+PUBLIC MmpPfnDatabase : ^MmpPfe
 
-PUBLIC MiTotalPages := 0
+PUBLIC MmpTotalPages := 0
 
-PUBLIC MiSystemSize := 0
+PUBLIC MmpSystemSize := 0
 
-PUBLIC MiConstantZeroPfe : ^MiPfe
+PUBLIC MmpConstantZeroPfe : ^MmpPfe
 
-MiWiredPages := 0
-MiFreedPages := 0
-MiPagedPages := 0
-MiDebugPages := 0
+MmpWiredPages := 0
+MmpFreedPages := 0
+MmpPagedPages := 0
+MmpDebugPages := 0
 
-MiSystemQuota : MiQuotaBlock
+MmpSystemQuota : MmpQuotaBlock
 
-MiUnwireableList : RtlListEntry
+MmpUnwireableList : RtlListEntry
 
-ENUM MiUnwireableType : UBYTE
-    MI_WIRED_REGION,
+ENUM MmpUnwireableType : UBYTE
+    MMP_WIRED_REGION,
 
-    MI_FREE_REGION,
-    MI_PAGED_REGION,
-    MI_DEFERRED_FREE_REGION,
+    MMP_FREE_REGION,
+    MMP_PAGED_REGION,
+    MMP_DEFERRED_FREE_REGION,
 END
 
-STRUCT MiUnwireableRegion
+STRUCT MmpUnwireableRegion
     Entry : RtlListEntry,
     Type : UWORD,
     Pages : UWORD,
@@ -47,15 +47,15 @@ END
 
 #ENTERSECTION "INITtext"
 
-FN MmJettisonUnusedResources ()
+FN MmuJettisonUnusedResources ()
 
     // We need to release the page frames taken up by any boot resources that
     // were not claimed during the boot process.
 
-    listhead := &KeLoaderBlock.ResourceListHead
+    listhead := &KeuLoaderBlock.ResourceListHead
     listentry := listhead^.Next
 
-    partition := &MiBootNode^.Partition
+    partition := &MmpBootNode^.Partition
 
     WHILE listentry != listhead DO
         rsrc := CONTAINEROF listentry TO BlResource.Entry
@@ -63,7 +63,7 @@ FN MmJettisonUnusedResources ()
         IF rsrc^.Jettison THEN
             // Acquire a pointer to the first PTE for this region.
 
-            pte := MiPteAddress ( rsrc^.Data )
+            pte := MmpPteAddress ( rsrc^.Data )
 
             pages := (rsrc^.Size + RTL_PAGE_OFFSET_MASK) >> RTL_PAGE_SHIFT
 
@@ -78,16 +78,16 @@ FN MmJettisonUnusedResources ()
                 // need to check if each PTE has already been invalidated and
                 // don't do it a second time if so.
 
-                KeAssert ( rsrc^.IoConfig OR MiIsPteValid ( ptecontents ) )
+                KeAssert ( rsrc^.IoConfig OR MmpIsPteValid ( ptecontents ) )
 
-                IF MiIsPteValid ( ptecontents ) THEN
-                    pte[i] = MI_INVALID_KERNEL_PTE
+                IF MmpIsPteValid ( ptecontents ) THEN
+                    pte[i] = MMP_INVALID_KERNEL_PTE
 
                     // Free the page frame.
 
-                    MiFreePage (
+                    MmpFreePage (
                         partition, // partition
-                        MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
+                        MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ), // pfe
                     )
                 END
 
@@ -99,7 +99,7 @@ FN MmJettisonUnusedResources ()
     END
 END
 
-FN MiIdentifyUnwireableSections (
+FN MmpIdentifyUnwireableSections (
     IN dll : ^BlDll,
 )
 
@@ -122,7 +122,7 @@ FN MiIdentifyUnwireableSections (
 
         name := strtab + section^.NameOffset
 
-        type := MI_WIRED_REGION
+        type := MMP_WIRED_REGION
 
         IF dll^.Flags & BL_DLL_DEFERRED_FREE THEN
             // For whatever reason, the module failed to load.
@@ -132,14 +132,14 @@ FN MiIdentifyUnwireableSections (
 
             // We use this special region type because we have no idea how far
             // the loader got, so we might run into invalid PTEs. That's always
-            // wrong for MI_FREE_REGION but not for this type.
+            // wrong for MMP_FREE_REGION but not for this type.
 
             // TODO alert sysop somehow
 
-            type = MI_DEFERRED_FREE_REGION
+            type = MMP_DEFERRED_FREE_REGION
 
-            MiWiredPages -= pages
-            MiFreedPages += pages
+            MmpWiredPages -= pages
+            MmpFreedPages += pages
 
         ELSEIF RtlCompareStringWithMax (
             name, // str1
@@ -147,35 +147,35 @@ FN MiIdentifyUnwireableSections (
             4, // count
         ) == 0 THEN
 
-            type = MI_FREE_REGION
+            type = MMP_FREE_REGION
 
-            MiWiredPages -= pages
-            MiFreedPages += pages
+            MmpWiredPages -= pages
+            MmpFreedPages += pages
 
         ELSEIF RtlCompareStringWithMax (
             name, // str1
             "PAGE", // str2
             4, // count
         ) == 0 THEN
-            type = MI_PAGED_REGION
+            type = MMP_PAGED_REGION
 
-            MiWiredPages -= pages
-            MiPagedPages += pages
+            MmpWiredPages -= pages
+            MmpPagedPages += pages
         END
 
-        IF type != MI_WIRED_REGION THEN
+        IF type != MMP_WIRED_REGION THEN
             // Create an unwireable region record.
 
-            region := CAST MmAllocatePool (
-                MM_NONPAGED_POOL, // poolindex
-                SIZEOF MiUnwireableRegion, // bytes
+            region := CAST MmuAllocatePool (
+                MMU_NONPAGED_POOL, // poolindex
+                SIZEOF MmpUnwireableRegion, // bytes
                 'Unwi', // tag
                 FALSE, // wait
-            ) TO ^MiUnwireableRegion
+            ) TO ^MmpUnwireableRegion
 
             IF NOT region THEN
                 KeCrash ( "%sfailed to allocate unwire\n",
-                    "MiReclaimMemory: " )
+                    "MmpReclaimMemory: " )
             END
 
             region^.Type = type
@@ -186,7 +186,7 @@ FN MiIdentifyUnwireableSections (
             region^.StartVa = section^.VirtualAddress
 
             RtlInsertAtTailList (
-                &MiUnwireableList, // head
+                &MmpUnwireableList, // head
                 &region^.Entry, // entry
             )
         END
@@ -195,34 +195,34 @@ FN MiIdentifyUnwireableSections (
     END
 END
 
-FN MiReclaimMemory ()
+FN MmpReclaimMemory ()
 
     // We have to lift any lists the loader gave us onto our own pool. Then we
     // free the reclaimable regions of physical memory on the descriptor list.
 
-    RtlInitializeList ( &MiUnwireableList )
+    RtlInitializeList ( &MmpUnwireableList )
 
-    loaderhunk := MmAllocatePool (
-        MM_NONPAGED_POOL, // poolindex
-        KeLoaderBlock.ResourceCount * SIZEOF BlResource +
-        KeLoaderBlock.DllCount * SIZEOF BlDll, // bytes
+    loaderhunk := MmuAllocatePool (
+        MMU_NONPAGED_POOL, // poolindex
+        KeuLoaderBlock.ResourceCount * SIZEOF BlResource +
+        KeuLoaderBlock.DllCount * SIZEOF BlDll, // bytes
         'Boot', // tag
         FALSE, // wait
     )
 
     IF NOT loaderhunk THEN
         KeCrash ( "%sfailed to allocate loader hunk\n",
-            "MiReclaimMemory: " )
+            "MmpReclaimMemory: " )
     END
 
     resource := CAST loaderhunk TO ^BlResource
 
     dll := CAST loaderhunk +
-        KeLoaderBlock.ResourceCount * SIZEOF BlResource TO ^BlDll
+        KeuLoaderBlock.ResourceCount * SIZEOF BlResource TO ^BlDll
 
     // Move the resource list.
 
-    listhead := &KeLoaderBlock.ResourceListHead
+    listhead := &KeuLoaderBlock.ResourceListHead
     listentry := listhead^.Next
 
     tmplisthead : RtlListEntry
@@ -255,7 +255,7 @@ FN MiReclaimMemory ()
 
     // Move the module list.
 
-    listhead = &KeLoaderBlock.DllListHead
+    listhead = &KeuLoaderBlock.DllListHead
     listentry = listhead^.Next
 
     RtlInitializeList ( &tmplisthead )
@@ -277,7 +277,7 @@ FN MiReclaimMemory ()
         // Walk this module's section headers and create a list of unwireable
         // sections.
 
-        MiIdentifyUnwireableSections ( dll )
+        MmpIdentifyUnwireableSections ( dll )
 
         dll += SIZEOF BlDll
         listentry = listentry^.Next
@@ -291,9 +291,9 @@ FN MiReclaimMemory ()
 
     // Reclaim physical memory regions.
 
-    sys := &MiBootNode^.Partition
+    sys := &MmpBootNode^.Partition
 
-    listhead = &KeLoaderBlock.DescriptorListHead
+    listhead = &KeuLoaderBlock.DescriptorListHead
     listentry = listhead^.Next
 
     WHILE listentry != listhead DO
@@ -303,29 +303,29 @@ FN MiReclaimMemory ()
         // reclaimable, or is debug memory and no debugger is installed.
 
         IF desc^.Type == BL_MEMORY_RECLAIMABLE OR
-            (desc^.Type == BL_MEMORY_DEBUG AND NOT KeLoaderBlock.DbgMain) THEN
+            (desc^.Type == BL_MEMORY_DEBUG AND NOT KeuLoaderBlock.DbgMain) THEN
 
             pages := desc^.PageCount
 
-            MiWiredPages -= pages
-            MiFreedPages += pages
+            MmpWiredPages -= pages
+            MmpFreedPages += pages
 
             sys^.FreeList.Count += pages
             sys^.AvailablePageCount += pages
             sys^.FluidPageCount += pages
 
             pfn := desc^.StartPfn
-            pfe := MiPfnToPfe ( pfn )
+            pfe := MmpPfnToPfe ( pfn )
 
             WHILE pages DO
-                pfe^.Type = MI_FREE_PFE_TYPE
+                pfe^.Type = MMP_FREE_PFE_TYPE
 
                 RtlInsertAtTailList (
-                    &sys^.FreeList.Heads[MiPfnColor(pfn)], // head
+                    &sys^.FreeList.Heads[MmpPfnColor(pfn)], // head
                     &pfe^.Entry, // entry
                 )
 
-                pfe += MI_PFE_SIZE
+                pfe += MMP_PFE_SIZE
                 pfn += 1
                 pages -= 1
             END
@@ -335,49 +335,49 @@ FN MiReclaimMemory ()
     END
 END
 
-FN MiInitializeZeroedPage ()
+FN MmpInitializeZeroedPage ()
 
     // Allocate the constantly zeroed page frame.
 
-    MiConstantZeroPfe = MiAllocatePage (
-        &MiBootNode^.Partition, // partition
+    MmpConstantZeroPfe = MmpAllocatePage (
+        &MmpBootNode^.Partition, // partition
         TRUE, // zeroed
         TRUE, // low
         0, // color
     )
 
-    IF NOT MiConstantZeroPfe THEN
+    IF NOT MmpConstantZeroPfe THEN
         KeCrash ( "Failed to allocate zero page\n" )
     END
 END
 
-FN MmInitializeStage1 ()
+FN MmuInitializeStage1 ()
 
     // Stage 1 initialization for Memory Management. Here we have to initialize
     // the system memory partition enough to get physical memory allocation
     // working.
 
-    KeAssert ( SIZEOF MiPfe <= MI_PFE_SIZE )
+    KeAssert ( SIZEOF MmpPfe <= MMP_PFE_SIZE )
 
     // TMP
-    MiBootNode = &MiBootNodeStatic
+    MmpBootNode = &MmpBootNodeStatic
 
-    sys := &MiBootNodeStatic.Partition
+    sys := &MmpBootNodeStatic.Partition
 
     // Copy the address of the PFN database.
 
-    MiPfnDatabase = KeLoaderBlock.PfnDatabase
+    MmpPfnDatabase = KeuLoaderBlock.PfnDatabase
 
     // Initialize the integral data structures of the system partition.
 
-    MiInitializePartitionStage1 (
+    MmpInitializePartitionStage1 (
         sys, // partition
-        MiBootNode, // node
+        MmpBootNode, // node
     )
 
     // Walk the memory descriptor list.
 
-    head := &KeLoaderBlock.DescriptorListHead
+    head := &KeuLoaderBlock.DescriptorListHead
     listentry := head^.Next
 
     WHILE listentry != head DO
@@ -398,23 +398,23 @@ FN MmInitializeStage1 ()
             sys^.FreeList.Count += pages
 
             pfn := desc^.StartPfn
-            pfe := MiPfnToPfe ( pfn )
+            pfe := MmpPfnToPfe ( pfn )
 
             WHILE pages DO
-                pfe^.Type = MI_FREE_PFE_TYPE
+                pfe^.Type = MMP_FREE_PFE_TYPE
 
                 RtlInsertAtTailList (
-                    &sys^.FreeList.Heads[MiPfnColor(pfn)], // head
+                    &sys^.FreeList.Heads[MmpPfnColor(pfn)], // head
                     &pfe^.Entry, // entry
                 )
 
-                pfe += MI_PFE_SIZE
+                pfe += MMP_PFE_SIZE
                 pfn += 1
                 pages -= 1
             END
 
         ELSE
-            MiWiredPages += pages
+            MmpWiredPages += pages
         END
 
         listentry = listentry^.Next
@@ -422,28 +422,28 @@ FN MmInitializeStage1 ()
 
     membytes := sys^.TotalPages << RTL_PAGE_SHIFT
 
-    RtlPrint ( "MmInitialize: %u KB\n", membytes / 1024 )
+    RtlPrint ( "MmuInitialize: %u KB\n", membytes / 1024 )
 
     // Set the idle process's partition to the system partition.
 
-    KeIdleProcess.Partition = sys
-    KeIdleProcess.Node = MiBootNode
+    KeuIdleProcess.Partition = sys
+    KeuIdleProcess.Node = MmpBootNode
 
     // Determine system size.
 
-    MiSetPartitionSize ( sys )
+    MmpSetPartitionSize ( sys )
 
     // Initialize the system virtual address allocator.
 
-    MiInitializeSystemVa ( MiBootNode )
+    MmpInitializeSystemVa ( MmpBootNode )
 
     // Initialize the system pools.
 
-    MiInitializePools ( MiBootNode )
+    MmpInitializePools ( MmpBootNode )
 
     // Initialize the quick map pages.
 
-    MiInitializeQuickPages ( MiBootNode )
+    MmpInitializeQuickPages ( MmpBootNode )
 
     // Initialize commit to something acceptable before creation of the
     // pagefiles.
@@ -453,10 +453,10 @@ FN MmInitializeStage1 ()
 
     // Initialize quota management.
 
-    MiInitializeQuota ()
+    MmpInitializeQuota ()
 
-    MiInitializeQuotaBlock (
-        &MiSystemQuota, // quotablock
+    MmpInitializeQuotaBlock (
+        &MmpSystemQuota, // quotablock
         -1, // nplimit
         -1, // pglimit
         -1, // vmlimit
@@ -466,33 +466,33 @@ FN MmInitializeStage1 ()
     // Give the idle process a quota block. We stash this in the handle table.
     // Idle process has no real handle table.
 
-    KeIdleProcess.Paged^.HandleTable.QuotaBlock = &MiSystemQuota
+    KeuIdleProcess.Paged^.HandleTable.QuotaBlock = &MmpSystemQuota
 
     // Reclaim boot time memory. Nothing in "loader space" is safe to access
     // after this point.
 
-    MiReclaimMemory ()
+    MmpReclaimMemory ()
 
     // Hook for the architecture code to do what it wants.
 
-    MiInitializeArchitecture ()
+    MmpInitializeArchitecture ()
 
     // Initialize the zones for quick MDL allocation.
 
-    MiInitializeMdlCache ( MiBootNode )
+    MmpInitializeMdlCache ( MmpBootNode )
 
     // Initialize the zones for quick kernel stack allocation.
 
-    MiInitializeKernelStackCache ( MiBootNode )
+    MmpInitializeKernelStackCache ( MmpBootNode )
 
     // Allocate one page which just remains constantly zeroed for the lifetime
     // of the system.
 
-    MiInitializeZeroedPage ()
+    MmpInitializeZeroedPage ()
 
-    // Initialize the MiPartition object type.
+    // Initialize the MmpPartition object type.
 
-    ObInitializeType ( &MmPartitionType )
+    ObuInitializeType ( &MmuPartitionType )
 END
 
 #LEAVESECTION

@@ -1,0 +1,303 @@
+//
+// Undocumented header file for the Executive Support (Ex) component of the
+// MINTIA Executive.
+//
+
+#INCLUDE "<ll>/Executive/Ex.hjk"
+
+#INCLUDE "<inc>/Keu.hjk"
+
+EXTERN FN (KeStartThreadF) ExuStartSystemProcess (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+STRUCT ExuHandleTable
+    Entries : UWORD,
+
+    QuotaBlock : ^MmpQuotaBlock,
+
+    Table : ^^VOID,
+
+    FreeListHead : ULONG,
+
+    EntrySizeLog : UBYTE,
+END
+
+FNPTR ExuHandleTableEnumerationF (
+    IN handletable : ^ExuHandleTable,
+    IN handle : UWORD,
+    IN entryptr : ^VOID,
+    IN context : UWORD,
+)
+
+EXTERN FN ExuInitializeHandleTable (
+    IN handletable : ^ExuHandleTable,
+    IN entrysizelog : UWORD,
+    IN quotablock : ^MmpQuotaBlock,
+)
+
+EXTERN FN ExuEnumerateHandleTable (
+    IN handletable : ^ExuHandleTable,
+    IN func : ExuHandleTableEnumerationF,
+    IN context : UWORD,
+)
+
+EXTERN FN ExuLookupHandle (
+    IN handletable : ^ExuHandleTable,
+    IN handle : UWORD,
+) : ^VOID
+
+EXTERN FN ExuDeleteHandleTable (
+    IN handletable : ^ExuHandleTable,
+    IN func : ExuHandleTableEnumerationF,
+    IN context : UWORD,
+)
+
+EXTERN FN ExuDeleteHandle (
+    IN handletable : ^ExuHandleTable,
+    IN handle : UWORD,
+    IN entry : ^VOID,
+) : UWORD
+
+EXTERN FN ExuCreateHandle (
+    IN handletable : ^ExuHandleTable,
+    IN lock : ^KeLock,
+    OUT handle : UWORD,
+    OUT entryptr : ^VOID,
+) : OsStatus
+
+STRUCT ExpEventCounterUsed
+    Event : KeEvent,
+    References : ULONG,
+END
+
+UNION ExuEventCounter
+    Used : ExpEventCounterUsed,
+    Free : RtlListEntry,
+END
+
+EXTERN FN ExuAllocateEventCounter (
+    IN wait : UWORD,
+) : ^ExuEventCounter
+
+EXTERN FN ExuReferenceEventCounter (
+    IN counter : ^ExuEventCounter,
+)
+
+EXTERN FN ExuUnreferenceEventCounter (
+    IN counter : ^ExuEventCounter,
+)
+
+STRUCT ExuName
+    Entry : RtlAvlNode,
+
+    References : ULONG,
+
+    BucketIndex : UBYTE,
+END
+
+#MACRO ExuNameToString ( name ) [
+    (CAST (name + SIZEOF ExuName) TO ^RtlString)
+]
+
+EXTERN FN ExuFindName (
+    IN str : ^RtlString,
+) : ^ExuName
+
+EXTERN FN ExuUnreferenceName (
+    IN name : ^ExuName,
+)
+
+EXTERN FN ExuReferenceName (
+    IN name : ^ExuName,
+)
+
+EXTERN FN ExuDuplicateString (
+    IN outputstring : ^RtlString,
+    IN inputstring : ^RtlString,
+    IN poolindex : UWORD,
+    IN tag : UWORD,
+) : OsStatus
+
+STRUCT ExuEvent
+    Event : KeEvent,
+END
+
+#MACRO ExuInitializeWorkItem ( item, routine ) [
+    NOTHING (item)^.Routine = (routine)
+]
+
+FNPTR ExuWorkItemF (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+STRUCT ExuWorkItem
+    QueueEntry : RtlListEntry,
+    Routine : ExuWorkItemF,
+    Context1 : UWORD,
+    Context2 : UWORD,
+END
+
+ENUM ExuWorkQueuePriority : UBYTE
+    // These priorities can be used for pretty much anything.
+
+    EXU_LOW_WORK_PRIORITY,
+    EXU_HIGH_WORK_PRIORITY,
+
+    // This priority is reserved for nonpaged work such as page-out IO
+    // completion. These worker threads may NEVER block on memory allocation.
+    // They are VM-privileged.
+
+    EXU_NONPAGED_WORK_PRIORITY,
+
+    EXU_MAX_WORK_PRIORITY,
+END
+
+EXTERN FN ExuEnqueueWorkItem (
+    IN item : ^ExuWorkItem,
+    IN priority : ExuWorkQueuePriority,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+STRUCT ExuTimedWorkItem
+    Item : ExuWorkItem,
+    Dpc : KeDpc,
+    Timer : KeTimer,
+    Priority : ExuWorkQueuePriority,
+END
+
+EXTERN FN ExuEnqueueTimedWorkItem (
+    IN item : ^ExuTimedWorkItem,
+    IN priority : ExuWorkQueuePriority,
+    IN interval : ^RtlUquad,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN (KeDpcF) ExpTimedWorkItemDpc (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN ExuInitializeTimedWorkItem (
+    IN item : ^ExuTimedWorkItem,
+    IN routine : ExuWorkItemF,
+)
+
+#DEFINE EXU_SET_INITIAL_BUFFER 4
+
+STRUCT ExuObjectSet
+    Buffer : ^^VOID,
+    InitialBuffer : ^VOID[EXU_SET_INITIAL_BUFFER],
+    Index : ULONG,
+    Capacity : ULONG,
+    Tag : ULONG,
+    PoolIndex : UBYTE,
+END
+
+EXTERN FN ExuRemoveObjectFromSetByIndex (
+    IN set : ^ExuObjectSet,
+    IN index : UWORD,
+)
+
+EXTERN FN ExuFindObjectInSet (
+    IN set : ^ExuObjectSet,
+    IN object : ^VOID,
+) : UWORD
+
+EXTERN FN ExuAppendSet (
+    IN set : ^ExuObjectSet,
+    IN object : ^VOID,
+) : OsStatus
+
+EXTERN FN ExuInitializeSet (
+    IN set : ^ExuObjectSet,
+    IN tag : UWORD,
+    IN poolindex : UWORD,
+)
+
+EXTERN FN ExuRemoveObjectFromSet (
+    IN set : ^ExuObjectSet,
+    IN object : ^VOID,
+) : UWORD
+
+FNPTR ExuEnumerateSetF (
+    IN set : ^ExuObjectSet,
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+EXTERN FN ExuEnumerateSet (
+    IN set : ^ExuObjectSet,
+    IN enumfunc : ExuEnumerateSetF,
+    IN context : ^VOID,
+) : OsStatus
+
+EXTERN FN ExuEmptySet (
+    IN set : ^ExuObjectSet,
+    IN enumfunc : ExuEnumerateSetF,
+    IN context : ^VOID,
+)
+
+#DEFINE EXP_DICTIONARY_BUCKET_COUNT 32
+
+STRUCT ExuDictionary
+    Buckets : RtlAvlNode[EXP_DICTIONARY_BUCKET_COUNT],
+    OrderedListHead : RtlListEntry,
+END
+
+FNPTR ExuEnumerateDictionaryF (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+    IN value : ^VOID,
+    IN context : ^VOID,
+)
+
+EXTERN FN ExuInitializeDictionary (
+    IN dict : ^ExuDictionary,
+)
+
+EXTERN FN ExuLookupDictionary (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+) : ^VOID
+
+EXTERN FN ExuRemoveFromDictionary (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+) : ^VOID
+
+EXTERN FN ExuInsertInDictionary (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+    IN value : ^VOID,
+    IN canupdate : UWORD,
+) : OsStatus
+
+EXTERN FN ExuEnumerateDictionary (
+    IN dict : ^ExuDictionary,
+    IN func : ExuEnumerateDictionaryF,
+    IN context : ^VOID,
+    IN delete : UWORD,
+)
+
+#DEFINE EXU_MODULE_UNLOADING 1
+#DEFINE EXU_MODULE_LOADING 2
+
+STRUCT ExuKnownModule
+    Name : RtlString,
+
+    LoadedModule : ^ExuLoadedModule,
+
+    Entry : RtlAvlNode,
+END
+
+STRUCT ExuLoadedModule
+    KnownModule : ^ExuKnownModule,
+
+    Flags : ULONG,
+END

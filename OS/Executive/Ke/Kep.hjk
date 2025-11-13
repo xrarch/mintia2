@@ -1,0 +1,936 @@
+//
+// Private header file for the Kernel component of the MINTIA Executive.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "<ll>/System/OsProcess.hjk"
+
+#INCLUDE "<inc>/Halu.hjk"
+#INCLUDE "<inc>/Keu.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
+
+#DEFINE KEP_IPL_LOW 0
+#DEFINE KEP_IPL_APC 1
+#DEFINE KEP_IPL_DPC 2
+#DEFINE KEP_IPL_CLOCK 29
+#DEFINE KEP_IPL_IPI 30
+#DEFINE KEP_IPL_HIGH 31
+#DEFINE KEP_IPL_MAX 32
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    #INCLUDE "xr17032/Kep.hjk"
+
+#ELSEIF ( STRCMP ARCHITECTURE "fox32" )
+    #INCLUDE "fox32/Kep.hjk"
+
+#ELSE
+    #ERROR "Unknown architecture\n"
+#END
+
+#DEFINE KEP_VOLATILE_LOCAL_PRB ( AND ( NOT KEP_VIRTUAL_PRB ) BLD_MP )
+
+#IF KEP_VIRTUAL_PRB
+
+#MACRO KepToGlobalPrb ( prb ) [
+    NOTHING (prb) = (prb)^.RealVirtual
+]
+
+#ELSE
+
+#MACRO KepToGlobalPrb ( prb ) []
+
+#END
+
+// Default quantum is 30ms.
+
+#DEFINE KEP_DEFAULT_QUANTUM 30
+
+// Number of timeshared ready queues.
+
+#DEFINE KEP_TIMESHARED_QUEUES 32
+
+// Distance from the enqueue pointer to place a thread at priority zero into the
+// circular timeshared ready queues.
+
+#DEFINE KEP_TIMESHARED_DISTANCE [(OS_PRIORITY_HIGH_USER + 1)]
+
+// Interval in milliseconds at which to perform global load balancing.
+
+#DEFINE KEP_WORK_BALANCE_INTERVAL 1000
+
+// Interval in milliseconds for which a thread must be asleep before we outswap
+// its stack.
+
+#DEFINE KEP_STACK_SWAP_INTERVAL_MS 10000
+
+// Minimum load to steal threads from a processor.
+// This is a count of threads on its ready queue.
+
+#DEFINE KEP_STEAL_LOAD 1
+
+#DEFINE KEP_TICK_SHIFT 10
+
+// These are the different events that can be posted to an idle processor that
+// would normally cause a source processor to spin-wait, but that wait can be
+// avoided in the case the target is idle.
+
+#DEFINE KEP_DEFERRED_IDLE_TB_SHOOTDOWN 1
+#DEFINE KEP_DEFERRED_IDLE_ICACHE_SHOOTDOWN 2
+#DEFINE KEP_DEFERRED_IDLE_DCACHE_SHOOTDOWN 4
+
+// Note that we subtract 1 from the IPL shift so that we can do a right
+// shift by IPL to check for pending bits later (which is the hotter path).
+
+#MACRO KepPendingIpl ( ipl ) [
+     (1 << ((ipl) - 1))
+]
+
+// Fields within the stashed thread info.
+
+#DEFINE KEP_STASHED_PRIORITY_SHIFT 0
+#DEFINE KEP_STASHED_PRIORITY_MASK 0xFF
+
+#DEFINE KEP_STASHED_INTERACTIVE_SHIFT 8
+#DEFINE KEP_STASHED_INTERACTIVE_MASK 0xFF
+
+#DEFINE KEP_STASHED_IDLE_SHIFT 16
+#DEFINE KEP_STASHED_IDLE_MASK 0xFF
+
+#MACRO KepCurrentThreadPriority ( stash ) [
+    (((stash) >> KEP_STASHED_PRIORITY_SHIFT) & KEP_STASHED_PRIORITY_MASK)
+]
+
+#MACRO KepCurrentThreadInteractivity ( stash ) [
+    (((stash) >> KEP_STASHED_INTERACTIVE_SHIFT) & KEP_STASHED_INTERACTIVE_MASK)
+]
+
+#MACRO KepCurrentThreadIdle ( stash ) [
+    (((stash) >> KEP_STASHED_IDLE_SHIFT) & KEP_STASHED_IDLE_MASK)
+]
+
+#MACRO KepSetPriorityInStash ( stash, priority ) [
+    (((stash) & ~KEP_STASHED_PRIORITY_MASK) |
+        (priority << KEP_STASHED_PRIORITY_SHIFT))
+]
+
+#MACRO KepSetInteractivityInStash ( stash, interactive ) [
+    (((stash) & ~KEP_STASHED_INTERACTIVE_MASK) |
+        (interactive << KEP_STASHED_INTERACTIVE_SHIFT))
+]
+
+#MACRO KepSetIdleInStash ( stash, idle ) [
+    (((stash) & ~KEP_STASHED_IDLE_MASK) |
+        (idle << KEP_STASHED_IDLE_SHIFT))
+]
+
+#DEFINE KEP_INTERACTIVE_WELL_BEHAVED 1
+#DEFINE KEP_INTERACTIVE_PI_FLOOR 2
+
+#MACRO KepIsInteractiveForBehavior ( thread ) [
+    ((thread)^.InteractiveBits & KEP_INTERACTIVE_WELL_BEHAVED)
+]
+
+#MACRO KepIsInteractiveForFloor ( thread ) [
+    ((thread)^.InteractiveBits & KEP_INTERACTIVE_PI_FLOOR)
+]
+
+#MACRO KepIsInteractiveForOtherThanFloor ( thread ) [
+    ((thread)^.InteractiveBits & ~KEP_INTERACTIVE_PI_FLOOR)
+]
+
+#MACRO KepSetInteractiveForBehavior ( thread ) [
+    NOTHING (thread)^.InteractiveBits |= KEP_INTERACTIVE_WELL_BEHAVED
+]
+
+#MACRO KepSetInteractiveForFloor ( thread ) [
+    NOTHING (thread)^.InteractiveBits |= KEP_INTERACTIVE_PI_FLOOR
+]
+
+#MACRO KepClearInteractiveForBehavior ( thread ) [
+    NOTHING (thread)^.InteractiveBits &= ~KEP_INTERACTIVE_WELL_BEHAVED
+]
+
+#MACRO KepClearInteractiveForFloor ( thread ) [
+    NOTHING (thread)^.InteractiveBits &= ~KEP_INTERACTIVE_PI_FLOOR
+]
+
+#IF BLD_MP
+
+FNPTR KepIpiF (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+ENUM KepIpiType : UBYTE
+    KEP_IPI_SYNCHRONOUS,
+    KEP_IPI_ASYNCHRONOUS,
+
+    KEP_IPI_TYPE_MAX,
+END
+
+EXTERN KepMaximumBalanceIterations : ULONG
+
+#END
+
+// The per-processor block (Prb) is an architectural page size, but is at
+// minimum 4KB. It contains all per-processor information.
+
+STRUCT KepPrb
+
+#IF BLD_MP
+    // Give the spinlocks their own cache lines.
+
+    DpcQueueLock : KepSpinlock,
+    CacheAlign1 : UBYTE[KE_CACHE_ALIGN - SIZEOF KepSpinlock],
+
+    ReadyQueueLock : KepSpinlock,
+    CacheAlign2 : UBYTE[KE_CACHE_ALIGN - SIZEOF KepSpinlock],
+
+    TimerTreeLock : KepSpinlock,
+    CacheAlign3 : UBYTE[KE_CACHE_ALIGN - SIZEOF KepSpinlock],
+
+    StackSwapListLock : KepSpinlock,
+    CacheAlign4 : UBYTE[KE_CACHE_ALIGN - SIZEOF KepSpinlock],
+
+    IpiFunction : KepIpiF,
+
+    IdlePrbListEntry : RtlListEntry,
+
+    IpiContext1 : UWORD,
+    IpiContext2 : UWORD,
+
+    IpiSpin : ULONG,
+
+    IpiPendingSet : ULONG,
+#END
+
+#IF ( STRCMP PLATFORM "XRstation" )
+    LsicBase : ^VOID,
+#END
+
+    TimerTreeRoot : ^RtlHeapEntry,
+
+    IrqDispatchTable : ^^KeInterrupt,
+    IdleStackBase : ^VOID,
+
+#IF KEP_VIRTUAL_PRB
+    RealVirtual : ^KepPrb,
+#END
+
+    FrozenContext : ^OsContext,
+
+    // Idle threads (priority 0) go on this list.
+
+    IdleListHead : RtlListEntry,
+
+    TimerInterrupt : KeInterrupt,
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    AsidSequenceNumber : RtlUquad,
+    NextAsid : UINT,
+#END
+
+    KernelStackTop : ^VOID,
+    CurrentThread : ^KeuThread,
+    NextThread : ^KeuThread,
+
+    DpcListHead : RtlListEntry,
+
+    StackSwapCandidateListHead : RtlListEntry,
+
+    TimerExpirationDpc : KeDpc,
+
+    PendingSoftwareInterrupts : ULONG,
+
+    // 32-bit mask where a set bit indicates a real time queue that has at least
+    // one thread.
+
+    RealTimeReady : ULONG,
+
+    // 32-bit mask where a set bit indicates a timeshared queue that has at
+    // least one thread.
+
+    CalendarReady : ULONG,
+
+#IF BLD_MP
+    // 32-bit count of threads enqueued ready on this processor.
+
+    Load : ULONG,
+
+    IdleDeferredIpiEvents : ULONG,
+
+    StashedCurrentThreadInfo : ULONG,
+#END
+
+    Id : UINT,
+
+    Ipl : UBYTE, // ASM routines assume this is a byte size.
+    QuantumEnd : UBYTE,
+    DpcActive : UBYTE,
+    CalendarRunIndex : UBYTE,
+    CalendarEnqueueIndex : UBYTE,
+    CheckInteractivity : UBYTE,
+
+#IF BLD_MP
+    WakeStackSwapper : UBYTE,
+    StealWork : UBYTE,
+    InIdleLoop : UBYTE,
+#END
+
+    // Put big stuff at the end to make sure the common fields are readily in
+    // reach of immediate offset ranges on various architectures.
+
+    IdleThread : KeuThread,
+
+#IF BLD_MP
+    IpiInterrupt1 : KeInterrupt,
+    IpiInterrupt2 : KeInterrupt,
+#END
+
+    ClockTicks : RtlUquad,
+    DpcTimeMs : RtlUquad,
+    UserTimeMs : RtlUquad,
+    SystemTimeMs : RtlUquad,
+    EarliestTimerMs : RtlUquad,
+
+    // Inspired by ULE of FreeBSD:
+    //
+    // The real time list heads are indexed by thread priority, with all ready
+    // threads of the same priority being chained together off of that list
+    // head. The scheduler will *always* select the highest priority available
+    // thread from the real time ready queues if one exists.
+    //
+    // The threads in this queue come from those with "real time priority", and
+    // also those with lower priority that have been temporarily designated as
+    // as "interactive" in order to increase responsiveness.
+
+    RealTimeListHeads : RtlListEntry[OS_PRIORITY_MAX],
+
+    // The calendar list heads form a "clock" whose hand ticks once every 20ms,
+    // or the length of the system tick, whichever is greater. When the real
+    // time queues are empty, the next thread to run is taken from the queue
+    // pointed to by the CalendarRunIndex. After all threads are emptied from
+    // this queue (i.e. they have all gotten a chance to run), the
+    // CalendarRunIndex is incremented to the next queue which contains threads,
+    // in order to make sure the processor doesn't waste time idling.
+    //
+    // The CalendarEnqueueIndex is the ticking hand. Newly enqueued threads are
+    // inserted into the queue pointed to by:
+    //
+    //   CalendarEnqueueIndex + KEP_TIMESHARED_DISTANCE - thread^.Priority
+    //
+    // That is, threads are placed into a "further" queue when they have lower
+    // priority. This accomplishes a relative ratio of CPU time granted to each
+    // thread based on their priorities.
+    //
+    // If CalendarRunIndex is incremented and equals CalendarEnqueueIndex, the
+    // latter is incremented in order to make sure the queue being run is
+    // flushed before more stuff is put on it.
+    //
+    // Threads on these lists are called "timeshared threads".
+
+    CalendarListHeads : RtlListEntry[KEP_TIMESHARED_QUEUES],
+
+    IplTimes : RtlUquad[KEP_IPL_MAX],
+END
+
+#DEFINE KEP_DISPATCH_EVENT_NOTIF 1
+#DEFINE KEP_DISPATCH_EVENT_SYNCH 2
+#DEFINE KEP_DISPATCH_BALANCED_QUEUE 3
+
+#DEFINE KEP_WB_UNWAITED 1
+#DEFINE KEP_WB_DEQUEUED 2
+
+#DEFINE KEP_PROCESS_RESIDENT 1
+#DEFINE KEP_PROCESS_OUTSWAPPED 2
+#DEFINE KEP_PROCESS_TRANSITION 3
+
+#DEFINE KEP_THREAD_WAIT_NONE 0
+#DEFINE KEP_THREAD_WAIT_TRY 1
+#DEFINE KEP_THREAD_WAIT_ABORTED 2
+#DEFINE KEP_THREAD_WAIT_COMMITTED 3
+
+#DEFINE KEP_IDLE_QUEUE 1
+#DEFINE KEP_TIMESHARED_QUEUE 2
+#DEFINE KEP_REAL_TIME_QUEUE 3
+
+#DEFINE KEP_REQUEST_NONE 0
+#DEFINE KEP_REQUEST_ENQUEUED 1
+#DEFINE KEP_REQUEST_CURRENT 2
+#DEFINE KEP_REQUEST_CANCELLED 3
+#DEFINE KEP_REQUEST_COMPLETED 4
+
+#MACRO KepAreTherePendingSignals ( thread ) [
+    ((thread^.SignalAcceptMask[0] &
+    ~thread^.SignalDeliverOnWaitMask[0] &
+    thread^.SignalMask[0]) |
+    (thread^.SignalAcceptMask[1] &
+    ~thread^.SignalDeliverOnWaitMask[1] &
+    thread^.SignalMask[1]))
+]
+
+#MACRO KepSignalIsUnmaskable ( signal ) [
+    (signal == OS_SIGNAL_KILL)
+]
+
+EXTERN FN KepLowerIpl (
+    IN newipl : UWORD,
+)
+
+EXTERN FN KepDisableInterrupts () : UWORD
+
+EXTERN FN KepRestoreInterrupts (
+    IN oldstate : UWORD,
+)
+
+EXTERN FN KepEnableInterrupts ()
+
+EXTERN FN KepWaitForInterrupt ()
+
+EXTERN FN KepCurrentProcessor () : UWORD
+
+EXTERN FN KepInitializeCrashing ()
+
+EXTERN FN KepInitializeArchitecture (
+    IN prb : ^KepPrb,
+)
+
+EXTERN FN KepFlushMyIcache ()
+
+EXTERN FN KepFlushMyDcache ()
+
+EXTERN FN KepFlushMyIcacheByPhys (
+    IN pfn : UWORD,
+)
+
+EXTERN FN KepFlushMyDcacheByPhys (
+    IN pfn : UWORD,
+)
+
+EXTERN FN KepDispatchSoftwareInterrupts (
+    IN newipl : UWORD,
+)
+
+EXTERN FN KepInterruptUsermode (
+    IN dispatchfunc : ^VOID,
+    IN trapframe : ^OsContext,
+    IN userfunc : UWORD,
+    IN context : UWORD,
+    IN thread : ^KeuThread,
+)
+
+EXTERN FN KepInitializeTurnstiles ()
+
+EXTERN FN KepAcquireLockShared (
+    IN lock : ^KeLock,
+    IN oldipl : UWORD,
+) : UWORD
+
+EXTERN FN KepAcquireLockExclusive (
+    IN lock : ^KeLock,
+    IN oldipl : UWORD,
+) : UWORD
+
+EXTERN FN KepReleaseLock (
+    IN lock : ^KeLock,
+)
+
+EXTERN FN KepDispatchKernelApcQueue (
+    IN current : ^KeuThread,
+)
+
+EXTERN FN KepDispatchLazyApcQueue (
+    IN current : ^KeuThread,
+)
+
+EXTERN FN KepDispatchUserApcQueue (
+    IN current : ^KeuThread,
+)
+
+EXTERN FN KepDispatchDpcQueue (
+    IN prb : ^KepPrb,
+)
+
+EXTERN FN KepPreemptThread (
+    IN prb : ^KepPrb,
+)
+
+EXTERN FN KepQuantumEnd (
+    IN prb : ^KepPrb,
+)
+
+EXTERN FN KepCheckInteractivity (
+    IN prb : ^KepPrb,
+)
+
+EXTERN FN KepCheckInteractivityInternal (
+    IN prb : ^KepPrb,
+    IN current : ^KeuThread,
+    IN oldinteractivity : UWORD,
+    IN newinteractivity : UWORD,
+)
+
+EXTERN FN KepSwitchAddressSpace (
+    IN process : ^KeuProcess,
+)
+
+EXTERN FN KepSwitchContext (
+    IN newthread : ^KeuThread,
+    IN oldthread : ^KeuThread,
+)
+
+EXTERN FN KepJumpIntoThread (
+    IN thread : ^KeuThread,
+)
+
+EXTERN FN KepJumpIntoIdleThread (
+    IN prb : ^KepPrb,
+)
+
+EXTERN FN KepUpdateInteractivity (
+    IN thread : ^KeuThread,
+    IN deferupdate : UWORD,
+)
+
+EXTERN FN (KeDpcF) KepTimerExpiration (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN (KeInterruptF) KepClockTick (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+EXTERN FN KepSatisfyObject (
+    IN object : ^KepDispatchHeader,
+    IN priorityboost : UWORD,
+    IN all : UWORD,
+    IN status : OsStatus,
+) : ^KeuThread
+
+EXTERN FN KepUnwaitThread (
+    IN thread : ^KeuThread,
+    IN status : OsStatus,
+    IN priorityboost : UWORD,
+)
+
+EXTERN FN KepYield (
+    IN current : ^KeuThread,
+    IN prb : ^KepPrb,
+)
+
+EXTERN FN KepRaisePriorityFloorThread (
+    IN thread : ^KeuThread,
+    IN interactive : UWORD,
+    IN priority : UWORD,
+) : UWORD
+
+EXTERN FN KepLowerPriorityFloorThread (
+    IN thread : ^KeuThread,
+    IN interactive : UWORD,
+    IN priority : UWORD,
+)
+
+EXTERN FN KepReadyThread (
+    IN thread : ^KeuThread,
+)
+
+EXTERN FN KepDispatchUserInterrupts ()
+
+EXTERN FN KepWakeBalancedQueue (
+    IN queue : ^KeBalancedQueue,
+)
+
+EXTERN FN KepDisassociateFromBalancedQueue (
+    IN thread : ^KeuThread,
+)
+
+EXTERN KepUnexpectedInterruptObject : KeInterrupt
+
+EXTERN FN KepSoftInterruptSelfSet (
+    IN prb : ^KepPrb,
+    IN set : UWORD,
+)
+
+#MACRO KepSoftInterruptSelf ( prb, ipl ) [
+    KeOrUlong (
+        &(prb)^.PendingSoftwareInterrupts, // ptr
+        KepPendingIpl ( ipl ), // ulong
+    )
+]
+
+#IF BLD_MP
+
+EXTERN FN KepPinThread (
+    IN prb : ^KepPrb,
+)
+
+EXTERN FN KepUnpinThread ()
+
+EXTERN FN (KeDpcF) KepBalanceWork (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN KepFreezeOtherProcessors ()
+
+EXTERN FN KepUnfreezeOtherProcessors ()
+
+EXTERN FN (KeInterruptF) KepServiceIpi (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+EXTERN FN KepExecuteOnOtherProcessor (
+    IN target : ^KepPrb,
+    IN function : KepIpiF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN KepExecuteOnEveryoneElse (
+    IN function : KepIpiF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+    IN deferred : UWORD,
+)
+
+#MACRO KepSoftInterruptOther ( targetprb, ipl ) [
+    // Cause a software interrupt on another processor.
+
+    oldvalue := KeOrUlong (
+        &(targetprb)^.PendingSoftwareInterrupts, // ptr
+        KepPendingIpl ( ipl ), // bitset
+    )
+
+    IF oldvalue & KepPendingIpl ( ipl ) == 0 THEN
+        // We just set it, so we should send an IPI to get him to check it.
+
+        HaluTriggerIpi (
+            targetprb, // target
+            KEP_IPI_ASYNCHRONOUS, // type
+        )
+    END
+]
+
+EXTERN FN KepTryAcquireSpinlock (
+    IN spinlock : ^KepSpinlock,
+) : UWORD
+
+EXTERN FN KepAcquireSpinlock (
+    IN spinlock : ^KepSpinlock,
+)
+
+EXTERN FN KepForceReleaseSpinlock (
+    IN spinlock : ^KepSpinlock,
+)
+
+EXTERN FN KepAcquireSpinlockRaise (
+    IN spinlock : ^KepSpinlock,
+) : UWORD
+
+EXTERN FN KepAcquireSpinlockInPrb (
+    IN offset : UWORD,
+    OUT prb : ^KepPrb,
+) : UWORD
+
+#MACRO KepAcquireObject ( object ) [
+    KepAcquireSpinlockRaise ( &(object)^.Spinlock )
+]
+
+#MACRO KepReleaseObject ( object, ipl ) [
+    KepReleaseSpinlockLower ( &(object)^.Spinlock, ipl )
+]
+
+#MACRO KepAcquireObjectElevated ( object ) [
+    KepAcquireSpinlock ( &(object)^.Spinlock )
+]
+
+#MACRO KepReleaseObjectElevated ( object ) [
+    KepReleaseSpinlock ( &(object)^.Spinlock )
+]
+
+#DEFINE KEP_QUEUE_REMOVAL_LOCKS 32
+
+#IF ( == BLD_BITS 64 )
+
+#DEFINE KEP_QUEUE_SHIFT 6
+
+#ELSE
+
+#DEFINE KEP_QUEUE_SHIFT 5
+
+#END
+
+EXTERN KepQueueRemovalLocks : KepSpinlock[KEP_QUEUE_REMOVAL_LOCKS]
+
+#MACRO KepQueueLockIndex ( queue ) [
+    (((queue) >> KEP_QUEUE_SHIFT) & (KEP_QUEUE_REMOVAL_LOCKS - 1))
+]
+
+#MACRO KepComputeQueueRemovalLockAddress ( lock, queue ) [
+    lock := &KepQueueRemovalLocks[KepQueueLockIndex(queue)]
+]
+
+#MACRO KepAcquireQueueRemoval ( lock ) [
+    KepAcquireSpinlockRaise ( lock )
+]
+
+#MACRO KepReleaseQueueRemoval ( lock, ipl ) [
+    KepReleaseSpinlockLower ( lock, ipl )
+]
+
+#MACRO KepAcquireQueueRemovalElevated ( lock ) [
+    KepAcquireSpinlock ( lock )
+]
+
+#MACRO KepReleaseQueueRemovalElevated ( lock ) [
+    KepReleaseSpinlock ( lock )
+]
+
+#MACRO KepAcquireThread ( thread ) [
+    KepAcquireSpinlockRaise ( &(thread)^.Spinlock )
+]
+
+#MACRO KepReleaseThread ( thread, oldipl ) [
+    KepReleaseSpinlockLower (
+        &(thread)^.Spinlock, // spinlock
+        oldipl, // oldipl
+    )
+]
+
+#MACRO KepAcquireThreadElevated ( thread ) [
+    KepAcquireSpinlock ( &(thread)^.Spinlock )
+]
+
+#MACRO KepTryAcquireThreadElevated ( thread ) [
+    KepTryAcquireSpinlock ( &(thread)^.Spinlock )
+]
+
+#MACRO KepReleaseThreadElevated ( thread ) [
+    KepReleaseSpinlock ( &(thread)^.Spinlock )
+]
+
+#MACRO KepAcquireSwapState ( process ) [
+    KepAcquireSpinlockRaise ( &(process)^.SwapStateSpinlock )
+]
+
+#MACRO KepReleaseSwapState ( process, ipl ) [
+    KepReleaseSpinlockLower ( &(process)^.SwapStateSpinlock, ipl )
+]
+
+#MACRO KepAcquireSwapStateElevated ( process ) [
+    KepAcquireSpinlock ( &(process)^.SwapStateSpinlock )
+]
+
+#MACRO KepReleaseSwapStateElevated ( process ) [
+    KepReleaseSpinlock ( &(process)^.SwapStateSpinlock )
+]
+
+EXTERN FN KepStealWork ()
+
+EXTERN KepWorkBalanceDpc : KeDpc
+
+#MACRO KepPrbFromNumber ( procid ) [
+    (CAST KeuLoaderBlock.VirtualPrbBase + (procid) * BL_PRB_SIZE TO ^KepPrb)
+]
+
+#ELSE
+
+#MACRO KepAcquireObject ( object ) [
+    KepRaiseIpl ( KEP_IPL_DPC )
+]
+
+#MACRO KepReleaseObject ( object, ipl ) [
+    KepLowerIpl ( ipl )
+]
+
+#MACRO KepAcquireObjectElevated ( object ) []
+
+#MACRO KepReleaseObjectElevated ( object ) []
+
+#MACRO KepComputeQueueRemovalLockAddress ( lock, queue ) []
+
+#MACRO KepAcquireQueueRemoval ( lock ) [
+    KepRaiseIpl ( KEP_IPL_DPC )
+]
+
+#MACRO KepReleaseQueueRemoval ( lock, ipl ) [
+    KepLowerIpl ( ipl )
+]
+
+#MACRO KepAcquireQueueRemovalElevated ( lock ) []
+
+#MACRO KepReleaseQueueRemovalElevated ( lock ) []
+
+#MACRO KepAcquireThread ( thread ) [
+    KepRaiseIpl ( KEP_IPL_DPC )
+]
+
+#MACRO KepReleaseThread ( thread, oldipl ) [
+    KepLowerIpl ( oldipl )
+]
+
+#MACRO KepAcquireThreadElevated ( thread ) []
+
+#MACRO KepReleaseThreadElevated ( thread ) []
+
+#MACRO KepAcquireSwapState ( process ) [
+    KepRaiseIpl ( KEP_IPL_DPC )
+]
+
+#MACRO KepReleaseSwapState ( process, ipl ) [
+    KepLowerIpl ( ipl )
+]
+
+#MACRO KepAcquireSwapStateElevated ( process ) []
+
+#MACRO KepReleaseSwapStateElevated ( process ) []
+
+#MACRO KepPrbFromNumber ( procid ) [
+    (KEP_CURRENT_PRB)
+]
+
+#END
+
+#IF ( == BLD_BITS 32 )
+
+#MACRO KepCaptureCurrentTicks ( uquad ) [
+    WHILE TRUE DO
+        sup := KeSharedUserPage
+
+        NOTHING (uquad)^.High = (sup)^.Uptime.High
+        KeMemoryBarrier ()
+        NOTHING (uquad)^.Low = (sup)^.Uptime.Low
+        KeMemoryBarrier ()
+
+        IF (uquad)^.High == (sup)^.UptimeCheckHigh THEN
+            // Didn't change while collecting.
+
+            BREAK
+        END
+    END
+]
+
+#MACRO KepLowTick () [
+    (KeSharedUserPage^.Uptime.Low)
+]
+
+#MACRO KepUpdateTime ( prb ) [
+    sup := KeSharedUserPage
+
+    realtime : RtlUquad
+
+    HaluQueryTime ( &realtime )
+
+#IF HALU_RTC_IS_LOCAL
+    // Convert to real time by subtracting the time zone offset.
+
+    offset := KeSharedUserPage^.TimeZoneOffset
+
+    RtlSubUlongFromUquad (
+        &realtime, // destquad
+        offset, // ulong
+    )
+#END
+
+    sup^.RealTimeCheckHigh = realtime.High
+    KeWriteMemoryBarrier ()
+    sup^.RealTime.Low = realtime.Low
+    KeWriteMemoryBarrier ()
+    sup^.RealTime.High = realtime.High
+
+    sup^.UptimeCheckHigh = (prb)^.ClockTicks.High
+    KeWriteMemoryBarrier ()
+    sup^.Uptime.Low = (prb)^.ClockTicks.Low
+    KeWriteMemoryBarrier ()
+    sup^.Uptime.High = (prb)^.ClockTicks.High
+]
+
+#ELSE
+
+#MACRO KepCaptureCurrentTicks ( uquad ) [
+    NOTHING (uquad)^.Quad = KeSharedUserPage^.Uptime.Quad
+]
+
+#MACRO KepLowTick ( prb ) [
+    (KeSharedUserPage^.Uptime.Quad)
+]
+
+#MACRO KepUpdateTime ( prb ) [
+    sup := KeSharedUserPage
+
+    realtime : RtlUquad
+
+    HaluQueryTime ( &realtime )
+
+#IF HALU_RTC_IS_LOCAL
+    // Convert to real time by subtracting the time zone offset.
+
+    realtime.Quad -= KeSharedUserPage^.TimeZoneOffset
+#END
+
+    sup^.RealTime.Quad = realtime.Quad
+
+    sup^.Uptime.Quad = (prb)^.ClockTicks.Quad
+]
+
+#END
+
+#MACRO KepInitializeDispatchObject ( hdr, name, type ) [
+    RtlInitializeList ( &(hdr)^.WaitListHead )
+    NOTHING (hdr)^.Name = (name)
+    NOTHING (hdr)^.WaiterCount = 0
+#IF BLD_MP
+    KepInitializeSpinlock ( &(hdr)^.Spinlock )
+#END
+    NOTHING (hdr)^.Type = (type)
+]
+
+EXTERN FN KepInitializeContext (
+    IN thread : ^KeuThread,
+    IN kstack : ^VOID,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : ^OsContext
+
+EXTERN KepIndexFirstBitClear : UBYTE[256]
+
+EXTERN KepIndexFirstBitSet : UBYTE[256]
+
+EXTERN FN KepInsertSwapCandidateListFunc (
+    IN thread : ^KeuThread,
+)
+
+EXTERN FN KepRemoveSwapCandidateListFunc (
+    IN thread : ^KeuThread,
+)
+
+#MACRO KepInsertSwapCandidateList ( thread, waitmode ) [
+    IF (waitmode) == KE_USER_MODE THEN
+        KepInsertSwapCandidateListFunc ( thread )
+    END
+]
+
+#MACRO KepRemoveSwapCandidateList ( thread ) [
+    IF (thread)^.SwapCandidatePrb THEN
+        KepRemoveSwapCandidateListFunc ( thread )
+    END
+]
+
+EXTERN FN KepReadyOutswappedThread (
+    IN thread : ^KeuThread,
+) : UWORD
+
+EXTERN FN KepReadyThreadOutswappedProcess (
+    IN thread : ^KeuThread,
+) : UWORD
+
+#DEFINE KEP_THREAD_PENDING_KAPC 1
+#DEFINE KEP_THREAD_PENDING_UAPC 2
+#DEFINE KEP_THREAD_PENDING_LAPC 4
+#DEFINE KEP_THREAD_PENDING_SIGNAL 8

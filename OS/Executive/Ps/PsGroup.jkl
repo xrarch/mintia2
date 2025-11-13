@@ -6,8 +6,8 @@
 
 #SECTION "PAGEtext"
 FN PspInheritProcessGroup (
-    IN child : ^PsProcess,
-    IN parent : ^PsProcess,
+    IN child : ^PsuProcess,
+    IN parent : ^PsuProcess,
 )
 
     // Inherit the process group of the parent into the child.
@@ -24,8 +24,8 @@ FN PspInheritProcessGroup (
         group := parentpaged^.ProcessGroup
         sidgroup := parentpaged^.SessionGroup
 
-        ObReferenceObject ( sidgroup )
-        ObReferenceObject ( group )
+        ObuReferenceObject ( sidgroup )
+        ObuReferenceObject ( group )
 
         childpaged^.SessionGroup = sidgroup
         childpaged^.ProcessGroup = group
@@ -51,7 +51,7 @@ END
 
 #SECTION "PAGEtext"
 FN PspRemoveProcessGroup (
-    IN process : ^PsProcess,
+    IN process : ^PsuProcess,
 )
 
     // Remove the process from its process group.
@@ -70,21 +70,21 @@ FN PspRemoveProcessGroup (
 
     // Unreference the group.
 
-    ObUnreferenceObject ( group )
+    ObuUnreferenceObject ( group )
 
     // Unreference the session.
 
-    ObUnreferenceObject ( paged^.SessionGroup )
+    ObuUnreferenceObject ( paged^.SessionGroup )
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) PspDeleteGroupObject (
+FN (ObuTypeDeleteF) PspDeleteGroupObject (
     IN object : ^VOID,
 ) : UWORD
 
     // Delete a group object.
 
-    group := CAST object TO ^PsProcessGroup
+    group := CAST object TO ^PsuProcessGroup
 
     IF group^.LeaderDied THEN
         // If the leader died then we're currently occupying a position in the
@@ -97,14 +97,14 @@ FN (ObTypeDeleteF) PspDeleteGroupObject (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeInitializeF) PspInitializeGroupObject (
+FN (ObuTypeInitializeF) PspInitializeGroupObject (
     IN object : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
 
     // Initialize a group object.
 
-    group := CAST object TO ^PsProcessGroup
+    group := CAST object TO ^PsuProcessGroup
 
     KeInitializeLock ( &group^.Lock )
 
@@ -115,54 +115,54 @@ FN (ObTypeInitializeF) PspInitializeGroupObject (
     RETURN OS_STATUS_SUCCESS
 END
 
-PUBLIC PsGroupType : ObType = {
+PUBLIC PsuGroupType : ObuType = {
     [Name] = "Group",
 
     [Delete] = &PspDeleteGroupObject,
     [Initialize] = &PspInitializeGroupObject,
 
-    [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
+    [WaitOffset] = OBU_TYPE_NO_WAIT_OFFSET,
     [TypeIdentifier] = OS_GROUP_TYPE,
     [Tag] = 'Grup',
 
-    [TypicalBodySize] = SIZEOF PsProcessGroup,
+    [TypicalBodySize] = SIZEOF PsuProcessGroup,
 
     [IsPaged] = TRUE,
 }
 
 #SECTION "PAGEtext"
 FN PspCreateGroup (
-    IN leader : ^PsProcess,
-    OUT group : ^PsProcessGroup,
+    IN leader : ^PsuProcess,
+    OUT group : ^PsuProcessGroup,
 ) : OsStatus
 
     // Create a new group object.
 
-    obparams : ObParameters
+    obparams : ObuParameters
 
-    ObInitializeParameters (
+    ObuInitializeParameters (
         &obparams, // obparams
-        &PsGroupType, // type
+        &PsuGroupType, // type
         NULLPTR, // context
-        PsCurrentCredentials (), // cred
+        PsuCurrentCredentials (), // cred
         OS_ACCESS_OWNER_ALL, // access
         0, // flags
-        SIZEOF PsProcessGroup, // bodysize
+        SIZEOF PsuProcessGroup, // bodysize
         0, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
     )
 
-    RETURN ObAllocateObject (
+    RETURN ObuAllocateObject (
         &obparams, // obparams
         OUT group, // object
     )
 END
 
 #SECTION "PAGEtext"
-FN PsSetGroupProcess (
-    IN process : ^PsProcess,
-    IN group : ^PsProcessGroup,
+FN PsuSetGroupProcess (
+    IN process : ^PsuProcess,
+    IN group : ^PsuProcessGroup,
     IN newsession : UWORD,
 ) : OsStatus
 
@@ -189,7 +189,7 @@ FN PsSetGroupProcess (
     ELSE
         // Add a reference to the group to reflect the new member.
 
-        ObReferenceObject ( group )
+        ObuReferenceObject ( group )
     END
 
     // Acquire the process's group lock.
@@ -201,7 +201,7 @@ FN PsSetGroupProcess (
     // We should only encounter a process without a group one time ever,
     // which is when the system session is being created.
 
-    KeAssert ( (oldgroup != NULLPTR) OR (process == PsSystemProcess) )
+    KeAssert ( (oldgroup != NULLPTR) OR (process == PsuSystemProcess) )
 
     IF oldgroup THEN
         // We already belong to a group and session, so check that this is a
@@ -267,7 +267,7 @@ FN PsSetGroupProcess (
         // Apply an extra reference to the new session group to reflect the fact
         // we are a member of the session.
 
-        ObReferenceObject ( group )
+        ObuReferenceObject ( group )
     END
 
     KeAcquireLockExclusive ( &group^.Lock )
@@ -285,10 +285,10 @@ FN PsSetGroupProcess (
         // Unreference the old group, and the session group if we switched out
         // of it.
 
-        ObUnreferenceObject ( oldgroup )
+        ObuUnreferenceObject ( oldgroup )
 
         IF newsession THEN
-            ObUnreferenceObject ( sessiongroup )
+            ObuUnreferenceObject ( sessiongroup )
         END
     END
 
@@ -300,7 +300,7 @@ FN PsSetGroupProcess (
 
     KeReleaseLock ( &paged^.GroupLock )
 
-    ObUnreferenceObject ( group )
+    ObuUnreferenceObject ( group )
 
     RETURN status
 END
@@ -313,12 +313,12 @@ FN OsSetGroupProcess (
 
     // Set the group of a process, system service.
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -333,12 +333,12 @@ FN OsSetGroupProcess (
         GOTO Exit1
     END
 
-    group : ^PsProcessGroup = NULLPTR
+    group : ^PsuProcessGroup = NULLPTR
 
     IF grouphandle != OS_NULL_HANDLE THEN
-        status = ObReferenceByHandle (
+        status = ObuReferenceByHandle (
             grouphandle, // handle
-            &PsGroupType, // type
+            &PsuGroupType, // type
             OUT group, // object
             OUT access, // access
         )
@@ -354,7 +354,7 @@ FN OsSetGroupProcess (
         END
     END
 
-    status = PsSetGroupProcess (
+    status = PsuSetGroupProcess (
         process, // process
         group, // group
         FALSE, // newsession
@@ -363,12 +363,12 @@ FN OsSetGroupProcess (
 @Exit2
 
     IF group THEN
-        ObUnreferenceObject ( group )
+        ObuUnreferenceObject ( group )
     END
 
 @Exit1
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
@@ -382,13 +382,13 @@ FN OsOpenGroupByPid (
 
     // Open a group object by PID, system service.
 
-    group : ^PsProcessGroup
+    group : ^PsuProcessGroup
 
     // Get a referenced pointer to the group object.
 
     status := PspReferenceById (
         pid, // pid
-        &PsGroupType, // type
+        &PsuGroupType, // type
         OUT group, // object
     )
 
@@ -398,7 +398,7 @@ FN OsOpenGroupByPid (
 
     // Check for appropriate access rights to the group.
 
-    IF NOT ObCheckAccessForCurrent (
+    IF NOT ObuCheckAccessForCurrent (
         group, // object
         access, // access
     ) THEN
@@ -410,8 +410,8 @@ FN OsOpenGroupByPid (
 
     // Insert the group object into the handle table.
 
-    status = ObInsertObject (
-        PsCurrentProcess (), // process
+    status = ObuInsertObject (
+        PsuCurrentProcess (), // process
         group, // object
         access, // access
         OUT handle, // handle
@@ -425,7 +425,7 @@ FN OsOpenGroupByPid (
 
 @Exit
 
-    ObUnreferenceObject ( group )
+    ObuUnreferenceObject ( group )
 
     RETURN status
 END
@@ -440,7 +440,7 @@ FN OsOpenMyGroup (
 
     // Get a referenced pointer to my group object.
 
-    currentpaged := PsCurrentProcess()^.Paged
+    currentpaged := PsuCurrentProcess()^.Paged
 
     KeAcquireLockExclusive ( &currentpaged^.GroupLock )
 
@@ -452,7 +452,7 @@ FN OsOpenMyGroup (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    ObReferenceObject ( group )
+    ObuReferenceObject ( group )
 
     KeReleaseLock ( &currentpaged^.GroupLock )
 
@@ -460,7 +460,7 @@ FN OsOpenMyGroup (
 
     // Check for appropriate access rights to the group.
 
-    IF NOT ObCheckAccessForCurrent (
+    IF NOT ObuCheckAccessForCurrent (
         group, // object
         access, // access
     ) THEN
@@ -472,8 +472,8 @@ FN OsOpenMyGroup (
 
     // Insert the group object into the handle table.
 
-    status = ObInsertObject (
-        PsCurrentProcess (), // process
+    status = ObuInsertObject (
+        PsuCurrentProcess (), // process
         group, // object
         access, // access
         OUT handle, // handle
@@ -487,14 +487,14 @@ FN OsOpenMyGroup (
 
 @Exit
 
-    ObUnreferenceObject ( group )
+    ObuUnreferenceObject ( group )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsSignalGroup (
-    IN group : ^PsProcessGroup,
+FN PsuSignalGroup (
+    IN group : ^PsuProcessGroup,
     IN signal : UWORD,
 )
 
@@ -507,7 +507,7 @@ FN PsSignalGroup (
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
-        process := (CONTAINEROF listentry TO PsPagedProcess.GroupEntry)^.Process
+        process := (CONTAINEROF listentry TO PsuPagedProcess.GroupEntry)^.Process
 
         KeSignalProcess (
             &process^.Pcb, // process
@@ -528,16 +528,16 @@ FN OsSignalGroup (
 
     // Signal a group, system service.
 
-    IF KeInvalidSignal ( signal ) THEN
+    IF KeuInvalidSignal ( signal ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    group : ^PsProcessGroup
+    group : ^PsuProcessGroup
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsGroupType, // type
+        &PsuGroupType, // type
         OUT group, // object
         OUT access, // access
     )
@@ -552,14 +552,14 @@ FN OsSignalGroup (
         GOTO Exit
     END
 
-    PsSignalGroup (
+    PsuSignalGroup (
         group, // group
         signal, // signal
     )
 
 @Exit
 
-    ObUnreferenceObject ( group )
+    ObuUnreferenceObject ( group )
 
     RETURN status
 END
@@ -571,12 +571,12 @@ FN OsNewSessionProcess (
 
     // Put a process into a new session, system service.
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -591,7 +591,7 @@ FN OsNewSessionProcess (
         GOTO Exit
     END
 
-    status = PsSetGroupProcess (
+    status = PsuSetGroupProcess (
         process, // process
         NULLPTR, // group
         TRUE, // newsession
@@ -599,7 +599,7 @@ FN OsNewSessionProcess (
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END

@@ -2,17 +2,17 @@
 // Implements the Balance Manager for the MINTIA Executive.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 
 #INCLUDE "<ll>/System/OsProcess.hjk"
 
-#DEFINE MI_BALANCE_MANAGER_INTERVAL_MS 1000
+#DEFINE MMP_BALANCE_MANAGER_INTERVAL_MS 1000
 
-#DEFINE MI_POOL_ADJUSTMENT_SHORT_INTERVAL_MS 1000
-#DEFINE MI_POOL_ADJUSTMENT_INTERVAL_MS 5000
-#DEFINE MI_POOL_PURGE_INTERVAL_MS 10000
+#DEFINE MMP_POOL_ADJUSTMENT_SHORT_INTERVAL_MS 1000
+#DEFINE MMP_POOL_ADJUSTMENT_INTERVAL_MS 5000
+#DEFINE MMP_POOL_PURGE_INTERVAL_MS 10000
 
-FN (ExWorkItemF) MiAdjustPagedPoolCacheWorker (
+FN (ExuWorkItemF) MmpAdjustPagedPoolCacheWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -20,14 +20,14 @@ FN (ExWorkItemF) MiAdjustPagedPoolCacheWorker (
     // Called from the context of a worker thread to perform periodic adjustment
     // work that is unsafe to perform in the context of the balance manager.
 
-    node := CAST context1 TO ^MiNode
+    node := CAST context1 TO ^MmpNode
     partition := &node^.Partition
 
     node^.PgPoolCacheAdjustActive = FALSE
 
     empty := partition^.AvailablePageCount < partition^.LowPageCount
 
-    MiAdjustPoolCaches (
+    MmpAdjustPoolCaches (
         &node^.PgPoolCacheList, // list
         context2, // purgepercpu
         empty, // empty
@@ -38,20 +38,20 @@ FN (ExWorkItemF) MiAdjustPagedPoolCacheWorker (
         // TODO: Make the reaper lists for these things per-node.
         //       The worker thread pool should also be made per-node.
 
-        PsReaperWorker (
+        PsuReaperWorker (
             0, // context1
             0, // context2
         )
 
-        ObDeferredDeletionWorker (
+        ObuDeferredDeletionWorker (
             0, // context1
             0, // context2
         )
     END
 END
 
-FN MiAdjustAllPoolCachesSafely (
-    IN node : ^MiNode,
+FN MmpAdjustAllPoolCachesSafely (
+    IN node : ^MmpNode,
     IN purgepercpu : UWORD,
     IN empty : UWORD,
 )
@@ -64,9 +64,9 @@ FN MiAdjustAllPoolCachesSafely (
     IF NOT node^.PgPoolCacheAdjustActive THEN
         node^.PgPoolCacheAdjustActive = TRUE
 
-        ExEnqueueWorkItem (
+        ExuEnqueueWorkItem (
             &node^.PgPoolCacheAdjustItem, // item
-            EX_HIGH_WORK_PRIORITY, // priority
+            EXU_HIGH_WORK_PRIORITY, // priority
             CAST node TO UWORD, // context1
             purgepercpu, // context2
         )
@@ -75,14 +75,14 @@ FN MiAdjustAllPoolCachesSafely (
     // Immediately chuck the nonpaged pool caches from the context
     // of this thread.
 
-    MiAdjustPoolCaches (
+    MmpAdjustPoolCaches (
         &node^.NpPoolCacheList, // list
         purgepercpu, // purgepercpu
         empty, // empty
     )
 END
 
-FN MmBalanceManager ()
+FN MmuBalanceManager ()
 
     // Responsible for:
     // o Kernel thread stack swapping.
@@ -90,7 +90,7 @@ FN MmBalanceManager ()
     // o Working set trimming.
     // o Pool cache adjustment.
 
-    thread := PsCurrentThread ()
+    thread := PsuCurrentThread ()
 
     thread^.VmPrivileged = TRUE
 
@@ -100,15 +100,15 @@ FN MmBalanceManager ()
         TRUE, // setcurrentpriority
     )
 
-    partition := PsCurrentPartition ()
-    node := PsCurrentNode ()
+    partition := PsuCurrentPartition ()
+    node := PsuCurrentNode ()
 
-    IF MiIsPartitionPhysical ( partition ) THEN
+    IF MmpIsPartitionPhysical ( partition ) THEN
         node^.PgPoolCacheAdjustActive = FALSE
 
-        ExInitializeWorkItem (
+        ExuInitializeWorkItem (
             &node^.PgPoolCacheAdjustItem, // item
-            &MiAdjustPagedPoolCacheWorker, // routine
+            &MmpAdjustPagedPoolCacheWorker, // routine
         )
     END
 
@@ -122,13 +122,13 @@ FN MmBalanceManager ()
 
     RtlSetUquadToUlong (
         &interval, // uquad
-        MI_BALANCE_MANAGER_INTERVAL_MS, // ms
+        MMP_BALANCE_MANAGER_INTERVAL_MS, // ms
     )
 
     KeInitializeTimer (
         &timer, // timer
         NULLPTR, // dpc
-        "ExBalanceManagerTimer", // name
+        "ExuBalanceManagerTimer", // name
     )
 
     waittable : ^VOID[2]
@@ -164,13 +164,13 @@ FN MmBalanceManager ()
             // The timer expired.
             // Perform periodic adjustment work.
 
-            ms += MI_BALANCE_MANAGER_INTERVAL_MS
+            ms += MMP_BALANCE_MANAGER_INTERVAL_MS
             dt := ms - mssinceadjust
 
-            IF MiIsPartitionPhysical ( partition ) AND
-                (dt >= MI_POOL_ADJUSTMENT_INTERVAL_MS OR
+            IF MmpIsPartitionPhysical ( partition ) AND
+                (dt >= MMP_POOL_ADJUSTMENT_INTERVAL_MS OR
                 (partition^.AvailablePageCount < partition^.LowPageCount AND
-                dt >= MI_POOL_ADJUSTMENT_SHORT_INTERVAL_MS)) THEN
+                dt >= MMP_POOL_ADJUSTMENT_SHORT_INTERVAL_MS)) THEN
 
                 // Adjust pool caches.
 
@@ -178,7 +178,7 @@ FN MmBalanceManager ()
 
                 purge := FALSE
 
-                IF (ms - mssincepurge) >= MI_POOL_PURGE_INTERVAL_MS THEN
+                IF (ms - mssincepurge) >= MMP_POOL_PURGE_INTERVAL_MS THEN
                     mssincepurge = ms
 
                     IF partition^.AvailablePageCount <
@@ -188,7 +188,7 @@ FN MmBalanceManager ()
                     END
                 END
 
-                MiAdjustAllPoolCachesSafely (
+                MmpAdjustAllPoolCachesSafely (
                     node, // node
                     purge, // purgepercpu
                     partition^.AvailablePageCount < partition^.LowPageCount,

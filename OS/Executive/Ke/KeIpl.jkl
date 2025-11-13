@@ -2,84 +2,84 @@
 // Implements support for software Interrupt Priority Levels (IPLs).
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 
-#MACRO KiAcknowledgeSoftwareInterrupt ( prb, ipl ) [
-    KeAssert ( ipl != KI_IPL_LOW )
+#MACRO KepAcknowledgeSoftwareInterrupt ( prb, ipl ) [
+    KeAssert ( ipl != KEP_IPL_LOW )
 
 #IF BLD_MP
     KeMaskUlong (
         &(prb)^.PendingSoftwareInterrupts, // ptr
-        ~(KiPendingIpl ( ipl )), // mask
+        ~(KepPendingIpl ( ipl )), // mask
     )
 #ELSE
-    NOTHING (prb)^.PendingSoftwareInterrupts &= ~(KiPendingIpl ( ipl ))
+    NOTHING (prb)^.PendingSoftwareInterrupts &= ~(KepPendingIpl ( ipl ))
 #END
 ]
 
-FNPTR KiSoftwareInterruptHandlerF ()
+FNPTR KepSoftwareInterruptHandlerF ()
 
-FN (KiSoftwareInterruptHandlerF) KiNoInterrupt ()
+FN (KepSoftwareInterruptHandlerF) KepNoInterrupt ()
 
     // Called if no software interrupt is pending on entry to
-    // KiDispatchSoftwareInterrupts.
+    // KepDispatchSoftwareInterrupts.
 
     NOTHING
 END
 
-FN (KiSoftwareInterruptHandlerF) KiApcInterrupt ()
+FN (KepSoftwareInterruptHandlerF) KepApcInterrupt ()
 
     // Called if an APC interrupt is pending.
     // Atomically clear the pending APC interrupt.
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
-    KiAcknowledgeSoftwareInterrupt (
+    KepAcknowledgeSoftwareInterrupt (
         prb, // prb
-        KI_IPL_APC, // ipl
+        KEP_IPL_APC, // ipl
     )
 
     current := prb^.CurrentThread
 
-    prb^.Ipl = KI_IPL_APC
+    prb^.Ipl = KEP_IPL_APC
 
-    KiEnableInterrupts ()
+    KepEnableInterrupts ()
 
-    KiDispatchKernelApcQueue ( current )
+    KepDispatchKernelApcQueue ( current )
 
-    KiDisableInterrupts ()
+    KepDisableInterrupts ()
 END
 
-FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt ()
+FN (KepSoftwareInterruptHandlerF) KepDpcInterrupt ()
 
     // Called if a DPC interrupt is pending.
     // Atomically clear the pending DPC interrupt.
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
-    KiAcknowledgeSoftwareInterrupt (
+    KepAcknowledgeSoftwareInterrupt (
         prb, // prb
-        KI_IPL_DPC, // ipl
+        KEP_IPL_DPC, // ipl
     )
 
-    prb^.Ipl = KI_IPL_DPC
+    prb^.Ipl = KEP_IPL_DPC
 
-    KiEnableInterrupts ()
+    KepEnableInterrupts ()
 
     IF NOT RtlEmptyList ( &prb^.DpcListHead ) THEN
-        KiDispatchDpcQueue ( prb )
+        KepDispatchDpcQueue ( prb )
     END
 
     IF prb^.CheckInteractivity THEN
         prb^.CheckInteractivity = FALSE
 
-        KiCheckInteractivity ( prb )
+        KepCheckInteractivity ( prb )
     END
 
     IF prb^.QuantumEnd THEN
         prb^.QuantumEnd = FALSE
 
-        KiQuantumEnd ( prb )
+        KepQuantumEnd ( prb )
     END
 
 #IF BLD_MP
@@ -92,7 +92,7 @@ FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt ()
         prb^.WakeStackSwapper = FALSE
 
         KeSignalEvent (
-            &KeStackSwapperEvent, // event
+            &KeuStackSwapperEvent, // event
             0, // priorityboost
         )
     END
@@ -102,21 +102,21 @@ FN (KiSoftwareInterruptHandlerF) KiDpcInterrupt ()
         // A next thread was selected to preempt the current one.
         // Switch to it immediately.
 
-        KiPreemptThread ( prb )
+        KepPreemptThread ( prb )
     END
 
-    KiDisableInterrupts ()
+    KepDisableInterrupts ()
 END
 
 #SECTION "text"
-KiSoftwareInterruptPriorityTable : KiSoftwareInterruptHandlerF[] = {
-    [0] = &KiNoInterrupt,
-    [1] = &KiApcInterrupt,
-    [2] = &KiDpcInterrupt,
-    [3] = &KiDpcInterrupt,
+KepSoftwareInterruptPriorityTable : KepSoftwareInterruptHandlerF[] = {
+    [0] = &KepNoInterrupt,
+    [1] = &KepApcInterrupt,
+    [2] = &KepDpcInterrupt,
+    [3] = &KepDpcInterrupt,
 }
 
-FN KiDispatchSoftwareInterrupts (
+FN KepDispatchSoftwareInterrupts (
     IN newipl : UWORD,
 )
 
@@ -127,7 +127,7 @@ FN KiDispatchSoftwareInterrupts (
 
     mask := 3 << newipl
 
-    oldstate := KiDisableInterrupts ()
+    oldstate := KepDisableInterrupts ()
 
     // Note that there's a race where inbetween the caller noticing unmasked
     // pending soft ints, and disabling interrupts just now, an interrupt may
@@ -137,17 +137,17 @@ FN KiDispatchSoftwareInterrupts (
     // in the dispatch table is a no-op routine in order to catch this
     // harmlessly without wasting branch instructions in the hot path.
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
     pending := prb^.PendingSoftwareInterrupts & mask
 
     WHILE TRUE DO
-        KiSoftwareInterruptPriorityTable[pending] ()
+        KepSoftwareInterruptPriorityTable[pending] ()
 
-#IF KI_VOLATILE_LOCAL_PRB
+#IF KEP_VOLATILE_LOCAL_PRB
         // Recapture the Prb since it might have changed due to activity of the
         // scheduler while interrupts were enabled.
 
-        prb = KI_CURRENT_PRB_LOCAL
+        prb = KEP_CURRENT_PRB_LOCAL
 #END
 
         pending = prb^.PendingSoftwareInterrupts & mask
@@ -159,5 +159,5 @@ FN KiDispatchSoftwareInterrupts (
 
     prb^.Ipl = newipl
 
-    KiRestoreInterrupts ( oldstate )
+    KepRestoreInterrupts ( oldstate )
 END

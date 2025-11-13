@@ -29,7 +29,7 @@ IopTreeLock : KeLock = KE_INITIAL_LOCK
     KeReleaseLock ( &(treenode)^.Lock )
 ]
 
-STRUCT IoPlane
+STRUCT IouPlane
     Name : ^UBYTE,
 
     NodeListHead : RtlListEntry,
@@ -39,27 +39,27 @@ STRUCT IoPlane
     Lock : KeLock,
 END
 
-STRUCT IoPlaneEntry
-    Plane : ^IoPlane,
+STRUCT IouPlaneEntry
+    Plane : ^IouPlane,
 
-    TreeNode : ^IoTreeNode,
+    TreeNode : ^IouTreeNode,
 
-    RelationSets : ExObjectSet[IO_RELATION_MAX],
+    RelationSets : ExuObjectSet[IO_RELATION_MAX],
 
     Entry : RtlListEntry,
 END
 
-EXPORT IoServicePlane : ^IoPlane
+EXPORT IouServicePlane : ^IouPlane
 
-IopServicePlane : IoPlane
+IopServicePlane : IouPlane
 
 IopPlaneList : RtlListEntry
 
 IopPlaneListLock : KeLock = KE_INITIAL_LOCK
 
 #SECTION "PAGEtext"
-FN IoInitializePlane (
-    IN plane : ^IoPlane,
+FN IouInitializePlane (
+    IN plane : ^IouPlane,
     IN name : ^UBYTE,
 )
 
@@ -86,19 +86,19 @@ FN IopInitializeDeviceTree ()
 
     // Initialize the device tree.
 
-    IoServicePlane = &IopServicePlane
+    IouServicePlane = &IopServicePlane
 
-    IoInitializePlane (
-        IoServicePlane, // plane
-        "IoService", // name
+    IouInitializePlane (
+        IouServicePlane, // plane
+        "IouService", // name
     )
 END
 
 #SECTION "PAGEtext"
 FN IopFindPlaneEntry (
-    IN treenode : ^IoTreeNode,
-    IN plane : ^IoPlane,
-) : ^IoPlaneEntry
+    IN treenode : ^IouTreeNode,
+    IN plane : ^IouPlane,
+) : ^IouPlaneEntry
 
     // Find the plane entry associated with the tree node.
     // If not found, allocate. Returns NULLPTR on failure.
@@ -108,7 +108,7 @@ FN IopFindPlaneEntry (
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
-        node := CONTAINEROF listentry TO IoPlaneEntry.Entry
+        node := CONTAINEROF listentry TO IouPlaneEntry.Entry
 
         IF node^.Plane == plane THEN
             // Found it.
@@ -121,12 +121,12 @@ FN IopFindPlaneEntry (
 
     // Create a new one.
 
-    node := CAST MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
-        SIZEOF IoPlaneEntry, // bytes
+    node := CAST MmuAllocatePool (
+        MMU_PAGED_POOL, // poolindex
+        SIZEOF IouPlaneEntry, // bytes
         'PlNd', // tag
         TRUE, // wait
-    ) TO ^IoPlaneEntry
+    ) TO ^IouPlaneEntry
 
     IF NOT node THEN
         RETURN NULLPTR
@@ -140,10 +140,10 @@ FN IopFindPlaneEntry (
     i := 0
 
     WHILE i < IO_RELATION_MAX DO
-        ExInitializeSet (
+        ExuInitializeSet (
             &node^.RelationSets[i], // set
             'IoRs', // tag
-            MM_PAGED_POOL, // poolindex
+            MMU_PAGED_POOL, // poolindex
         )
 
         i += 1
@@ -158,10 +158,10 @@ FN IopFindPlaneEntry (
 END
 
 #SECTION "PAGEtext"
-FN IoAttachNodes (
-    IN plane : ^IoPlane,
-    IN parent : ^IoTreeNode,
-    IN child : ^IoTreeNode,
+FN IouAttachNodes (
+    IN plane : ^IouPlane,
+    IN parent : ^IouTreeNode,
+    IN child : ^IouTreeNode,
 ) : OsStatus
 
     // Attach two nodes in the specified plane.
@@ -199,7 +199,7 @@ FN IoAttachNodes (
 
     // Insert as a parent of the child.
 
-    status = ExAppendSet (
+    status = ExuAppendSet (
         &childparents^.RelationSets[IO_RELATION_PARENTS], // set
         parent, // object
     )
@@ -210,7 +210,7 @@ FN IoAttachNodes (
 
     // Insert as a child of the parent.
 
-    status = ExAppendSet (
+    status = ExuAppendSet (
         &parentchildren^.RelationSets[IO_RELATION_CHILDREN], // set
         child, // object
     )
@@ -218,7 +218,7 @@ FN IoAttachNodes (
     IF OsError ( status ) THEN
         // Undo the parent addition.
 
-        ExRemoveObjectFromSet (
+        ExuRemoveObjectFromSet (
             &childparents^.RelationSets[IO_RELATION_PARENTS], // set
             parent, // object
         )
@@ -228,7 +228,7 @@ FN IoAttachNodes (
 
     // The link has been made, so reference the parent to reflect the new child.
 
-    ObReferenceObject ( parent )
+    ObuReferenceObject ( parent )
 
 @Exit
 
@@ -239,10 +239,10 @@ FN IoAttachNodes (
 END
 
 #SECTION "PAGEtext"
-FN IoDetachNodes (
-    IN plane : ^IoPlane,
-    IN parent : ^IoTreeNode,
-    IN child : ^IoTreeNode,
+FN IouDetachNodes (
+    IN plane : ^IouPlane,
+    IN parent : ^IouTreeNode,
+    IN child : ^IouTreeNode,
 )
 
     // Destroy a parent-child relationship in the specified plane.
@@ -264,14 +264,14 @@ FN IoDetachNodes (
 
     KeAssert ( childparents != NULLPTR )
 
-    removed := ExRemoveObjectFromSet (
+    removed := ExuRemoveObjectFromSet (
         &childparents^.RelationSets[IO_RELATION_PARENTS], // set
         parent, // object
     )
 
     KeAssert ( removed != FALSE )
 
-    removed = ExRemoveObjectFromSet (
+    removed = ExuRemoveObjectFromSet (
         &parentchildren^.RelationSets[IO_RELATION_CHILDREN], // set
         child, // object
     )
@@ -284,27 +284,27 @@ FN IoDetachNodes (
     // Unreference the parent to reflect the loss of a child.
     // This may cause the parent to go away as well.
 
-    ObUnreferenceObject ( parent )
+    ObuUnreferenceObject ( parent )
 END
 
 #SECTION "PAGEtext"
-FN (ExEnumerateSetF) IopEnumerateRelationsFunc (
-    IN set : ^ExObjectSet,
+FN (ExuEnumerateSetF) IopEnumerateRelationsFunc (
+    IN set : ^ExuObjectSet,
     IN object : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
 
     // Add an object to the relation set.
 
-    IF NOT ObConditionallyReferenceObject ( object ) THEN
+    IF NOT ObuConditionallyReferenceObject ( object ) THEN
         // It's being deleted and just hasn't been removed from the relation set
         // yet. Pretend it's not here.
 
         RETURN OS_STATUS_SUCCESS
     END
 
-    status := ExAppendSet (
-        CAST context TO ^ExObjectSet, // set
+    status := ExuAppendSet (
+        CAST context TO ^ExuObjectSet, // set
         object, // object
     )
 
@@ -313,15 +313,15 @@ FN (ExEnumerateSetF) IopEnumerateRelationsFunc (
         // Use DeferDelete so that we don't call the deletion routine while
         // holding a node lock.
 
-        ObUnreferenceObjectDeferDelete ( object )
+        ObuUnreferenceObjectDeferDelete ( object )
     END
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN (ExEnumerateSetF) IopEnumerateDestroyRelationsFunc (
-    IN set : ^ExObjectSet,
+FN (ExuEnumerateSetF) IopEnumerateDestroyRelationsFunc (
+    IN set : ^ExuObjectSet,
     IN object : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
@@ -329,19 +329,19 @@ FN (ExEnumerateSetF) IopEnumerateDestroyRelationsFunc (
     // Remove a reference from an object that was previously in a relation
     // enumeration set.
 
-    ObUnreferenceObject ( object )
+    ObuUnreferenceObject ( object )
 
     RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
-FN IoEmptyRelationSet (
-    IN set : ^ExObjectSet,
+FN IouEmptyRelationSet (
+    IN set : ^ExuObjectSet,
 )
 
-    // Uninitialize a set previously filled by a call to IoEnumerateRelations.
+    // Uninitialize a set previously filled by a call to IouEnumerateRelations.
 
-    ExEmptySet (
+    ExuEmptySet (
         set, // set
         &IopEnumerateDestroyRelationsFunc, // enumfunc
         NULLPTR, // context
@@ -349,18 +349,18 @@ FN IoEmptyRelationSet (
 END
 
 #SECTION "PAGEtext"
-FN IoEnumerateRelations (
-    IN plane : ^IoPlane,
-    IN treenode : ^IoTreeNode,
-    IN set : ^ExObjectSet,
-    IN relation : IoNodeRelation,
+FN IouEnumerateRelations (
+    IN plane : ^IouPlane,
+    IN treenode : ^IouTreeNode,
+    IN set : ^ExuObjectSet,
+    IN relation : IouNodeRelation,
 ) : OsStatus
 
     // Enumerate the relations of the tree node into the provided object set.
     // The object set must be empty.
     //
     // The returned tree nodes are referenced and safe to use. Because they're
-    // referenced, the set must be emptied by a call to IoEmptyRelationSet once
+    // referenced, the set must be emptied by a call to IouEmptyRelationSet once
     // the extra reference is no longer required.
     //
     // An important detail is that this only captures the set of relations at a
@@ -385,7 +385,7 @@ FN IoEnumerateRelations (
         GOTO Exit
     END
 
-    status = ExEnumerateSet (
+    status = ExuEnumerateSet (
         &planeentry^.RelationSets[relation], // set
         &IopEnumerateRelationsFunc, // enumfunc
         set, // context
@@ -399,7 +399,7 @@ FN IoEnumerateRelations (
         // Failed to capture a complete picture of the relations, so
         // remove whatever items we did get.
 
-        IoEmptyRelationSet ( set )
+        IouEmptyRelationSet ( set )
     END
 
     RETURN status

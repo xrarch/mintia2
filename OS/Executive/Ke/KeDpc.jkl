@@ -2,48 +2,48 @@
 // Implements support for DPC objects.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 
 #IF BLD_MP
 
-#MACRO KiAcquireDpcQueue () [
-    KiDisableInterrupts ()
-    prb := KI_CURRENT_PRB_LOCAL
-    KiAcquireSpinlock ( &prb^.DpcQueueLock )
+#MACRO KepAcquireDpcQueue () [
+    KepDisableInterrupts ()
+    prb := KEP_CURRENT_PRB_LOCAL
+    KepAcquireSpinlock ( &prb^.DpcQueueLock )
 ]
 
-#MACRO KiReleaseDpcQueue ( oldstate ) [
-    prb := KI_CURRENT_PRB_LOCAL
-    KiReleaseSpinlock ( &prb^.DpcQueueLock )
-    KiRestoreInterrupts ( oldstate )
+#MACRO KepReleaseDpcQueue ( oldstate ) [
+    prb := KEP_CURRENT_PRB_LOCAL
+    KepReleaseSpinlock ( &prb^.DpcQueueLock )
+    KepRestoreInterrupts ( oldstate )
 ]
 
-#MACRO KiAcquireOtherDpcQueue ( prb ) [
-    KiDisableInterrupts ()
-    KiAcquireSpinlock ( &(prb)^.DpcQueueLock )
+#MACRO KepAcquireOtherDpcQueue ( prb ) [
+    KepDisableInterrupts ()
+    KepAcquireSpinlock ( &(prb)^.DpcQueueLock )
 ]
 
-#MACRO KiReleaseOtherDpcQueue ( prb, oldstate ) [
-    KiReleaseSpinlock ( &(prb)^.DpcQueueLock )
-    KiRestoreInterrupts ( oldstate )
+#MACRO KepReleaseOtherDpcQueue ( prb, oldstate ) [
+    KepReleaseSpinlock ( &(prb)^.DpcQueueLock )
+    KepRestoreInterrupts ( oldstate )
 ]
 
 #ELSE
 
-#MACRO KiAcquireDpcQueue () [
-    KiDisableInterrupts ()
+#MACRO KepAcquireDpcQueue () [
+    KepDisableInterrupts ()
 ]
 
-#MACRO KiReleaseDpcQueue ( oldstate ) [
-    KiRestoreInterrupts ( oldstate )
+#MACRO KepReleaseDpcQueue ( oldstate ) [
+    KepRestoreInterrupts ( oldstate )
 ]
 
-#MACRO KiAcquireOtherDpcQueue ( prb ) [
-    KiDisableInterrupts ()
+#MACRO KepAcquireOtherDpcQueue ( prb ) [
+    KepDisableInterrupts ()
 ]
 
-#MACRO KiReleaseOtherDpcQueue ( prb, oldstate ) [
-    KiRestoreInterrupts ( oldstate )
+#MACRO KepReleaseOtherDpcQueue ( prb, oldstate ) [
+    KepRestoreInterrupts ( oldstate )
 ]
 
 #END
@@ -71,12 +71,12 @@ EXPORT FN KeEnqueueDpc (
 
     // Lock our DPC queue.
 
-    ipl := KiAcquireDpcQueue ()
+    ipl := KepAcquireDpcQueue ()
 
     IF dpc^.EnqueuedTo THEN
         // Already enqueued.
 
-        KiReleaseDpcQueue ( ipl )
+        KepReleaseDpcQueue ( ipl )
 
         RETURN FALSE
     END
@@ -86,7 +86,7 @@ EXPORT FN KeEnqueueDpc (
 
     // Capture the Prb into the DPC.
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
     dpc^.EnqueuedTo = prb
 
     // Insert into the queue.
@@ -99,9 +99,9 @@ EXPORT FN KeEnqueueDpc (
     // Set the DPC interrupt pending.
 
 #IF BLD_MP
-    KiSoftInterruptSelf ( prb, KI_IPL_DPC )
+    KepSoftInterruptSelf ( prb, KEP_IPL_DPC )
 #ELSE
-    prb^.PendingSoftwareInterrupts |= KiPendingIpl ( KI_IPL_DPC )
+    prb^.PendingSoftwareInterrupts |= KepPendingIpl ( KEP_IPL_DPC )
 #END
 
     // Release the DPC queue lock.
@@ -115,7 +115,7 @@ EXPORT FN KeEnqueueDpc (
     // lower IPL, but if they are, they will get dispatched next timer
     // interrupt.
 
-    KiReleaseDpcQueue ( ipl )
+    KepReleaseDpcQueue ( ipl )
 
     RETURN TRUE
 END
@@ -140,7 +140,7 @@ EXPORT FN KeDequeueDpc (
 
     // Lock the Prb's DPC queue.
 
-    ipl := KiAcquireOtherDpcQueue ( trgprb )
+    ipl := KepAcquireOtherDpcQueue ( trgprb )
 
     IF dpc^.EnqueuedTo != trgprb THEN
         // It changed while we were checking. This could include the DPC being
@@ -148,7 +148,7 @@ EXPORT FN KeDequeueDpc (
 
         // Retry.
 
-        KiReleaseOtherDpcQueue ( trgprb, ipl )
+        KepReleaseOtherDpcQueue ( trgprb, ipl )
 
         GOTO Retry
     END
@@ -163,13 +163,13 @@ EXPORT FN KeDequeueDpc (
 
     // Release the DPC queue lock.
 
-    KiReleaseOtherDpcQueue ( trgprb, ipl )
+    KepReleaseOtherDpcQueue ( trgprb, ipl )
 
     RETURN TRUE
 END
 
-FN KiDispatchDpcQueue (
-    IN prb : ^KiPrb,
+FN KepDispatchDpcQueue (
+    IN prb : ^KepPrb,
 )
 
     // Dispatch the DPC queue for this processor.
@@ -182,14 +182,14 @@ FN KiDispatchDpcQueue (
     head := &prb^.DpcListHead
 
     WHILE TRUE DO
-        ipl := KiAcquireDpcQueue ()
+        ipl := KepAcquireDpcQueue ()
 
         listentry := head^.Next
 
         IF listentry == head THEN
             // Queue's empty.
 
-            KiReleaseDpcQueue ( ipl )
+            KepReleaseDpcQueue ( ipl )
 
             BREAK
         END
@@ -209,7 +209,7 @@ FN KiDispatchDpcQueue (
 
         // Unlock the queue.
 
-        KiReleaseDpcQueue ( ipl )
+        KepReleaseDpcQueue ( ipl )
 
         // Call the DPC function.
 

@@ -1,0 +1,85 @@
+//
+// Private memory management header file for the XR/17032 architecture.
+//
+
+// Describes the base address of the virtually linear page table.
+
+#DEFINE MMP_TABLE_BASE 0xB0000000
+#DEFINE MMP_TABLE_END 0xB0400000
+
+#DEFINE MMP_DIRECTORY_BASE 0xB02C0000
+
+#DEFINE MMP_USER_SPACE_END 0x7FFF0000
+#DEFINE MMP_SYSTEM_SPACE 0x80000000
+
+// Describes the number of levels in the page table.
+
+#DEFINE MMP_TABLE_LEVELS 2
+
+// Describes base and bounds of the three dynamic areas.
+
+#DEFINE MMP_POOL_SPACE 0xC0000000
+#DEFINE MMP_POOL_SPACE_SIZE [(256 * 1024 * 1024)]
+#DEFINE MMP_POOL_SPACE_END 0xD0000000
+
+#DEFINE MMP_DYNAMIC_SPACE 0xD0000000
+#DEFINE MMP_DYNAMIC_SPACE_SIZE [(256 * 1024 * 1024)]
+#DEFINE MMP_DYNAMIC_SPACE_END 0xE0000000
+
+#DEFINE MMP_CACHE_SPACE 0xE0000000
+#DEFINE MMP_CACHE_SPACE_SIZE [(256 * 1024 * 1024)]
+#DEFINE MMP_CACHE_SPACE_END 0xF0000000
+
+// Describes whether the page table gives a "complete" picture of the address
+// space. This is not the case on architectures where there is an architectural
+// mapping of physical memory (such as MIPS) or where the TLB can be used to
+// permanently map pages that are not reflected in the page table.
+
+#DEFINE MMP_COMPLETE_TABLE 0
+
+#DEFINE MMP_PTE_V 1
+#DEFINE MMP_PTE_W 2
+#DEFINE MMP_PTE_K 4
+#DEFINE MMP_PTE_NC 8
+#DEFINE MMP_PTE_G 16
+
+#DEFINE MMP_INVALID_KERNEL_PTE MMP_PTE_G
+
+TYPE MmpPte : ULONG
+
+#MACRO MmpPteAddress ( vaddr ) [
+    (CAST (MMP_TABLE_BASE + (((vaddr) >> 12) << 2)) TO ^MmpPte)
+]
+
+#MACRO MmpVirtualAddress ( pteaddr ) [
+    (CAST ((((pteaddr) - MMP_TABLE_BASE) >> 2) << 12) TO ^VOID)
+]
+
+#MACRO MmpPfnFromPte ( pte ) [
+    ((pte) >> 5)
+]
+
+#MACRO MmpBuildPoolPte ( pfn ) [
+    (((pfn) << 5) | (MMP_PTE_V | MMP_PTE_W | MMP_PTE_K | MMP_PTE_G))
+]
+
+// We use a fixed TB entry to map the PRB at this address on all processors.
+
+#MACRO MmpIsArchitecturallyValid ( vaddr ) [
+    ((vaddr) & 0xFFFFC000 == 0xFFFFC000)
+]
+
+#MACRO MmpIsPteValid ( pte ) [
+    ((pte) & MMP_PTE_V == 1)
+]
+
+// Assumes two-way 32KB I+D cache.
+
+#DEFINE MMP_COLOR_COUNT 4
+
+// NUMA not supported on xr17032.
+// On an architecture where it IS supported, this macro may do something like
+// subtract the base of dynamic space from the pointer and convert some pointer
+// bits into a NUMA node ID.
+
+#MACRO MmpNumaNodeFromDynamicSpacePointer ( ptr ) [ MmpBootNode ]

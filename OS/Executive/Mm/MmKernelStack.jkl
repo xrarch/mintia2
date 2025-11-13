@@ -2,24 +2,24 @@
 // Implements kernel stack management for the memory manager.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 
 #SECTION "PAGEtext"
-FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
+FN (MmuPoolCacheAllocateF) MmpAllocateKernelStack (
     IN context : ^VOID,
     IN wait : UWORD,
 ) : ^VOID
 
     // Allocate a kernel stack by request of the cache layer.
 
-    node := CAST context TO ^MiNode
+    node := CAST context TO ^MmpNode
     partition := &node^.Partition
 
     // Allocate the required system space.
 
-    kstack := MiAllocateDynamicPages (
+    kstack := MmpAllocateDynamicPages (
         node, // node
-        KE_STACK_PAGES + 1, // pages
+        KEU_STACK_PAGES + 1, // pages
     )
 
     IF NOT kstack THEN
@@ -28,7 +28,7 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
         RETURN NULLPTR
     END
 
-    pfes : ^MiPfe[KE_STACK_PAGES]
+    pfes : ^MmpPfe[KEU_STACK_PAGES]
 
     // TEMP: Naive implementation. Full implementation will initialize these
     //       pages as modified anonymous memory so that kernel stacks can be
@@ -38,14 +38,14 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
     i := 0
     ptr := kstack + RTL_PAGE_SIZE
 
-    WHILE i < KE_STACK_PAGES DO
+    WHILE i < KEU_STACK_PAGES DO
         // Allocate a physical page.
 
-        pfes[i] = MiAllocatePageWait (
+        pfes[i] = MmpAllocatePageWait (
             partition, // partition
             FALSE, // zeroed
             FALSE, // low
-            MiVirtualAddressColor ( ptr ), // color
+            MmpVirtualAddressColor ( ptr ), // color
         )
 
         IF NOT pfes[i] THEN
@@ -56,16 +56,16 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
             WHILE i DO
                 i -= 1
 
-                MiFreePage (
+                MmpFreePage (
                     partition, // partition
                     pfes[i], // pfe
                 )
             END
 
-            MiReleaseDynamicPages (
+            MmpReleaseDynamicPages (
                 node, // node
                 kstack, // ptr
-                KE_STACK_PAGES + 1, // pages
+                KEU_STACK_PAGES + 1, // pages
                 FALSE, // flush
             )
 
@@ -78,11 +78,11 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
 
     // Acquire a pointer to the first PTE for this region.
 
-    pte := MiPteAddress ( kstack )
+    pte := MmpPteAddress ( kstack )
 
     // Set the guard page invalid.
 
-    pte[0] = MI_INVALID_KERNEL_PTE
+    pte[0] = MMP_INVALID_KERNEL_PTE
 
     // Skip to the first real stack page.
 
@@ -92,8 +92,8 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
 
     i = 0
 
-    WHILE i < KE_STACK_PAGES DO
-        pte[i] = MiBuildPoolPte ( MiPfeToPfn ( pfes[i]) )
+    WHILE i < KEU_STACK_PAGES DO
+        pte[i] = MmpBuildPoolPte ( MmpPfeToPfn ( pfes[i]) )
 
         i += 1
     END
@@ -102,44 +102,44 @@ FN (MmPoolCacheAllocateF) MiAllocateKernelStack (
 END
 
 #SECTION "PAGEtext"
-FN (MmPoolCacheFreeF) MiFreeKernelStack (
+FN (MmuPoolCacheFreeF) MmpFreeKernelStack (
     IN context : ^VOID,
     IN ptr : ^VOID,
 )
 
     // Free a kernel stack.
 
-    node := CAST context TO ^MiNode
+    node := CAST context TO ^MmpNode
     partition := &node^.Partition
 
     // Acquire a pointer to the first PTE for this region.
 
-    pte := MiPteAddress ( ptr )
+    pte := MmpPteAddress ( ptr )
 
     // Free the kernel stack pages.
 
     i := 0
 
-    WHILE i < KE_STACK_PAGES DO
+    WHILE i < KEU_STACK_PAGES DO
         // Load the PTE for this page.
 
         ptecontents := pte[i]
 
-        KeAssert ( MiIsPteValid ( ptecontents ) )
+        KeAssert ( MmpIsPteValid ( ptecontents ) )
 
         // Clear the PTE, makes it more likely we'll see it if a bad pointer
         // within this space is used later. Due to the TB it's not 100% though.
 
-        pte[i] = MI_INVALID_KERNEL_PTE
+        pte[i] = MMP_INVALID_KERNEL_PTE
 
         // Free the page frame.
 
         // TEMP: Does not yet handle kernel stacks being private anonymous
         //       memory.
 
-        MiFreePage (
+        MmpFreePage (
             partition, // partition
-            MiPfnToPfe ( MiPfnFromPte ( ptecontents ) ), // pfe
+            MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ), // pfe
         )
 
         i += 1
@@ -147,43 +147,43 @@ FN (MmPoolCacheFreeF) MiFreeKernelStack (
 
     // Release the system space containing the stack.
 
-    MiReleaseDynamicPages (
+    MmpReleaseDynamicPages (
         node, // node
         ptr - RTL_PAGE_SIZE, // ptr
-        KE_STACK_PAGES + 1, // pages
+        KEU_STACK_PAGES + 1, // pages
         TRUE, // flush
     )
 END
 
 #SECTION "INITtext"
-FN MiInitializeKernelStackCache (
-    IN node : ^MiNode,
+FN MmpInitializeKernelStackCache (
+    IN node : ^MmpNode,
 )
 
     // Initialize the zones we use for quickly allocating kernel stacks.
 
-    node^.KernelStackCache = MmCreatePoolCacheEx (
+    node^.KernelStackCache = MmuCreatePoolCacheEx (
         node, // node
         "Kstacks", // name
-        KE_STACK_PAGES * RTL_PAGE_SIZE, // size
+        KEU_STACK_PAGES * RTL_PAGE_SIZE, // size
         TRUE, // pageable
-        &MiAllocateKernelStack, // allocfunc
-        &MiFreeKernelStack, // freefunc
+        &MmpAllocateKernelStack, // allocfunc
+        &MmpFreeKernelStack, // freefunc
         NULLPTR, // deletefunc
         node, // context
     )
 
 #ENTERSECTION "INITtext"
     IF NOT node^.KernelStackCache THEN
-        KeCrash ( "MiInitializeKernelStackCache: failed to create cache\n" )
+        KeCrash ( "MmpInitializeKernelStackCache: failed to create cache\n" )
     END
 #LEAVESECTION
 
 END
 
 #SECTION "PAGEtext"
-FN MmCreateKernelStack (
-    IN process : ^PsProcess,
+FN MmuCreateKernelStack (
+    IN process : ^PsuProcess,
     OUT kstack : ^VOID,
 ) : OsStatus
 
@@ -194,14 +194,14 @@ FN MmCreateKernelStack (
 
     partition := &process^.Node^.Partition
 
-    quotablock := PsQuotaBlock ( process )
+    quotablock := PsuQuotaBlock ( process )
 
     // Charge the process's virtual memory quota for the kernel stack.
 
-    status := MmChargeVmQuota (
+    status := MmuChargeVmQuota (
         partition, // partition
         quotablock, // quotablock
-        KE_STACK_PAGES, // pages
+        KEU_STACK_PAGES, // pages
     )
 
     IF OsError ( status ) THEN
@@ -210,7 +210,7 @@ FN MmCreateKernelStack (
 
     // Allocate it.
 
-    kstack = MmAllocateFromPoolCache (
+    kstack = MmuAllocateFromPoolCache (
         process^.Node^.KernelStackCache, // cache
         TRUE, // wait
     )
@@ -218,10 +218,10 @@ FN MmCreateKernelStack (
     IF NOT kstack THEN
         // Failed to allocate it so uncharge and report an error.
 
-        MmUnchargeVmQuota (
+        MmuUnchargeVmQuota (
             partition, // partition
             quotablock, // quotablock
-            KE_STACK_PAGES, // pages
+            KEU_STACK_PAGES, // pages
         )
 
         status = OS_STATUS_NO_MEMORY
@@ -231,23 +231,23 @@ FN MmCreateKernelStack (
 END
 
 #SECTION "PAGEtext"
-FN MmFreeKernelStack (
-    IN process : ^PsProcess,
+FN MmuFreeKernelStack (
+    IN process : ^PsuProcess,
     IN kstack : ^VOID,
 )
 
     // Free a kernel stack. It must be in an inswapped state.
 
-    MmFreeToPoolCache (
+    MmuFreeToPoolCache (
         process^.Node^.KernelStackCache, // cache
         kstack, // ptr
     )
 
     // Uncharge the virtual memory quota consumed by the kernel stack.
 
-    MmUnchargeVmQuota (
+    MmuUnchargeVmQuota (
         &process^.Node^.Partition, // partition
-        PsQuotaBlock ( process ), // quotablock
-        KE_STACK_PAGES, // pages
+        PsuQuotaBlock ( process ), // quotablock
+        KEU_STACK_PAGES, // pages
     )
 END

@@ -2,31 +2,31 @@
 // Implements support for kernel Thread objects.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 #INCLUDE "<ll>/System/OsStatus.hjk"
 #INCLUDE "<ll>/System/OsSignal.hjk"
 
-EXTERN FN PsExitThread ()
+EXTERN FN PsuExitThread ()
 
-PUBLIC KeUexecApcDispatcher : ^VOID
-PUBLIC KeUexecSignalDispatcher : ^VOID
+PUBLIC KeuUexecApcDispatcher : ^VOID
+PUBLIC KeuUexecSignalDispatcher : ^VOID
 
-PUBLIC KeReaperCustodyList : KeCustodyList
+PUBLIC KeuReaperCustodyList : KeuCustodyList
 
 #SECTION "PAGEtext"
-FN (KeApcF) KiSuspendThreadApc (
+FN (KeApcF) KepSuspendThreadApc (
     IN apc : ^KeApc,
     IN context1 : UWORD,
     IN context2 : UWORD,
     IN rundown : UWORD,
 )
 
-    // Called at KI_IPL_LOW as a lazy APC whenever thread suspension has been
+    // Called at KEP_IPL_LOW as a lazy APC whenever thread suspension has been
     // requested.
 
     thread := KeCurrentThread ()
 
-    KeWaitForSingleObject (
+    KeuWaitForSingleObject (
         KE_KERNEL_MODE, // waitmode
         KE_UNALERTABLE, // alertable
         NULLPTR, // timeout
@@ -34,36 +34,36 @@ FN (KeApcF) KiSuspendThreadApc (
     )
 END
 
-FN KiAddSwappableThreadToProcess (
-    IN process : ^KeProcess,
-    IN thread : ^KeThread,
+FN KepAddSwappableThreadToProcess (
+    IN process : ^KeuProcess,
+    IN thread : ^KeuThread,
 )
 
     // Nonpaged helper routine for adding a thread's resident stack count to the
     // process.
 
-    ipl := KiAcquireSwapState ( process )
+    ipl := KepAcquireSwapState ( process )
 
     // We should be attached to the process right now, meaning there is at least
     // one thread whose stack is not swapped out, and therefore the process
     // cannot be either as we only outswap processes after their threads are all
     // gone.
 
-    KeAssert ( process^.MemoryState == KI_PROCESS_RESIDENT )
+    KeAssert ( process^.MemoryState == KEP_PROCESS_RESIDENT )
 
     process^.ResidentThreadCount += 1
 
-    KiReleaseSwapState ( process, ipl )
+    KepReleaseSwapState ( process, ipl )
 END
 
 #SECTION "PAGEtext"
-FN KeInitializeThread (
-    IN process : ^KeProcess,
-    IN thread : ^KeThread,
+FN KeuInitializeThread (
+    IN process : ^KeuProcess,
+    IN thread : ^KeuThread,
     IN name : ^UBYTE,
     IN kstack : ^VOID,
     IN kstacksize : UWORD,
-    IN turnstile : ^KiTurnstile,
+    IN turnstile : ^KepTurnstile,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -75,10 +75,10 @@ FN KeInitializeThread (
     RtlCopyString (
         &thread^.Name[0], // dest
         name, // src
-        KE_DEBUG_NAME_LENGTH, // bufsize
+        KEU_DEBUG_NAME_LENGTH, // bufsize
     )
 
-    thread^.Status = KI_THREAD_INITIALIZED
+    thread^.Status = KE_THREAD_INITIALIZED
 
     thread^.ActualProcess = process
     thread^.Process = process
@@ -99,7 +99,7 @@ FN KeInitializeThread (
 
     // Initialize the context on the kernel stack.
 
-    thread^.Context = KiInitializeContext (
+    thread^.Context = KepInitializeContext (
         thread, // thread
         kstack + kstacksize, // kstack
         startfunc, // startfunc
@@ -109,7 +109,7 @@ FN KeInitializeThread (
 
     thread^.KernelStackTop = kstack + kstacksize
 
-    thread^.RemainingQuantum = KI_DEFAULT_QUANTUM
+    thread^.RemainingQuantum = KEP_DEFAULT_QUANTUM
 
     thread^.InteractiveBits = 0
 
@@ -121,15 +121,15 @@ FN KeInitializeThread (
 
     KeInitializeApc (
         &thread^.SuspendLapc, // apc
-        &KiSuspendThreadApc, // func
+        &KepSuspendThreadApc, // func
         KE_APC_LAZY, // type
         thread, // thread
     )
 
-    KiInitializeDispatchObject (
+    KepInitializeDispatchObject (
         &thread^.SuspendHeader, // hdr
         "Suspended", // name
-        KI_DISPATCH_EVENT_NOTIF, // type
+        KEP_DISPATCH_EVENT_NOTIF, // type
     )
 
     thread^.SuspendCount = 0
@@ -180,9 +180,9 @@ FN KeInitializeThread (
     // Initialize the thread lock.
 
 #IF BLD_MP
-    KiInitializeSpinlock ( &thread^.Spinlock )
+    KepInitializeSpinlock ( &thread^.Spinlock )
 
-    thread^.WaitAttempt = KI_THREAD_WAIT_NONE
+    thread^.WaitAttempt = KEP_THREAD_WAIT_NONE
 
     thread^.AffinityPrb = NULLPTR
     thread^.CurrentPrb = NULLPTR
@@ -252,7 +252,7 @@ FN KeInitializeThread (
 
     // Call nonpaged helper routine to increment the resident stack count.
 
-    KiAddSwappableThreadToProcess (
+    KepAddSwappableThreadToProcess (
         process, // process
         thread, // thread
     )
@@ -260,15 +260,15 @@ FN KeInitializeThread (
     RETURN TRUE
 END
 
-FN KeUninitializeThread (
-    IN thread : ^KeThread,
+FN KeuUninitializeThread (
+    IN thread : ^KeuThread,
 ) : UWORD
 
     // Called to uninitialize a thread, from within the context of that thread.
     // Returns TRUE if the process was marked terminated due to the thread count
     // dropping to zero, FALSE otherwise.
 
-    // NOTE: This is not part of KeExitThread because it returns whether the
+    // NOTE: This is not part of KeuExitThread because it returns whether the
     //       process should be terminated, and only Ps knows what to do then.
 
     KeAssert ( thread^.KernelStackResident != FALSE )
@@ -309,7 +309,7 @@ FN KeUninitializeThread (
         // Replace it with the thread on the head of the process's list.
 
         process^.SignalThread = CONTAINEROF process^.ThreadListHead.Next TO
-            KeThread.ProcessListEntry
+            KeuThread.ProcessListEntry
     END
 
     KeReleaseLock ( &process^.Lock )
@@ -322,19 +322,19 @@ FN KeUninitializeThread (
     // afterward, we guarantee that KeDetachProcess won't see it transition to
     // zero after the process's threads have all died.
 
-    ipl := KiAcquireSwapState ( process )
+    ipl := KepAcquireSwapState ( process )
 
     KeAssert ( process^.ResidentThreadCount != 0 )
 
     process^.ResidentThreadCount -= 1
 
-    KiReleaseSwapState ( process, ipl )
+    KepReleaseSwapState ( process, ipl )
 
     RETURN terminated
 END
 
 EXPORT FN KeSuspendThread (
-    IN thread : ^KeThread,
+    IN thread : ^KeuThread,
 ) : UWORD
 
     // Suspend a thread. Return the old suspension count.
@@ -349,7 +349,7 @@ EXPORT FN KeSuspendThread (
         RETURN 0
     END
 
-    ipl := KiAcquireObject ( &thread^.SuspendHeader )
+    ipl := KepAcquireObject ( &thread^.SuspendHeader )
 
     count := thread^.SuspendCount
 
@@ -375,19 +375,19 @@ EXPORT FN KeSuspendThread (
         END
     END
 
-    KiReleaseObject ( &thread^.SuspendHeader, ipl )
+    KepReleaseObject ( &thread^.SuspendHeader, ipl )
 
     RETURN count
 END
 
 EXPORT FN KeUnsuspendThread (
-    IN thread : ^KeThread,
+    IN thread : ^KeuThread,
     IN force : UWORD,
 ) : UWORD
 
     // Unsuspend a thread. Return the old suspension count.
 
-    ipl := KiAcquireObject ( &thread^.SuspendHeader )
+    ipl := KepAcquireObject ( &thread^.SuspendHeader )
 
     count := thread^.SuspendCount
 
@@ -408,7 +408,7 @@ EXPORT FN KeUnsuspendThread (
             // Satisfy any waits.
 
             IF thread^.SuspendHeader.WaiterCount THEN
-                KiSatisfyObject (
+                KepSatisfyObject (
                     &thread^.SuspendHeader, // object
                     0, // priorityboost
                     TRUE, // all
@@ -418,24 +418,24 @@ EXPORT FN KeUnsuspendThread (
         END
     END
 
-    KiReleaseObject ( &thread^.SuspendHeader, ipl )
+    KepReleaseObject ( &thread^.SuspendHeader, ipl )
 
     RETURN count
 END
 
-FN KiWakeThreadForSignal (
-    IN thread : ^KeThread,
+FN KepWakeThreadForSignal (
+    IN thread : ^KeuThread,
 )
 
     // Check if the thread needs to be awoken to receive a signal.
     // Thread lock is held.
 
-    IF (thread^.Status == KI_THREAD_WAITING
+    IF (thread^.Status == KE_THREAD_WAITING
 #IF BLD_MP
-        OR (thread^.Status == KI_THREAD_RUNNING AND
-        thread^.WaitAttempt == KI_THREAD_WAIT_TRY)
+        OR (thread^.Status == KE_THREAD_RUNNING AND
+        thread^.WaitAttempt == KEP_THREAD_WAIT_TRY)
 #END
-        ) AND thread^.WaitIpl == KI_IPL_LOW THEN
+        ) AND thread^.WaitIpl == KEP_IPL_LOW THEN
 
         // The thread is waiting and may need to be awoken.
 
@@ -448,7 +448,7 @@ FN KiWakeThreadForSignal (
                 status = OS_STATUS_KILLED
 
             ELSEIF thread^.Alertable == KE_ALERTABLE AND
-                thread^.PendingEventsSet & KI_THREAD_PENDING_SIGNAL THEN
+                thread^.PendingEventsSet & KEP_THREAD_PENDING_SIGNAL THEN
 
                 // This is a usermode alertable wait and there are pending
                 // signals, so cause a wake.
@@ -479,7 +479,7 @@ FN KiWakeThreadForSignal (
             IF NOT thread^.IgnoreEventCount THEN
                 // Wake the thread.
 
-                KiUnwaitThread (
+                KepUnwaitThread (
                     thread, // thread,
                     status, // status
                     0, // priorityboost
@@ -487,7 +487,7 @@ FN KiWakeThreadForSignal (
             END
         END
 
-    ELSEIF KeAreTherePendingSignals ( thread ) THEN
+    ELSEIF KepAreTherePendingSignals ( thread ) THEN
         // There are pending signals. Set user interrupt pending so he checks
         // it eventually.
 
@@ -496,23 +496,23 @@ FN KiWakeThreadForSignal (
 #IF BLD_MP
         KeMemoryBarrier ()
 
-        IF thread^.Status == KI_THREAD_RUNNING AND
+        IF thread^.Status == KE_THREAD_RUNNING AND
             thread^.CurrentMode == KE_USER_MODE THEN
 
             // The thread is running in usermode on another processor, so cause
             // an IPI to slurp him up into the kernel to check his signals.
 
-            HalTriggerIpi (
+            HaluTriggerIpi (
                 thread^.CurrentPrb, // target
-                KI_IPI_ASYNCHRONOUS, // type
+                KEP_IPI_ASYNCHRONOUS, // type
             )
         END
 #END
     END
 END
 
-FN KeDeliverOnWaitSignalThread (
-    IN thread : ^KeThread,
+FN KeuDeliverOnWaitSignalThread (
+    IN thread : ^KeuThread,
     IN signal : UWORD,
     IN enable : UWORD,
 ) : UWORD
@@ -524,14 +524,14 @@ FN KeDeliverOnWaitSignalThread (
     KeAssert ( signal != 0 )
     KeAssert ( signal < OS_SIGNAL_COUNT )
 
-    IF KeSignalIsUnmaskable ( signal ) THEN
+    IF KepSignalIsUnmaskable ( signal ) THEN
         RETURN TRUE
     END
 
     index := signal / 32
     offset := signal % 32
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KepAcquireThread ( thread )
 
     enabled := FALSE
 
@@ -552,16 +552,16 @@ FN KeDeliverOnWaitSignalThread (
         // See if we need to wake the thread now that this signal has been
         // enabled.
 
-        KiWakeThreadForSignal ( thread )
+        KepWakeThreadForSignal ( thread )
     END
 
-    KiReleaseThread ( thread, ipl )
+    KepReleaseThread ( thread, ipl )
 
     RETURN enabled
 END
 
-FN KeMaskSignalThread (
-    IN thread : ^KeThread,
+FN KeuMaskSignalThread (
+    IN thread : ^KeuThread,
     IN signal : UWORD,
     IN enable : UWORD,
 ) : UWORD
@@ -572,14 +572,14 @@ FN KeMaskSignalThread (
     KeAssert ( signal != 0 )
     KeAssert ( signal < OS_SIGNAL_COUNT )
 
-    IF KeSignalIsUnmaskable ( signal ) THEN
+    IF KepSignalIsUnmaskable ( signal ) THEN
         RETURN TRUE
     END
 
     index := signal / 32
     offset := signal % 32
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KepAcquireThread ( thread )
 
     enabled := FALSE
 
@@ -595,7 +595,7 @@ FN KeMaskSignalThread (
         // See if we need to wake the thread now that this signal has been
         // enabled.
 
-        KiWakeThreadForSignal ( thread )
+        KepWakeThreadForSignal ( thread )
 
     ELSE
         // Disable the signal.
@@ -608,23 +608,23 @@ FN KeMaskSignalThread (
     IF thread^.SignalMask[index] & thread^.SignalAcceptMask[index] != 0 THEN
         // We set a pending signal, so set the bit.
 
-        thread^.PendingEventsSet |= KI_THREAD_PENDING_SIGNAL
+        thread^.PendingEventsSet |= KEP_THREAD_PENDING_SIGNAL
 
     ELSEIF thread^.SignalMask[index $ 1] &
         thread^.SignalAcceptMask[index $ 1] == 0 THEN
 
         // There are no pending signals in this bit set or the other one, so clear the bit.
 
-        thread^.PendingEventsSet &= ~KI_THREAD_PENDING_SIGNAL
+        thread^.PendingEventsSet &= ~KEP_THREAD_PENDING_SIGNAL
     END
 
-    KiReleaseThread ( thread, ipl )
+    KepReleaseThread ( thread, ipl )
 
     RETURN enabled
 END
 
 FN KeSignalThread (
-    IN thread : ^KeThread,
+    IN thread : ^KeuThread,
     IN signal : UWORD,
 )
 
@@ -652,7 +652,7 @@ FN KeSignalThread (
 
     // Acquire the thread lock.
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KepAcquireThread ( thread )
 
     // OR the new signal bit in.
 
@@ -661,19 +661,19 @@ FN KeSignalThread (
     // Set the pending event bit.
 
     IF thread^.SignalMask[index] & thread^.SignalAcceptMask[index] != 0 THEN
-        thread^.PendingEventsSet |= KI_THREAD_PENDING_SIGNAL
+        thread^.PendingEventsSet |= KEP_THREAD_PENDING_SIGNAL
     END
 
     // Check if the thread needs to be kicked in the pants.
 
-    KiWakeThreadForSignal ( thread )
+    KepWakeThreadForSignal ( thread )
 
     // Release the thread lock.
 
-    KiReleaseThread ( thread, ipl )
+    KepReleaseThread ( thread, ipl )
 END
 
-EXPORT FN KeIgnoreEvents ()
+EXPORT FN KeuIgnoreEvents ()
 
     // Increment the IgnoreEvent count of the current thread.
 
@@ -684,7 +684,7 @@ EXPORT FN KeIgnoreEvents ()
     thread^.IgnoreEventCount += 1
 END
 
-EXPORT FN KeAcceptEvents ()
+EXPORT FN KeuAcceptEvents ()
 
     // Decrement the IgnoreEvent count of the current thread.
 
@@ -695,8 +695,8 @@ EXPORT FN KeAcceptEvents ()
     thread^.IgnoreEventCount -= 1
 END
 
-FN KiRundownApcQueue (
-    IN thread : ^KeThread,
+FN KepRundownApcQueue (
+    IN thread : ^KeuThread,
     IN head : ^RtlListEntry,
 )
 
@@ -726,24 +726,24 @@ END
 
 #IF BLD_MP
 
-FN KeReaperBarrier (
-    IN thread : ^KeThread,
+FN KeuReaperBarrier (
+    IN thread : ^KeuThread,
 )
 
     // Acquire and release the thread's spinlock as a barrier to ensure it
     // isn't currently context switching and has fully died.
 
-    ipl := KiAcquireThread ( thread )
-    KiReleaseThread ( thread, ipl )
+    ipl := KepAcquireThread ( thread )
+    KepReleaseThread ( thread, ipl )
 END
 
 #END
 
-FN KeExitThread (
-    IN thread : ^KeThread,
+FN KeuExitThread (
+    IN thread : ^KeuThread,
 )
 
-    // Called by PsExitThread as the final stage of thread termination.
+    // Called by PsuExitThread as the final stage of thread termination.
     // We have to rundown the thread, add it to the reaper list, and signal the
     // reaper event. This function does not return.
 
@@ -757,21 +757,21 @@ FN KeExitThread (
 
     // Rundown the lazy APC queue.
 
-    KiRundownApcQueue (
+    KepRundownApcQueue (
         thread, // thread
         &thread^.LapcListHead, // head
     )
 
     // Rundown the user APC queue.
 
-    KiRundownApcQueue (
+    KepRundownApcQueue (
         thread, // thread
         &thread^.UapcListHead, // head
     )
 
     // Remove the thread from any balanced queue it is currently attached to.
 
-    KiDisassociateFromBalancedQueue ( thread )
+    KepDisassociateFromBalancedQueue ( thread )
 
     // Make sure the thread is set terminated.
 
@@ -779,7 +779,7 @@ FN KeExitThread (
 
     // Raise IPL.
 
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
     // Signal our termination event with raised IPL to ensure we make it out of
     // here quickly (not immediately preempted by a higher priority waiter).
@@ -791,35 +791,35 @@ FN KeExitThread (
 
     // Take thread spinlock.
 
-    KiAcquireThreadElevated ( thread )
+    KepAcquireThreadElevated ( thread )
 
     // Atomically enqueue to reaper list.
 
-    KeInsertCustodyList (
-        &KeReaperCustodyList, // list
+    KeuInsertCustodyList (
+        &KeuReaperCustodyList, // list
         &thread^.ReadyEntry.Next, // link
     )
 
     // Set to terminated status.
 
-    thread^.Status = KI_THREAD_TERMINATED
+    thread^.Status = KE_THREAD_TERMINATED
 
     // Yield. Control will never return to this thread.
     // The thread lock is released automatically.
 
-    KiYield (
+    KepYield (
         thread, // thread
-        KI_CURRENT_PRB, // prb
+        KEP_CURRENT_PRB, // prb
     )
 
 #IF BLD_CHK
-    KeCrash ( "KeExitThread: yield came back\n" )
+    KeCrash ( "KeuExitThread: yield came back\n" )
 #END
 
 END
 
-FN KiDispatchSignal (
-    IN thread : ^KeThread,
+FN KepDispatchSignal (
+    IN thread : ^KeuThread,
 )
 
     // There's a pending signal and we are ready to receive it. Find out what
@@ -828,7 +828,7 @@ FN KiDispatchSignal (
     index := 0
     signal := 0
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KepAcquireThread ( thread )
 
     excsignals := thread^.SignalAcceptMask[0] &
         ~thread^.SignalDeliverOnWaitMask[0] &
@@ -845,7 +845,7 @@ FN KiDispatchSignal (
         IF NOT excsignals THEN
             // No signals pending, somehow.
 
-            KiReleaseThread ( thread, ipl )
+            KepReleaseThread ( thread, ipl )
 
             LEAVE
         END
@@ -859,7 +859,7 @@ FN KiDispatchSignal (
         signal += 8
     END
 
-    signal += KiIndexFirstBitSet[excsignals & 0xFF]
+    signal += KepIndexFirstBitSet[excsignals & 0xFF]
 
     offset := signal & 31
 
@@ -876,15 +876,15 @@ FN KiDispatchSignal (
     IF ((thread^.SignalMask[0] & thread^.SignalAcceptMask[0]) |
         (thread^.SignalMask[1] & thread^.SignalAcceptMask[1])) == 0 THEN
 
-        thread^.PendingEventsSet &= ~KI_THREAD_PENDING_SIGNAL
+        thread^.PendingEventsSet &= ~KEP_THREAD_PENDING_SIGNAL
     END
 
-    KiReleaseThread ( thread, ipl )
+    KepReleaseThread ( thread, ipl )
 
     // Dispatch the signal in usermode.
 
-    KiInterruptUsermode (
-        KeUexecSignalDispatcher, // dispatchfunc
+    KepInterruptUsermode (
+        KeuUexecSignalDispatcher, // dispatchfunc
         thread^.UserFrame, // trapframe
         0, // userfunc
         signal, // context
@@ -892,7 +892,7 @@ FN KiDispatchSignal (
     )
 END
 
-FN KiDispatchUserInterrupts ()
+FN KepDispatchUserInterrupts ()
 
     // Called before the exception handler returns to usermode.
     // Handles usermode interrupt dispatch, such as thread termination,
@@ -909,25 +909,25 @@ FN KiDispatchUserInterrupts ()
     WHILE thread^.UserInterrupt DO
         thread^.UserInterrupt = FALSE
 
-        KiEnableInterrupts ()
+        KepEnableInterrupts ()
 
         IF thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
             // The current thread has been terminated.
-            // Upcall into Ps to go die. It'll call KeExitThread when it's ready
+            // Upcall into Ps to go die. It'll call KeuExitThread when it's ready
             // and then we will add this thread to the reaper list and yield the
             // processor for the last time.
 
-            PsExitThread ()
+            PsuExitThread ()
 
 #IF BLD_CHK
-            KeCrash ( "PsExitThread returned\n" )
+            KeCrash ( "PsuExitThread returned\n" )
 #END
         END
 
-        IF KeAreTherePendingSignals ( thread ) THEN
+        IF KepAreTherePendingSignals ( thread ) THEN
             // Dispatch a pending signal.
 
-            KiDispatchSignal ( thread )
+            KepDispatchSignal ( thread )
 
             // Set UserInterrupt to go around the loop again in case there are
             // multiple signals to dispatch.
@@ -938,7 +938,7 @@ FN KiDispatchUserInterrupts ()
         IF NOT RtlEmptyList ( &thread^.LapcListHead ) THEN
             // Dispatch the lazy APC queue.
 
-            KiDispatchLazyApcQueue ( thread )
+            KepDispatchLazyApcQueue ( thread )
         END
 
         IF thread^.UserApcTriggered THEN
@@ -950,9 +950,9 @@ FN KiDispatchUserInterrupts ()
 
             thread^.UserApcTriggered = FALSE
 
-            KiDispatchUserApcQueue ( thread )
+            KepDispatchUserApcQueue ( thread )
         END
 
-        KiDisableInterrupts ()
+        KepDisableInterrupts ()
     END
 END

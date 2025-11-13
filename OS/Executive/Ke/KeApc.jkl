@@ -2,17 +2,17 @@
 // Implements support for APC objects.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 
 // APCs are functions that can be targeted to run in the context of a particular
 // arbitrary thread.
 //
 // There are three kinds of APCs.
 //
-// Kernel APCs: KAPCs are dispatched whenever IPL is below KI_IPL_APC for the
+// Kernel APCs: KAPCs are dispatched whenever IPL is below KEP_IPL_APC for the
 //              thread. They can take page faults and can acquire locks that
 //              are designed to be KAPC-acquirable (i.e. they're only ever taken
-//              with the KeAcquireApcLock family of routines, which
+//              with the KeuAcquireApcLock family of routines, which
 //              automatically raise and lower IPL appropriately).
 //
 // Lazy APCs:   LAPCs are dispatched whenever a thread is executing in usermode,
@@ -33,7 +33,7 @@ EXPORT FN KeInitializeApc (
     IN apc : ^KeApc,
     IN func : KeApcF,
     IN type : UWORD,
-    IN thread : ^KeThread,
+    IN thread : ^KeuThread,
 )
 
     apc^.Function = func
@@ -58,12 +58,12 @@ EXPORT FN KeEnqueueKapc (
 
     // Acquire the thread.
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KepAcquireThread ( thread )
 
     IF apc^.Enqueued THEN
         // Already enqueued.
 
-        KiReleaseThread ( thread, ipl )
+        KepReleaseThread ( thread, ipl )
 
         RETURN FALSE
     END
@@ -75,28 +75,28 @@ EXPORT FN KeEnqueueKapc (
         &apc^.Entry, // entry
     )
 
-    thread^.PendingEventsSet |= KI_THREAD_PENDING_KAPC
+    thread^.PendingEventsSet |= KEP_THREAD_PENDING_KAPC
 
     apc^.Enqueued = TRUE
 
     apc^.Context1 = context1
     apc^.Context2 = context2
 
-    IF thread^.Status == KI_THREAD_RUNNING THEN
+    IF thread^.Status == KE_THREAD_RUNNING THEN
         // Need to trigger an APC interrupt.
 
         // Acquire a pointer to the current Prb.
 
-        prb := KI_CURRENT_PRB
+        prb := KEP_CURRENT_PRB
 
 #IF BLD_MP
-        IF thread^.WaitAttempt == KI_THREAD_WAIT_TRY AND
-            (thread^.WaitIpl == KI_IPL_LOW OR
+        IF thread^.WaitAttempt == KEP_THREAD_WAIT_TRY AND
+            (thread^.WaitIpl == KEP_IPL_LOW OR
             thread^.Alertable == KE_CANCEL_ON_KAPC) THEN
 
             // Abort the wait attempt.
 
-            KiUnwaitThread (
+            KepUnwaitThread (
                 thread, // thread,
                 OS_STATUS_KERNEL_APC, // status
                 priorityboost, // priorityboost
@@ -106,37 +106,37 @@ EXPORT FN KeEnqueueKapc (
         IF thread^.CurrentPrb != prb THEN
             // Trigger on the target processor.
 
-            KiSoftInterruptOther (
+            KepSoftInterruptOther (
                 thread^.CurrentPrb, // targetprb
-                KI_IPL_APC, // ipl
+                KEP_IPL_APC, // ipl
             )
 
         ELSE
 #END
             // Trigger on the current processor.
 
-            KiSoftInterruptSelf (
+            KepSoftInterruptSelf (
                 prb, // targetprb
-                KI_IPL_APC, // ipl
+                KEP_IPL_APC, // ipl
             )
 #IF BLD_MP
         END
 #END
 
-    ELSEIF thread^.Status == KI_THREAD_WAITING AND
-        (thread^.WaitIpl == KI_IPL_LOW OR
+    ELSEIF thread^.Status == KE_THREAD_WAITING AND
+        (thread^.WaitIpl == KEP_IPL_LOW OR
         thread^.Alertable == KE_CANCEL_ON_KAPC) THEN
 
         // Wake the thread.
 
-        KiUnwaitThread (
+        KepUnwaitThread (
             thread, // thread,
             OS_STATUS_KERNEL_APC, // status
             priorityboost, // priorityboost
         )
     END
 
-    KiReleaseThread ( thread, ipl )
+    KepReleaseThread ( thread, ipl )
 
     RETURN TRUE
 END
@@ -157,12 +157,12 @@ EXPORT FN KeEnqueueUapc (
 
     // Acquire the thread.
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KepAcquireThread ( thread )
 
     IF apc^.Enqueued THEN
         // Already enqueued.
 
-        KiReleaseThread ( thread, ipl )
+        KepReleaseThread ( thread, ipl )
 
         RETURN FALSE
     END
@@ -174,19 +174,19 @@ EXPORT FN KeEnqueueUapc (
         &apc^.Entry, // entry
     )
 
-    thread^.PendingEventsSet |= KI_THREAD_PENDING_UAPC
+    thread^.PendingEventsSet |= KEP_THREAD_PENDING_UAPC
 
     apc^.Enqueued = TRUE
 
     apc^.Context1 = context1
     apc^.Context2 = context2
 
-    IF (thread^.Status == KI_THREAD_WAITING
+    IF (thread^.Status == KE_THREAD_WAITING
 #IF BLD_MP
-        OR (thread^.Status == KI_THREAD_RUNNING AND
-        thread^.WaitAttempt == KI_THREAD_WAIT_TRY)
+        OR (thread^.Status == KE_THREAD_RUNNING AND
+        thread^.WaitAttempt == KEP_THREAD_WAIT_TRY)
 #END
-        ) AND thread^.WaitIpl == KI_IPL_LOW AND
+        ) AND thread^.WaitIpl == KEP_IPL_LOW AND
         thread^.WaitMode == KE_USER_MODE AND
         thread^.Alertable == KE_ALERTABLE THEN
 
@@ -198,14 +198,14 @@ EXPORT FN KeEnqueueUapc (
 
         // Wake the thread.
 
-        KiUnwaitThread (
+        KepUnwaitThread (
             thread, // thread,
             OS_STATUS_USER_APC, // status
             priorityboost, // priorityboost
         )
     END
 
-    KiReleaseThread ( thread, ipl )
+    KepReleaseThread ( thread, ipl )
 
     RETURN TRUE
 END
@@ -226,12 +226,12 @@ EXPORT FN KeEnqueueLapc (
 
     // Acquire the thread.
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KepAcquireThread ( thread )
 
     IF apc^.Enqueued THEN
         // Already enqueued.
 
-        KiReleaseThread ( thread, ipl )
+        KepReleaseThread ( thread, ipl )
 
         RETURN FALSE
     END
@@ -243,7 +243,7 @@ EXPORT FN KeEnqueueLapc (
         &apc^.Entry, // entry
     )
 
-    thread^.PendingEventsSet |= KI_THREAD_PENDING_LAPC
+    thread^.PendingEventsSet |= KEP_THREAD_PENDING_LAPC
 
     apc^.Enqueued = TRUE
 
@@ -255,26 +255,26 @@ EXPORT FN KeEnqueueLapc (
 
     thread^.UserInterrupt = TRUE
 
-    IF (thread^.Status == KI_THREAD_WAITING
+    IF (thread^.Status == KE_THREAD_WAITING
 #IF BLD_MP
-        OR (thread^.Status == KI_THREAD_RUNNING AND
-        thread^.WaitAttempt == KI_THREAD_WAIT_TRY)
+        OR (thread^.Status == KE_THREAD_RUNNING AND
+        thread^.WaitAttempt == KEP_THREAD_WAIT_TRY)
 #END
-        ) AND thread^.WaitIpl == KI_IPL_LOW AND
+        ) AND thread^.WaitIpl == KEP_IPL_LOW AND
         thread^.WaitMode == KE_USER_MODE THEN
 
         // The thread was in a usermode wait, so wake him up with a kernel APC
         // status so that he tries to wait again and dispatches his lazy APC
         // queue at that time.
 
-        KiUnwaitThread (
+        KepUnwaitThread (
             thread, // thread,
             OS_STATUS_KERNEL_APC, // status
             priorityboost, // priorityboost
         )
 
 #IF BLD_MP
-    ELSEIF thread^.Status == KI_THREAD_RUNNING AND
+    ELSEIF thread^.Status == KE_THREAD_RUNNING AND
         thread^.CurrentMode == KE_USER_MODE THEN
 
         KeMemoryBarrier ()
@@ -282,14 +282,14 @@ EXPORT FN KeEnqueueLapc (
         // The thread is running in usermode on another processor. Cause an IPI
         // to get him to check his lazy APC queue.
 
-        HalTriggerIpi (
+        HaluTriggerIpi (
             thread^.CurrentPrb, // target
-            KI_IPI_ASYNCHRONOUS, // type
+            KEP_IPI_ASYNCHRONOUS, // type
         )
 #END
     END
 
-    KiReleaseThread ( thread, ipl )
+    KepReleaseThread ( thread, ipl )
 
     RETURN TRUE
 END
@@ -304,7 +304,7 @@ EXPORT FN KeDequeueApc (
 
     // Acquire the APC queue.
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KepAcquireThread ( thread )
 
     enqueued := apc^.Enqueued
 
@@ -318,13 +318,13 @@ EXPORT FN KeDequeueApc (
 
     // Release APC queue.
 
-    KiReleaseThread ( thread, ipl )
+    KepReleaseThread ( thread, ipl )
 
     RETURN enqueued
 END
 
-FN KiDispatchKernelModeApcs (
-    IN thread : ^KeThread,
+FN KepDispatchKernelModeApcs (
+    IN thread : ^KeuThread,
     IN head : ^RtlListEntry,
     IN pendingbit : UWORD,
 )
@@ -334,7 +334,7 @@ FN KiDispatchKernelModeApcs (
     // Pop items from the list until it's emptied.
 
     WHILE TRUE DO
-        ipl := KiAcquireThread ( thread )
+        ipl := KepAcquireThread ( thread )
 
         listentry := head^.Next
 
@@ -343,7 +343,7 @@ FN KiDispatchKernelModeApcs (
 
             thread^.PendingEventsSet &= ~pendingbit
 
-            KiReleaseThread ( thread, ipl )
+            KepReleaseThread ( thread, ipl )
 
             BREAK
         END
@@ -367,7 +367,7 @@ FN KiDispatchKernelModeApcs (
 
         // Unlock the queue.
 
-        KiReleaseThread ( thread, ipl )
+        KepReleaseThread ( thread, ipl )
 
         // Call the APC function.
 
@@ -380,61 +380,61 @@ FN KiDispatchKernelModeApcs (
     END
 END
 
-FN KiDispatchKernelApcQueue (
-    IN current : ^KeThread,
+FN KepDispatchKernelApcQueue (
+    IN current : ^KeuThread,
 )
 
     // Here we have to dispatch kernel APCs. We are in the context of the
-    // current thread at KI_IPL_APC.
+    // current thread at KEP_IPL_APC.
 
-    KeAssert ( KiCurrentIpl () == KI_IPL_APC )
+    KeAssert ( KepCurrentIpl () == KEP_IPL_APC )
 
     // Dispatch the APCs.
 
     current^.ExecutingKapc = TRUE
 
-    KiDispatchKernelModeApcs (
+    KepDispatchKernelModeApcs (
         current, // thread
         &current^.KapcListHead, // head
-        KI_THREAD_PENDING_KAPC, // pendingbit
+        KEP_THREAD_PENDING_KAPC, // pendingbit
     )
 
     current^.ExecutingKapc = FALSE
 END
 
-FN KiDispatchLazyApcQueue (
-    IN current : ^KeThread,
+FN KepDispatchLazyApcQueue (
+    IN current : ^KeuThread,
 )
 
     // Dispatch the lazy APC queue. This is called upon an attempt to perform a
     // KE_USER_MODE wait, and upon a return to userspace with pending lazy APCs.
-    // We are in the context of the current thread at KI_IPL_LOW.
+    // We are in the context of the current thread at KEP_IPL_LOW.
 
-    KeAssert ( KiCurrentIpl () == KI_IPL_LOW )
+    KeAssert ( KepCurrentIpl () == KEP_IPL_LOW )
 
-    KiDispatchKernelModeApcs (
+    KepDispatchKernelModeApcs (
         current, // thread
         &current^.LapcListHead, // head
-        KI_THREAD_PENDING_LAPC, // pendingbit
+        KEP_THREAD_PENDING_LAPC, // pendingbit
     )
 END
 
-FN KiDispatchUserApcQueue (
-    IN current : ^KeThread,
+FN KepDispatchUserApcQueue (
+    IN current : ^KeuThread,
 )
 
     // Dispatch the user APC queue. This is called upon return to usermode after
     // an attempt to perform an alertable KE_USER_MODE wait. We are in the
-    // context of the current thread at KI_IPL_LOW.
+    // context of the current thread at KEP_IPL_LOW.
 
-    ipl := KiAcquireThread ( current )
+    ipl := KepAcquireThread ( current )
 
     IF RtlEmptyList ( &current^.UapcListHead ) THEN
         // None to dispatch.
 
-        current^.PendingEventsSet &= ~KI_THREAD_PENDING_UAPC
+        current^.PendingEventsSet &= ~KEP_THREAD_PENDING_UAPC
 
-        KiReleaseThread ( current, ipl )
+        KepReleaseThread ( current, ipl )
 
         LEAVE
     END
@@ -460,7 +460,7 @@ FN KiDispatchUserApcQueue (
 
     // Unlock the queue.
 
-    KiReleaseThread ( current, ipl )
+    KepReleaseThread ( current, ipl )
 
     // Call the kernel function. It will probably free the APC structure, so we
     // can't touch it after this.
@@ -474,8 +474,8 @@ FN KiDispatchUserApcQueue (
 
     // Dispatch the APC in usermode.
 
-    KiInterruptUsermode (
-        KeUexecApcDispatcher, // dispatchfunc
+    KepInterruptUsermode (
+        KeuUexecApcDispatcher, // dispatchfunc
         current^.UserFrame, // trapframe
         context1, // userfunc
         context2, // context
@@ -487,5 +487,5 @@ FN KeAreApcsDeliverable () : UWORD
 
     // Return whether APCs are deliverable.
 
-    RETURN KiCurrentIpl () == KI_IPL_LOW
+    RETURN KepCurrentIpl () == KEP_IPL_LOW
 END

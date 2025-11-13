@@ -2,15 +2,15 @@
 // Implements the MINTIA page fault handler.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 
-FN MmPageFault (
+FN MmuPageFault (
     IN address : ^VOID,
     IN writing : UWORD,
     IN usermode : UWORD,
 ) : OsStatus
 
-    thread := PsCurrentThread ()
+    thread := PsuCurrentThread ()
 
     // TEMP
     RtlPrint ( "fault on %x\n", address )
@@ -29,25 +29,25 @@ FN MmPageFault (
     END
 END
 
-FN MmWriteFaultOnLockWord (
+FN MmuWriteFaultOnLockWord (
     IN lockptr : ^VOID,
 )
 
     // Called by the turnstile package when a fault was taken on the lock word.
     // We need to fault in the containing page and make sure it's set modified.
 
-    // Ignore the return status from MmPageFault because if it failed, we want
+    // Ignore the return status from MmuPageFault because if it failed, we want
     // the turnstile package to find that out later and die in a "normal" way.
     // Simple dirty faults are infallible so we don't have to worry about that case.
 
-    MmPageFault (
+    MmuPageFault (
         lockptr, // address
         TRUE, // writing
         FALSE, // usermode
     )
 END
 
-FN MmShouldAccessCrash (
+FN MmuShouldAccessCrash (
     IN abortblock : ^KeAbortBlock,
     IN badaddr : ^VOID,
     IN status : OsStatus,
@@ -63,7 +63,7 @@ FN MmShouldAccessCrash (
     // security/debugging measure and not strictly necessary for
     // functionality.
 
-    IF badaddr >= MI_SYSTEM_SPACE THEN
+    IF badaddr >= MMP_SYSTEM_SPACE THEN
         // Check if we should catch system space errors.
 
         IF abortblock^.Flags & KE_ABORT_CATCH_SYSTEM_SPACE == 0 THEN

@@ -4,49 +4,49 @@
 // higher level code.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 
-KiStackSwapListHead : ^KeThread = NULLPTR
-KiProcessSwapListHead : ^KeProcess = NULLPTR
-KiProcessOutSwapListHead : ^KeProcess = NULLPTR
+KepStackSwapListHead : ^KeuThread = NULLPTR
+KepProcessSwapListHead : ^KeuProcess = NULLPTR
+KepProcessOutSwapListHead : ^KeuProcess = NULLPTR
 
-PUBLIC KeStackSwapperEvent : KeEvent
+PUBLIC KeuStackSwapperEvent : KeEvent
 
 #IF BLD_MP
 
-#MACRO KiAcquireCandidateListElevated ( prb ) [
-    KiAcquireSpinlock ( &(prb)^.StackSwapListLock )
+#MACRO KepAcquireCandidateListElevated ( prb ) [
+    KepAcquireSpinlock ( &(prb)^.StackSwapListLock )
 ]
 
-#MACRO KiReleaseCandidateListElevated ( prb ) [
-    KiReleaseSpinlock ( &(prb)^.StackSwapListLock )
+#MACRO KepReleaseCandidateListElevated ( prb ) [
+    KepReleaseSpinlock ( &(prb)^.StackSwapListLock )
 ]
 
-#MACRO KiAcquireCandidateList ( prb ) [
-    KiAcquireSpinlockRaise ( &(prb)^.StackSwapListLock )
+#MACRO KepAcquireCandidateList ( prb ) [
+    KepAcquireSpinlockRaise ( &(prb)^.StackSwapListLock )
 ]
 
-#MACRO KiReleaseCandidateList ( prb, ipl ) [
-    KiReleaseSpinlockLower ( &(prb)^.StackSwapListLock, ipl )
+#MACRO KepReleaseCandidateList ( prb, ipl ) [
+    KepReleaseSpinlockLower ( &(prb)^.StackSwapListLock, ipl )
 ]
 
 #ELSE
 
-#MACRO KiAcquireCandidateListElevated ( prb ) []
+#MACRO KepAcquireCandidateListElevated ( prb ) []
 
-#MACRO KiReleaseCandidateListElevated ( prb ) []
+#MACRO KepReleaseCandidateListElevated ( prb ) []
 
-#MACRO KiAcquireCandidateList ( prb ) [
-    KiRaiseIpl ( KI_IPL_DPC )
+#MACRO KepAcquireCandidateList ( prb ) [
+    KepRaiseIpl ( KEP_IPL_DPC )
 ]
 
-#MACRO KiReleaseCandidateList ( prb, ipl ) [
-    KiLowerIpl ( ipl )
+#MACRO KepReleaseCandidateList ( prb, ipl ) [
+    KepLowerIpl ( ipl )
 ]
 
 #END
 
-#MACRO KiInsertInSwapList ( headptr, item, fieldname ) [
+#MACRO KepInsertInSwapList ( headptr, item, fieldname ) [
     WHILE TRUE DO
         head := (headptr)^
         NOTHING (item)^.fieldname = CAST (head) TO ^VOID
@@ -64,60 +64,60 @@ PUBLIC KeStackSwapperEvent : KeEvent
     END
 ]
 
-FN KeReadyInswappedThread (
-    IN thread : ^KeThread,
+FN KeuReadyInswappedThread (
+    IN thread : ^KeuThread,
 )
 
     // Called by the stack swapper thread when it has inswapped a kernel stack
     // and wants to re-ready the thread.
 
     KeAssert ( thread^.InSwapList != FALSE )
-    KeAssert ( thread^.Process^.MemoryState == KI_PROCESS_RESIDENT )
+    KeAssert ( thread^.Process^.MemoryState == KEP_PROCESS_RESIDENT )
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KepAcquireThread ( thread )
 
     thread^.KernelStackResident = TRUE
 
-    KiReadyThread ( thread )
+    KepReadyThread ( thread )
 
-    KiReleaseThread ( thread, ipl )
+    KepReleaseThread ( thread, ipl )
 END
 
-FN KeReadyInswappedProcess (
-    IN process : ^KeProcess,
+FN KeuReadyInswappedProcess (
+    IN process : ^KeuProcess,
 )
 
     // Called by the stack swapper thread when it has inswapped a process and
     // wants to set it RESIDENT and ready any deferred threads.
 
-    ipl := KiAcquireSwapState ( process )
+    ipl := KepAcquireSwapState ( process )
 
-    KeAssert ( process^.MemoryState == KI_PROCESS_TRANSITION )
+    KeAssert ( process^.MemoryState == KEP_PROCESS_TRANSITION )
 
-    process^.MemoryState = KI_PROCESS_RESIDENT
+    process^.MemoryState = KEP_PROCESS_RESIDENT
 
     thread := process^.SwapListHead
     process^.SwapListHead = NULLPTR
 
-    KiReleaseSwapState ( process, ipl )
+    KepReleaseSwapState ( process, ipl )
 
     // Now ready all the threads. Threads whose kernel stacks were swapped out
     // will get placed back on a queue and we'll see them later.
 
     WHILE thread DO
-        nextthread := CAST thread^.ReadyEntry.Next TO ^KeThread
+        nextthread := CAST thread^.ReadyEntry.Next TO ^KeuThread
 
-        ipl = KiAcquireThread ( thread )
+        ipl = KepAcquireThread ( thread )
 
-        KiReadyThread ( thread )
+        KepReadyThread ( thread )
 
-        KiReleaseThread ( thread, ipl )
+        KepReleaseThread ( thread, ipl )
 
         thread = nextthread
     END
 END
 
-FN KeFlushThreadInSwapQueue () : ^KeThread
+FN KeuFlushThreadInSwapQueue () : ^KeuThread
 
     // Atomically detaches the current contents of the thread stack swap list
     // and returns the head item of a singly linked list. If it was empty,
@@ -125,25 +125,25 @@ FN KeFlushThreadInSwapQueue () : ^KeThread
     // Atomically fetch-and-set the head to NULLPTR.
 
     RETURN CAST KeFetchAndSetPtr (
-        &KiStackSwapListHead, // ptr
+        &KepStackSwapListHead, // ptr
         NULLPTR, // newvalue
-    ) TO ^KeThread
+    ) TO ^KeuThread
 END
 
-FN KeFlushProcessInSwapQueue () : ^KeProcess
+FN KeuFlushProcessInSwapQueue () : ^KeuProcess
 
     // Atomically detaches the current contents of the process swap list
     // and returns the head item of a singly linked list. If it was empty,
     // NULLPTR is returned.
 
     RETURN CAST KeFetchAndSetPtr (
-        &KiProcessSwapListHead, // ptr
+        &KepProcessSwapListHead, // ptr
         NULLPTR, // newvalue
-    ) TO ^KeProcess
+    ) TO ^KeuProcess
 END
 
-FN KeSetProcessOutswapped (
-    IN process : ^KeProcess,
+FN KeuSetProcessOutswapped (
+    IN process : ^KeuProcess,
 ) : UWORD
 
     // Try to set the given process outswapped. Returns TRUE on success, FALSE
@@ -151,21 +151,21 @@ FN KeSetProcessOutswapped (
     // caller. If the caller is interested in the next process in the list, it
     // should grab that pointer before calling this routine.
 
-    ipl := KiAcquireSwapState ( process )
+    ipl := KepAcquireSwapState ( process )
 
     hadthreads := process^.SwapListHead
 
     IF NOT hadthreads THEN
-        process^.MemoryState = KI_PROCESS_OUTSWAPPED
+        process^.MemoryState = KEP_PROCESS_OUTSWAPPED
     END
 
-    KiReleaseSwapState ( process, ipl )
+    KepReleaseSwapState ( process, ipl )
 
     IF hadthreads THEN
         // Threads were enqueued to the process while it was in TRANSITION.
         // Set it RESIDENT and ready the deferred threads.
 
-        KeReadyInswappedProcess ( process )
+        KeuReadyInswappedProcess ( process )
 
         RETURN FALSE
     END
@@ -173,44 +173,44 @@ FN KeSetProcessOutswapped (
     RETURN TRUE
 END
 
-FN KeFlushProcessOutSwapQueue () : ^KeProcess
+FN KeuFlushProcessOutSwapQueue () : ^KeuProcess
 
     // Atomically detaches the current contents of the process outswap list
     // and returns the head item of a singly linked list. If it was empty,
     // NULLPTR is returned.
 
     // These processes are in TRANSITION, so the caller should call
-    // KeSetProcessOutSwapped before doing anything else with them.
+    // KeuSetProcessOutSwapped before doing anything else with them.
 
     RETURN CAST KeFetchAndSetPtr (
-        &KiProcessOutSwapListHead, // ptr
+        &KepProcessOutSwapListHead, // ptr
         NULLPTR, // newvalue
-    ) TO ^KeProcess
+    ) TO ^KeuProcess
 END
 
-FN KeHarvestSwapCandidates (
+FN KeuHarvestSwapCandidates (
     IN procid : UWORD,
-) : ^KeThread
+) : ^KeuThread
 
     // Scans the kernel stack swap candidate list for the given processor, marks
     // any eligible threads outswapped, and returns the head item of a singly
     // linked list of outswapped threads to process. If none, NULLPTR is
     // returned.
 
-    head : ^KeThread = NULLPTR
+    head : ^KeuThread = NULLPTR
 
-    prb := KiPrbFromNumber ( procid )
+    prb := KepPrbFromNumber ( procid )
 
     listhead := &prb^.StackSwapCandidateListHead
 
-    ipl := KiAcquireCandidateList ( prb )
+    ipl := KepAcquireCandidateList ( prb )
 
-    tick := KiLowTick ()
+    tick := KepLowTick ()
 
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
-        thread := CONTAINEROF listentry TO KeThread.WaitEntry
+        thread := CONTAINEROF listentry TO KeuThread.WaitEntry
 
         // Capture the next link now since we may be about to corrupt it.
 
@@ -218,20 +218,20 @@ FN KeHarvestSwapCandidates (
 
         // Lock the thread.
 
-        KiAcquireThreadElevated ( thread )
+        KepAcquireThreadElevated ( thread )
 
-        IF thread^.Status == KI_THREAD_WAITING THEN
+        IF thread^.Status == KE_THREAD_WAITING THEN
             // The thread is WAITING which means we may be able to outswap its
             // stack.
 
             KeAssert ( thread^.WaitMode == KE_USER_MODE )
 
-            IF tick - thread^.StateMs < KI_STACK_SWAP_INTERVAL_MS THEN
+            IF tick - thread^.StateMs < KEP_STACK_SWAP_INTERVAL_MS THEN
                 // This thread has been waiting for less time than the required
                 // interval. No more threads after it will be eligible either,
                 // so break out of the loop.
 
-                KiReleaseThreadElevated ( thread )
+                KepReleaseThreadElevated ( thread )
 
                 BREAK
             END
@@ -266,12 +266,12 @@ FN KeHarvestSwapCandidates (
 
                 process := thread^.Process
 
-                KiAcquireSwapStateElevated ( process )
+                KepAcquireSwapStateElevated ( process )
 
                 oldcount := process^.ResidentThreadCount
 
                 KeAssert ( oldcount != 0)
-                KeAssert ( process^.MemoryState == KI_PROCESS_RESIDENT )
+                KeAssert ( process^.MemoryState == KEP_PROCESS_RESIDENT )
 
                 process^.ResidentThreadCount = oldcount - 1
 
@@ -280,28 +280,28 @@ FN KeHarvestSwapCandidates (
                     // the process in-transition and place it on the outswap
                     // list.
 
-                    process^.MemoryState = KI_PROCESS_TRANSITION
+                    process^.MemoryState = KEP_PROCESS_TRANSITION
 
-                    KiInsertInSwapList (
-                        &KiProcessOutSwapListHead, // headptr
+                    KepInsertInSwapList (
+                        &KepProcessOutSwapListHead, // headptr
                         process, // item
                         SwapNext, // fieldname
                     )
                 END
 
-                KiReleaseSwapStateElevated ( process )
+                KepReleaseSwapStateElevated ( process )
             END
         END
 
-        KiReleaseThreadElevated ( thread )
+        KepReleaseThreadElevated ( thread )
     END
 
-    KiReleaseCandidateList ( prb, ipl )
+    KepReleaseCandidateList ( prb, ipl )
 
     RETURN head
 END
 
-FN KiWakeSwapper ()
+FN KepWakeSwapper ()
 
     // Wake the swapper.
 
@@ -310,28 +310,28 @@ FN KiWakeSwapper ()
     // underneath some spinlocks whose order we would violate, so we defer it
     // until the next time IPL drops below DPC level.
 
-    myprb := KI_CURRENT_PRB
+    myprb := KEP_CURRENT_PRB
 
     myprb^.WakeStackSwapper = TRUE
 
-    KiSoftInterruptSelf (
+    KepSoftInterruptSelf (
         myprb, // prb
-        KI_IPL_DPC, // ipl
+        KEP_IPL_DPC, // ipl
     )
 
 #ELSE
     // Wake the swap thread.
 
     KeSignalEvent (
-        &KeStackSwapperEvent, // event
+        &KeuStackSwapperEvent, // event
         0, // priorityboost
     )
 #END
 
 END
 
-FN KiReadyThreadOutswappedProcess (
-    IN thread : ^KeThread,
+FN KepReadyThreadOutswappedProcess (
+    IN thread : ^KeuThread,
 ) : UWORD
 
     // The thread was readied while its process was outswapped, so we have to
@@ -345,15 +345,15 @@ FN KiReadyThreadOutswappedProcess (
 
     // Acquire the process's swap state spinlock.
 
-    KiAcquireSwapStateElevated ( process )
+    KepAcquireSwapStateElevated ( process )
 
     memorystate := process^.MemoryState
 
-    IF memorystate == KI_PROCESS_RESIDENT THEN
+    IF memorystate == KEP_PROCESS_RESIDENT THEN
         // Process was in-swapped since we last checked.
         // Tell caller to re-check.
 
-        KiReleaseSwapStateElevated ( process )
+        KepReleaseSwapStateElevated ( process )
 
         RETURN TRUE
     END
@@ -364,30 +364,30 @@ FN KiReadyThreadOutswappedProcess (
     thread^.ReadyEntry.Next = CAST process^.SwapListHead TO ^VOID
     process^.SwapListHead = thread
 
-    IF memorystate == KI_PROCESS_OUTSWAPPED THEN
+    IF memorystate == KEP_PROCESS_OUTSWAPPED THEN
         // We saw the process OUTSWAPPED, so it's now our responsibility to
         // enqueue it to the swapper thread.
 
-        process^.MemoryState = KI_PROCESS_TRANSITION
+        process^.MemoryState = KEP_PROCESS_TRANSITION
 
-        KiInsertInSwapList (
-            &KiProcessSwapListHead, // headptr
+        KepInsertInSwapList (
+            &KepProcessSwapListHead, // headptr
             process, // item
             SwapNext, // fieldname
         )
     END
 
-    KiReleaseSwapStateElevated ( process )
+    KepReleaseSwapStateElevated ( process )
 
     // Set READY and in the swap list. This is synchronized by the thread lock,
     // which is taken by the swapper before it manipulates us.
 
-    thread^.Status = KI_THREAD_READY
+    thread^.Status = KE_THREAD_READY
     thread^.InSwapList = TRUE
 
     // Wake the swapper to bring in this process's page directory.
 
-    KiWakeSwapper ()
+    KepWakeSwapper ()
 
     // Return an indication that we successfully enqueued the thread to the
     // process's deferred ready list.
@@ -395,8 +395,8 @@ FN KiReadyThreadOutswappedProcess (
     RETURN FALSE
 END
 
-FN KiReadyOutswappedThread (
-    IN thread : ^KeThread,
+FN KepReadyOutswappedThread (
+    IN thread : ^KeuThread,
 ) : UWORD
 
     // The thread was readied while its kernel stack was outswapped, so we have
@@ -414,12 +414,12 @@ FN KiReadyOutswappedThread (
 
     // Acquire the process's swap state spinlock.
 
-    KiAcquireSwapStateElevated ( process )
+    KepAcquireSwapStateElevated ( process )
 
-    IF process^.MemoryState != KI_PROCESS_RESIDENT THEN
+    IF process^.MemoryState != KEP_PROCESS_RESIDENT THEN
         // Not resident, have caller re-check.
 
-        KiReleaseSwapStateElevated ( process )
+        KepReleaseSwapStateElevated ( process )
 
         RETURN TRUE
     END
@@ -428,26 +428,26 @@ FN KiReadyOutswappedThread (
 
     process^.ResidentThreadCount += 1
 
-    KiReleaseSwapStateElevated ( process )
+    KepReleaseSwapStateElevated ( process )
 
     // Set READY and in the swap list. This is synchronized by the thread lock,
     // which is taken by the swapper before it manipulates us.
 
-    thread^.Status = KI_THREAD_READY
+    thread^.Status = KE_THREAD_READY
     thread^.InSwapList = TRUE
 
     // The process was still resident, so we're going to enqueue the thread
     // in the global thread in-swap list.
 
-    KiInsertInSwapList (
-        &KiStackSwapListHead, // headptr
+    KepInsertInSwapList (
+        &KepStackSwapListHead, // headptr
         thread, // item
         ReadyEntry.Next, // fieldname
     )
 
     // Wake the swapper to bring in this thread's stack.
 
-    KiWakeSwapper ()
+    KepWakeSwapper ()
 
     // Return an indication that we successfully enqueued ourselves to the
     // in-swap list.
@@ -455,8 +455,8 @@ FN KiReadyOutswappedThread (
     RETURN FALSE
 END
 
-FN KiInsertSwapCandidateListFunc (
-    IN thread : ^KeThread,
+FN KepInsertSwapCandidateListFunc (
+    IN thread : ^KeuThread,
 )
 
     KeAssert ( KeCurrentThread () == thread )
@@ -464,7 +464,7 @@ FN KiInsertSwapCandidateListFunc (
 
     // Insert the thread in the swap candidate list for the current processor.
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
     // Stash the Prb whose candidate list we're going into.
 
@@ -472,7 +472,7 @@ FN KiInsertSwapCandidateListFunc (
 
     // Acquire the Prb's candidate list lock.
 
-    KiAcquireCandidateListElevated ( prb )
+    KepAcquireCandidateListElevated ( prb )
 
     // Insert at the tail of the list, which keeps it sorted by earliest to
     // latest sleep time.
@@ -484,11 +484,11 @@ FN KiInsertSwapCandidateListFunc (
 
     // Release the candidate list lock.
 
-    KiReleaseCandidateListElevated ( prb )
+    KepReleaseCandidateListElevated ( prb )
 END
 
-FN KiRemoveSwapCandidateListFunc (
-    IN thread : ^KeThread,
+FN KepRemoveSwapCandidateListFunc (
+    IN thread : ^KeuThread,
 )
 
     KeAssert ( KeCurrentThread () == thread )
@@ -501,11 +501,11 @@ FN KiRemoveSwapCandidateListFunc (
 
     prb := thread^.SwapCandidatePrb
 
-    KiAcquireCandidateListElevated ( prb )
+    KepAcquireCandidateListElevated ( prb )
 
     RtlRemoveEntryList ( &thread^.WaitEntry )
 
-    KiReleaseCandidateListElevated ( prb )
+    KepReleaseCandidateListElevated ( prb )
 
     // Clear the Prb pointer to indicate no longer in a list.
 
@@ -513,7 +513,7 @@ FN KiRemoveSwapCandidateListFunc (
 END
 
 FN KeAttachProcess (
-    IN process : ^KeProcess,
+    IN process : ^KeuProcess,
     IN try : UWORD,
 ) : UWORD
 
@@ -533,21 +533,21 @@ FN KeAttachProcess (
 
     // Mask KAPCs since we won't be in the right address space to receive them.
 
-    thread^.AttachIpl = KiRaiseIpl ( KI_IPL_APC )
+    thread^.AttachIpl = KepRaiseIpl ( KEP_IPL_APC )
 
     // Acquire the current thread's lock.
 
-    KiAcquireThread ( thread )
+    KepAcquireThread ( thread )
 
-    KiAcquireSwapStateElevated ( process )
+    KepAcquireSwapStateElevated ( process )
 
-    IF try AND process^.MemoryState != KI_PROCESS_RESIDENT THEN
+    IF try AND process^.MemoryState != KEP_PROCESS_RESIDENT THEN
         // An atomic try was specified. Since it's non-resident, our attempt
         // failed.
 
-        KiReleaseSwapStateElevated ( process )
+        KepReleaseSwapStateElevated ( process )
 
-        KiReleaseThread ( thread, thread^.AttachIpl )
+        KepReleaseThread ( thread, thread^.AttachIpl )
 
         RETURN FALSE
     END
@@ -555,14 +555,14 @@ FN KeAttachProcess (
     process^.ResidentThreadCount += 1
     thread^.Process = process
 
-    IF process^.MemoryState == KI_PROCESS_RESIDENT THEN
+    IF process^.MemoryState == KEP_PROCESS_RESIDENT THEN
         // Perform an immediate switch to the new process's address space.
 
-        KiReleaseSwapStateElevated ( process )
+        KepReleaseSwapStateElevated ( process )
 
-        KiSwitchAddressSpace ( process )
+        KepSwitchAddressSpace ( process )
 
-        KiReleaseThread ( thread, KI_IPL_APC )
+        KepReleaseThread ( thread, KEP_IPL_APC )
 
         RETURN TRUE
     END
@@ -573,43 +573,43 @@ FN KeAttachProcess (
     thread^.ReadyEntry.Next = CAST process^.SwapListHead TO ^VOID
     process^.SwapListHead = thread
 
-    IF process^.MemoryState == KI_PROCESS_OUTSWAPPED THEN
+    IF process^.MemoryState == KEP_PROCESS_OUTSWAPPED THEN
         // We saw the process OUTSWAPPED, so it's now our responsibility to
         // enqueue it to the swapper thread.
 
-        process^.MemoryState = KI_PROCESS_TRANSITION
+        process^.MemoryState = KEP_PROCESS_TRANSITION
 
-        KiInsertInSwapList (
-            &KiProcessSwapListHead, // headptr
+        KepInsertInSwapList (
+            &KepProcessSwapListHead, // headptr
             process, // item
             SwapNext, // fieldname
         )
     END
 
-    KiReleaseSwapStateElevated ( process )
+    KepReleaseSwapStateElevated ( process )
 
     // Wake the swapper to bring the process in.
 
-    KiWakeSwapper ()
+    KepWakeSwapper ()
 
     // Yield the processor. We will get scheduled back in (in the target address
     // space) when the process has been inswapped. The thread lock is
     // automatically released.
 
-    KiYield (
+    KepYield (
         thread, // thread
-        KI_CURRENT_PRB, // prb
+        KEP_CURRENT_PRB, // prb
     )
 
     // Lower to APC level.
 
-    KiLowerIpl ( KI_IPL_APC )
+    KepLowerIpl ( KEP_IPL_APC )
 
     RETURN TRUE
 END
 
 FN KeDetachProcess (
-    IN process : ^KeProcess,
+    IN process : ^KeuProcess,
 )
 
     // Detach from the process that was previously attached to.
@@ -628,14 +628,14 @@ FN KeDetachProcess (
 
     // Lock the thread.
 
-    KiAcquireThread ( thread )
+    KepAcquireThread ( thread )
 
     // Lock the old process's swap state.
 
-    KiAcquireSwapStateElevated ( oldprocess )
+    KepAcquireSwapStateElevated ( oldprocess )
 
-    KeAssert ( oldprocess^.MemoryState == KI_PROCESS_RESIDENT )
-    KeAssert ( thread^.ActualProcess^.MemoryState == KI_PROCESS_RESIDENT )
+    KeAssert ( oldprocess^.MemoryState == KEP_PROCESS_RESIDENT )
+    KeAssert ( thread^.ActualProcess^.MemoryState == KEP_PROCESS_RESIDENT )
 
     // Decrement the resident stack count, since we're leaving.
 
@@ -648,12 +648,12 @@ FN KeDetachProcess (
     // XXX The memory barrier below is probably not necessary because the
     //     implied barrier from acquiring the swap state spinlock above,
     //     and releasing the process lock and acquiring the swap state spinlock
-    //     in KeUninitializeThread, should be sufficient to avoid pathological
+    //     in KeuUninitializeThread, should be sufficient to avoid pathological
     //     cases.
     //
     // Perform a memory barrier to ensure the load of ResidentThreadCount and
     // ThreadCount are not reordered with respect to one another, which could
-    // lead to problems below due to a race with KeUninitializeThread.
+    // lead to problems below due to a race with KeuUninitializeThread.
     //
     // KeMemoryBarrier ()
 
@@ -663,30 +663,30 @@ FN KeDetachProcess (
         // This process has threads, and we just decremented its resident stack
         // count to 0. We need to enqueue it to be outswapped.
 
-        oldprocess^.MemoryState = KI_PROCESS_TRANSITION
+        oldprocess^.MemoryState = KEP_PROCESS_TRANSITION
 
-        KiInsertInSwapList (
-            &KiProcessOutSwapListHead, // headptr
+        KepInsertInSwapList (
+            &KepProcessOutSwapListHead, // headptr
             process, // item
             SwapNext, // fieldname
         )
 
         // Wake the swapper to get it to deal with this outswapped process.
 
-        KiWakeSwapper ()
+        KepWakeSwapper ()
     END
 
     // Release the swap state.
 
-    KiReleaseSwapStateElevated ( oldprocess )
+    KepReleaseSwapStateElevated ( oldprocess )
 
     // Switch back to our real address space.
 
     thread^.Process = thread^.ActualProcess
 
-    KiSwitchAddressSpace ( thread^.ActualProcess )
+    KepSwitchAddressSpace ( thread^.ActualProcess )
 
     // Release thread lock, lower IPL, unmask APCs.
 
-    KiReleaseThread ( thread, thread^.AttachIpl )
+    KepReleaseThread ( thread, thread^.AttachIpl )
 END

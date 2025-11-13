@@ -3,19 +3,19 @@
 //
 
 #INCLUDE "Exp.hjk"
-#INCLUDE "<inc>/Ps.hjk"
-#INCLUDE "<inc>/Io.hjk"
+#INCLUDE "<inc>/Psu.hjk"
+#INCLUDE "<inc>/Iou.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 #INCLUDE "<ll>/System/OsBootFlags.hjk"
 
 FNPTR KtMainF ()
 
-PUBLIC ExZeroPageWorker : KeThread
-PUBLIC ExZeroPageWorkerStack : UBYTE[(KE_STACK_PAGES << RTL_PAGE_SHIFT) + 32]
+PUBLIC ExuZeroPageWorker : KeuThread
+PUBLIC ExuZeroPageWorkerStack : UBYTE[(KEU_STACK_PAGES << RTL_PAGE_SHIFT) + 32]
 
-ExBootFlags : ULONG = 0
+ExuBootFlags : ULONG = 0
 
-EXTERN FN (KeStartThreadF) MmZeroPageWorker (
+EXTERN FN (KeStartThreadF) MmuZeroPageWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -27,8 +27,8 @@ FN ExpGetExistenceArg (
 
     // Check if an argument matching the provided string was passed.
 
-    argcount := KeLoaderBlock.ArgCount
-    argtable := KeLoaderBlock.ArgTable
+    argcount := KeuLoaderBlock.ArgCount
+    argtable := KeuLoaderBlock.ArgTable
 
     i := 0
 
@@ -52,8 +52,8 @@ FN ExpGetValueArg (
     // This is a pointer into the argument string itself and shouldn't
     // be manipulated. If the key does not exist, NULLPTR is returned.
 
-    argcount := KeLoaderBlock.ArgCount
-    argtable := KeLoaderBlock.ArgTable
+    argcount := KeuLoaderBlock.ArgCount
+    argtable := KeuLoaderBlock.ArgTable
 
     i := 0
 
@@ -95,19 +95,19 @@ FN ExpInitializeBootFlags ()
     IF ExpGetExistenceArg ( "-s" ) THEN
         // Boot the system in single user mode.
 
-        ExBootFlags |= OS_BOOT_SINGLE_USER
+        ExuBootFlags |= OS_BOOT_SINGLE_USER
     END
 
     IF ExpGetExistenceArg ( "-nonpagedexec" ) THEN
         // Force the paged executive to be nonpaged.
 
-        ExBootFlags |= OS_BOOT_NONPAGED_EXECUTIVE
+        ExuBootFlags |= OS_BOOT_NONPAGED_EXECUTIVE
     END
 
     IF ExpGetExistenceArg ( "-nonpagedpool" ) THEN
         // Force the paged pool to be nonpaged.
 
-        ExBootFlags |= OS_BOOT_NONPAGED_POOL
+        ExuBootFlags |= OS_BOOT_NONPAGED_POOL
     END
 END
 
@@ -126,11 +126,11 @@ FN (KeStartThreadF) ExpInitializeExecutive (
 
     // Initialize the idle process enough to continue.
 
-    PsInitializeIdleProcess ()
+    PsuInitializeIdleProcess ()
 
     // Initialize physical memory allocation.
 
-    MmInitializeStage1 ()
+    MmuInitializeStage1 ()
 
     // Initialize event counters.
 
@@ -146,35 +146,35 @@ FN (KeStartThreadF) ExpInitializeExecutive (
 
     // Initialize the object manager.
 
-    ObInitialize ()
+    ObuInitialize ()
 
     // Initialize the namespace manager.
 
-    NsInitialize ()
+    NsuInitialize ()
 
     // Initialize the system process and create the balance manager, in whose
     // context we will finish initialization.
 
-    PsInitializeStage1 ()
+    PsuInitializeStage1 ()
 
     // Perform kernel tests.
 
-    IF KeLoaderBlock.KtMain THEN
-        ktmain := CAST KeLoaderBlock.KtMain TO KtMainF
+    IF KeuLoaderBlock.KtMain THEN
+        ktmain := CAST KeuLoaderBlock.KtMain TO KtMainF
 
         ktmain ()
     END
 
     // The Executive is initialized, become the ZPW.
 
-    MmZeroPageWorker (
+    MmuZeroPageWorker (
         0, // context1
         0, // context2
     )
 END
 
 #SECTION "INITtext"
-FN (KeStartThreadF) ExStartSystemProcess (
+FN (KeStartThreadF) ExuStartSystemProcess (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -189,7 +189,7 @@ FN (KeStartThreadF) ExStartSystemProcess (
 
     // Initialize virtual memory.
 
-    // MmInitializeStage2 ()
+    // MmuInitializeStage2 ()
 
     // Initialize modules.
 
@@ -197,7 +197,7 @@ FN (KeStartThreadF) ExStartSystemProcess (
 
     // Initialize I/O.
 
-    IoInitialize ()
+    IouInitialize ()
 
     // Initialize IPC.
 
@@ -205,27 +205,27 @@ FN (KeStartThreadF) ExStartSystemProcess (
 
     // Initialize the executive video terminals.
 
-    // ExInitializeVideoTerminals ()
+    // ExuInitializeVideoTerminals ()
 
     // Jettison unused boot resources.
 
-    MmJettisonUnusedResources ()
+    MmuJettisonUnusedResources ()
 
     // Initialize the swap worker.
 
-    // MmInitializeSwapWorker ()
+    // MmuInitializeSwapWorker ()
 
     // Initialize OSDLL and the SystemInit.exe process.
 
-    PsInitializeStage2 ()
+    PsuInitializeStage2 ()
 
     // Become the balance manager.
 
-    MmBalanceManager ()
+    MmuBalanceManager ()
 END
 
 #SECTION "INITtext"
-FN ExStartExecutive ()
+FN ExuStartExecutive ()
 
     // Called by the Kernel (Ke) after it finishes its own self-initialization.
     // Responsible for kick-starting the initialization of the rest of
@@ -240,17 +240,17 @@ FN ExStartExecutive ()
     // First get a 32-byte-aligned pointer to its statically allocated kernel
     // stack.
 
-    kstack := (&ExZeroPageWorkerStack[0] + 31) & ~31
+    kstack := (&ExuZeroPageWorkerStack[0] + 31) & ~31
 
     // Now initialize the thread object.
 
-    KeInitializeThread (
-        &KeIdleProcess.Pcb, // process
-        &ExZeroPageWorker, // thread
+    KeuInitializeThread (
+        &KeuIdleProcess.Pcb, // process
+        &ExuZeroPageWorker, // thread
         "Zpw", // name
         kstack, // kstack
-        KE_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
-        KeAllocateInitialTurnstile (), // turnstile
+        KEU_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
+        KeuAllocateInitialTurnstile (), // turnstile
         &ExpInitializeExecutive, // startfunc
         0, // context1
         0, // context2
@@ -258,7 +258,7 @@ FN ExStartExecutive ()
 
     // And ready the thread.
 
-    KeReadyThread ( &ExZeroPageWorker )
+    KeuReadyThread ( &ExuZeroPageWorker )
 
     // Return and become the idle loop for the boot processor.
 END

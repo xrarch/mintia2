@@ -1,0 +1,88 @@
+//
+// Private header file for the Kernel component of the MINTIA Executive.
+//
+
+// The Prb is mapped in the same location on all processors on XR/17032 via
+// a wired entry in each DTB. This location is -16384 in order to allow the
+// address to be loaded with a single SUBI instruction.
+
+#DEFINE KEP_PRB_LESS_ZERO 16384
+
+#DEFINE KEP_CURRENT_PRB_LOCAL [(CAST 0xFFFFC000 TO ^KepPrb)]
+
+#DEFINE KEP_INITIAL_SPINLOCK 0
+
+#MACRO KepInitializeSpinlock ( spinlock ) [
+    NOTHING (spinlock)^ = 0
+]
+
+#IF BLD_MP
+
+#DEFINE KEP_CURRENT_PRB [((CAST 0xFFFFC000 TO ^KepPrb)^.RealVirtual)]
+#DEFINE KEP_VIRTUAL_PRB 1
+
+#MACRO KepReleaseSpinlock ( spinlock ) [
+    BARRIER
+
+    // Memory barrier to ensure old writes are committed.
+
+    INSERTASM "wmb"
+    BARRIER
+
+    // Set spinlock un-owned.
+    
+    NOTHING (spinlock)^ = 0
+    BARRIER
+]
+
+#MACRO KepReleaseTwoSpinlocks ( spinlock1, spinlock2 ) [
+    BARRIER
+
+    // Memory barrier to ensure old writes are committed.
+
+    INSERTASM "wmb"
+    BARRIER
+
+    // Set spinlock un-owned.
+    
+    NOTHING (spinlock1)^ = 0
+    NOTHING (spinlock2)^ = 0
+    BARRIER
+]
+
+#MACRO KepReleaseSpinlockLower ( spinlock, ipl ) [
+    KepReleaseSpinlock ( spinlock )
+    KepLowerIpl ( ipl )
+]
+
+#MACRO KepReleaseTwoSpinlocksLower ( spinlock1, spinlock2, ipl ) [
+    KepReleaseTwoSpinlocks ( spinlock1, spinlock2 )
+    KepLowerIpl ( ipl )
+]
+
+#ELSE
+
+#DEFINE KEP_CURRENT_PRB [(CAST 0xFFFFC000 TO ^KepPrb)]
+#DEFINE KEP_VIRTUAL_PRB 0
+
+#END
+
+#MACRO KepRaiseIpl ( ipl ) [
+    NOTHING KEP_CURRENT_PRB_LOCAL^.Ipl
+
+    KeAssert ( KEP_CURRENT_PRB_LOCAL^.Ipl <= ipl )
+
+    NOTHING KEP_CURRENT_PRB_LOCAL^.Ipl = ipl
+
+    BARRIER
+]
+
+#MACRO KepCurrentIpl () [
+    (KEP_CURRENT_PRB_LOCAL)^.Ipl
+]
+
+// The only thing this restricts is the size of some bitmaps, so it can be
+// freely set to the maximum number of processors supported by any platform with
+// this processor.
+
+#DEFINE KEP_MAXIMUM_PROCESSORS 8

@@ -6,8 +6,8 @@
 
 PUBLIC NspTreeLock : KeLock
 
-PUBLIC NspRootEntry : NsContainerEntry
-PUBLIC NspRootSubspace : NsSubspace
+PUBLIC NspRootEntry : NsuContainerEntry
+PUBLIC NspRootSubspace : NsuSubspace
 
 PUBLIC NspReclaimListHead : RtlListEntry
 PUBLIC NspReclaimCount := 0
@@ -24,7 +24,7 @@ NspMountList : RtlListEntry
 
 #SECTION "PAGEtext"
 FN NspInitializeEntry (
-    IN entry : ^NsEntry,
+    IN entry : ^NsuEntry,
     IN flags : UWORD,
     IN name : ^RtlString,
 ) : UWORD
@@ -36,7 +36,7 @@ FN NspInitializeEntry (
     RtlInitializeList ( &entry^.VirtualChildListHead )
 
     IF name THEN
-        entry^.Name = ExFindName ( name )
+        entry^.Name = ExuFindName ( name )
 
         IF NOT entry^.Name THEN
             RETURN FALSE
@@ -73,8 +73,8 @@ FN (RtlAvlLessThanF) NspCompareEntries (
 
     // Return whether A < B, lexicographically.
 
-    str1 := ExNameToString ( (CONTAINEROF a TO NsEntry.LookupEntry)^.Name )
-    str2 := ExNameToString ( (CONTAINEROF b TO NsEntry.LookupEntry)^.Name )
+    str1 := ExuNameToString ( (CONTAINEROF a TO NsuEntry.LookupEntry)^.Name )
+    str2 := ExuNameToString ( (CONTAINEROF b TO NsuEntry.LookupEntry)^.Name )
 
     RETURN CAST RtlCompareRtlString (
         str1, // str1
@@ -84,7 +84,7 @@ END
 
 #SECTION "PAGEtext"
 FN NspDeleteEntry (
-    IN entry : ^NsEntry,
+    IN entry : ^NsuEntry,
 )
 
     // Delete the entry.
@@ -96,23 +96,23 @@ FN NspDeleteEntry (
 
     // First unreference the interned name.
 
-    ExUnreferenceName ( entry^.Name )
+    ExuUnreferenceName ( entry^.Name )
 
     // Unreference the object.
 
     IF entry^.Object THEN
-        ObUnreferenceObject ( entry^.Object )
+        ObuUnreferenceObject ( entry^.Object )
     END
 
     // Delete the bounce path if this is a symlink.
 
     IF entry^.BouncePath THEN
-        ExUnreferenceName ( entry^.BouncePath )
+        ExuUnreferenceName ( entry^.BouncePath )
     END
 
     // Now delete the entry itself.
 
-    MmFreePool (
+    MmuFreePool (
         entry, // ptr
         'NsEn', // tag
     )
@@ -120,7 +120,7 @@ END
 
 #SECTION "PAGEtext"
 FN NspReferenceEntry (
-    IN entry : ^NsEntry,
+    IN entry : ^NsuEntry,
 )
 
     // Reference the supplied entry. Tree lock must be held at least shared if
@@ -140,7 +140,7 @@ FN NspReferenceEntry (
 
         RtlRemoveEntryList ( &entry^.ReclaimEntry )
 
-        IF entry^.Flags & NS_ENTRY_NEGATIVE THEN
+        IF entry^.Flags & NSU_ENTRY_NEGATIVE THEN
             NspNegativeCount -= 1
         ELSE
             NspReclaimCount -= 1
@@ -152,7 +152,7 @@ END
 
 #SECTION "PAGEtext"
 FN NspUnreferenceEntry (
-    IN entry : ^NsEntry,
+    IN entry : ^NsuEntry,
 )
 
     // Unreference the supplied entry. Tree lock need not be held, but if it is
@@ -180,7 +180,7 @@ FN NspUnreferenceEntry (
             LEAVE
         END
 
-        IF entry^.Flags & NS_ENTRY_NEGATIVE THEN
+        IF entry^.Flags & NSU_ENTRY_NEGATIVE THEN
             NspNegativeCount += 1
 
             RtlInsertAtTailList (
@@ -217,19 +217,19 @@ END
 #SECTION "PAGEtext"
 FN NspCreateEntry (
     IN name : ^RtlString,
-    IN parent : ^NsEntry,
+    IN parent : ^NsuEntry,
     IN flags : UWORD,
-) : ^NsEntry
+) : ^NsuEntry
 
     // Create a new namespace entry and link it as a child of the parent.
     // Tree lock must be held exclusive.
 
-    entry := CAST MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
-        SIZEOF NsEntry, // bytes
+    entry := CAST MmuAllocatePool (
+        MMU_PAGED_POOL, // poolindex
+        SIZEOF NsuEntry, // bytes
         'NsEn', // tag
         TRUE, // wait
-    ) TO ^NsEntry
+    ) TO ^NsuEntry
 
     IF NOT entry THEN
         RETURN NULLPTR
@@ -245,7 +245,7 @@ FN NspCreateEntry (
 
         // Failed to initialize the entry.
 
-        MmFreePool (
+        MmuFreePool (
             entry, // ptr
             'NsEn', // tag
         )
@@ -267,7 +267,7 @@ FN NspCreateEntry (
         &NspCompareEntries, // comparisonfunc
     )
 
-    IF flags & NS_ENTRY_VIRTUAL THEN
+    IF flags & NSU_ENTRY_VIRTUAL THEN
         // Link the child into the list of virtual entries.
 
         parent^.VirtualChildCount += 1
@@ -283,7 +283,7 @@ END
 
 #SECTION "PAGEtext"
 FN NspUnlinkEntry (
-    IN entry : ^NsEntry,
+    IN entry : ^NsuEntry,
 )
 
     // Unlink the entry from its parent. Assumes tree lock is held exclusive.
@@ -302,7 +302,7 @@ FN NspUnlinkEntry (
         &entry^.LookupEntry, // entry
     )
 
-    IF entry^.Flags & NS_ENTRY_VIRTUAL THEN
+    IF entry^.Flags & NSU_ENTRY_VIRTUAL THEN
         // Remove from the virtual node list.
 
         parent^.VirtualChildCount -= 1
@@ -332,17 +332,17 @@ FN NspInitializeTree ()
     // entries. Therefore the FCB cache is also trimmed when these entries are
     // trimmed, so these values can have a large impact on system performance.
 
-    size := MmGetSystemSize ()
+    size := MmuGetSystemSize ()
 
-    IF size <= MM_TINY_SYSTEM THEN
+    IF size <= MMU_TINY_SYSTEM THEN
         NspMaximumReclaimableEntries = 200
         NspMaximumNegativeEntries = 100
 
-    ELSEIF size <= MM_SMALL_SYSTEM THEN
+    ELSEIF size <= MMU_SMALL_SYSTEM THEN
         NspMaximumReclaimableEntries = 1000
         NspMaximumNegativeEntries = 200
 
-    ELSEIF size <= MM_LARGE_SYSTEM THEN
+    ELSEIF size <= MMU_LARGE_SYSTEM THEN
         NspMaximumReclaimableEntries = 6000
         NspMaximumNegativeEntries = 500
 
@@ -386,7 +386,7 @@ FN NspInitializeTree ()
 
     // Set the root directory of the idle process.
 
-    idleproc := KeIdleProcess.Paged
+    idleproc := KeuIdleProcess.Paged
 
     idleproc^.RootHandle.Entry = &NspRootEntry.Entry
     idleproc^.RootHandle.Subspace = &NspRootSubspace
@@ -394,9 +394,9 @@ END
 
 #SECTION "PAGEtext"
 FN NspFindSubspaceByRoot (
-    IN subspace : ^NsSubspace,
-    IN entry : ^NsEntry,
-) : ^NsSubspace
+    IN subspace : ^NsuSubspace,
+    IN entry : ^NsuEntry,
+) : ^NsuSubspace
 
     // Find the subspace mounted upon the given subspace/entry pair, if any.
     // Tree lock is held at least shared.
@@ -405,7 +405,7 @@ FN NspFindSubspaceByRoot (
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
-        checkspace := CONTAINEROF listentry TO NsSubspace.MountListEntry
+        checkspace := CONTAINEROF listentry TO NsuSubspace.MountListEntry
 
         IF checkspace^.MountedUpon.Subspace == subspace AND
             checkspace^.MountedUpon.Entry == entry THEN
@@ -420,7 +420,7 @@ FN NspFindSubspaceByRoot (
 END
 
 #SECTION "PAGEtext"
-FN NsUnlinkObject (
+FN NsuUnlinkObject (
     IN object : ^VOID,
 )
 
@@ -429,7 +429,7 @@ FN NsUnlinkObject (
     // explicit unlink operation then the header lock of the object is held
     // exclusively.
 
-    header := ObFindHeader ( object )
+    header := ObuFindHeader ( object )
 
     entry := header^.NamespaceEntry
 
@@ -453,14 +453,14 @@ END
 
 #SECTION "PAGEtext"
 FN NspLookupChild (
-    IN entry : ^NsEntry,
+    IN entry : ^NsuEntry,
     IN name : ^RtlString,
-) : ^NsEntry
+) : ^NsuEntry
 
     // Look up a child of this entry by name. Return the entry or NULLPTR if not
     // found.
 
-    child : ^NsEntry
+    child : ^NsuEntry
 
     avlnode := entry^.LookupRoot.Right
 
@@ -471,11 +471,11 @@ FN NspLookupChild (
             RETURN NULLPTR
         END
 
-        child = CONTAINEROF avlnode TO NsEntry.LookupEntry
+        child = CONTAINEROF avlnode TO NsuEntry.LookupEntry
 
         res := CAST RtlCompareRtlString (
             name, // str1
-            ExNameToString ( child^.Name ), // str2
+            ExuNameToString ( child^.Name ), // str2
         ) TO WORD
 
         IF res == 0 THEN
@@ -494,8 +494,8 @@ END
 
 #SECTION "PAGEtext"
 FN NspCaptureRootHandle (
-    IN process : ^PsProcess,
-    IN roothandle : ^NsHandle,
+    IN process : ^PsuProcess,
+    IN roothandle : ^NsuHandle,
 )
 
     // Capture the process's root handle.
@@ -504,12 +504,12 @@ FN NspCaptureRootHandle (
 
     KeAcquireLockShared ( &processpaged^.RootLock )
 
-    NsCopyHandle (
+    NsuCopyHandle (
         roothandle, // dest
         &processpaged^.RootHandle, // src
     )
 
-    NsReferenceHandle ( roothandle )
+    NsuReferenceHandle ( roothandle )
 
     KeReleaseLock ( &processpaged^.RootLock )
 END
@@ -518,17 +518,17 @@ END
 #DEFINE NSP_LOOKUP_CREATED 2
 
 STRUCT NspSymlinkState
-    SymlinkCookie : ^ExName,
+    SymlinkCookie : ^ExuName,
     SymlinkCount : ULONG,
 END
 
 #SECTION "PAGEtext"
-FN NsLookupEntryByPath (
-    IN params : ^NsOpenParameters,
-    IN handle : ^NsHandle,
-    IN cred : ^ObCredentials,
-    IN obparams : ^ObParameters,
-    IN type : ^ObType,
+FN NsuLookupEntryByPath (
+    IN params : ^NsuOpenParameters,
+    IN handle : ^NsuHandle,
+    IN cred : ^ObuCredentials,
+    IN obparams : ^ObuParameters,
+    IN type : ^ObuType,
 ) : OsStatus
 
     // Parse the specified path and initialize the 'handle' with a referenced
@@ -543,7 +543,7 @@ FN NsLookupEntryByPath (
 
     // Initialize the root directory.
 
-    roothandle : NsHandle
+    roothandle : NsuHandle
 
     roothandle.Entry = NULLPTR
 
@@ -551,14 +551,14 @@ FN NsLookupEntryByPath (
         // The initial handle should be the root directory.
 
         NspCaptureRootHandle (
-            PsCurrentProcess (), // process
+            PsuCurrentProcess (), // process
             &roothandle, // roothandle
         )
 
         params^.InitialHandle.Entry = roothandle.Entry
         params^.InitialHandle.Subspace = roothandle.Subspace
 
-        NsReferenceHandle ( &params^.InitialHandle )
+        NsuReferenceHandle ( &params^.InitialHandle )
     END
 
     component : UBYTE[OS_NAME_MAX + 1]
@@ -566,9 +566,9 @@ FN NsLookupEntryByPath (
     componentstring : RtlString
     componentstring.Data = &component[0]
 
-    lookupcontext : NsLookupContext
+    lookupcontext : NsuLookupContext
 
-    event : ^ExEventCounter
+    event : ^ExuEventCounter
 
     // Capture some stuff from the params structure.
 
@@ -602,7 +602,7 @@ FN NsLookupEntryByPath (
     currentspace := params^.InitialHandle.Subspace
 
     WHILE TRUE DO
-        IF currententry^.Flags & NS_ENTRY_TRANSITION THEN
+        IF currententry^.Flags & NSU_ENTRY_TRANSITION THEN
             // We've stumbled on a transition entry. We need to wait with
             // the tree lock dropped and then retry our entire lookup.
             // It is possible for the very first entry (which we already
@@ -616,7 +616,7 @@ FN NsLookupEntryByPath (
 
             event = currententry^.Object
 
-            ExReferenceEventCounter ( event )
+            ExuReferenceEventCounter ( event )
 
             // Drop the lock.
 
@@ -624,7 +624,7 @@ FN NsLookupEntryByPath (
 
             // Wait on the event counter.
 
-            KeWaitForSingleObject (
+            KeuWaitForSingleObject (
                 KE_KERNEL_MODE, // waitmode
                 FALSE, // alertable
                 NULLPTR, // timeout
@@ -633,7 +633,7 @@ FN NsLookupEntryByPath (
 
             // Unreference the event counter.
 
-            ExUnreferenceEventCounter ( event )
+            ExuUnreferenceEventCounter ( event )
 
             // Re-take the lock.
 
@@ -647,7 +647,7 @@ FN NsLookupEntryByPath (
         END
 
         IF currentpath[0] == '/' AND
-            currententry^.Flags & NS_ENTRY_LEAF THEN
+            currententry^.Flags & NSU_ENTRY_LEAF THEN
 
             // This is a leaf entry (i.e., not a directory). It can have no
             // children, so just return an error status.
@@ -673,7 +673,7 @@ FN NsLookupEntryByPath (
 
         // Check for traversal access.
 
-        IF NOT ObCheckAccess (
+        IF NOT ObuCheckAccess (
             currententry^.Permissions, // permissions
             cred, // cred
             OS_ACCESS_EXEC, // access
@@ -765,7 +765,7 @@ FN NsLookupEntryByPath (
         )
 
         IF child THEN
-            IF child^.Flags & NS_ENTRY_NEGATIVE THEN
+            IF child^.Flags & NSU_ENTRY_NEGATIVE THEN
                 // The child was a negative entry.
 
                 IF flags & OS_OPEN_CREATE AND
@@ -818,21 +818,21 @@ FN NsLookupEntryByPath (
                 END
 
                 IF symstate.SymlinkCookie THEN
-                    ExUnreferenceName ( symstate.SymlinkCookie )
+                    ExuUnreferenceName ( symstate.SymlinkCookie )
                 END
 
                 symstate.SymlinkCookie = child^.BouncePath
 
-                ExReferenceName ( symstate.SymlinkCookie )
+                ExuReferenceName ( symstate.SymlinkCookie )
 
                 // Set the lookup path to the symlink path.
 
-                path = ExNameToString ( symstate.SymlinkCookie )^.Data
+                path = ExuNameToString ( symstate.SymlinkCookie )^.Data
 
                 // We're changing the initial handle, so unreference the current
                 // one.
 
-                NsUnreferenceHandle ( &params^.InitialHandle )
+                NsuUnreferenceHandle ( &params^.InitialHandle )
 
                 IF path[0] == '/' THEN
                     // The symlink path is relative to root.
@@ -844,7 +844,7 @@ FN NsLookupEntryByPath (
                         //       inferior to the tree lock.
 
                         NspCaptureRootHandle (
-                            PsCurrentProcess (), // process
+                            PsuCurrentProcess (), // process
                             &roothandle, // roothandle
                         )
                     END
@@ -862,7 +862,7 @@ FN NsLookupEntryByPath (
 
                 // Reference the new initial handle.
 
-                NsReferenceHandle ( &params^.InitialHandle )
+                NsuReferenceHandle ( &params^.InitialHandle )
 
                 // Retry the lookup.
 
@@ -880,14 +880,14 @@ FN NsLookupEntryByPath (
 
         // No child. Grab the object for this entry.
 
-        lookupfunc : ObTypeNamespaceLookupF = NULLPTR
+        lookupfunc : ObuTypeNamespaceLookupF = NULLPTR
 
         IF currententry^.Object THEN
             // This entry has an associated object, so grab the type's lookup
             // function.
 
             lookupfunc =
-                (ObFindHeader(currententry^.Object))^.Type^.NamespaceLookup
+                (ObuFindHeader(currententry^.Object))^.Type^.NamespaceLookup
         END
 
         IF NOT lookupfunc AND
@@ -954,7 +954,7 @@ FN NsLookupEntryByPath (
         // Then the lock is reacquired and the transition entry is awoken and
         // destroyed.
 
-        event = ExAllocateEventCounter ( TRUE )
+        event = ExuAllocateEventCounter ( TRUE )
 
         IF NOT event THEN
             NspUnlockTree ()
@@ -970,13 +970,13 @@ FN NsLookupEntryByPath (
             child = NspCreateEntry (
                 &componentstring, // name
                 currententry, // parent
-                NS_ENTRY_TRANSITION, // flags
+                NSU_ENTRY_TRANSITION, // flags
             )
 
             IF NOT child THEN
                 NspUnlockTree ()
 
-                ExUnreferenceEventCounter ( event )
+                ExuUnreferenceEventCounter ( event )
 
                 status = OS_STATUS_NO_MEMORY
 
@@ -987,7 +987,7 @@ FN NsLookupEntryByPath (
             // We already have an entry, and we came here because it was a
             // negative entry and we're trying to create a new file.
 
-            KeAssert ( child^.Flags & NS_ENTRY_NEGATIVE != 0 )
+            KeAssert ( child^.Flags & NSU_ENTRY_NEGATIVE != 0 )
 
             // Reference it to make sure it's no longer on the negative entry
             // list.
@@ -996,7 +996,7 @@ FN NsLookupEntryByPath (
 
             // Convert it to transition.
 
-            child^.Flags = NS_ENTRY_TRANSITION
+            child^.Flags = NSU_ENTRY_TRANSITION
         END
 
         // Stash the event counter.
@@ -1026,7 +1026,7 @@ FN NsLookupEntryByPath (
 
             // Responsibilities of this function are to create if the CREATE
             // flag is specified and the object does not exist. If it did create
-            // it should return NS_ENTRY_CREATED as one of the EntryFlags.
+            // it should return NSU_ENTRY_CREATED as one of the EntryFlags.
             // If it creates it should check for the OS_ACCESS_WRITE permission
             // on the parent object.
 
@@ -1056,7 +1056,7 @@ FN NsLookupEntryByPath (
 
             // Check for write access to the parent.
 
-            IF NOT ObCheckAccess (
+            IF NOT ObuCheckAccess (
                 currententry^.Permissions, // permissions
                 cred, // cred
                 OS_ACCESS_WRITE, // access
@@ -1072,13 +1072,13 @@ FN NsLookupEntryByPath (
             // Atomically create a new object under the umbrella of the
             // transition entry.
 
-            lookupcontext.EntryFlags = NS_ENTRY_VIRTUAL |
-                NS_ENTRY_CREATED |
-                NS_ENTRY_LEAF
+            lookupcontext.EntryFlags = NSU_ENTRY_VIRTUAL |
+                NSU_ENTRY_CREATED |
+                NSU_ENTRY_LEAF
 
-            params^.ResultFlags |= NS_RESULT_CREATED
+            params^.ResultFlags |= NSU_RESULT_CREATED
 
-            status = ObAllocateObject (
+            status = ObuAllocateObject (
                 obparams, // obparams
                 OUT lookupcontext.Object, // object
             )
@@ -1089,7 +1089,7 @@ FN NsLookupEntryByPath (
 
             // Set up this entry as the namespace entry of this new object.
 
-            header := ObFindHeader ( lookupcontext.Object )
+            header := ObuFindHeader ( lookupcontext.Object )
 
             header^.NamespaceEntry = child
 
@@ -1124,7 +1124,7 @@ FN NsLookupEntryByPath (
             )
         END
 
-        ExUnreferenceEventCounter ( event )
+        ExuUnreferenceEventCounter ( event )
 
         IF OsError ( status ) THEN
             IF status == OS_STATUS_NOT_FOUND THEN
@@ -1134,7 +1134,7 @@ FN NsLookupEntryByPath (
                 // Set this entry up as a negative entry so that we don't call
                 // the FS again upon later attempts to open the same path.
 
-                child^.Flags = NS_ENTRY_NEGATIVE
+                child^.Flags = NSU_ENTRY_NEGATIVE
 
                 // Unreference and put on the negative entry list.
 
@@ -1163,9 +1163,9 @@ FN NsLookupEntryByPath (
         // Set the permissions of the namespace entry to track those of the
         // object.
 
-        child^.Permissions = &ObFindHeader ( lookupcontext.Object )^.Permissions
+        child^.Permissions = &ObuFindHeader ( lookupcontext.Object )^.Permissions
 
-        IF lookupcontext.EntryFlags & NS_ENTRY_VIRTUAL THEN
+        IF lookupcontext.EntryFlags & NSU_ENTRY_VIRTUAL THEN
             // Insert into the virtual child list of the parent.
 
             currententry^.VirtualChildCount += 1
@@ -1176,7 +1176,7 @@ FN NsLookupEntryByPath (
             )
         END
 
-        IF lookupcontext.EntryFlags & NS_ENTRY_CREATED THEN
+        IF lookupcontext.EntryFlags & NSU_ENTRY_CREATED THEN
             // Looking up this entry caused the object to be created.
 
             state |= NSP_LOOKUP_CREATED
@@ -1205,7 +1205,7 @@ FN NsLookupEntryByPath (
             GOTO Exit
         END
 
-        IF NOT ObCheckAccess (
+        IF NOT ObuCheckAccess (
             currententry^.Permissions, // permissions
             cred, // cred
             params^.Captured.Access, // access
@@ -1224,7 +1224,7 @@ FN NsLookupEntryByPath (
             // Check the type of the object.
 
             IF NOT currententry^.Object OR
-                ObFindHeader ( currententry^.Object )^.Type != type THEN
+                ObuFindHeader ( currententry^.Object )^.Type != type THEN
 
                 NspUnlockTree ()
 
@@ -1243,7 +1243,7 @@ FN NsLookupEntryByPath (
 
     // Reference the returned handle before unlocking the tree.
 
-    NsReferenceHandle ( handle )
+    NsuReferenceHandle ( handle )
 
     NspUnlockTree ()
 
@@ -1254,21 +1254,21 @@ FN NsLookupEntryByPath (
     IF symstate.SymlinkCookie THEN
         // We were keeping a symlink path around for parsing. Unreference it.
 
-        ExUnreferenceName ( symstate.SymlinkCookie )
+        ExuUnreferenceName ( symstate.SymlinkCookie )
     END
 
     IF roothandle.Entry THEN
         // We had to capture the root handle for the current process at some
         // point, which referenced it. Unreference it now.
 
-        NsUnreferenceHandle ( &roothandle )
+        NsuUnreferenceHandle ( &roothandle )
     END
 
     // Unreference the initial handle.
 
-    NsUnreferenceHandle ( &params^.InitialHandle )
+    NsuUnreferenceHandle ( &params^.InitialHandle )
 
-    // Zero out the initial handle to make sure NsFreeOpenParameters doesn't
+    // Zero out the initial handle to make sure NsuFreeOpenParameters doesn't
     // unref it upon return from the system service (if we're even in one).
     // If it sees a nonzero initial handle then it assumes there was an error
     // condition or something and that we never reached this point.

@@ -2,15 +2,15 @@
 // Implements spinlocks for the kernel.
 //
 
-#INCLUDE "../Ki.hjk"
+#INCLUDE "../Kep.hjk"
 
 #IF BLD_MP
 
 #ASM [
 
 // a0 - spinlock
-KiForceReleaseSpinlock:
-.global KiForceReleaseSpinlock
+KepForceReleaseSpinlock:
+.global KepForceReleaseSpinlock
 
     mb
 
@@ -21,8 +21,8 @@ KiForceReleaseSpinlock:
 // a0 - spinlock
 // outputs:
 // a3 - success
-KiTryAcquireSpinlock:
-.global KiTryAcquireSpinlock
+KepTryAcquireSpinlock:
+.global KepTryAcquireSpinlock
 
     // Initialize the try spin count.
 
@@ -64,15 +64,15 @@ KiTryAcquireSpinlock:
 // outputs:
 // a3 - oldipl
 // a2 - prb
-KiAcquireSpinlockInPrb:
-.global KiAcquireSpinlockInPrb
+KepAcquireSpinlockInPrb:
+.global KepAcquireSpinlockInPrb
 
     // Note that we access the Prb through a per-processor mapping via the wired
     // TB entries on XR17032. Therefore we can get a pointer to it before we
     // raise IPL and that's safe, allowing us to order it with the following
     // fall-through.
     
-    subi a0, a0, KI_PRB_LESS_ZERO   // Calculate the pointer of the spinlock
+    subi a0, a0, KEP_PRB_LESS_ZERO   // Calculate the pointer of the spinlock
                                     // within the Prb.
 
     // Fall through.
@@ -80,20 +80,20 @@ KiAcquireSpinlockInPrb:
 // a0 - spinlock
 // outputs:
 // a3 - oldipl
-KiAcquireSpinlockRaise:
-.global KiAcquireSpinlockRaise
+KepAcquireSpinlockRaise:
+.global KepAcquireSpinlockRaise
 
-    // Inline KiRaiseIpl here.
+    // Inline KepRaiseIpl here.
 
-    subi a2, zero, KI_PRB_LESS_ZERO // Acquire a pointer to the Prb.
-    mov  a3, byte [a2 + KiPrb_Ipl]  // Load the old IPL.
-    mov  byte [a2 + KiPrb_Ipl], 2   // Store the new IPL.
+    subi a2, zero, KEP_PRB_LESS_ZERO // Acquire a pointer to the Prb.
+    mov  a3, byte [a2 + KepPrb_Ipl]  // Load the old IPL.
+    mov  byte [a2 + KepPrb_Ipl], 2   // Store the new IPL.
 
     // Fall through.
 
 // a0 - spinlock
-KiAcquireSpinlock:
-.global KiAcquireSpinlock
+KepAcquireSpinlock:
+.global KepAcquireSpinlock
 
     // Common case: non-contended.
 

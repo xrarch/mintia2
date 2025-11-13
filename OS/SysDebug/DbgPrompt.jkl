@@ -23,7 +23,7 @@ DbgTokenBuffer : UBYTE[DBG_TOKEN_BUFFER_SIZE]
 DbgNextTokenPointer : ^UBYTE
 
 PUBLIC DbgCurrentContext : ^OsContext
-PUBLIC DbgCurrentPrb : ^KiPrb
+PUBLIC DbgCurrentPrb : ^KepPrb
 
 FNPTR DbgCommandF ()
 
@@ -57,7 +57,7 @@ FN DbgPaginate () : UWORD
         c := -1
 
         WHILE c == -1 DO
-            c = HalDebugRead ()
+            c = HaluDebugRead ()
         END
 
         RtlPrint ( "\[[2K\r" )
@@ -237,7 +237,7 @@ FN (DbgCommandF) DbgCommandPeekUlong ()
 
     addr := CAST numval TO ^ULONG
 
-    IF NOT MmIsVirtualValid ( addr ) THEN
+    IF NOT MmuIsVirtualValid ( addr ) THEN
         RtlPrint ( "Invalid address\n" )
 
         LEAVE
@@ -304,7 +304,7 @@ FN (DbgCommandF) DbgCommandPokeUlong ()
 
     addr := CAST numval TO ^ULONG
 
-    IF NOT MmIsVirtualValid ( addr ) THEN
+    IF NOT MmuIsVirtualValid ( addr ) THEN
         RtlPrint ( "Invalid address\n" )
 
         LEAVE
@@ -391,7 +391,7 @@ FN (DbgCommandF) DbgCommandCpu ()
         LEAVE
     END
 
-    prb := KiPrbFromNumber ( numval )
+    prb := KepPrbFromNumber ( numval )
 
     context := prb^.FrozenContext
 
@@ -403,13 +403,13 @@ FN (DbgCommandF) DbgCommandCpu ()
         LEAVE
     END
 
-    IF NOT MmIsVirtualValid ( context ) THEN
+    IF NOT MmuIsVirtualValid ( context ) THEN
         RtlPrint ( "Context lies in invalid virtual space%s", " - not switched\n" )
 
         LEAVE
     END
 
-    IF NOT MmIsVirtualValid ( context + SIZEOF OsContext ) THEN
+    IF NOT MmuIsVirtualValid ( context + SIZEOF OsContext ) THEN
         RtlPrint ( "Context ends in invalid virtual space%s", " - not switched\n" )
 
         LEAVE
@@ -456,7 +456,7 @@ FN (DbgCommandF) DbgCommandReady ()
     i := 0
     head : ^RtlListEntry
     listentry : ^RtlListEntry
-    thread : ^KeThread
+    thread : ^KeuThread
 
     WHILE i < OS_PRIORITY_MAX DO
         head = &prb^.RealTimeListHeads[i]
@@ -468,10 +468,10 @@ FN (DbgCommandF) DbgCommandReady ()
         listentry = head^.Next
 
         WHILE listentry != head DO
-            thread = CONTAINEROF listentry TO KeThread.ReadyEntry
+            thread = CONTAINEROF listentry TO KeuThread.ReadyEntry
 
-            IF NOT MmIsVirtualValid ( thread ) OR
-                NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+            IF NOT MmuIsVirtualValid ( thread ) OR
+                NOT MmuIsVirtualValid ( thread + SIZEOF KeuThread - 1 ) THEN
 
                 RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
 
@@ -494,7 +494,7 @@ FN (DbgCommandF) DbgCommandReady ()
 
     i = 0
 
-    WHILE i < KI_TIMESHARED_QUEUES DO
+    WHILE i < KEP_TIMESHARED_QUEUES DO
         head = &prb^.CalendarListHeads[i]
 
         IF NOT RtlEmptyList ( head ) THEN
@@ -504,10 +504,10 @@ FN (DbgCommandF) DbgCommandReady ()
         listentry = head^.Next
 
         WHILE listentry != head DO
-            thread = CONTAINEROF listentry TO KeThread.ReadyEntry
+            thread = CONTAINEROF listentry TO KeuThread.ReadyEntry
 
-            IF NOT MmIsVirtualValid ( thread ) OR
-                NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+            IF NOT MmuIsVirtualValid ( thread ) OR
+                NOT MmuIsVirtualValid ( thread + SIZEOF KeuThread - 1 ) THEN
 
                 RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
 
@@ -532,10 +532,10 @@ FN (DbgCommandF) DbgCommandReady ()
     listentry = head^.Next
 
     WHILE listentry != head DO
-        thread = CONTAINEROF listentry TO KeThread.ReadyEntry
+        thread = CONTAINEROF listentry TO KeuThread.ReadyEntry
 
-        IF NOT MmIsVirtualValid ( thread ) OR
-            NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+        IF NOT MmuIsVirtualValid ( thread ) OR
+            NOT MmuIsVirtualValid ( thread + SIZEOF KeuThread - 1 ) THEN
 
             RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
 
@@ -553,13 +553,13 @@ FN (DbgCommandF) DbgCommandReady ()
 END
 
 DbgThreadStatusName : ^UBYTE[8] = {
-    [KI_THREAD_RUNNING] = "RUNNING",
-    [KI_THREAD_READY] = "READY",
-    [KI_THREAD_WAITING] = "WAITING",
-    [KI_THREAD_INITIALIZED] = "INIT",
-    [KI_THREAD_STANDBY] = "STANDBY",
-    [KI_THREAD_INFLIGHT] = "INFLIGHT",
-    [KI_THREAD_TERMINATED] = "TERM",
+    [KE_THREAD_RUNNING] = "RUNNING",
+    [KE_THREAD_READY] = "READY",
+    [KE_THREAD_WAITING] = "WAITING",
+    [KE_THREAD_INITIALIZED] = "INIT",
+    [KE_THREAD_STANDBY] = "STANDBY",
+    [KE_THREAD_INFLIGHT] = "INFLIGHT",
+    [KE_THREAD_TERMINATED] = "TERM",
 }
 
 FN (DbgCommandF) DbgCommandThreads ()
@@ -589,7 +589,7 @@ FN (DbgCommandF) DbgCommandThreads ()
         LEAVE
     END
 
-    proc := CAST numval TO ^KeProcess
+    proc := CAST numval TO ^KeuProcess
 
     IF proc & DBG_POINTER_ALIGN_MASK THEN
         RtlPrint ( "Unaligned pointer %p\n", proc )
@@ -597,8 +597,8 @@ FN (DbgCommandF) DbgCommandThreads ()
         LEAVE
     END
 
-    IF NOT MmIsVirtualValid ( proc ) OR
-        NOT MmIsVirtualValid ( proc + SIZEOF KeProcess - 1 ) THEN
+    IF NOT MmuIsVirtualValid ( proc ) OR
+        NOT MmuIsVirtualValid ( proc + SIZEOF KeuProcess - 1 ) THEN
 
         RtlPrint ( "Process object %p overlaps invalid page\n", proc )
 
@@ -611,7 +611,7 @@ FN (DbgCommandF) DbgCommandThreads ()
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
-        thread := CONTAINEROF listentry TO KeThread.ProcessListEntry
+        thread := CONTAINEROF listentry TO KeuThread.ProcessListEntry
 
         IF thread & DBG_POINTER_ALIGN_MASK THEN
             RtlPrint ( "Unaligned thread object %p\n", thread )
@@ -619,8 +619,8 @@ FN (DbgCommandF) DbgCommandThreads ()
             LEAVE
         END
 
-        IF NOT MmIsVirtualValid ( thread ) OR
-            NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+        IF NOT MmuIsVirtualValid ( thread ) OR
+            NOT MmuIsVirtualValid ( thread + SIZEOF KeuThread - 1 ) THEN
 
             RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
 
@@ -666,7 +666,7 @@ FN (DbgCommandF) DbgCommandWait ()
         LEAVE
     END
 
-    thread := CAST numval TO ^KeThread
+    thread := CAST numval TO ^KeuThread
 
     IF thread & DBG_POINTER_ALIGN_MASK THEN
         RtlPrint ( "Unaligned pointer %p\n", thread )
@@ -674,8 +674,8 @@ FN (DbgCommandF) DbgCommandWait ()
         LEAVE
     END
 
-    IF NOT MmIsVirtualValid ( thread ) OR
-        NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+    IF NOT MmuIsVirtualValid ( thread ) OR
+        NOT MmuIsVirtualValid ( thread + SIZEOF KeuThread - 1 ) THEN
 
         RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
 
@@ -705,8 +705,8 @@ FN (DbgCommandF) DbgCommandWait ()
             LEAVE
         END
 
-        IF NOT MmIsVirtualValid ( waitblock ) OR
-            NOT MmIsVirtualValid ( waitblock + SIZEOF KiWaitBlock - 1 ) THEN
+        IF NOT MmuIsVirtualValid ( waitblock ) OR
+            NOT MmuIsVirtualValid ( waitblock + SIZEOF KepWaitBlock - 1 ) THEN
 
             RtlPrint ( "Wait block %p overlaps invalid page\n", waitblock )
 
@@ -721,8 +721,8 @@ FN (DbgCommandF) DbgCommandWait ()
             LEAVE
         END
 
-        IF NOT MmIsVirtualValid ( object ) OR
-            NOT MmIsVirtualValid ( object + SIZEOF KiDispatchHeader - 1 ) THEN
+        IF NOT MmuIsVirtualValid ( object ) OR
+            NOT MmuIsVirtualValid ( object + SIZEOF KepDispatchHeader - 1 ) THEN
 
             RtlPrint ( "Object %p overlaps invalid page\n", object )
 
@@ -737,7 +737,7 @@ FN (DbgCommandF) DbgCommandWait ()
 
         RtlPrint ( "wait(%u): %p '%s'\n", i, waitblock^.Object, name )
 
-        waitblock += SIZEOF KiWaitBlock
+        waitblock += SIZEOF KepWaitBlock
         count -= 1
         i += 1
     END
@@ -770,7 +770,7 @@ FN (DbgCommandF) DbgCommandTrace ()
         LEAVE
     END
 
-    thread := CAST numval TO ^KeThread
+    thread := CAST numval TO ^KeuThread
 
     IF thread & DBG_POINTER_ALIGN_MASK THEN
         RtlPrint ( "Unaligned pointer %p\n", thread )
@@ -778,15 +778,15 @@ FN (DbgCommandF) DbgCommandTrace ()
         LEAVE
     END
 
-    IF NOT MmIsVirtualValid ( thread ) OR
-        NOT MmIsVirtualValid ( thread + SIZEOF KeThread - 1 ) THEN
+    IF NOT MmuIsVirtualValid ( thread ) OR
+        NOT MmuIsVirtualValid ( thread + SIZEOF KeuThread - 1 ) THEN
 
         RtlPrint ( "Thread object %p overlaps invalid page\n", thread )
 
         LEAVE
     END
 
-    IF thread^.Status == KI_THREAD_RUNNING THEN
+    IF thread^.Status == KE_THREAD_RUNNING THEN
         RtlPrint ( "Running - no context.\n" )
 
 #IF BLD_MP
@@ -902,7 +902,7 @@ FN DbgGetString (
         c := -1
 
         WHILE c == -1 DO
-            c = HalDebugRead ()
+            c = HaluDebugRead ()
         END
 
         IF c == '\r' THEN

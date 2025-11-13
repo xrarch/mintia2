@@ -2,22 +2,22 @@
 // Implements support for kernel Process objects.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 #INCLUDE "<ll>/System/OsStatus.hjk"
 #INCLUDE "<ll>/System/OsSignal.hjk"
 
 #SECTION "PAGEtext"
-FN KeInitializeProcess (
-    IN process : ^KeProcess,
+FN KeuInitializeProcess (
+    IN process : ^KeuProcess,
     IN name : ^UBYTE,
 )
 
-    // Initialize a KeProcess object.
+    // Initialize a KeuProcess object.
 
     RtlCopyString (
         &process^.Name[0], // dest
         name, // src
-        KE_DEBUG_NAME_LENGTH, // bufsize
+        KEU_DEBUG_NAME_LENGTH, // bufsize
     )
 
     RtlInitializeList ( &process^.ThreadListHead )
@@ -26,7 +26,7 @@ FN KeInitializeProcess (
     process^.SignalThread = NULLPTR
     process^.Terminated = FALSE
     process^.PageDirectoryPfn = 0
-    process^.MemoryState = KI_PROCESS_RESIDENT
+    process^.MemoryState = KEP_PROCESS_RESIDENT
     process^.ResidentThreadCount = 0
     process^.SwapListHead = NULLPTR
     process^.BasePriority = OS_PRIORITY_DEFAULT
@@ -34,7 +34,7 @@ FN KeInitializeProcess (
     KeInitializeLock ( &process^.Lock )
 
 #IF BLD_MP
-    KiInitializeSpinlock ( &process^.SwapStateSpinlock )
+    KepInitializeSpinlock ( &process^.SwapStateSpinlock )
 #END
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
@@ -46,7 +46,7 @@ FN KeInitializeProcess (
 
     IF asidtable THEN
         i := 0
-        max := KeLoaderBlock.ProcessorCount
+        max := KeuLoaderBlock.ProcessorCount
 
         WHILE i < max DO
             // Cause the process to get assigned a new ASID when its first
@@ -67,7 +67,7 @@ END
 
 #SECTION "PAGEtext"
 FN KeSignalProcess (
-    IN process : ^KeProcess,
+    IN process : ^KeuProcess,
     IN signal : UWORD,
 )
 
@@ -100,7 +100,7 @@ FN KeSignalProcess (
         listentry := head^.Next
 
         WHILE listentry != head DO
-            thread := CONTAINEROF listentry TO KeThread.ProcessListEntry
+            thread := CONTAINEROF listentry TO KeuThread.ProcessListEntry
 
             KeSignalThread (
                 thread, // thread
@@ -122,7 +122,7 @@ END
 
 #SECTION "PAGEtext"
 FN KeSetBasePriorityProcess (
-    IN process : ^KeProcess,
+    IN process : ^KeuProcess,
     IN priority : UWORD,
 )
 
@@ -142,7 +142,7 @@ FN KeSetBasePriorityProcess (
     listentry := head^.Next
 
     WHILE listentry != head DO
-        thread := CONTAINEROF listentry TO KeThread.ProcessListEntry
+        thread := CONTAINEROF listentry TO KeuThread.ProcessListEntry
 
         IF priority > thread^.BasePriority THEN
             KeSetBasePriorityThread (

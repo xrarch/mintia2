@@ -1,0 +1,433 @@
+//
+// Undocumented header file for the Kernel (Ke) component of the MINTIA
+// Executive.
+//
+
+#INCLUDE "<ll>/Executive/Ke.hjk"
+
+#DEFINE KEP_LOCK_WAITERS 0x1
+#DEFINE KEP_LOCK_WRITE_LOCKED 0x2
+#DEFINE KEP_LOCK_SHARE_INC 0x4
+#DEFINE KEP_LOCK_SHARE_SHIFT 2
+#DEFINE KEP_LOCK_BITS ( - 0 KEP_LOCK_SHARE_INC )
+#DEFINE KEP_LOCK_C_BITS ( ~ KEP_LOCK_BITS )
+
+#DEFINE KEU_STACK_PAGES 1
+
+FNPTR KeuDebuggerEntryF (
+    IN context : ^OsContext,
+)
+
+EXTERN KeuDebuggerEntry : KeuDebuggerEntryF
+
+STRUCT KeInterrupt
+    Entry : RtlListEntry,
+
+    Routine : KeInterruptF,
+    Handler : KeInterruptF,
+    Context : UWORD,
+    Vector : UWORD,
+    ProcessorId : UWORD,
+
+#IF BLD_MP
+    Spinlock : KepSpinlock,
+#END
+
+    ShareVector : UBYTE,
+    EdgeTriggered : UBYTE,
+    Ipl : UBYTE,
+    Connected : UBYTE,
+END
+
+#DEFINE KEU_AUTOMATIC_INTERRUPT_PROCESSOR -1
+
+EXTERN FN KeuInitializeInterrupt (
+    IN interrupt : ^KeInterrupt,
+    IN routine : KeInterruptF,
+    IN context : UWORD,
+    IN vector : UWORD,
+    IN ipl : UWORD,
+    IN edgetriggered : UWORD,
+    IN sharevector : UWORD,
+    IN procid : UWORD,
+)
+
+EXTERN FN KeuConnectInterrupt (
+    IN interrupt : ^KeInterrupt,
+) : UWORD
+
+EXTERN FN KeuDisconnectInterrupt (
+    IN interrupt : ^KeInterrupt,
+) : UWORD
+
+STRUCT KepWaitBlock
+    Entry : RtlListEntry,
+    Thread : ^KeuThread,
+    Object : ^KepDispatchHeader,
+    WakeStatus : ULONG,
+    Flags : ULONG,
+END
+
+EXTERN FN KeuAllocateInitialTurnstile () : ^KepTurnstile
+
+STRUCT KepTurnstile
+    ChainEntry : RtlListEntry,
+
+    PiEntry : RtlListEntry,
+
+    WaiterHeapRoot : ^RtlHeapEntry,
+
+    Free : ^KepTurnstile,
+
+    Key : ^VOID,
+
+    Event : KeEvent,
+
+    Owner : ^KeuThread,
+
+#IF BLD_MP
+    Spinlock : KepSpinlock,
+#END
+
+END
+
+EXTERN FN KeuInitializeThread (
+    IN process : ^KeuProcess,
+    IN thread : ^KeuThread,
+    IN name : ^UBYTE,
+    IN kstack : ^VOID,
+    IN kstacksize : UWORD,
+    IN turnstile : ^KepTurnstile,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+EXTERN FN KeuUninitializeThread (
+    IN thread : ^KeuThread,
+) : UWORD
+
+// This is the per-processor entry in the ASID table attached to each KeuProcess
+// object.
+
+STRUCT KepAsidInfoEntry
+    AsidSequenceNumber : RtlUquad,
+    Asid : UWORD,
+END
+
+#DEFINE KEU_DEBUG_NAME_LENGTH 32
+
+STRUCT KeuProcess
+    Name : UBYTE[KEU_DEBUG_NAME_LENGTH],
+
+    ThreadListHead : RtlListEntry,
+
+    SignalThread : ^KeuThread,
+
+    SwapNext : ^KeuProcess,
+    SwapListHead : ^KeuThread,
+
+    Lock : KeLock,
+
+    PageDirectoryPfn : UWORD,
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    AsidTable : ^KepAsidInfoEntry,
+#END
+
+#IF BLD_MP
+    SwapStateSpinlock : KepSpinlock,
+#END
+
+    ResidentThreadCount : ULONG,
+    ThreadCount : ULONG,
+
+    Terminated : UBYTE,
+    MemoryState : UBYTE,
+    BasePriority : UBYTE,
+END
+
+EXTERN FN KeuInitializeProcess (
+    IN process : ^KeuProcess,
+    IN name : ^UBYTE,
+)
+
+#DEFINE KEP_THREAD_WAIT_BLOCKS 4
+
+STRUCT KeuThread
+    WaitBlockTable : ^KepWaitBlock,
+    Context : ^OsContext,
+    Process : ^KeuProcess,
+    ActualProcess : ^KeuProcess,
+    KernelStackTop : ^VOID,
+    UserFrame : ^OsContext,
+
+    BalancedQueue : ^KeBalancedQueue,
+    QueueItem : ^RtlListEntry,
+
+#IF BLD_MP
+    AffinityPrb : ^KepPrb,
+    CurrentPrb : ^KepPrb,
+#END
+    SwapCandidatePrb : ^KepPrb,
+
+#IF BLD_MP
+    Spinlock : KepSpinlock,
+#END
+
+    SignalMask : ULONG[2],
+    SignalAcceptMask : ULONG[2],
+    SignalDeliverOnWaitMask : ULONG[2],
+    WaitStatus : OsStatus,
+    SleepMs : ULONG,
+    RunMs : ULONG,
+    StateMs : ULONG,
+
+    RemainingQuantum : BYTE,
+    UserApcTriggered : UBYTE,
+    UserInterrupt : UBYTE,
+    WaitCount : UBYTE,
+    Priority : UBYTE,
+    BasePriority : UBYTE,
+    Status : UBYTE,
+    Alertable : UBYTE,
+    WaitMode : UBYTE,
+    WaitIpl : UBYTE,
+    InSwapList : UBYTE,
+    InteractiveBits : UBYTE,
+    CurrentQueue : UBYTE,
+    SuspendCount : UBYTE,
+    Terminated : UBYTE,
+    KernelStackResident : UBYTE,
+    IgnoreEventCount : UBYTE,
+    KernelStackSwappable : UBYTE,
+    AttachIpl : UBYTE,
+    PriorityFloor : UBYTE,
+    PendingEventsSet : UBYTE,
+
+#IF BLD_MP
+    WaitAttempt : UBYTE,
+    Pinned : UBYTE,
+    Switching : UBYTE,
+    CurrentMode : UBYTE,
+#END
+
+    BestowedPriority : UBYTE,
+    BestowedInteractivity : UBYTE,
+    ExecutingKapc : UBYTE,
+
+    // Put large and uncommonly accessed fields at the end to increase odds that
+    // the commonly accessed ones are within range of immediate offsets on
+    // various architectures (especially fox32 whose range is only 255 bytes).
+
+    // NOTE: The ReadyEntry is reused by thread reaping and kernel stack
+    //       swapping.
+
+    ReadyEntry : RtlListEntry,
+    BalancedQueueEntry : RtlListEntry,
+    WaitEntry : RtlListEntry,
+    ProcessListEntry : RtlListEntry,
+
+    KapcListHead : RtlListEntry,
+    LapcListHead : RtlListEntry,
+    UapcListHead : RtlListEntry,
+
+    // My turnstile.
+
+    Turnstile : ^KepTurnstile,
+
+    // The turnstile I'm currently blocked on.
+
+    BlockedOnTurnstile : ^KepTurnstile,
+
+    // Entry on the max-heap of threads blocked on that turnstile.
+    // Ordered by BestowedPriority and BestowedInteractivity.
+
+    TurnstileEntry : RtlHeapEntry,
+
+    // List of turnstiles that were made by people waiting for me to release a
+    // lock.
+
+    PiTurnstileListHead : RtlListEntry,
+
+    // The list head array is indexed by the current value of the ExecutingKapc
+    // field.
+
+    AbortListHead : ^KeAbortBlock[2],
+
+    UserTimeMs : RtlUquad,
+    DpcTimeMs : RtlUquad,
+    SystemTimeMs : RtlUquad,
+
+    SuspendLapc : KeApc,
+    SuspendHeader : KepDispatchHeader,
+
+    TimeoutWaitBlock : KepWaitBlock,
+    Timeout : KeTimer,
+
+    TerminationEvent : KeEvent,
+
+    WaitBlocks : KepWaitBlock[KEP_THREAD_WAIT_BLOCKS],
+
+    LastFaultStatus : OsStatus,
+
+    Name : UBYTE[KEU_DEBUG_NAME_LENGTH],
+END
+
+EXTERN FN KeuIgnoreEvents ()
+
+EXTERN FN KeuAcceptEvents ()
+
+EXTERN FN KeuReadyThread (
+    IN thread : ^KeuThread,
+)
+
+EXTERN FN KeuMaskSignalThread (
+    IN thread : ^KeuThread,
+    IN signal : UWORD,
+    IN enable : UWORD,
+) : UWORD
+
+EXTERN FN KeuDeliverOnWaitSignalThread (
+    IN thread : ^KeuThread,
+    IN signal : UWORD,
+    IN enable : UWORD,
+) : UWORD
+
+#MACRO KeuInvalidAlertability ( alertable ) [
+    ((alertable) >= KE_MAX_USER_ALERTABLE)
+]
+
+#MACRO KeuInvalidSignal ( signal ) [
+    (((signal) == 0) | ((signal) >= OS_SIGNAL_COUNT))
+]
+
+EXTERN KeuStackSwapperEvent : KeEvent
+
+EXTERN FN KeuFlushThreadInSwapQueue () : ^KeuThread
+EXTERN FN KeuFlushProcessInSwapQueue () : ^KeuProcess
+EXTERN FN KeuFlushProcessOutSwapQueue () : ^KeuProcess
+
+EXTERN FN KeuSetProcessOutswapped (
+    IN process : ^KeuProcess,
+) : UWORD
+
+EXTERN FN KeuHarvestSwapCandidates (
+    IN procid : UWORD,
+) : ^KeuThread
+
+EXTERN FN KeuReadyInswappedThread (
+    IN thread : ^KeuThread,
+)
+
+EXTERN FN KeuReadyInswappedProcess (
+    IN process : ^KeuProcess,
+)
+
+EXTERN FN KeuExitThread (
+    IN thread : ^KeuThread,
+)
+
+EXTERN FN KeuSweepMyTb (
+    IN keepglobal : UWORD,
+)
+
+EXTERN FN KeuFlushMyTbAddress (
+    IN address : ^VOID,
+)
+
+EXTERN FN KeuSweepTb (
+    IN keepglobal : UWORD,
+)
+
+EXTERN FN KeuFlushSingleTb (
+    IN vaddr : ^VOID,
+)
+
+EXTERN FN KeuFlushMultipleTb (
+    IN vaddrtable : ^^VOID,
+    IN pagecount : UWORD,
+)
+
+EXTERN FN KeuSweepDcache ()
+
+EXTERN FN KeuFlushDcachePages (
+    IN pfntable : ^^VOID,
+    IN pagecount : UWORD,
+)
+
+EXTERN FN KeuSweepIcache ()
+
+EXTERN FN KeuFlushIcachePages (
+    IN pfntable : ^^VOID,
+    IN pagecount : UWORD,
+)
+
+EXTERN KeuSystemPageDirectoryPfn : UWORD
+
+EXTERN KeuUexecApcDispatcher : ^VOID
+EXTERN KeuUexecSignalDispatcher : ^VOID
+
+FNPTR KeuCustodyListActivateF (
+    IN list : ^KeuCustodyList,
+)
+
+FNPTR KeuProcessCustodyListF (
+    IN list : ^KeuCustodyList,
+    IN object : ^VOID,
+    IN context : ^VOID,
+)
+
+STRUCT KeuCustodyList
+    Head : ^VOID,
+    ActivateRoutine : KeuCustodyListActivateF,
+    Context : UWORD,
+END
+
+EXTERN FN KeuInsertCustodyList (
+    IN list : ^KeuCustodyList,
+    IN link : ^^VOID,
+)
+
+EXTERN FN KeuProcessCustodyList (
+    IN list : ^KeuCustodyList,
+    IN callback : KeuProcessCustodyListF,
+    IN context : ^VOID,
+)
+
+#MACRO KeuInitializeCustodyList ( list, activateroutine, context ) [
+    NOTHING (list)^.Head = NULLPTR
+    NOTHING (list)^.ActivateRoutine = (activateroutine)
+    NOTHING (list)^.Context = (context)
+]
+
+#IF BLD_MP
+
+EXTERN FN KeuReaperBarrier (
+    IN thread : ^KeuThread,
+)
+
+#MACRO KeuControlMigration ( thread, pinned ) [
+    // Control whether the current thread can migrate to another CPU.
+    //
+    // We take a thread pointer to avoid having to load the current thread
+    // redundantly, but it's not allowed to be anything other than the current
+    // thread. This is because we don't take any spinlocks while disabling
+    // migration, relying on the fact that the Pinned field is only accessed
+    // from other contexts while the thread is on a ready queue, and if it's the
+    // currently running thread, it ain't on a ready queue.
+
+    NOTHING (thread)^.Pinned
+
+    KeAssert ( (thread) == KeCurrentThread () )
+
+    NOTHING (thread)^.Pinned = pinned
+]
+
+#ELSE
+
+#MACRO KeuControlMigration ( thread, pinned ) [ TRUE ]
+
+#END
+
+EXTERN KeuReaperCustodyList : KeuCustodyList

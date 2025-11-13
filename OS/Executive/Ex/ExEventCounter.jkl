@@ -5,18 +5,18 @@
 
 #INCLUDE "Exp.hjk"
 
-ExpEventCounterCache : ^MiPoolCache
+ExpEventCounterCache : ^MmpPoolCache
 
 #SECTION "INITtext"
 FN ExpInitializeEventCounters ()
 
     // Initialize the event counter list.
 
-    ExpEventCounterCache = MmCreatePoolCache (
-        PsCurrentNode (), // node
+    ExpEventCounterCache = MmuCreatePoolCache (
+        PsuCurrentNode (), // node
         "Event Counters", // name
-        SIZEOF ExEventCounter, // size
-        MM_NONPAGED_POOL, // poolindex
+        SIZEOF ExuEventCounter, // size
+        MMU_NONPAGED_POOL, // poolindex
         'EvCn', // tag
     )
 
@@ -28,13 +28,13 @@ FN ExpInitializeEventCounters ()
 
 END
 
-FN ExAllocateEventCounter (
+FN ExuAllocateEventCounter (
     IN wait : UWORD,
-) : ^ExEventCounter
+) : ^ExuEventCounter
 
     // Allocate an event counter.
 
-    counter : ^ExEventCounter = MmAllocateFromPoolCache (
+    counter : ^ExuEventCounter = MmuAllocateFromPoolCache (
         ExpEventCounterCache, // cache
         wait, // wait
     )
@@ -55,8 +55,8 @@ FN ExAllocateEventCounter (
     RETURN counter
 END
 
-FN ExReferenceEventCounter (
-    IN counter : ^ExEventCounter,
+FN ExuReferenceEventCounter (
+    IN counter : ^ExuEventCounter,
 )
 
     // Increment the refcount of the counter.
@@ -69,8 +69,8 @@ FN ExReferenceEventCounter (
     KeAssert ( oldcount != 0 )
 END
 
-FN ExUnreferenceEventCounter (
-    IN counter : ^ExEventCounter,
+FN ExuUnreferenceEventCounter (
+    IN counter : ^ExuEventCounter,
 )
 
     // Decrement the refcount of the counter.
@@ -85,7 +85,7 @@ FN ExUnreferenceEventCounter (
     IF oldcount == 1 THEN
         // This was the last user of this event counter. Put it on the list.
 
-        MmFreeToPoolCache (
+        MmuFreeToPoolCache (
             ExpEventCounterCache, // cache
             counter, // ptr
         )

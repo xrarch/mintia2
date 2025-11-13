@@ -44,7 +44,7 @@ FN (KeStartThreadF) FwtParticleThread (
     
     // And free it.
 
-    MmFreeToPoolCache (
+    MmuFreeToPoolCache (
         FwtDataCache, // cache
         thisfwd, // ptr
     )
@@ -102,7 +102,7 @@ FN (KeStartThreadF) FwtParticleThread (
         vely += FWT_INT_TO_FP ( FWT_GRAVITY_AMT ) * FWT_INTERVAL_MS / 1000
     END
     
-    PsExitThread ()
+    PsuExitThread ()
 END
 
 FN (KeStartThreadF) FwtExplodeableThread (
@@ -193,7 +193,7 @@ FN (KeStartThreadF) FwtExplodeableThread (
     WHILE i < count DO
         i += 1
         
-        data : ^FwtData = MmAllocateFromPoolCache (
+        data : ^FwtData = MmuAllocateFromPoolCache (
             FwtDataCache, // cache
             FALSE, // wait
         )
@@ -217,14 +217,14 @@ FN (KeStartThreadF) FwtExplodeableThread (
 
             RtlPrint ( "FwtExplodeableThread: Out of system resources\n" )
 
-            MmFreeToPoolCache (
+            MmuFreeToPoolCache (
                 FwtDataCache, // cache
                 data, // ptr
             )
         END
     END
     
-    PsExitThread ()
+    PsuExitThread ()
 END
 
 FN FwtSpawnExplodeable ()

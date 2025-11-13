@@ -2,24 +2,24 @@
 // Implements low-level exception handling for XR/17032.
 //
 
-#INCLUDE "../Ki.hjk"
+#INCLUDE "../Kep.hjk"
 
 #INCLUDE "<ll>/System/OsSignal.hjk"
 
-#INCLUDE "<inc>/Mm.hjk"
+#INCLUDE "<inc>/Mmu.hjk"
 
 // The exact interface to the HAL for interrupts is private to the architecture.
 
-EXTERN FN HalInterrupt (
+EXTERN FN HaluInterrupt (
     IN context : ^OsContext,
 )
 
-FNPTR KiHighLevelHandlerF (
+FNPTR KepHighLevelHandlerF (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
 )
 
-KiCauseNames : ^UBYTE[16] = {
+KepCauseNames : ^UBYTE[16] = {
     "EXC0",
     "INTERRUPT",
     "SYSCALL",
@@ -38,7 +38,7 @@ KiCauseNames : ^UBYTE[16] = {
     "EXC15",
 }
 
-FN KiFaultCrash (
+FN KepFaultCrash (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
 )
@@ -46,7 +46,7 @@ FN KiFaultCrash (
     // Set the FrozenContext to the faulting context because that will be the
     // most relevant information for the debugger.
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
     IF prb^.FrozenContext THEN
         RtlPrint ( "CPU%d OLD CONTEXT: 0x%p\n", prb^.FrozenContext )
@@ -59,14 +59,14 @@ FN KiFaultCrash (
         context^.Rs,
         badaddr,
         context^.Epc,
-        KiCauseNames[context^.Rs >> OS_XR_RS_ECAUSE_SHIFT],
+        KepCauseNames[context^.Rs >> OS_XR_RS_ECAUSE_SHIFT],
     )
 END
 
-EXTERN KiAbortVector : UBYTE
+EXTERN KepAbortVector : UBYTE
 
-FN KiAbort (
-    IN thread : ^KeThread,
+FN KepAbort (
+    IN thread : ^KeuThread,
     IN context : ^OsContext,
     IN status : OsStatus,
     IN badaddr : ^VOID,
@@ -77,12 +77,12 @@ FN KiAbort (
     IF NOT OsStatusIsAddressError ( status ) THEN
         // Not an address error status, so aborting is nonsense.
 
-        KiFaultCrash ( context, badaddr )
+        KepFaultCrash ( context, badaddr )
     END
 
     abortblock := thread^.AbortListHead[thread^.ExecutingKapc]
 
-    IF NOT abortblock OR MmShouldAccessCrash (
+    IF NOT abortblock OR MmuShouldAccessCrash (
         abortblock, // abortblock
         badaddr, // badaddr
         status, // status
@@ -90,7 +90,7 @@ FN KiAbort (
         // No abortable operation was in progress, or this abort block isn't
         // catching this type of error. This is just a kernel bug.
 
-        KiFaultCrash ( context, badaddr )
+        KepFaultCrash ( context, badaddr )
     END
 
     // Save the status corresponding to the error.
@@ -101,10 +101,10 @@ FN KiAbort (
 
     context^.S0 = abortblock
     context^.S1 = thread + (thread^.ExecutingKapc * 4)
-    context^.Epc = &KiAbortVector
+    context^.Epc = &KepAbortVector
 END
 
-FN (KiHighLevelHandlerF) KiSpuriousException (
+FN (KepHighLevelHandlerF) KepSpuriousException (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
 )
@@ -120,44 +120,44 @@ END
 
 #IF BLD_MP
 
-FN KiProcessIdleDeferredIpiEvents ()
+FN KepProcessIdleDeferredIpiEvents ()
 
     // There were idle deferred events we need to process.
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
     events := KeFetchAndSetUlong (
         &prb^.IdleDeferredIpiEvents, // ptr
         0, // ulong
     )
 
-    IF events & KI_DEFERRED_IDLE_TB_SHOOTDOWN THEN
+    IF events & KEP_DEFERRED_IDLE_TB_SHOOTDOWN THEN
         // Dump the entire TB right now.
 
-        KeSweepMyTb ( FALSE )
+        KeuSweepMyTb ( FALSE )
     END
 
-    IF events & KI_DEFERRED_IDLE_ICACHE_SHOOTDOWN THEN
+    IF events & KEP_DEFERRED_IDLE_ICACHE_SHOOTDOWN THEN
         // Dump the entire Icache.
 
-        KiFlushMyIcache ()
+        KepFlushMyIcache ()
     END
 
-    IF events & KI_DEFERRED_IDLE_DCACHE_SHOOTDOWN THEN
+    IF events & KEP_DEFERRED_IDLE_DCACHE_SHOOTDOWN THEN
         // Dump my entire Dcache.
 
-        KiFlushMyDcache ()
+        KepFlushMyDcache ()
     END
 END
 
 #END
 
-FN (KiHighLevelHandlerF) KiHandleInterrupt (
+FN (KepHighLevelHandlerF) KepHandleInterrupt (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
 )
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
 #IF BLD_MP
     idle := prb^.InIdleLoop
@@ -168,15 +168,15 @@ FN (KiHighLevelHandlerF) KiHandleInterrupt (
         KeMemoryBarrier ()
 
         IF prb^.IdleDeferredIpiEvents THEN
-            KiProcessIdleDeferredIpiEvents ()
+            KepProcessIdleDeferredIpiEvents ()
         END
     END
 #END
 
-    HalInterrupt ( context )
+    HaluInterrupt ( context )
 
     IF prb^.PendingSoftwareInterrupts >> prb^.Ipl THEN
-        KiDispatchSoftwareInterrupts ( prb^.Ipl )
+        KepDispatchSoftwareInterrupts ( prb^.Ipl )
     END
 
 #IF BLD_MP
@@ -185,21 +185,21 @@ FN (KiHighLevelHandlerF) KiHandleInterrupt (
 
 END
 
-KiExceptionToSignal : UBYTE[16] = {
+KepExceptionToSignal : UBYTE[16] = {
     [OS_XR_ECAUSE_BUS] = OS_SIGNAL_BUS,
     [OS_XR_ECAUSE_INV] = OS_SIGNAL_ILL,
     [OS_XR_ECAUSE_PRV] = OS_SIGNAL_ILL,
     [OS_XR_ECAUSE_UNA] = OS_SIGNAL_ACV,
 }
 
-KiExceptionToStatus : OsStatus[16] = {
+KepExceptionToStatus : OsStatus[16] = {
     [OS_XR_ECAUSE_BUS] = OS_STATUS_BUS_ERROR,
     [OS_XR_ECAUSE_INV] = OS_STATUS_ILLEGAL_INSTRUCTION,
     [OS_XR_ECAUSE_PRV] = OS_STATUS_ILLEGAL_INSTRUCTION,
     [OS_XR_ECAUSE_UNA] = OS_STATUS_UNALIGNED_FAULT,
 }
 
-FN (KiHighLevelHandlerF) KiHandleError (
+FN (KepHighLevelHandlerF) KepHandleError (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
 )
@@ -209,7 +209,7 @@ FN (KiHighLevelHandlerF) KiHandleError (
     //
     // If it happened in usermode, generate a signal to the thread.
 
-    KiEnableInterrupts ()
+    KepEnableInterrupts ()
 
     thread := KeCurrentThread ()
 
@@ -218,28 +218,28 @@ FN (KiHighLevelHandlerF) KiHandleError (
     IF context^.Rs & OS_XR_RS_OLD_USER THEN
         // Happened in usermode, send a signal.
 
-        thread^.LastFaultStatus = KiExceptionToStatus[ecause]
+        thread^.LastFaultStatus = KepExceptionToStatus[ecause]
 
         KeSignalThread (
             thread, // thread
-            KiExceptionToSignal[ecause], // signal
+            KepExceptionToSignal[ecause], // signal
         )
 
     ELSE
         // Happened in kernel mode, abort the operation.
 
-        KiAbort (
+        KepAbort (
             thread, // thread
             context, // context
-            KiExceptionToStatus[ecause], // status
+            KepExceptionToStatus[ecause], // status
             badaddr, // badaddr
         )
     END
 
-    KiDisableInterrupts ()
+    KepDisableInterrupts ()
 END
 
-FN (KiHighLevelHandlerF) KiHandleBreakpoint (
+FN (KepHighLevelHandlerF) KepHandleBreakpoint (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
 )
@@ -252,8 +252,8 @@ FN (KiHighLevelHandlerF) KiHandleBreakpoint (
 
         KeCrash ( "NYI Usermode breakpoint\n" )
 
-    ELSEIF KeDebuggerEntry THEN
-        KeDebuggerEntry ( context )
+    ELSEIF KeuDebuggerEntry THEN
+        KeuDebuggerEntry ( context )
 
         IF ecause == OS_XR_ECAUSE_BRK AND context^.Epc == &KeBreakpoint THEN
             // Skip over the explicit breakpoint.
@@ -266,32 +266,32 @@ FN (KiHighLevelHandlerF) KiHandleBreakpoint (
     END
 END
 
-EXTERN KiStartAbortCasRegion : UBYTE
-EXTERN KiEndAbortCasRegion : UBYTE
-EXTERN KiAbortCas : UBYTE
+EXTERN KepStartAbortCasRegion : UBYTE
+EXTERN KepEndAbortCasRegion : UBYTE
+EXTERN KepAbortCas : UBYTE
 
-FN (KiHighLevelHandlerF) KiHandlePageFault (
+FN (KepHighLevelHandlerF) KepHandlePageFault (
     IN context : ^OsContext,
     IN badaddr : ^VOID,
 )
 
     // Enable interrupts and dispatch the page fault to Mm.
 
-    IF context^.Epc >= &KiStartAbortCasRegion AND
-        context^.Epc < &KiEndAbortCasRegion THEN
+    IF context^.Epc >= &KepStartAbortCasRegion AND
+        context^.Epc < &KepEndAbortCasRegion THEN
 
         // We cannot handle this page fault because the current thread's
         // turnstile is in use; it can't usefully take locks. Abort the CAS
         // operation.
 
-        context^.Epc = &KiAbortCas
+        context^.Epc = &KepAbortCas
 
         LEAVE
     END
 
-    KiEnableInterrupts ()
+    KepEnableInterrupts ()
 
-    status := MmPageFault (
+    status := MmuPageFault (
         badaddr, // address
         (context^.Rs >> OS_XR_RS_ECAUSE_SHIFT) == OS_XR_ECAUSE_PFW, // writing
         context^.Rs & OS_XR_RS_OLD_USER, // usermode
@@ -315,7 +315,7 @@ FN (KiHighLevelHandlerF) KiHandlePageFault (
         ELSE
             // Happened in kernel mode. Abort the current operation.
 
-            KiAbort (
+            KepAbort (
                 thread, // thread
                 context, // context
                 status, // status
@@ -324,27 +324,27 @@ FN (KiHighLevelHandlerF) KiHandlePageFault (
         END
     END
 
-    KiDisableInterrupts ()
+    KepDisableInterrupts ()
 END
 
 #SECTION "text"
-KiHandlerTable : KiHighLevelHandlerF[16] = {
-    [0] = &KiSpuriousException,
-    [OS_XR_ECAUSE_INT] = &KiHandleInterrupt,
-    [2] = &KiSpuriousException,
-    [3] = &KiSpuriousException,
-    [OS_XR_ECAUSE_BUS] = &KiHandleError,
-    [OS_XR_ECAUSE_NMI] = &KiHandleBreakpoint,
-    [OS_XR_ECAUSE_BRK] = &KiHandleBreakpoint,
-    [OS_XR_ECAUSE_INV] = &KiHandleError,
-    [OS_XR_ECAUSE_PRV] = &KiHandleError,
-    [OS_XR_ECAUSE_UNA] = &KiHandleError,
-    [10] = &KiSpuriousException,
-    [11] = &KiSpuriousException,
-    [OS_XR_ECAUSE_PGF] = &KiHandlePageFault,
-    [OS_XR_ECAUSE_PFW] = &KiHandlePageFault,
-    [14] = &KiSpuriousException,
-    [15] = &KiSpuriousException,
+KepHandlerTable : KepHighLevelHandlerF[16] = {
+    [0] = &KepSpuriousException,
+    [OS_XR_ECAUSE_INT] = &KepHandleInterrupt,
+    [2] = &KepSpuriousException,
+    [3] = &KepSpuriousException,
+    [OS_XR_ECAUSE_BUS] = &KepHandleError,
+    [OS_XR_ECAUSE_NMI] = &KepHandleBreakpoint,
+    [OS_XR_ECAUSE_BRK] = &KepHandleBreakpoint,
+    [OS_XR_ECAUSE_INV] = &KepHandleError,
+    [OS_XR_ECAUSE_PRV] = &KepHandleError,
+    [OS_XR_ECAUSE_UNA] = &KepHandleError,
+    [10] = &KepSpuriousException,
+    [11] = &KepSpuriousException,
+    [OS_XR_ECAUSE_PGF] = &KepHandlePageFault,
+    [OS_XR_ECAUSE_PFW] = &KepHandlePageFault,
+    [14] = &KepSpuriousException,
+    [15] = &KepSpuriousException,
 }
 
 #ASM [
@@ -352,8 +352,8 @@ KiHandlerTable : KiHighLevelHandlerF[16] = {
 // Put symbols here to allow the debugger to know how to interpret the
 // context.
 
-KiExceptionHandler:
-.export KiExceptionHandler
+KepExceptionHandler:
+.export KepExceptionHandler
     mtcr scratch0, t0               // Save T0 as a scratch register.
     mtcr scratch1, sp               // Save the current stack pointer.
 
@@ -362,11 +362,11 @@ KiExceptionHandler:
     beq  t0, .waskernel             // If not set, we were already in kernel
                                     // mode. If clear, we entered from usermode.
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
 
     // Switch to the current thread's kernel stack.
 
-    mov  sp, long [t0 + KiPrb_KernelStackTop]
+    mov  sp, long [t0 + KepPrb_KernelStackTop]
 
 .waskernel:
 
@@ -416,26 +416,26 @@ KiExceptionHandler:
     beq  s0, .waskernel2            // If not set, we were already in kernel
                                     // mode. If clear, we entered from usermode.
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
 
     // Load the current thread.
 
-    mov  s1, long [t0 + KiPrb_CurrentThread]
+    mov  s1, long [t0 + KepPrb_CurrentThread]
 
     // Store the user trapframe address.
 
-    mov  long [s1 + KeThread_UserFrame], sp
+    mov  long [s1 + KeuThread_UserFrame], sp
 
 #IF BLD_MP
     // Set current thread as currently in kernel mode.
 
-    mov  byte [s1 + KeThread_CurrentMode], KE_KERNEL_MODE
+    mov  byte [s1 + KeuThread_CurrentMode], KE_KERNEL_MODE
 #END
 
 .waskernel2:
 
     rshi t0, t2, OS_XR_RS_ECAUSE_SHIFT // Isolate the exception code.
-    la   t1, KiHandlerTable         // Load the address of the handler table.
+    la   t1, KepHandlerTable         // Load the address of the handler table.
     mov  t0, long [t1 + t0 LSH 2]   // Load the handler.
 
     mfcr a1, ebadaddr               // Set bad address as second argument.
@@ -453,18 +453,18 @@ KiExceptionHandler:
     // point sending an IPI to get the thread into the kernel to check its
     // signals, if we're already there.
 
-    mov  byte [s1 + KeThread_CurrentMode], KE_USER_MODE
+    mov  byte [s1 + KeuThread_CurrentMode], KE_USER_MODE
 
     mb
 #END
 
     // Check for pending usermode interrupt.
 
-    mov  t0, byte [s1 + KeThread_UserInterrupt]
+    mov  t0, byte [s1 + KeuThread_UserInterrupt]
 
     beq  t0, .waskernel3            // If clear, no pending usermode interrupt.
 
-    jal  KiDispatchUserInterrupts   // Dispatch pending usermode interrupts.
+    jal  KepDispatchUserInterrupts   // Dispatch pending usermode interrupts.
 
 .waskernel3:
 
@@ -518,21 +518,21 @@ DbgExcEnd:
 KeMaskApcs:
 .global KeMaskApcs
 
-    li   a0, KI_IPL_APC             // Set argument to KiRaiseIpl.
+    li   a0, KEP_IPL_APC             // Set argument to KepRaiseIpl.
 
     // Fall through.
 
 // a0 - newipl
 // outputs:
 // a3 - oldipl
-KiRaiseIpl:
-.global KiRaiseIpl
+KepRaiseIpl:
+.global KepRaiseIpl
 
-    // Note: This routine is inlined at KiAcquireSpinlockRaise.
+    // Note: This routine is inlined at KepAcquireSpinlockRaise.
     
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KiPrb_Ipl]  // Load the old IPL.
-    mov  byte [t0 + KiPrb_Ipl], a0  // Store the new IPL.
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
+    mov  a3, byte [t0 + KepPrb_Ipl]  // Load the old IPL.
+    mov  byte [t0 + KepPrb_Ipl], a0  // Store the new IPL.
 
 #IF BLD_CHK
 
@@ -551,7 +551,7 @@ KiRaiseIpl:
     subi sp, sp, 4
     mov  long [sp], lr
 
-    la   a0, KiBadRaiseMessage
+    la   a0, KepBadRaiseMessage
     li   a1, 0
     li   a2, 0
     jal  KeCrash
@@ -565,30 +565,30 @@ KeUnmaskApcs:
     // Fall through.
 
 // a0 - newipl
-KiLowerIpl:
-.global KiLowerIpl
+KepLowerIpl:
+.global KepLowerIpl
 
-    // Note: This routine is inlined at KiReleaseSpinlockLower.
+    // Note: This routine is inlined at KepReleaseSpinlockLower.
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
 
 #IF BLD_CHK
 
-    mov  t1, byte [t0 + KiPrb_Ipl]  // Load old IPL.
+    mov  t1, byte [t0 + KepPrb_Ipl]  // Load old IPL.
     slt  t1, t1, a0                 // Compare oldipl < newipl
     bne  t1, .badlower              // If lower, this is a bad request.
 
 #END
 
-    mov  byte [t0 + KiPrb_Ipl], a0  // Store the new IPL.
-    mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
+    mov  byte [t0 + KepPrb_Ipl], a0  // Store the new IPL.
+    mov  t1, long [t0 + KepPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a0                 // Right shift pending by new IPL.
     bne  t2, .dispatch              // If zero, none pending at new IPL.
 
     ret
 
 .dispatch:
-    j    KiDispatchSoftwareInterrupts
+    j    KepDispatchSoftwareInterrupts
 
 #IF BLD_CHK
 
@@ -598,17 +598,17 @@ KiLowerIpl:
     subi sp, sp, 4
     mov  long [sp], lr
 
-    la   a0, KiBadLowerMessage
+    la   a0, KepBadLowerMessage
     li   a1, 0
     li   a2, 0
     jal  KeCrash
 
-KiBadRaiseMessage:
-    .ds "KiRaiseIpl: oldipl > newipl\n"
+KepBadRaiseMessage:
+    .ds "KepRaiseIpl: oldipl > newipl\n"
     .db 0
 
-KiBadLowerMessage:
-    .ds "KiLowerIpl: newipl > oldipl\n"
+KepBadLowerMessage:
+    .ds "KepLowerIpl: newipl > oldipl\n"
     .db 0
 
 .align 4
@@ -616,19 +616,19 @@ KiBadLowerMessage:
 #END
 
 // a0 - thread
-KiJumpIntoThread:
-.global KiJumpIntoThread
+KepJumpIntoThread:
+.global KepJumpIntoThread
 
     // Restore context of new thread.
 
-    mov  sp, long [a0 + KeThread_Context]
+    mov  sp, long [a0 + KeuThread_Context]
 
     j    LoadContext
 
 // a0 - newthread
 // a1 - oldthread
-KiSwitchContext:
-.global KiSwitchContext
+KepSwitchContext:
+.global KepSwitchContext
     
     // Save the current context and restore the new.
     // We only need to save the callee-saved registers as this has the same
@@ -657,18 +657,18 @@ KiSwitchContext:
     mov  long [sp + OsContext_S16], s16
     mov  long [sp + OsContext_S17], s17
 
-    mov  long [a1 + KeThread_Context], sp
+    mov  long [a1 + KeuThread_Context], sp
 
     // Restore context of new thread.
 
-    mov  sp, long [a0 + KeThread_Context]
+    mov  sp, long [a0 + KeuThread_Context]
 
-    // Release thread lock. Inline KiReleaseSpinlock here for speed.
+    // Release thread lock. Inline KepReleaseSpinlock here for speed.
 
 #IF BLD_MP
     // Indicate no longer switching off of our stack.
 
-    mov  byte [a1 + KeThread_Switching], 0
+    mov  byte [a1 + KeuThread_Switching], 0
 
     // Memory barrier to ensure old writes are committed.
 
@@ -676,27 +676,27 @@ KiSwitchContext:
 
     // Set spinlock un-owned.
 
-    mov  long [a1 + KeThread_Spinlock], zero
+    mov  long [a1 + KeuThread_Spinlock], zero
 #END
 
 LoadContext:
 
     // Set thread to RUNNING.
 
-    mov  byte [a0 + KeThread_Status], KI_THREAD_RUNNING
+    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
 
-    // If there are any KAPCs pending in the new thread, set int at KI_IPL_APC
+    // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
     // pending.
 
-    addi t1, a0, KeThread_KapcListHead
-    mov  t0, long [a0 + (KeThread_KapcListHead + RtlListEntry_Next)]
+    addi t1, a0, KeuThread_KapcListHead
+    mov  t0, long [a0 + (KeuThread_KapcListHead + RtlListEntry_Next)]
     sub  t0, t0, t1
     beq  t0, .none
 
     // Trigger.
 
-    subi a0, zero, (KI_PRB_LESS_ZERO - KiPrb_PendingSoftwareInterrupts)
-    li   a1, (1 << ((KI_IPL_APC) - 1))
+    subi a0, zero, (KEP_PRB_LESS_ZERO - KepPrb_PendingSoftwareInterrupts)
+    li   a1, (1 << ((KEP_IPL_APC) - 1))
     jal  KeOrUlong
 
 .none:
@@ -726,12 +726,12 @@ LoadContext:
 
     ret
 
-// NOTE: KiSwitchMapCode is copied into the wired exception block so that no TB
+// NOTE: KepSwitchMapCode is copied into the wired exception block so that no TB
 //       misses are taken while executing it.
 
 // a0 - pgtb
 // a1 - asid
-KiSwitchMapCode:
+KepSwitchMapCode:
 
     // Disable interrupts.
 
@@ -766,17 +766,17 @@ KiSwitchMapCode:
 
     ret
 
-KiSwitchMapCodeEnd:
+KepSwitchMapCodeEnd:
 
-KiThreadTrampoline:
+KepThreadTrampoline:
 
     // This is where a new thread begins execution.
     // s0 contains the start function, s1 and s2 contain context pointers.
 
-    // We're at KI_IPL_DPC, so lower that now.
+    // We're at KEP_IPL_DPC, so lower that now.
 
-    li   a0, KI_IPL_LOW
-    jal  KiLowerIpl
+    li   a0, KEP_IPL_LOW
+    jal  KepLowerIpl
 
     // Set LR to 0 so that stack traces terminate here.
 
@@ -790,29 +790,29 @@ KiThreadTrampoline:
 
 ]
 
-EXTERN FN KiThreadTrampoline ()
+EXTERN FN KepThreadTrampoline ()
 
-EXTERN FN KiExceptionHandler ()
+EXTERN FN KepExceptionHandler ()
 
-EXTERN KiSwitchMapCode : UBYTE
-EXTERN KiSwitchMapCodeEnd : UBYTE
+EXTERN KepSwitchMapCode : UBYTE
+EXTERN KepSwitchMapCodeEnd : UBYTE
 
-FNPTR KiSwitchMapF (
+FNPTR KepSwitchMapF (
     IN pgtb : UWORD,
     IN asid : UWORD,
 )
 
-KiSwitchMap : KiSwitchMapF
+KepSwitchMap : KepSwitchMapF
 
 #SECTION "INITtext"
-FN KiInitializeArchitecture (
-    IN prb : ^KiPrb,
+FN KepInitializeArchitecture (
+    IN prb : ^KepPrb,
 )
 
-    // Our KiCurrentProcessor is implemented by reading the WHAMI control
+    // Our KepCurrentProcessor is implemented by reading the WHAMI control
     // register, so it's already okay to do that.
 
-    procid := KiCurrentProcessor ()
+    procid := KepCurrentProcessor ()
 
     IF procid == 0 THEN
         // Construct a jump instruction that just jumps to our exception
@@ -820,9 +820,9 @@ FN KiInitializeArchitecture (
         // the exception block, except for the TB miss handlers, which have
         // already been set up by Loader.
 
-        eb := CAST KeLoaderBlock.U.Xr.ExceptionBlock TO ^ULONG
+        eb := CAST KeuLoaderBlock.U.Xr.ExceptionBlock TO ^ULONG
 
-        jmpinstruction := CAST &KiExceptionHandler TO ULONG
+        jmpinstruction := CAST &KepExceptionHandler TO ULONG
 
         jmpinstruction >>= 2
         jmpinstruction <<= 3
@@ -837,18 +837,18 @@ FN KiInitializeArchitecture (
             eb += 256
         END
 
-        // Copy KiSwitchMap into the zeroth vector. We do this because exception
+        // Copy KepSwitchMap into the zeroth vector. We do this because exception
         // 0 is permanently reserved by the architecture, making it a convenient
         // place to stash this function which *cannot* cause a TB miss during
         // execution.
 
         RtlCopyBytes (
-            KeLoaderBlock.U.Xr.ExceptionBlock, // dest
-            &KiSwitchMapCode, // src
-            &KiSwitchMapCodeEnd - &KiSwitchMapCode, // sz
+            KeuLoaderBlock.U.Xr.ExceptionBlock, // dest
+            &KepSwitchMapCode, // src
+            &KepSwitchMapCodeEnd - &KepSwitchMapCode, // sz
         )
 
-        KiSwitchMap = CAST KeLoaderBlock.U.Xr.ExceptionBlock TO KiSwitchMapF
+        KepSwitchMap = CAST KeuLoaderBlock.U.Xr.ExceptionBlock TO KepSwitchMapF
 
         // Copy the syscall handler into the exception block.
         // This one is special because it doesn't need to save as much as the
@@ -858,7 +858,7 @@ FN KiInitializeArchitecture (
 
         // We modified the instruction stream, so flush the icache.
 
-        KiFlushMyIcache ()
+        KepFlushMyIcache ()
     END
 
     // Initialize the ASID sequence counter.
@@ -873,18 +873,18 @@ FN KiInitializeArchitecture (
     prb^.NextAsid = 1
 END
 
-FN KiSwitchAddressSpace (
-    IN process : ^KeProcess,
+FN KepSwitchAddressSpace (
+    IN process : ^KeuProcess,
 )
 
     // Switch address space to the given process. Interrupts are enabled, thread
-    // lock is held. IPL is KI_IPL_DPC, so we are pinned to this processor.
+    // lock is held. IPL is KEP_IPL_DPC, so we are pinned to this processor.
 
-    IF process^.PageDirectoryPfn == KeSystemPageDirectoryPfn THEN
+    IF process^.PageDirectoryPfn == KeuSystemPageDirectoryPfn THEN
         // Just switch, don't bother dealing with ASIDs since ASID 0 is reserved
         // for the system address space.
 
-        KiSwitchMap (
+        KepSwitchMap (
             process^.PageDirectoryPfn, // pgtb
             0, // asid
         )
@@ -892,7 +892,7 @@ FN KiSwitchAddressSpace (
         LEAVE
     END
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
     asidentry := &process^.AsidTable[prb^.Id]
 
@@ -927,7 +927,7 @@ FN KiSwitchAddressSpace (
             // Flush my TB. Keep global pages because we only use ASIDs for
             // private pages, no need to waste system space TB entries.
 
-            KeSweepMyTb ( TRUE )
+            KeuSweepMyTb ( TRUE )
         END
 
         asidentry^.Asid = asid
@@ -940,15 +940,15 @@ FN KiSwitchAddressSpace (
 
     // Perform the low-level address space switch.
 
-    KiSwitchMap (
+    KepSwitchMap (
         process^.PageDirectoryPfn, // pgtb
         asidentry^.Asid, // asid
     )
 END
 
 #SECTION "PAGEtext"
-FN KiInitializeContext (
-    IN thread : ^KeThread,
+FN KepInitializeContext (
+    IN thread : ^KeuThread,
     IN kstack : ^VOID,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
@@ -963,18 +963,18 @@ FN KiInitializeContext (
     context^.S1 = CAST context1 TO ULONG
     context^.S2 = CAST context2 TO ULONG
 
-    context^.Lr = CAST &KiThreadTrampoline TO ULONG
+    context^.Lr = CAST &KepThreadTrampoline TO ULONG
 
     RETURN context
 END
 
 #SECTION "PAGEtext"
-FN KiInterruptUsermode (
+FN KepInterruptUsermode (
     IN dispatchfunc : ^VOID,
     IN trapframe : ^OsContext,
     IN userfunc : UWORD,
     IN context : UWORD,
-    IN thread : ^KeThread,
+    IN thread : ^KeuThread,
 )
 
     // Cause a usermode interrupt of the current thread by saving the context
@@ -989,7 +989,7 @@ FN KiInterruptUsermode (
     // If that fails, and the thread has a panic stack, switch to it and copy
     // out to that instead. If THAT fails, terminate the entire process.
 
-    status := MmSafeCopyOut (
+    status := MmuSafeCopyOut (
         CAST usp TO ^VOID, // dest
         trapframe, // src
         SIZEOF OsContext, // sz

@@ -2,10 +2,10 @@
 // Various architecture-specific functions.
 //
 
-#INCLUDE "../Ki.hjk"
-#INCLUDE "../../Mm/fox32/Mi.hjk"
+#INCLUDE "../Kep.hjk"
+#INCLUDE "../../Mm/fox32/Mmp.hjk"
 
-PUBLIC KiInterruptsDisabled := TRUE
+PUBLIC KepInterruptsDisabled := TRUE
 
 #ASM [
 
@@ -59,12 +59,12 @@ KeExceptionJacket:
 
     // Acquire a pointer to the current thread.
 
-    mov  s1, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
+    mov  s1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
 
     // The AbortListHead field is out of range of the fox32 offsets.
 
-    add  s1, KeThread_AbortListHead
-    movz.8 t0, [s1 + KeThread_ExecutingKapc]
+    add  s1, KeuThread_AbortListHead
+    movz.8 t0, [s1 + KeuThread_ExecutingKapc]
     sla  t0, 2
     add  s1, t0
 
@@ -92,8 +92,8 @@ KeExceptionJacket:
 
 // s0 - abortblock
 // s1 - &thread^.AbortListHead
-KiAbortVector:
-.global KiAbortVector
+KepAbortVector:
+.global KepAbortVector
 
     // We get vectored here when an abort occurred. We have to restore state
     // from the abort block.
@@ -128,28 +128,28 @@ KiAbortVector:
 
 // outputs:
 // a3 - old interrupt state
-KiDisableInterrupts:
-.global KiDisableInterrupts
+KepDisableInterrupts:
+.global KepDisableInterrupts
 
     icl
 
-    mov  a3, [KiInterruptsDisabled]
-    mov  [KiInterruptsDisabled], 1
+    mov  a3, [KepInterruptsDisabled]
+    mov  [KepInterruptsDisabled], 1
 
     ret
 
 // a0 - old interrupt state
-KiRestoreInterrupts:
-.global KiRestoreInterrupts
+KepRestoreInterrupts:
+.global KepRestoreInterrupts
 
     icl
 
-    mov  [KiInterruptsDisabled], a0
+    mov  [KepInterruptsDisabled], a0
 
     cmp  a0, 1
     ifz  jmp .dontenable
 
-    cmp.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], KI_IPL_DPC
+    cmp.8 [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)], KEP_IPL_DPC
     ifgt jmp .dontenable
 
     ise
@@ -158,14 +158,14 @@ KiRestoreInterrupts:
     
     ret
 
-KiEnableInterrupts:
-.global KiEnableInterrupts
+KepEnableInterrupts:
+.global KepEnableInterrupts
 
     icl
 
-    mov  [KiInterruptsDisabled], 0
+    mov  [KepInterruptsDisabled], 0
 
-    cmp.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], KI_IPL_DPC
+    cmp.8 [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)], KEP_IPL_DPC
     ifgt jmp .dontenable
 
     ise
@@ -179,7 +179,7 @@ KiEnableInterrupts:
 KeCurrentThread:
 .export KeCurrentThread
 
-    mov  a3, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
+    mov  a3, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
 
     ret
 
@@ -188,22 +188,22 @@ KeCurrentThread:
 KeCurrentProcess:
 .export KeCurrentProcess
 
-    mov  t0, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
-    mov  a3, [t0 + KeThread_Process]
+    mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+    mov  a3, [t0 + KeuThread_Process]
 
     ret
 
 // outputs:
 // a3 - current processor ID
-KiCurrentProcessor:
-.global KiCurrentProcessor
+KepCurrentProcessor:
+.global KepCurrentProcessor
 
     mov  a3, 0
 
     ret
 
-KiWaitForInterrupt:
-.global KiWaitForInterrupt
+KepWaitForInterrupt:
+.global KepWaitForInterrupt
 
     halt
 
@@ -211,10 +211,10 @@ KiWaitForInterrupt:
 
 // outputs:
 // a3 - current IPL
-KiCurrentIpl:
-.global KiCurrentIpl
+KepCurrentIpl:
+.global KepCurrentIpl
 
-    movz.8 a3, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
+    movz.8 a3, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
 
     ret
 
@@ -231,24 +231,24 @@ KeBreakpoint:
     ret
 
 // a0 - keepglobal
-KeSweepMyTb:
-.global KeSweepMyTb
+KeuSweepMyTb:
+.global KeuSweepMyTb
 
     // Set the page directory back to that of the current process.
     // This will not switch address spaces but it does cause a TB flush on
     // fox32.
 
-    mov  t0, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
-    mov  t0, [t0 + KeThread_Process]
-    mov  t0, [t0 + KeProcess_PageDirectoryPfn]
+    mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+    mov  t0, [t0 + KeuThread_Process]
+    mov  t0, [t0 + KeuProcess_PageDirectoryPfn]
     sla  t0, 12
     tlb  t0
 
     ret
 
 // a0 - virtual address
-KeFlushMyTbAddress:
-.global KeFlushMyTbAddress
+KeuFlushMyTbAddress:
+.global KeuFlushMyTbAddress
 
     flp  a0
 
@@ -256,25 +256,25 @@ KeFlushMyTbAddress:
 
 ]
 
-FN KeSweepTb (
+FN KeuSweepTb (
     IN keepglobal : UWORD,
 )
 
     // Flush the entire TB on all processors.
 
-    KeSweepMyTb ( keepglobal )
+    KeuSweepMyTb ( keepglobal )
 END
 
-FN KeFlushSingleTb (
+FN KeuFlushSingleTb (
     IN vaddr : ^VOID,
 )
 
     // Flush a single TB entry on all processors.
 
-    KeFlushMyTbAddress ( vaddr )
+    KeuFlushMyTbAddress ( vaddr )
 END
 
-FN KeFlushMultipleTb (
+FN KeuFlushMultipleTb (
     IN vaddrtable : ^^VOID,
     IN pagecount : UWORD,
 )
@@ -282,7 +282,7 @@ FN KeFlushMultipleTb (
     // Flush multiple TB entries on all processors.
 
     WHILE pagecount DO
-        KeFlushMyTbAddress ( vaddrtable^ )
+        KeuFlushMyTbAddress ( vaddrtable^ )
 
         vaddrtable += SIZEOF ^VOID
         pagecount -= 1

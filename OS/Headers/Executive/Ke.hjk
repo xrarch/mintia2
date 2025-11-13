@@ -1,0 +1,684 @@
+//
+// Public header file for the Kernel (Ke) component of the MINTIA Executive.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+
+#INCLUDE "<ll>/System/OsArch.hjk"
+#INCLUDE "<ll>/System/OsStatus.hjk"
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    #INCLUDE "KeXr17032.hjk"
+
+#ELSEIF ( STRCMP ARCHITECTURE "fox32" )
+    #INCLUDE "KeFox32.hjk"
+
+#ELSE
+    #ERROR "Unknown architecture"
+#END
+
+TYPE KepSpinlock : ULONG
+
+#DEFINE KE_KERNEL_MODE 1
+#DEFINE KE_USER_MODE 2
+
+#MACRO KeCurrentProcess () [
+    KeCurrentThread ()^.Process
+]
+
+STRUCT KeLock
+    Ptr : UWORD,
+END
+
+#DEFINE KE_INITIAL_LOCK [{
+    [Ptr] = 0,
+}]
+
+#MACRO KeInitializeLock ( lock ) [
+    NOTHING (lock)^.Ptr = 0
+]
+
+EXTERN KeSharedUserPage : ^OsSharedUserPage
+
+EXTERN FN KeFindResource (
+    IN name : ^UBYTE,
+    OUT data : ^VOID,
+) : ^BlResource
+
+EXTERN FN KePinResource (
+    IN rsrc : ^BlResource,
+)
+
+EXTERN FN KeIncrementUlong (
+    IN ptr : ^ULONG,
+    IN inc : ULONG,
+) : ULONG
+
+EXTERN FN KeCompareSwapUlong (
+    IN ptr : ^ULONG,
+    IN newvalue : ULONG,
+    IN expectedvalue : ULONG,
+) : ULONG
+
+EXTERN FN KeCompareSwapUlongAbortOnFault (
+    IN ptr : ^ULONG,
+    IN newvalue : ULONG,
+    IN expectedvalue : ULONG,
+    OUT aborted : UWORD,
+) : ULONG
+
+EXTERN FN KeMaskUlong (
+    IN ptr : ^ULONG,
+    IN mask : ULONG,
+) : ULONG
+
+EXTERN FN KeOrUlong (
+    IN ptr : ^ULONG,
+    IN bitset : ULONG,
+) : ULONG
+
+EXTERN FN KeFetchAndSetUlong (
+    IN ptr : ^ULONG,
+    IN newvalue : ULONG,
+) : ULONG
+
+#IF ( == BLD_BITS 64 )
+
+#MACRO KeIncrementPtr ( ptr, inc ) [
+    KeIncrementUquad ( CAST (ptr) TO ^VOID, inc )
+]
+
+#MACRO KeCompareSwapPtrAbortOnFault ( ptr, newvalue, expectedvalue, aborted ) [
+    KeCompareSwapUquadAbortOnFault (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO UQUAD,
+        CAST (expectedvalue) TO UQUAD,
+        aborted,
+    )
+]
+
+#MACRO KeCompareSwapPtr ( ptr, newvalue, expectedvalue ) [
+    KeCompareSwapUquad (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO UQUAD,
+        CAST (expectedvalue) TO UQUAD,
+    )
+]
+
+#MACRO KeMaskPtr ( ptr, mask ) [
+    KeMaskUquad ( CAST (ptr) TO ^VOID, mask )
+]
+
+#MACRO KeOrPtr ( ptr, bitset ) [
+    KeOrUquad ( CAST (ptr) TO ^VOID, bitset )
+]
+
+#MACRO KeFetchAndSetPtr ( ptr, newvalue ) [
+    KeFetchAndSetUquad (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO UQUAD,
+    )
+]
+
+#ELSE
+
+#MACRO KeIncrementPtr ( ptr, inc ) [
+    KeIncrementUlong ( CAST (ptr) TO ^VOID, inc )
+]
+
+#MACRO KeCompareSwapPtrAbortOnFault ( ptr, newvalue, expectedvalue, aborted ) [
+    KeCompareSwapUlongAbortOnFault (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO ULONG,
+        CAST (expectedvalue) TO ULONG,
+        aborted,
+    )
+]
+
+#MACRO KeCompareSwapPtr ( ptr, newvalue, expectedvalue ) [
+    KeCompareSwapUlong (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO ULONG,
+        CAST (expectedvalue) TO ULONG,
+    )
+]
+
+#MACRO KeMaskPtr ( ptr, mask ) [
+    KeMaskUlong ( CAST (ptr) TO ^VOID, mask )
+]
+
+#MACRO KeOrPtr ( ptr, bitset ) [
+    KeOrUlong ( CAST (ptr) TO ^VOID, bitset )
+]
+
+#MACRO KeFetchAndSetPtr ( ptr, newvalue ) [
+    KeFetchAndSetUlong (
+        CAST (ptr) TO ^VOID,
+        CAST (newvalue) TO ULONG,
+    )
+]
+
+#END
+
+EXTERN FN KeCrash (
+    IN fmt : ^UBYTE,
+    ... argv argc
+)
+
+EXTERN FN KeBreakpoint ()
+
+FNPTR KeCrashCallbackF (
+    IN columns : UWORD,
+)
+
+STRUCT KeCrashCallback
+    Entry : RtlListEntry,
+
+    Function : KeCrashCallbackF,
+    DoesPrint : UBYTE,
+    Horizontal : UBYTE,
+END
+
+EXTERN FN KeRegisterCrashCallback (
+    IN callback : ^KeCrashCallback,
+    IN callbackfunc : KeCrashCallbackF,
+    IN doesprint : UWORD,
+    IN horizontal : UWORD,
+)
+
+FNPTR KeDpcF (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+STRUCT KeDpc
+    Entry : RtlListEntry,
+    Function : KeDpcF,
+    Context1 : UWORD,
+    Context2 : UWORD,
+    EnqueuedTo : ^KepPrb,
+END
+
+EXTERN FN KeInitializeDpc (
+    IN dpc : ^KeDpc,
+    IN func : KeDpcF,
+)
+
+EXTERN FN KeDequeueDpc (
+    IN dpc : ^KeDpc,
+) : UWORD
+
+EXTERN FN KeEnqueueDpc (
+    IN dpc : ^KeDpc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+FNPTR KeInterruptF (
+    IN interrupt : ^KeInterrupt,
+    IN context : ^OsContext,
+)
+
+STRUCT KepDispatchHeader
+    WaitListHead : RtlListEntry,
+    Name : ^UBYTE,
+    SignalCount : ULONG,
+    WaiterCount : ULONG,
+#IF BLD_MP
+    Spinlock : KepSpinlock,
+#END
+    Type : UBYTE,
+END
+
+STRUCT KeTimer
+    Header : KepDispatchHeader,
+
+    EnqueuedTo : ^KepPrb,
+    Entry : RtlHeapEntry,
+    ExpiryTime : RtlUquad,
+    Dpc : ^KeDpc,
+END
+
+EXTERN FN KeInitializeTimer (
+    IN timer : ^KeTimer,
+    IN dpc : ^KeDpc,
+    IN name : ^UBYTE,
+)
+
+EXTERN FN KeEnqueueTimer (
+    IN timer : ^KeTimer,
+    IN interval : ^RtlUquad,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+EXTERN FN KeDequeueTimer (
+    IN timer : ^KeTimer,
+) : UWORD
+
+EXTERN FN KeResetTimer (
+    IN timer : ^KeTimer,
+) :  UWORD
+
+EXTERN FN KeRealTimeToLocalTime (
+    IN desttime : ^RtlUquad,
+    IN srctime : ^RtlUquad,
+)
+
+EXTERN FN KeLocalTimeToRealTime (
+    IN desttime : ^RtlUquad,
+    IN srctime : ^RtlUquad,
+)
+
+EXTERN FN KeSetTimeZoneOffset (
+    IN offset : ULONG,
+)
+
+EXTERN FN KeGetTimeZoneOffset () : ULONG
+
+EXTERN FN KeQueryTime (
+    IN time : ^RtlUquad,
+    IN local : UWORD,
+)
+
+#DEFINE KE_APC_USER 1
+#DEFINE KE_APC_LAZY 2
+#DEFINE KE_APC_KERNEL 3
+
+FNPTR KeApcF (
+    IN apc : ^KeApc,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+    IN rundown : UWORD,
+)
+
+STRUCT KeApc
+    Entry : RtlListEntry,
+    Function : KeApcF,
+    Thread : ^KeuThread,
+    Context1 : UWORD,
+    Context2 : UWORD,
+    Type : UBYTE,
+    Enqueued : UBYTE,
+END
+
+EXTERN FN KeInitializeApc (
+    IN apc : ^KeApc,
+    IN func : KeApcF,
+    IN type : UWORD,
+    IN thread : ^KeuThread,
+)
+
+EXTERN FN KeEnqueueKapc (
+    IN apc : ^KeApc,
+    IN priorityboost : UWORD,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+EXTERN FN KeEnqueueLapc (
+    IN apc : ^KeApc,
+    IN priorityboost : UWORD,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+EXTERN FN KeEnqueueUapc (
+    IN apc : ^KeApc,
+    IN priorityboost : UWORD,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+) : UWORD
+
+EXTERN FN KeDequeueApc (
+    IN apc : ^KeApc,
+) : UWORD
+
+EXTERN FN KeMaskApcs () : UWORD
+
+EXTERN FN KeUnmaskApcs (
+    IN oldipl : UWORD,
+)
+
+EXTERN FN KeAreApcsDeliverable () : UWORD
+
+STRUCT KeEvent
+    Header : KepDispatchHeader,
+END
+
+STRUCT KeSemaphore
+    Header : KepDispatchHeader,
+END
+
+EXTERN FN KeSignalProcess (
+    IN process : ^KeuProcess,
+    IN signal : UWORD,
+)
+
+EXTERN FN KeSetBasePriorityProcess (
+    IN process : ^KeuProcess,
+    IN priority : UWORD,
+)
+
+EXTERN FN KeAttachProcess (
+    IN process : ^KeuProcess,
+    IN try : UWORD,
+) : UWORD
+
+EXTERN FN KeDetachProcess (
+    IN process : ^KeuProcess,
+)
+
+FNPTR KeStartThreadF (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+#DEFINE KE_THREAD_RUNNING 1
+#DEFINE KE_THREAD_READY 2
+#DEFINE KE_THREAD_WAITING 3
+#DEFINE KE_THREAD_INITIALIZED 4
+#DEFINE KE_THREAD_STANDBY 5
+#DEFINE KE_THREAD_INFLIGHT 6
+#DEFINE KE_THREAD_TERMINATED 7
+
+#DEFINE KE_SUSPEND_MAX 255
+
+EXTERN FN KeInitializeEvent (
+    IN event : ^KeEvent,
+    IN name : ^UBYTE,
+    IN notification : UWORD,
+    IN signalstate : UWORD,
+)
+
+EXTERN FN KeResetEvent (
+    IN event : ^KeEvent,
+) : UWORD
+
+EXTERN FN KeSignalEvent (
+    IN event : ^KeEvent,
+    IN priorityboost : UWORD,
+) : UWORD
+
+EXTERN FN KeSignalThread (
+    IN thread : ^KeuThread,
+    IN signal : UWORD,
+)
+
+EXTERN FN KeSetBasePriorityThread (
+    IN thread : ^KeuThread,
+    IN priority : UWORD,
+    IN setcurrentpriority : UWORD,
+)
+
+EXTERN FN KeSetPriorityThread (
+    IN thread : ^KeuThread,
+    IN priority : UWORD,
+)
+
+EXTERN FN KeSuspendThread (
+    IN thread : ^KeuThread,
+) : UWORD
+
+EXTERN FN KeUnsuspendThread (
+    IN thread : ^KeuThread,
+    IN force : UWORD,
+) : UWORD
+
+EXTERN FN KeInitializeSemaphore (
+    IN semaphore : ^KeSemaphore,
+    IN name : ^UBYTE,
+    IN initialcount : UWORD,
+)
+
+EXTERN FN KeReleaseSemaphore (
+    IN semaphore : ^KeSemaphore,
+    IN priorityboost : UWORD,
+    IN count : UWORD,
+) : UWORD
+
+EXTERN FN KeAcquireLockShared (
+    IN lock : ^KeLock,
+)
+EXTERN FN KeAcquireLockExclusive (
+    IN lock : ^KeLock,
+)
+
+EXTERN FN KeTryAcquireLockExclusive (
+    IN lock : ^KeLock,
+) : UWORD
+
+EXTERN FN KeReleaseLock (
+    IN lock : ^KeLock,
+)
+
+EXTERN FN KeAcquireApcLockShared (
+    IN lock : ^KeLock,
+) : UWORD
+
+EXTERN FN KeAcquireApcLockExclusive (
+    IN lock : ^KeLock,
+) : UWORD
+
+EXTERN FN KeReleaseApcLock (
+    IN lock : ^KeLock,
+    IN oldipl : UWORD,
+)
+
+EXTERN FN KeConvertLockToShared (
+    IN lock : ^KeLock,
+)
+
+EXTERN FN KeTryConvertLockToExclusive (
+    IN lock : ^KeLock,
+) : UWORD
+
+ENUM KeWaitAlertability : UBYTE
+    KE_UNALERTABLE,
+    KE_ALERTABLE,
+    KE_CANCEL_ON_KAPC,
+END
+
+#DEFINE KE_MAX_USER_ALERTABLE [KE_CANCEL_ON_KAPC]
+
+EXTERN FN KeWaitForObjects (
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+    IN timeout : ^RtlUquad,
+    IN objectcount : UWORD,
+    IN objecttable : ^^KepDispatchHeader,
+    IN waitblocktable : ^KepWaitBlock,
+) : OsStatus
+
+EXTERN FN KeSleep (
+    IN interval : ^RtlUquad,
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+) : OsStatus
+
+EXTERN FN KeuWaitForSingleObject (
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+    IN timeout : ^RtlUquad,
+    IN object : ^KepDispatchHeader,
+) : OsStatus
+
+STRUCT KeBalancedQueue
+    Header : KepDispatchHeader,
+    ThreadListHead : RtlListEntry,
+    ItemListHead : RtlListEntry,
+    ActiveThreadCount : ULONG,
+    MaximumThreadCount : ULONG,
+END
+
+EXTERN FN KeInitializeBalancedQueue (
+    IN queue : ^KeBalancedQueue,
+    IN name : ^UBYTE,
+    IN maxthreads : UWORD,
+)
+
+EXTERN FN KeInsertIntoBalancedQueue (
+    IN queue : ^KeBalancedQueue,
+    IN item : ^RtlListEntry,
+    IN head : UWORD,
+    IN priorityboost : UWORD,
+)
+
+EXTERN FN KeRemoveFromBalancedQueue (
+    IN queue : ^KeBalancedQueue,
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+    IN timeout : ^RtlUquad,
+    OUT item : ^RtlListEntry,
+) : OsStatus
+
+UNION KepRequestLinks
+    Sorted : RtlHeapEntry,
+    List : RtlListEntry,
+END
+
+#DEFINE KE_REQUEST_QUEUE_FIFO 0
+#DEFINE KE_REQUEST_QUEUE_KEY 1
+#DEFINE KE_REQUEST_QUEUE_COST 2
+
+STRUCT KeRequestEntry
+    Entry : KepRequestLinks,
+    SortKey : UWORD,
+    Cost : UINT,
+    HeapIndex : UBYTE,
+    Status : UBYTE,
+END
+
+#MACRO KeInitializeCostRequest ( request, cost ) [
+    NOTHING (request)^.Cost = (cost)
+    NOTHING (request)^.SortKey = (cost)
+    NOTHING (request)^.Status = KEP_REQUEST_NONE
+]
+
+#MACRO KeInitializeSortedRequest ( request, sortkey, cost ) [
+    NOTHING (request)^.Cost = (cost)
+    NOTHING (request)^.SortKey = (sortkey)
+    NOTHING (request)^.Status = KEP_REQUEST_NONE
+]
+
+#MACRO KeInitializeFifoRequest ( request, cost ) [
+    NOTHING (request)^.Cost = (cost)
+    NOTHING (request)^.Status = KEP_REQUEST_NONE
+]
+
+FNPTR KeRequestStartF (
+    IN request : ^KeRequestEntry,
+)
+
+FNPTR KeRequestCompleteF (
+    IN request : ^KeRequestEntry,
+    IN cancelled : UWORD,
+) : UWORD
+
+STRUCT KepRequestSortedHead
+    Roots : ^RtlHeapEntry[2],
+END
+
+UNION KepRequestHeads
+    Sorted : KepRequestSortedHead,
+    List : RtlListEntry,
+END
+
+STRUCT KeRequestQueue
+    Head : KepRequestHeads,
+    Pivot : UWORD,
+    StartFunction : KeRequestStartF,
+    CompleteFunction : KeRequestCompleteF,
+
+#IF BLD_MP
+    Spinlock : KepSpinlock,
+#END
+
+    Current : UINT,
+    Maximum : UINT,
+
+    SortPolicy : UBYTE,
+    CurrentQueueIndex : UBYTE,
+END
+
+EXTERN FN KeInitializeRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN sortpolicy : UWORD,
+    IN startfunc : KeRequestStartF,
+    IN completefunc : KeRequestCompleteF,
+    IN maximum : UWORD,
+)
+
+EXTERN FN KeCompleteRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN request : ^KeRequestEntry,
+) : UWORD
+
+EXTERN FN KeCancelRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN request : ^KeRequestEntry,
+) : UWORD
+
+EXTERN FN KeFinishCancelRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN request : ^KeRequestEntry,
+)
+
+FNPTR KeAbortableF (
+    IN context : ^VOID,
+) : OsStatus
+
+#DEFINE KE_ABORT_CATCH_SYSTEM_SPACE 1
+#DEFINE KE_ABORT_CATCH_USER_SPACE 2
+
+STRUCT KeAbortBlock
+    Next : ^KeAbortBlock,
+    Context : OsContext,
+    Status : ULONG,
+    Flags : ULONG,
+END
+
+EXTERN FN KeExceptionJacket (
+    IN abortblock : ^KeAbortBlock,
+    IN func : KeAbortableF,
+    IN context : ^VOID,
+    IN flags : UWORD,
+) : OsStatus
+
+#IF BLD_MP
+
+EXTERN FN KeQueryProcessorCount () : UWORD
+
+#ELSE
+
+#MACRO KeQueryProcessorCount () [ 1 ]
+
+#END
+
+#IF BLD_CHK
+
+EXTERN KepAssertionMessage : UBYTE[]
+
+#MACRO KeAssert ( expression ) [
+    #DEFINE EXPR_STRING ( STRCAT ( STRCAT "\"" expression ) "\"" )
+    #DEFINE FN_STRING ( STRCAT ( STRCAT "\"" JKL_FILE_NAME ) "\"" )
+    #DEFINE FUNC_STRING ( STRCAT ( STRCAT "\"" JKL_FUNC_NAME ) "\"" )
+    #DEFINE LN_STRING ( STRCAT "" JKL_LINE_NUMBER )
+
+    IF NOT (expression) THEN
+        KeCrash (
+            &KepAssertionMessage[0], // fmt
+            FUNC_STRING,
+            FN_STRING,
+            LN_STRING,
+            EXPR_STRING,
+        )
+    END
+]
+
+#ELSE
+
+#MACRO KeAssert ( expression ) []
+
+#END

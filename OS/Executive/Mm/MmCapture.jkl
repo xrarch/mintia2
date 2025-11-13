@@ -6,15 +6,15 @@
 // allocates (for string capture).
 //
 
-#INCLUDE "../Mm/Mi.hjk"
+#INCLUDE "../Mm/Mmp.hjk"
 
-STRUCT MiCopyContext
+STRUCT MmpCopyContext
     Destination : ^VOID,
     Source : ^VOID,
     Size : UWORD,
 END
 
-STRUCT MiStringCopyContext
+STRUCT MmpStringCopyContext
     Output : ^RtlString,
     Source : ^RtlString,
     Charged : UWORD,
@@ -22,14 +22,14 @@ STRUCT MiStringCopyContext
 END
 
 #SECTION "PAGEtext"
-FN (KeAbortableF) MiSafeCopy (
+FN (KeAbortableF) MmpSafeCopy (
     IN context : ^VOID,
 ) : OsStatus
 
     // Inner copy worker. Can terminate early and longjmp back to caller if
     // we take a bad exception here.
 
-    ctx := CAST context TO ^MiCopyContext
+    ctx := CAST context TO ^MmpCopyContext
 
     RtlCopyBytes (
         ctx^.Destination, // dest
@@ -41,7 +41,7 @@ FN (KeAbortableF) MiSafeCopy (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmSafeCopyIn (
+EXPORT FN MmuSafeCopyIn (
     IN dest : ^VOID,
     IN src : ^VOID,
     IN sz : UWORD,
@@ -50,15 +50,15 @@ EXPORT FN MmSafeCopyIn (
     // Safely copy a hunk of bytes from userspace.
     // The "src" pointer is supplied by usermode. The "dest" pointer is trusted.
 
-    IF src >= MI_USER_SPACE_END THEN
+    IF src >= MMP_USER_SPACE_END THEN
         RETURN OS_STATUS_READ_FAULT
     END
 
-    KeAssert ( dest >= MI_SYSTEM_SPACE )
+    KeAssert ( dest >= MMP_SYSTEM_SPACE )
 
     ab : KeAbortBlock
 
-    ctx : MiCopyContext
+    ctx : MmpCopyContext
 
     ctx.Destination = dest
     ctx.Source = src
@@ -66,14 +66,14 @@ EXPORT FN MmSafeCopyIn (
 
     RETURN KeExceptionJacket (
         &ab, // abortblock
-        &MiSafeCopy, // func
+        &MmpSafeCopy, // func
         &ctx, // context
         KE_ABORT_CATCH_USER_SPACE, // flags
     )
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmSafeCopyOut (
+EXPORT FN MmuSafeCopyOut (
     IN dest : ^VOID,
     IN src : ^VOID,
     IN sz : UWORD,
@@ -82,15 +82,15 @@ EXPORT FN MmSafeCopyOut (
     // Safely copy a hunk of bytes to userspace.
     // The "dest" pointer is supplied by usermode. The "src" pointer is trusted.
 
-    IF dest >= MI_USER_SPACE_END THEN
+    IF dest >= MMP_USER_SPACE_END THEN
         RETURN OS_STATUS_WRITE_FAULT
     END
 
-    KeAssert ( src >= MI_SYSTEM_SPACE )
+    KeAssert ( src >= MMP_SYSTEM_SPACE )
 
     ab : KeAbortBlock
 
-    ctx : MiCopyContext
+    ctx : MmpCopyContext
 
     ctx.Destination = dest
     ctx.Source = src
@@ -98,27 +98,27 @@ EXPORT FN MmSafeCopyOut (
 
     RETURN KeExceptionJacket (
         &ab, // abortblock
-        &MiSafeCopy, // func
+        &MmpSafeCopy, // func
         &ctx, // context
         KE_ABORT_CATCH_USER_SPACE, // flags
     )
 END
 
 #SECTION "PAGEtext"
-FN (KeAbortableF) MiSafeCaptureString (
+FN (KeAbortableF) MmpSafeCaptureString (
     IN context : ^VOID,
 ) : OsStatus
 
     // Inner copy worker. Can terminate early and longjmp back to caller if
     // we take a bad exception here.
 
-    ctx := CAST context TO ^MiStringCopyContext
+    ctx := CAST context TO ^MmpStringCopyContext
 
     // Validate the string pointer.
 
     src := ctx^.Source
 
-    IF src >= MI_USER_SPACE_END THEN
+    IF src >= MMP_USER_SPACE_END THEN
         RETURN OS_STATUS_READ_FAULT
     END
 
@@ -127,7 +127,7 @@ FN (KeAbortableF) MiSafeCaptureString (
 
     data := src^.Data
 
-    IF data >= MI_USER_SPACE_END THEN
+    IF data >= MMP_USER_SPACE_END THEN
         RETURN OS_STATUS_READ_FAULT
     END
 
@@ -141,12 +141,12 @@ FN (KeAbortableF) MiSafeCaptureString (
 
     // Charge quota.
 
-    quota := MmGetOverheadOfBytes ( len + 1 )
+    quota := MmuGetOverheadOfBytes ( len + 1 )
 
-    status := MmChargePoolQuota (
-        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+    status := MmuChargePoolQuota (
+        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
         quota, // charge
-        MM_PAGED_POOL, // poolindex
+        MMU_PAGED_POOL, // poolindex
     )
 
     IF OsError ( status ) THEN
@@ -159,8 +159,8 @@ FN (KeAbortableF) MiSafeCaptureString (
 
     // Allocate a buffer.
 
-    buf := CAST MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
+    buf := CAST MmuAllocatePool (
+        MMU_PAGED_POOL, // poolindex
         len + 1, // bytes
         'CpSt', // tag
         TRUE, // wait
@@ -192,7 +192,7 @@ FN (KeAbortableF) MiSafeCaptureString (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmCaptureString (
+EXPORT FN MmuCaptureString (
     IN string : ^RtlString,
     IN output : ^RtlString,
     IN maxlen : UWORD,
@@ -205,7 +205,7 @@ EXPORT FN MmCaptureString (
 
     ab : KeAbortBlock
 
-    ctx : MiStringCopyContext
+    ctx : MmpStringCopyContext
 
     ctx.Source = string
     ctx.Output = output
@@ -214,7 +214,7 @@ EXPORT FN MmCaptureString (
 
     status := KeExceptionJacket (
         &ab, // abortblock
-        &MiSafeCaptureString, // func
+        &MmpSafeCaptureString, // func
         &ctx, // context
         KE_ABORT_CATCH_USER_SPACE, // flags
     )
@@ -225,7 +225,7 @@ EXPORT FN MmCaptureString (
         IF output^.Data THEN
             // It allocated a buffer before it aborted, so free the buffer.
 
-            MmFreePool (
+            MmuFreePool (
                 output^.Data, // ptr
                 'CpSt', // tag
             )
@@ -234,10 +234,10 @@ EXPORT FN MmCaptureString (
         IF ctx.Charged THEN
             // Uncharge pool quota.
 
-            MmUnchargePoolQuota (
-                PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+            MmuUnchargePoolQuota (
+                PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
                 ctx.Charged, // charge
-                MM_PAGED_POOL, // poolindex
+                MMU_PAGED_POOL, // poolindex
             )
         END
     END
@@ -246,15 +246,15 @@ EXPORT FN MmCaptureString (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmFreeCapturedString (
+EXPORT FN MmuFreeCapturedString (
     IN string : ^RtlString,
 )
 
     // Free a previously captured string.
 
-    charge := MmGetOverheadOfBlock ( string^.Data )
+    charge := MmuGetOverheadOfBlock ( string^.Data )
 
-    MmFreePool (
+    MmuFreePool (
         string^.Data, // ptr
         'CpSt', // tag
     )
@@ -265,15 +265,15 @@ EXPORT FN MmFreeCapturedString (
 
     // Uncharge pool quota.
 
-    MmUnchargePoolQuota (
-        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+    MmuUnchargePoolQuota (
+        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
         charge, // charge
-        MM_PAGED_POOL, // poolindex
+        MMU_PAGED_POOL, // poolindex
     )
 END
 
 #SECTION "PAGEtext"
-FN MmAllocateAndChargeSysBuffer (
+FN MmuAllocateAndChargeSysBuffer (
     IN bytes : UWORD,
     IN poolindex : UWORD,
     IN tag : UWORD,
@@ -283,10 +283,10 @@ FN MmAllocateAndChargeSysBuffer (
     // Charge the size of a buffer and allocate it from kernel pool.
     // Intended as a utility function for system services.
 
-    quota := MmGetOverheadOfBytes ( bytes )
+    quota := MmuGetOverheadOfBytes ( bytes )
 
-    status := MmChargePoolQuota (
-        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+    status := MmuChargePoolQuota (
+        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
         quota, // charge
         poolindex, // poolindex
     )
@@ -295,7 +295,7 @@ FN MmAllocateAndChargeSysBuffer (
         RETURN status
     END
 
-    ptr = MmAllocatePool (
+    ptr = MmuAllocatePool (
         poolindex, // poolindex
         bytes, // bytes
         tag, // tag
@@ -308,8 +308,8 @@ FN MmAllocateAndChargeSysBuffer (
 
     // Failed.
 
-    MmUnchargePoolQuota (
-        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
+    MmuUnchargePoolQuota (
+        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
         quota, // charge
         poolindex, // poolindex
     )
@@ -318,7 +318,7 @@ FN MmAllocateAndChargeSysBuffer (
 END
 
 #SECTION "PAGEtext"
-FN MmDeallocateAndUnchargeSysBuffer (
+FN MmuDeallocateAndUnchargeSysBuffer (
     IN ptr : ^VOID,
     IN tag : UWORD,
     IN bytes : UWORD,
@@ -327,14 +327,14 @@ FN MmDeallocateAndUnchargeSysBuffer (
 
     // Uncharge the size of a buffer and free it to kernel pool.
 
-    MmFreePool (
+    MmuFreePool (
         ptr, // ptr
         tag, // tag
     )
 
-    MmUnchargePoolQuota (
-        PsQuotaBlock ( PsCurrentProcess () ), // quotablock
-        MmGetOverheadOfBytes ( bytes ), // charge
+    MmuUnchargePoolQuota (
+        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
+        MmuGetOverheadOfBytes ( bytes ), // charge
         poolindex, // poolindex
     )
 END

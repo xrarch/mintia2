@@ -2,57 +2,57 @@
 // Implements support for pinning and unpinning Memory Descriptor Lists.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 
-#DEFINE MI_SMALL_PAGES 8
+#DEFINE MMP_SMALL_PAGES 8
 
 #SECTION "INITtext"
-FN MiInitializeMdlCache (
-    IN node : ^MiNode,
+FN MmpInitializeMdlCache (
+    IN node : ^MmpNode,
 )
 
     // Initialize the zones we use for quickly allocating MDLs.
 
-    mdlsize := SIZEOF MmMdlHeader + (MI_SMALL_PAGES << RTL_MACHINE_WORD_LOG)
+    mdlsize := SIZEOF MmuMdlHeader + (MMP_SMALL_PAGES << RTL_MACHINE_WORD_LOG)
 
 #IF 0
-    RtlPrint ( "MiInitializeMdlZones: zonesize %u\n",
-        mdlsize * MI_SMALL_MDLS + MM_ZONE_OVERHEAD )
+    RtlPrint ( "MmpInitializeMdlZones: zonesize %u\n",
+        mdlsize * MMP_SMALL_MDLS + MMU_ZONE_OVERHEAD )
 #END
 
-    node^.MdlCache = MmCreatePoolCache (
+    node^.MdlCache = MmuCreatePoolCache (
         node, // node
         "Mdls", // name
         mdlsize, // size
-        MM_NONPAGED_POOL, // poolindex
+        MMU_NONPAGED_POOL, // poolindex
         'MDLz', // tag
     )
 
 #ENTERSECTION "INITtext"
     IF NOT node^.MdlCache THEN
-        KeCrash ( "MiInitializeMdlCache: failed to create cache\n" )
+        KeCrash ( "MmpInitializeMdlCache: failed to create cache\n" )
     END
 #LEAVESECTION
 
 END
 
-FN MmCompleteMdl (
-    IN mdl : ^MmMdlHeader,
+FN MmuCompleteMdl (
+    IN mdl : ^MmuMdlHeader,
 )
 
     // Complete an MDL. Called by IO completion.
 
     flags := mdl^.Flags
 
-    IF flags & MM_MDL_UNMAP THEN
+    IF flags & MMU_MDL_UNMAP THEN
         // NYI unmap MDL
     END
 
-    IF flags & MM_MDL_UNPIN THEN
+    IF flags & MMU_MDL_UNPIN THEN
         // NYI unpin MDL
     END
 
-    IF flags & MM_MDL_FREE THEN
+    IF flags & MMU_MDL_FREE THEN
         // NYI free MDL
     END
 END

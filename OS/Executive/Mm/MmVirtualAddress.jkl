@@ -2,16 +2,16 @@
 // Miscellaneous routines for dealing with virtual addresses.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 
-EXPORT FN MmIsVirtualValid (
+EXPORT FN MmuIsVirtualValid (
     IN vaddr : ^VOID,
 ) : UWORD
 
-#IF ( NOT MI_COMPLETE_TABLE )
+#IF ( NOT MMP_COMPLETE_TABLE )
     // Some architectures have valid addresses not described by the page table.
 
-    IF MiIsArchitecturallyValid ( vaddr ) THEN
+    IF MmpIsArchitecturallyValid ( vaddr ) THEN
         RETURN TRUE
     END
 #END
@@ -19,35 +19,35 @@ EXPORT FN MmIsVirtualValid (
 #IF ( == BLD_BITS 64 )
     // 64-bit architectures have "non-canonical" addresses.
 
-    IF NOT MI_IS_CANONICAL ( vaddr ) THEN
+    IF NOT MMP_IS_CANONICAL ( vaddr ) THEN
         RETURN FALSE
     END
 #END
 
-    l1 := MiPteAddress ( vaddr )
-    l2 := MiPteAddress ( l1 )
+    l1 := MmpPteAddress ( vaddr )
+    l2 := MmpPteAddress ( l1 )
 
-#IF ( >= MI_TABLE_LEVELS 3 )
-    l3 := MiPteAddress ( l2 )
+#IF ( >= MMP_TABLE_LEVELS 3 )
+    l3 := MmpPteAddress ( l2 )
 #END
 
-#IF ( >= MI_TABLE_LEVELS 4 )
-    l4 := MiPteAddress ( l3 )
+#IF ( >= MMP_TABLE_LEVELS 4 )
+    l4 := MmpPteAddress ( l3 )
 
-    IF NOT ( MiIsPteValid ( l4^ ) ) THEN
+    IF NOT ( MmpIsPteValid ( l4^ ) ) THEN
         RETURN FALSE
     END
 #END
 
-#IF ( >= MI_TABLE_LEVELS 3 )
-    IF NOT ( MiIsPteValid ( l3^ ) ) THEN
+#IF ( >= MMP_TABLE_LEVELS 3 )
+    IF NOT ( MmpIsPteValid ( l3^ ) ) THEN
         RETURN FALSE
     END
 #END
 
-    IF NOT ( MiIsPteValid ( l2^ ) ) THEN
+    IF NOT ( MmpIsPteValid ( l2^ ) ) THEN
         RETURN FALSE
     END
 
-    RETURN MiIsPteValid ( l1^ )
+    RETURN MmpIsPteValid ( l1^ )
 END

@@ -18,7 +18,7 @@ EXTERN FN DbgGetLinks (
     OUT pc : ^VOID,
 )
 
-EXTERN KiExceptionHandler : UBYTE
+EXTERN KepExceptionHandler : UBYTE
 EXTERN DbgExcEnd : UBYTE
 
 #DEFINE DBG_TRACE_NAME_MAX 40
@@ -110,19 +110,19 @@ FN DbgTrace (
 
         // Get next link.
 
-        IF pc >= &KiExceptionHandler AND pc < &DbgExcEnd THEN
+        IF pc >= &KepExceptionHandler AND pc < &DbgExcEnd THEN
             // Step out of the exception handler. The "stack frame" is really
             // an OsContext record.
 
             ctx := CAST sp TO ^OsContext
 
-            IF NOT MmIsVirtualValid ( ctx ) THEN
+            IF NOT MmuIsVirtualValid ( ctx ) THEN
                 RtlPrint ( "#\n" )
 
                 LEAVE
             END
 
-            IF NOT MmIsVirtualValid ( ctx + SIZEOF OsContext ) THEN
+            IF NOT MmuIsVirtualValid ( ctx + SIZEOF OsContext ) THEN
                 RtlPrint ( "#\n" )
 
                 LEAVE
@@ -145,7 +145,7 @@ FN DbgTrace (
             ulong : ^ULONG
 
             WHILE pc >= symvalue DO
-                IF NOT MmIsVirtualValid ( pc ) THEN
+                IF NOT MmuIsVirtualValid ( pc ) THEN
                     RtlPrint ( "#\n" )
 
                     LEAVE
@@ -188,7 +188,7 @@ FN DbgTrace (
 
                 ulong = CAST sp + offset - 4 TO ^ULONG
 
-                IF NOT MmIsVirtualValid ( ulong ) THEN
+                IF NOT MmuIsVirtualValid ( ulong ) THEN
                     RtlPrint ( "#\n" )
 
                     LEAVE

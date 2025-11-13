@@ -2,16 +2,16 @@
 // Implements a spinlock-guarded request queue. Intended for devices.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 
 #IF BLD_MP
 
-#MACRO KiAcquireRequestQueue ( queue ) [
-    KiAcquireSpinlockRaise ( &(queue)^.Spinlock )
+#MACRO KepAcquireRequestQueue ( queue ) [
+    KepAcquireSpinlockRaise ( &(queue)^.Spinlock )
 ]
 
-#MACRO KiReleaseRequestQueue ( queue, oldipl ) [
-    KiReleaseSpinlockLower (
+#MACRO KepReleaseRequestQueue ( queue, oldipl ) [
+    KepReleaseSpinlockLower (
         &(queue)^.Spinlock, // spinlock
         oldipl, // oldipl
     )
@@ -19,12 +19,12 @@
 
 #ELSE
 
-#MACRO KiAcquireRequestQueue ( queue ) [
-    KiRaiseIpl ( KI_IPL_DPC )
+#MACRO KepAcquireRequestQueue ( queue ) [
+    KepRaiseIpl ( KEP_IPL_DPC )
 ]
 
-#MACRO KiReleaseRequestQueue ( queue, oldipl ) [
-    KiLowerIpl ( oldipl )
+#MACRO KepReleaseRequestQueue ( queue, oldipl ) [
+    KepLowerIpl ( oldipl )
 ]
 
 #END
@@ -59,12 +59,12 @@ EXPORT FN KeInitializeRequestQueue (
     queue^.CompleteFunction = completefunc
 
 #IF BLD_MP
-    KiInitializeSpinlock ( &queue^.Spinlock )
+    KepInitializeSpinlock ( &queue^.Spinlock )
 #END
 
 END
 
-FN (RtlLessThanF) KiCompareRequests (
+FN (RtlLessThanF) KepCompareRequests (
     IN a : ^RtlHeapEntry,
     IN b : ^RtlHeapEntry,
 ) : UWORD
@@ -75,14 +75,14 @@ FN (RtlLessThanF) KiCompareRequests (
     RETURN request1^.SortKey < request2^.SortKey
 END
 
-EXPORT FN KeInsertRequestQueue (
+EXPORT FN KeuInsertRequestQueue (
     IN queue : ^KeRequestQueue,
     IN request : ^KeRequestEntry,
 )
 
     // Insert a request into the queue, and start it if possible.
 
-    ipl := KiAcquireRequestQueue ( queue )
+    ipl := KepAcquireRequestQueue ( queue )
 
     IF queue^.Current + request^.Cost <= queue^.Maximum THEN
         // Not busy, set it busy.
@@ -90,7 +90,7 @@ EXPORT FN KeInsertRequestQueue (
         queue^.Current += request^.Cost
         queue^.Pivot = request^.SortKey
 
-        request^.Status = KI_REQUEST_CURRENT
+        request^.Status = KEP_REQUEST_CURRENT
 
         // Start the request.
 
@@ -113,7 +113,7 @@ EXPORT FN KeInsertRequestQueue (
         END
 
         RtlInsertIntoHeap (
-            &KiCompareRequests, // comparisonfunc
+            &KepCompareRequests, // comparisonfunc
             &queue^.Head.Sorted.Roots[current], // rootptr
             &request^.Entry.Sorted, // entry
         )
@@ -124,7 +124,7 @@ EXPORT FN KeInsertRequestQueue (
 
         // Set inserted.
 
-        request^.Status = KI_REQUEST_ENQUEUED
+        request^.Status = KEP_REQUEST_ENQUEUED
 
     ELSE
         // This is a non-sorted request queue.
@@ -138,13 +138,13 @@ EXPORT FN KeInsertRequestQueue (
 
         // Set inserted.
 
-        request^.Status = KI_REQUEST_ENQUEUED
+        request^.Status = KEP_REQUEST_ENQUEUED
     END
 
-    KiReleaseRequestQueue ( queue, ipl )
+    KepReleaseRequestQueue ( queue, ipl )
 END
 
-FN KiStartRequests (
+FN KepStartRequests (
     IN queue : ^KeRequestQueue,
 )
 
@@ -197,7 +197,7 @@ FN KiStartRequests (
             // Remove from heap.
 
             RtlRemoveFromHeap (
-                &KiCompareRequests, // comparisonfunc
+                &KepCompareRequests, // comparisonfunc
                 &queue^.Head.Sorted.Roots[request^.HeapIndex], // rootptr
                 &request^.Entry.Sorted, // entry
             )
@@ -208,7 +208,7 @@ FN KiStartRequests (
         queue^.Current += request^.Cost
         queue^.Pivot = request^.SortKey
 
-        request^.Status = KI_REQUEST_CURRENT
+        request^.Status = KEP_REQUEST_CURRENT
 
         // Start the request.
 
@@ -231,17 +231,17 @@ EXPORT FN KeCompleteRequestQueue (
 
     completed := FALSE
 
-    ipl := KiAcquireRequestQueue ( queue )
+    ipl := KepAcquireRequestQueue ( queue )
 
-    KeAssert ( (request^.Status == KI_REQUEST_CURRENT) OR
-        (request^.Status == KI_REQUEST_CANCELLED) )
+    KeAssert ( (request^.Status == KEP_REQUEST_CURRENT) OR
+        (request^.Status == KEP_REQUEST_CANCELLED) )
 
-    IF request^.Status == KI_REQUEST_CURRENT THEN
+    IF request^.Status == KEP_REQUEST_CURRENT THEN
         completed = TRUE
 
         // Set as completed.
 
-        request^.Status = KI_REQUEST_COMPLETED
+        request^.Status = KEP_REQUEST_COMPLETED
 
         // The request is still current, so decrement the current cost.
 
@@ -257,10 +257,10 @@ EXPORT FN KeCompleteRequestQueue (
 
         // Try to start any requests that can be started.
 
-        KiStartRequests ( queue )
+        KepStartRequests ( queue )
     END
 
-    KiReleaseRequestQueue ( queue, ipl )
+    KepReleaseRequestQueue ( queue, ipl )
 
     RETURN completed
 END
@@ -274,22 +274,22 @@ EXPORT FN KeCancelRequestQueue (
 
     cancelled := FALSE
 
-    ipl := KiAcquireRequestQueue ( queue )
+    ipl := KepAcquireRequestQueue ( queue )
 
-    KeAssert ( (request^.Status == KI_REQUEST_ENQUEUED) OR
-        (request^.Status == KI_REQUEST_CURRENT) OR
-        (request^.Status == KI_REQUEST_COMPLETED) )
+    KeAssert ( (request^.Status == KEP_REQUEST_ENQUEUED) OR
+        (request^.Status == KEP_REQUEST_CURRENT) OR
+        (request^.Status == KEP_REQUEST_COMPLETED) )
 
     status := request^.Status
 
-    IF status != KI_REQUEST_COMPLETED THEN
+    IF status != KEP_REQUEST_COMPLETED THEN
         // Hasn't been completed yet, which means its still cancellable.
 
         cancelled = TRUE
 
-        request^.Status = KI_REQUEST_CANCELLED
+        request^.Status = KEP_REQUEST_CANCELLED
 
-        IF status == KI_REQUEST_ENQUEUED THEN
+        IF status == KEP_REQUEST_ENQUEUED THEN
             // It was enqueued, so we have to remove it from the queue
             // structure.
 
@@ -302,7 +302,7 @@ EXPORT FN KeCancelRequestQueue (
                 // Remove from the appropriate min heap.
 
                 RtlRemoveFromHeap (
-                    &KiCompareRequests, // comparisonfunc
+                    &KepCompareRequests, // comparisonfunc
                     &queue^.Head.Sorted.Roots[request^.HeapIndex], // rootptr
                     &request^.Entry.Sorted, // entry
                 )
@@ -332,12 +332,12 @@ EXPORT FN KeCancelRequestQueue (
 
                 // Try to start any requests that can be started.
 
-                KiStartRequests ( queue )
+                KepStartRequests ( queue )
             END
         END
     END
 
-    KiReleaseRequestQueue ( queue, ipl )
+    KepReleaseRequestQueue ( queue, ipl )
 
     RETURN cancelled
 END
@@ -350,9 +350,9 @@ EXPORT FN KeFinishCancelRequestQueue (
     // Finish cancelling the given request. This just decrements the current
     // cost and attempts to start more requests.
 
-    ipl := KiAcquireRequestQueue ( queue )
+    ipl := KepAcquireRequestQueue ( queue )
 
-    KeAssert ( request^.Status == KI_REQUEST_CANCELLED )
+    KeAssert ( request^.Status == KEP_REQUEST_CANCELLED )
 
     // Decrement the cost.
 
@@ -360,7 +360,7 @@ EXPORT FN KeFinishCancelRequestQueue (
 
     // Try to start any requests that can be started.
 
-    KiStartRequests ( queue )
+    KepStartRequests ( queue )
 
-    KiReleaseRequestQueue ( queue, ipl )
+    KepReleaseRequestQueue ( queue, ipl )
 END

@@ -9,9 +9,9 @@ FN HalpConfigureTimer ()
 
     // Configure the timer interrupt to interrupt at 5ms intervals.
 
-    timer := CAST KeLoaderBlock.U.Xr.CitronBase + 0x80 TO ^HalpTimer
+    timer := CAST KeuLoaderBlock.U.Xr.CitronBase + 0x80 TO ^HalpTimer
 
-    timer^.DataPort = HAL_TIMER_INTERVAL
+    timer^.DataPort = HALU_TIMER_INTERVAL
     BARRIER
 
     timer^.CmdPort = 1
@@ -27,9 +27,9 @@ FN HalpInitializeLsic (
     // for the timer interrupt and IPI interrupt. Then enable interrupts.
 
     lsic :=
-        CAST KeLoaderBlock.U.Xr.LsicBase + procid * HALP_LSIC_GAP TO ^HalpLsic
+        CAST KeuLoaderBlock.U.Xr.LsicBase + procid * HALP_LSIC_GAP TO ^HalpLsic
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
     // Stash the LSIC base.
 
@@ -56,12 +56,12 @@ FN HalpInitializeLsic (
 
     int := &prb^.TimerInterrupt
 
-    KeInitializeInterrupt (
+    KeuInitializeInterrupt (
         int, // interrupt
-        &KiClockTick, // routine
+        &KepClockTick, // routine
         0, // context
         2, // vector
-        KI_IPL_CLOCK, // ipl
+        KEP_IPL_CLOCK, // ipl
         FALSE, // edgetriggered
         FALSE, // sharevector
         procid, // procid
@@ -82,12 +82,12 @@ FN HalpInitializeLsic (
 
     int = &prb^.IpiInterrupt1
 
-    KeInitializeInterrupt (
+    KeuInitializeInterrupt (
         int, // interrupt
         0, // routine
         0, // context
         1, // vector
-        KI_IPL_IPI, // ipl
+        KEP_IPL_IPI, // ipl
         FALSE, // edgetriggered
         FALSE, // sharevector
         procid, // procid
@@ -96,7 +96,7 @@ FN HalpInitializeLsic (
     // Override the high level handler to bypass all the unnecessary general
     // interrupt stuff and just directly call the kernel's IPI service routine.
 
-    int^.Handler = &KiServiceIpi
+    int^.Handler = &KepServiceIpi
 
     // Manually insert in PRB.
 
@@ -106,12 +106,12 @@ FN HalpInitializeLsic (
 
     int = &prb^.IpiInterrupt2
 
-    KeInitializeInterrupt (
+    KeuInitializeInterrupt (
         int, // interrupt
         0, // routine
         0, // context
         63, // vector
-        KI_IPL_IPI, // ipl
+        KEP_IPL_IPI, // ipl
         FALSE, // edgetriggered
         FALSE, // sharevector
         procid, // procid
@@ -128,21 +128,21 @@ FN HalpInitializeLsic (
 
     // Enable interrupts.
 
-    KiEnableInterrupts ()
+    KepEnableInterrupts ()
 END
 
 #SECTION "INITtext"
-FN HalProcessorInitialize (
-    IN prb : ^KiPrb,
+FN HaluProcessorInitialize (
+    IN prb : ^KepPrb,
 )
 
     // Do whatever is needed to initialize the current processor.
 
-    HalpInitializeLsic ( KiCurrentProcessor () )
+    HalpInitializeLsic ( KepCurrentProcessor () )
 END
 
 #SECTION "INITtext"
-FN HalEarlyInitialize ()
+FN HaluEarlyInitialize ()
 
     // This initialization routine is called before there is a system thread
     // context. Here we have to establish everything required for base line
@@ -156,8 +156,8 @@ END
 #IF BLD_MP
 
 #SECTION "INITtext"
-FN HalStartProcessors (
-    IN startfunc : HalStartProcessorF,
+FN HaluStartProcessors (
+    IN startfunc : HaluStartProcessorF,
 )
 
     // Call the Loader to do platform-specific stuff to start the processors.
@@ -165,7 +165,7 @@ FN HalStartProcessors (
     // here, but on XR/station the Loader lives in an identity mapping of low
     // memory, so he can do that just fine.
 
-    KeLoaderBlock.U.Xr.StartProcessors ( CAST startfunc TO BlStartProcessorF )
+    KeuLoaderBlock.U.Xr.StartProcessors ( CAST startfunc TO BlStartProcessorF )
 END
 
 #END

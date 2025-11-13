@@ -4,15 +4,15 @@
 
 #INCLUDE "Halp.hjk"
 
-#DEFINE HAL_RTC_PORT 0x80000700
-#DEFINE HAL_RTC_YEAR 0
-#DEFINE HAL_RTC_MONTH 1
-#DEFINE HAL_RTC_DAY 2
-#DEFINE HAL_RTC_HOUR 3
-#DEFINE HAL_RTC_MIN 4
-#DEFINE HAL_RTC_SEC 5
-#DEFINE HAL_RTC_UPTME 6
-#DEFINE HAL_RTC_ISDST 7
+#DEFINE HALU_RTC_PORT 0x80000700
+#DEFINE HALU_RTC_YEAR 0
+#DEFINE HALU_RTC_MONTH 1
+#DEFINE HALU_RTC_DAY 2
+#DEFINE HALU_RTC_HOUR 3
+#DEFINE HALU_RTC_MIN 4
+#DEFINE HALU_RTC_SEC 5
+#DEFINE HALU_RTC_UPTME 6
+#DEFINE HALU_RTC_ISDST 7
 
 HalpBootTimeSeconds : ULONG
 HalpBootUptimeMs : ULONG
@@ -24,24 +24,24 @@ FN HalpMakeUnixTime ()
     // The fox32 RTC presents the date in a split up format that we need to
     // convert to milliseconds since 1970.
 
-    year := HalFox32In ( HAL_RTC_PORT | HAL_RTC_YEAR )
+    year := HaluFox32In ( HALU_RTC_PORT | HALU_RTC_YEAR )
 
-    month := HalFox32In ( HAL_RTC_PORT | HAL_RTC_MONTH )
+    month := HaluFox32In ( HALU_RTC_PORT | HALU_RTC_MONTH )
 
     IF month <= 2 THEN
         month += 12
         year -= 1
     END
 
-    day := HalFox32In ( HAL_RTC_PORT | HAL_RTC_DAY )
+    day := HaluFox32In ( HALU_RTC_PORT | HALU_RTC_DAY )
 
-    hour := HalFox32In ( HAL_RTC_PORT | HAL_RTC_HOUR )
+    hour := HaluFox32In ( HALU_RTC_PORT | HALU_RTC_HOUR )
 
-    min := HalFox32In ( HAL_RTC_PORT | HAL_RTC_MIN )
+    min := HaluFox32In ( HALU_RTC_PORT | HALU_RTC_MIN )
 
-    secpart := HalFox32In ( HAL_RTC_PORT | HAL_RTC_SEC )
+    secpart := HaluFox32In ( HALU_RTC_PORT | HALU_RTC_SEC )
 
-    isdst := HalFox32In ( HAL_RTC_PORT | HAL_RTC_ISDST )
+    isdst := HaluFox32In ( HALU_RTC_PORT | HALU_RTC_ISDST )
 
     // Years to days
 
@@ -66,16 +66,16 @@ FN HalpMakeUnixTime ()
 
     HalpBootTimeSeconds = secpart
 
-    HalpBootUptimeMs = HalFox32In ( HAL_RTC_PORT | HAL_RTC_UPTME )
+    HalpBootUptimeMs = HaluFox32In ( HALU_RTC_PORT | HALU_RTC_UPTME )
 END
 
-FN HalQueryTime (
+FN HaluQueryTime (
     IN time : ^RtlUquad,
 )
 
     // Query the time in milliseconds. This is called from the timer interrupt.
 
-    uptime := HalFox32In ( HAL_RTC_PORT | HAL_RTC_UPTME )
+    uptime := HaluFox32In ( HALU_RTC_PORT | HALU_RTC_UPTME )
 
     uptime -= HalpBootUptimeMs
 

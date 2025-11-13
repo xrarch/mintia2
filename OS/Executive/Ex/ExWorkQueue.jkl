@@ -5,7 +5,7 @@
 #INCLUDE "Exp.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
-ExpWorkQueues : KeBalancedQueue[EX_MAX_WORK_PRIORITY]
+ExpWorkQueues : KeBalancedQueue[EXU_MAX_WORK_PRIORITY]
 
 FN (KeStartThreadF) ExpWorkQueueLoop (
     IN context1 : UWORD,
@@ -31,7 +31,7 @@ FN (KeStartThreadF) ExpWorkQueueLoop (
 
         KeAssert ( NOT OsError ( status ) )
 
-        item := CONTAINEROF entry TO ExWorkItem.QueueEntry
+        item := CONTAINEROF entry TO ExuWorkItem.QueueEntry
 
         // Got a work item. Call the routine.
 
@@ -42,9 +42,9 @@ FN (KeStartThreadF) ExpWorkQueueLoop (
     END
 END
 
-FN ExEnqueueWorkItem (
-    IN item : ^ExWorkItem,
-    IN priority : ExWorkQueuePriority,
+FN ExuEnqueueWorkItem (
+    IN item : ^ExuWorkItem,
+    IN priority : ExuWorkQueuePriority,
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -66,9 +66,9 @@ FN ExEnqueueWorkItem (
     )
 END
 
-FN ExEnqueueTimedWorkItem (
-    IN item : ^ExTimedWorkItem,
-    IN priority : ExWorkQueuePriority,
+FN ExuEnqueueTimedWorkItem (
+    IN item : ^ExuTimedWorkItem,
+    IN priority : ExuWorkQueuePriority,
     IN interval : ^RtlUquad,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -95,9 +95,9 @@ FN (KeDpcF) ExpTimedWorkItemDpc (
     // The KeTimer embedded in a timed work item expired.
     // We have to enqueue the work item for real now.
 
-    item := CONTAINEROF dpc TO ExTimedWorkItem.Dpc
+    item := CONTAINEROF dpc TO ExuTimedWorkItem.Dpc
 
-    ExEnqueueWorkItem (
+    ExuEnqueueWorkItem (
         &item^.Item, // item
         item^.Priority, // priority
         context1, // context1
@@ -105,14 +105,14 @@ FN (KeDpcF) ExpTimedWorkItemDpc (
     )
 END
 
-FN ExInitializeTimedWorkItem (
-    IN item : ^ExTimedWorkItem,
-    IN routine : ExWorkItemF,
+FN ExuInitializeTimedWorkItem (
+    IN item : ^ExuTimedWorkItem,
+    IN routine : ExuWorkItemF,
 )
 
     // Initialize a timed work item.
 
-    ExInitializeWorkItem (
+    ExuInitializeWorkItem (
         &item^.Item, // item
         routine, // routine
     )
@@ -131,14 +131,14 @@ END
 
 #ENTERSECTION "INITtext"
 
-ExpWorkPriorities : UBYTE[EX_MAX_WORK_PRIORITY] = {
-    [EX_LOW_WORK_PRIORITY] = OS_PRIORITY_LOW_REALTIME,
-    [EX_HIGH_WORK_PRIORITY] = OS_PRIORITY_MED_REALTIME,
-    [EX_NONPAGED_WORK_PRIORITY] = OS_PRIORITY_MED_REALTIME,
+ExpWorkPriorities : UBYTE[EXU_MAX_WORK_PRIORITY] = {
+    [EXU_LOW_WORK_PRIORITY] = OS_PRIORITY_LOW_REALTIME,
+    [EXU_HIGH_WORK_PRIORITY] = OS_PRIORITY_MED_REALTIME,
+    [EXU_NONPAGED_WORK_PRIORITY] = OS_PRIORITY_MED_REALTIME,
 }
 
-ExpWorkVmPrivileged : UBYTE[EX_MAX_WORK_PRIORITY] = {
-    [EX_NONPAGED_WORK_PRIORITY] = TRUE,
+ExpWorkVmPrivileged : UBYTE[EXU_MAX_WORK_PRIORITY] = {
+    [EXU_NONPAGED_WORK_PRIORITY] = TRUE,
 }
 
 FN ExpInitializeWorkQueues ()
@@ -147,7 +147,7 @@ FN ExpInitializeWorkQueues ()
 
     i := 0
 
-    WHILE i < EX_MAX_WORK_PRIORITY DO
+    WHILE i < EXU_MAX_WORK_PRIORITY DO
         // Initialize the work queue for this priority.
         // maxthreads == 0 causes it to be equal to the number of processors in
         // the system.
@@ -164,29 +164,29 @@ FN ExpInitializeWorkQueues ()
     // Compute how many threads of each priority there should be.
     // We base this off the system size.
 
-    workthreads : UBYTE[EX_MAX_WORK_PRIORITY]
+    workthreads : UBYTE[EXU_MAX_WORK_PRIORITY]
     
-    systemsize := MmGetSystemSize ()
+    systemsize := MmuGetSystemSize ()
 
-    IF systemsize <= MM_TINY_SYSTEM THEN
-        workthreads[EX_NONPAGED_WORK_PRIORITY] = 1
-        workthreads[EX_HIGH_WORK_PRIORITY] = 1
-        workthreads[EX_LOW_WORK_PRIORITY] = 1
+    IF systemsize <= MMU_TINY_SYSTEM THEN
+        workthreads[EXU_NONPAGED_WORK_PRIORITY] = 1
+        workthreads[EXU_HIGH_WORK_PRIORITY] = 1
+        workthreads[EXU_LOW_WORK_PRIORITY] = 1
 
-    ELSEIF systemsize <= MM_SMALL_SYSTEM THEN
-        workthreads[EX_NONPAGED_WORK_PRIORITY] = 1
-        workthreads[EX_HIGH_WORK_PRIORITY] = 2
-        workthreads[EX_LOW_WORK_PRIORITY] = 3
+    ELSEIF systemsize <= MMU_SMALL_SYSTEM THEN
+        workthreads[EXU_NONPAGED_WORK_PRIORITY] = 1
+        workthreads[EXU_HIGH_WORK_PRIORITY] = 2
+        workthreads[EXU_LOW_WORK_PRIORITY] = 3
 
-    ELSEIF systemsize <= MM_MEDIUM_SYSTEM THEN
-        workthreads[EX_NONPAGED_WORK_PRIORITY] = 2
-        workthreads[EX_HIGH_WORK_PRIORITY] = 3
-        workthreads[EX_LOW_WORK_PRIORITY] = 5
+    ELSEIF systemsize <= MMU_MEDIUM_SYSTEM THEN
+        workthreads[EXU_NONPAGED_WORK_PRIORITY] = 2
+        workthreads[EXU_HIGH_WORK_PRIORITY] = 3
+        workthreads[EXU_LOW_WORK_PRIORITY] = 5
 
     ELSE
-        workthreads[EX_NONPAGED_WORK_PRIORITY] = 2
-        workthreads[EX_HIGH_WORK_PRIORITY] = 4
-        workthreads[EX_LOW_WORK_PRIORITY] = 7
+        workthreads[EXU_NONPAGED_WORK_PRIORITY] = 2
+        workthreads[EXU_HIGH_WORK_PRIORITY] = 4
+        workthreads[EXU_LOW_WORK_PRIORITY] = 7
     END
 
     // Initialize a name string for the threads.
@@ -198,15 +198,15 @@ FN ExpInitializeWorkQueues ()
 
     j := 0
 
-    WHILE j < EX_MAX_WORK_PRIORITY DO
+    WHILE j < EXU_MAX_WORK_PRIORITY DO
         i = 0
 
         threads := workthreads[j]
 
         WHILE i < threads DO
-            thread : ^PsThread
+            thread : ^PsuThread
 
-            status := PsCreateExecutiveThread (
+            status := PsuCreateExecutiveThread (
                 &name, // name
                 &ExpWorkQueueLoop, // startfunc
                 &ExpWorkQueues[j], // context1
@@ -236,7 +236,7 @@ FN ExpInitializeWorkQueues ()
 
             // Remove the reference we got by virtue of creating the thread.
 
-            ObUnreferenceObject ( thread )
+            ObuUnreferenceObject ( thread )
 
             i += 1
         END

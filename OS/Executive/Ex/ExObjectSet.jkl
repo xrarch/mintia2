@@ -6,8 +6,8 @@
 
 #DEFINE EXP_ARRAY_EXTENSION 6
 
-FN ExInitializeSet (
-    IN set : ^ExObjectSet,
+FN ExuInitializeSet (
+    IN set : ^ExuObjectSet,
     IN tag : UWORD,
     IN poolindex : UWORD,
 )
@@ -15,14 +15,14 @@ FN ExInitializeSet (
     // Initialize a set.
 
     set^.Index = 0
-    set^.Capacity = EX_SET_INITIAL_BUFFER
+    set^.Capacity = EXU_SET_INITIAL_BUFFER
     set^.Buffer = &set^.InitialBuffer[0]
     set^.Tag = tag
     set^.PoolIndex = poolindex
 END
 
-FN ExAppendSet (
-    IN set : ^ExObjectSet,
+FN ExuAppendSet (
+    IN set : ^ExuObjectSet,
     IN object : ^VOID,
 ) : OsStatus
 
@@ -48,7 +48,7 @@ FN ExAppendSet (
 
     newcapacity := set^.Capacity + EXP_ARRAY_EXTENSION
 
-    newbuffer := MmAllocatePool (
+    newbuffer := MmuAllocatePool (
         set^.PoolIndex, // poolindex
         newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
         set^.Tag, // tag
@@ -72,7 +72,7 @@ FN ExAppendSet (
     // Free the old buffer.
 
     IF set^.Buffer != &set^.InitialBuffer[0] THEN
-        MmFreePool (
+        MmuFreePool (
             set^.Buffer, // ptr
             set^.Tag, // tag
         )
@@ -88,8 +88,8 @@ FN ExAppendSet (
     GOTO Insert
 END
 
-FN ExFindObjectInSet (
-    IN set : ^ExObjectSet,
+FN ExuFindObjectInSet (
+    IN set : ^ExuObjectSet,
     IN object : ^VOID,
 ) : UWORD
 
@@ -110,8 +110,8 @@ FN ExFindObjectInSet (
     RETURN -1
 END
 
-FN ExRemoveObjectFromSetByIndex (
-    IN set : ^ExObjectSet,
+FN ExuRemoveObjectFromSetByIndex (
+    IN set : ^ExuObjectSet,
     IN index : UWORD,
 )
 
@@ -152,17 +152,17 @@ FN ExRemoveObjectFromSetByIndex (
 
     newbuffer : ^^VOID
 
-    IF newcapacity <= EX_SET_INITIAL_BUFFER THEN
+    IF newcapacity <= EXU_SET_INITIAL_BUFFER THEN
         // Use the inlined initial buffer again.
 
-        newcapacity = EX_SET_INITIAL_BUFFER
+        newcapacity = EXU_SET_INITIAL_BUFFER
 
         newbuffer = &set^.InitialBuffer[0]
 
     ELSE
         // Allocate a smaller buffer.
 
-        newbuffer = MmAllocatePool (
+        newbuffer = MmuAllocatePool (
             set^.PoolIndex, // poolindex
             newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
             set^.Tag, // tag
@@ -188,7 +188,7 @@ FN ExRemoveObjectFromSetByIndex (
     // Note we ruled out the case where this is still the initial buffer above,
     // so we can just free to pool unconditionally.
 
-    MmFreePool (
+    MmuFreePool (
         buf, // ptr
         set^.Tag, // tag
     )
@@ -199,15 +199,15 @@ FN ExRemoveObjectFromSetByIndex (
     set^.Capacity = newcapacity
 END
 
-FN ExRemoveObjectFromSet (
-    IN set : ^ExObjectSet,
+FN ExuRemoveObjectFromSet (
+    IN set : ^ExuObjectSet,
     IN object : ^VOID,
 ) : UWORD
 
     // Remove the specified object from the set. Returns TRUE if removed, FALSE
     // if not found.
 
-    index := ExFindObjectInSet (
+    index := ExuFindObjectInSet (
         set, // set
         object, // object
     )
@@ -216,7 +216,7 @@ FN ExRemoveObjectFromSet (
         RETURN FALSE
     END
 
-    ExRemoveObjectFromSetByIndex (
+    ExuRemoveObjectFromSetByIndex (
         set, // set
         index, // index
     )
@@ -224,9 +224,9 @@ FN ExRemoveObjectFromSet (
     RETURN TRUE
 END
 
-FN ExEnumerateSet (
-    IN set : ^ExObjectSet,
-    IN enumfunc : ExEnumerateSetF,
+FN ExuEnumerateSet (
+    IN set : ^ExuObjectSet,
+    IN enumfunc : ExuEnumerateSetF,
     IN context : ^VOID,
 ) : OsStatus
 
@@ -253,16 +253,16 @@ FN ExEnumerateSet (
     RETURN OS_STATUS_SUCCESS
 END
 
-FN ExEmptySet (
-    IN set : ^ExObjectSet,
-    IN enumfunc : ExEnumerateSetF,
+FN ExuEmptySet (
+    IN set : ^ExuObjectSet,
+    IN enumfunc : ExuEnumerateSetF,
     IN context : ^VOID,
 )
 
     // Empty an object set.
 
     IF enumfunc THEN
-        ExEnumerateSet (
+        ExuEnumerateSet (
             set, // set
             enumfunc, // enumfunc
             context, // context
@@ -270,7 +270,7 @@ FN ExEmptySet (
     END
 
     IF set^.Buffer != &set^.InitialBuffer[0] THEN
-        MmFreePool (
+        MmuFreePool (
             set^.Buffer, // ptr
             set^.Tag, // tag
         )
@@ -278,7 +278,7 @@ FN ExEmptySet (
 
     // Reinitialize the set.
 
-    ExInitializeSet (
+    ExuInitializeSet (
         set, // set
         set^.Tag, // tag
         set^.PoolIndex, // poolindex

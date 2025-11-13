@@ -2,9 +2,9 @@
 // Implements the architecture-specific part of interrupt object support.
 //
 
-#INCLUDE "../Ki.hjk"
+#INCLUDE "../Kep.hjk"
 
-EXPORT FN KeConnectInterrupt (
+EXPORT FN KeuConnectInterrupt (
     IN interrupt : ^KeInterrupt,
 ) : UWORD
 
@@ -17,7 +17,7 @@ EXPORT FN KeConnectInterrupt (
     //       connected simultaneously.
 
     IF interrupt^.Connected OR
-        interrupt^.Vector >= HAL_VECTOR_MAX OR
+        interrupt^.Vector >= HALU_VECTOR_MAX OR
         interrupt^.ShareVector THEN
 
         // Already connected, or beyond maximum, or shared (which we never do on
@@ -30,7 +30,7 @@ EXPORT FN KeConnectInterrupt (
 
     // Get the Prb for the target processor.
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
     IF prb^.IrqDispatchTable[interrupt^.Vector] THEN
         // Vector already in use. fox32 platforms never share IRQs, so
@@ -55,7 +55,7 @@ EXPORT FN KeConnectInterrupt (
     RETURN status
 END
 
-EXPORT FN KeDisconnectInterrupt (
+EXPORT FN KeuDisconnectInterrupt (
     IN interrupt : ^KeInterrupt,
 ) : UWORD
 
@@ -71,7 +71,7 @@ EXPORT FN KeDisconnectInterrupt (
 
     // Get the Prb for the target processor.
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
     // Clear the interrupt object in the table.
 

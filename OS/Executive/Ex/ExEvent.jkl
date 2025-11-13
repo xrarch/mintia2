@@ -4,9 +4,9 @@
 
 #INCLUDE "Exp.hjk"
 
-#INCLUDE "<inc>/Ob.hjk"
-#INCLUDE "<inc>/Ns.hjk"
-#INCLUDE "<inc>/Ps.hjk"
+#INCLUDE "<inc>/Obu.hjk"
+#INCLUDE "<inc>/Nsu.hjk"
+#INCLUDE "<inc>/Psu.hjk"
 
 #INCLUDE "<ll>/System/OsObject.hjk"
 #INCLUDE "<ll>/System/OsNamespace.hjk"
@@ -17,45 +17,45 @@ STRUCT ExpEventContext
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeInitializeF) ExpInitializeEventObject (
+FN (ObuTypeInitializeF) ExpInitializeEventObject (
     IN object : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
 
     // We've been called to initialize a new event object, so do that.
 
-    event := CAST object TO ^ExEvent
+    event := CAST object TO ^ExuEvent
 
     ctx := CAST context TO ^ExpEventContext
 
     KeInitializeEvent (
         &event^.Event, // event
-        "ExEventObject", // name
+        "ExuEventObject", // name
         ctx^.Notification, // notification
         ctx^.SignalState, // signalstate
     )
 END
 
-PUBLIC ExEventType : ObType = {
+PUBLIC ExuEventType : ObuType = {
     [Name] = "Event", // name
 
     [Initialize] = &ExpInitializeEventObject,
 
-    [WaitOffset] = OFFSETOF ExEvent.Event,
+    [WaitOffset] = OFFSETOF ExuEvent.Event,
     [TypeIdentifier] = OS_EVENT_TYPE,
     [Tag] = 'Evnt',
 
-    [TypicalBodySize] = SIZEOF ExEvent,
+    [TypicalBodySize] = SIZEOF ExuEvent,
 
     [IsPaged] = FALSE,
 }
 
 #SECTION "PAGEtext"
-FN ExCreateEventObject (
-    IN params : ^NsOpenParameters,
+FN ExuCreateEventObject (
+    IN params : ^NsuOpenParameters,
     IN notification : UWORD,
     IN signalstate : UWORD,
-    OUT event : ^ExEvent,
+    OUT event : ^ExuEvent,
 ) : OsStatus
 
     // Create an event object.
@@ -65,20 +65,20 @@ FN ExCreateEventObject (
     ctx.Notification = notification
     ctx.SignalState = signalstate
 
-    obparams : ObParameters
+    obparams : ObuParameters
 
-    NsInitializeObjectParameters (
+    NsuInitializeObjectParameters (
         &obparams, // obparams
         params, // params
-        &ExEventType, // type
+        &ExuEventType, // type
         &ctx, // context
-        SIZEOF ExEvent, // bodysize
+        SIZEOF ExuEvent, // bodysize
         0, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
     )
 
-    RETURN NsCreateObject (
+    RETURN NsuCreateObject (
         params, // params
         &obparams, // obparams
         OUT event, // object
@@ -86,8 +86,8 @@ FN ExCreateEventObject (
 END
 
 #SECTION "PAGEtext"
-FN ExCreateEvent (
-    IN params : ^NsOpenParameters,
+FN ExuCreateEvent (
+    IN params : ^NsuOpenParameters,
     IN notification : UWORD,
     IN signalstate : UWORD,
     OUT handle : UWORD,
@@ -95,9 +95,9 @@ FN ExCreateEvent (
 
     // Create an event object handle.
 
-    object : ^ExEvent
+    object : ^ExuEvent
 
-    status := ExCreateEventObject (
+    status := ExuCreateEventObject (
         params, // params
         notification, // notification
         signalstate, // signalstate
@@ -108,15 +108,15 @@ FN ExCreateEvent (
         RETURN status
     END
 
-    status = ObInsertObject (
-        PsCurrentProcess (), // process
+    status = ObuInsertObject (
+        PsuCurrentProcess (), // process
         object, // object
         params^.Captured.Access, // access
         OUT handle, // handle
     )
 
     IF OsError ( status ) THEN
-        ObUnreferenceObject ( object )
+        ObuUnreferenceObject ( object )
     END
 
     RETURN status
@@ -132,9 +132,9 @@ FN OsCreateEvent (
 
     // Create an event object, system service.
 
-    sysparams : NsOpenParameters
+    sysparams : NsuOpenParameters
 
-    status := NsCaptureOpenParameters (
+    status := NsuCaptureOpenParameters (
         params, // userparams
         &sysparams, // sysparams
     )
@@ -143,14 +143,14 @@ FN OsCreateEvent (
         RETURN status
     END
 
-    status = ExCreateEvent (
+    status = ExuCreateEvent (
         &sysparams, // params
         notification, // notification
         signalstate, // signalstate
         OUT handle, // handle
     )
 
-    NsFreeOpenParameters ( &sysparams )
+    NsuFreeOpenParameters ( &sysparams )
 
     RETURN status
 END
@@ -161,12 +161,12 @@ FN OsResetEvent (
     OUT signaled : UWORD,
 ) : OsStatus
 
-    event : ^ExEvent
+    event : ^ExuEvent
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &ExEventType, // type
+        &ExuEventType, // type
         OUT event, // object
         OUT access, // access
     )
@@ -187,7 +187,7 @@ FN OsResetEvent (
 
 @Exit
 
-    ObUnreferenceObject ( event )
+    ObuUnreferenceObject ( event )
 
     RETURN status
 END
@@ -198,12 +198,12 @@ FN OsSignalEvent (
     OUT signaled : UWORD,
 ) : OsStatus
 
-    event : ^ExEvent
+    event : ^ExuEvent
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &ExEventType, // type
+        &ExuEventType, // type
         OUT event, // object
         OUT access, // access
     )
@@ -227,7 +227,7 @@ FN OsSignalEvent (
 
 @Exit
 
-    ObUnreferenceObject ( event )
+    ObuUnreferenceObject ( event )
 
     RETURN status
 END
@@ -238,12 +238,12 @@ FN OsReadEvent (
     OUT signaled : UWORD,
 ) : OsStatus
 
-    event : ^ExEvent
+    event : ^ExuEvent
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &ExEventType, // type
+        &ExuEventType, // type
         OUT event, // object
         OUT access, // access
     )
@@ -264,7 +264,7 @@ FN OsReadEvent (
 
 @Exit
 
-    ObUnreferenceObject ( event )
+    ObuUnreferenceObject ( event )
 
     RETURN status
 END
@@ -274,5 +274,5 @@ FN ExpInitializeEvents ()
 
     // Initialize the event object type.
 
-    ObInitializeType ( &ExEventType )
+    ObuInitializeType ( &ExuEventType )
 END

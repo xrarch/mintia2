@@ -3,15 +3,15 @@
 // If an exception occurs during one of these sections, the program counter is
 // reset to the beginning. We group them together so that we don't have to check
 // for PC being inbetween each of them on every exception, only when we found it
-// between KiRestartableSections and KiRestartableSectionsEnd.
+// between KepRestartableSections and KepRestartableSectionsEnd.
 //
 
-#INCLUDE "../Ki.hjk"
+#INCLUDE "../Kep.hjk"
 
 #ASM [
 
-KiRestartableSections:
-.global KiRestartableSections
+KepRestartableSections:
+.global KepRestartableSections
 
 
 // a0 - ptr
@@ -24,8 +24,8 @@ KeIncrementUlong:
     mov  a3, [a0]
     add  [a0], a1
 
-KiIncrementUlongEnd:
-.global KiIncrementUlongEnd
+KepIncrementUlongEnd:
+.global KepIncrementUlongEnd
 
     ret
 
@@ -39,8 +39,8 @@ KeOrUlong:
     mov  a3, [a0]
     or   [a0], a1
 
-KiOrUlongEnd:
-.global KiOrUlongEnd
+KepOrUlongEnd:
+.global KepOrUlongEnd
 
     ret
 
@@ -54,8 +54,8 @@ KeMaskUlong:
     mov  a3, [a0]
     and  [a0], a1
 
-KiMaskUlongEnd:
-.global KiMaskUlongEnd
+KepMaskUlongEnd:
+.global KepMaskUlongEnd
 
     ret
 
@@ -69,8 +69,8 @@ KeFetchAndSetUlong:
     mov  a3, [a0]
     mov  [a0], a1
 
-KiFetchAndSetUlongEnd:
-.global KiFetchAndSetUlongEnd
+KepFetchAndSetUlongEnd:
+.global KepFetchAndSetUlongEnd
 
     ret
 
@@ -84,11 +84,11 @@ KeCompareSwapUlong:
     
     mov  a3, [a0]
     cmp  a3, a2
-    ifnz rjmp KiCompareSwapUlongEnd
+    ifnz rjmp KepCompareSwapUlongEnd
     mov  [a0], a1
 
-KiCompareSwapUlongEnd:
-.global KiCompareSwapUlongEnd
+KepCompareSwapUlongEnd:
+.global KepCompareSwapUlongEnd
 
     ret
 
@@ -103,18 +103,18 @@ KeCompareSwapUlongAbortOnFault:
     
     mov  a3, [a0]
     cmp  a3, a2
-    ifnz rjmp KiCompareSwapUlongAbortEnd
+    ifnz rjmp KepCompareSwapUlongAbortEnd
     mov  [a0], a1
 
-KiCompareSwapUlongAbortEnd:
-.global KiCompareSwapUlongAbortEnd
+KepCompareSwapUlongAbortEnd:
+.global KepCompareSwapUlongAbortEnd
 
     mov  a2, 0
 
     ret
 
-KiCompareSwapUlongAbort:
-.global KiCompareSwapUlongAbort
+KepCompareSwapUlongAbort:
+.global KepCompareSwapUlongAbort
 
     // We took a page fault while attempting the CAS. Return something that
     // is guaranteed not to be equal to the expectedvalue, thereby making the
@@ -127,11 +127,11 @@ KiCompareSwapUlongAbort:
 
     ret
 
-#MACRO KiAcquireLockSharedLoop ( slow ) [
+#MACRO KepAcquireLockSharedLoop ( slow ) [
     mov  t0, [a0]
-    and  t0, KI_LOCK_C_BITS
+    and  t0, KEP_LOCK_C_BITS
     ifnz rjmp slow
-    add  [a0], KI_LOCK_SHARE_INC
+    add  [a0], KEP_LOCK_SHARE_INC
 ]
 
 // a0 - lock
@@ -140,39 +140,39 @@ KiCompareSwapUlongAbort:
 KeAcquireApcLockShared:
 .export KeAcquireApcLockShared
 
-    movz.8 a3, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
-    mov.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], KI_IPL_APC
+    movz.8 a3, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
+    mov.8 [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)], KEP_IPL_APC
 
-KiAcquireApcLockSharedStart:
-.global KiAcquireApcLockSharedStart
+KepAcquireApcLockSharedStart:
+.global KepAcquireApcLockSharedStart
 
-    KiAcquireLockSharedLoop ( KiAcquireApcLockSharedSlow )
+    KepAcquireLockSharedLoop ( KepAcquireApcLockSharedSlow )
 
-KiAcquireApcLockSharedEnd:
-.global KiAcquireApcLockSharedEnd
+KepAcquireApcLockSharedEnd:
+.global KepAcquireApcLockSharedEnd
 
     ret
 
-KiAcquireApcLockSharedSlow:
+KepAcquireApcLockSharedSlow:
     mov  a1, a3
-    jmp  KiAcquireLockShared
+    jmp  KepAcquireLockShared
 
 // a0 - lock
 KeAcquireLockShared:
 .export KeAcquireLockShared
 
-    KiAcquireLockSharedLoop ( KiAcquireLockSharedSlow )
+    KepAcquireLockSharedLoop ( KepAcquireLockSharedSlow )
 
-KiAcquireLockSharedEnd:
-.global KiAcquireLockSharedEnd
+KepAcquireLockSharedEnd:
+.global KepAcquireLockSharedEnd
 
     ret
 
-KiAcquireLockSharedSlow:
-    movz.8 a1, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
-    jmp  KiAcquireLockShared
+KepAcquireLockSharedSlow:
+    movz.8 a1, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
+    jmp  KepAcquireLockShared
 
-#MACRO KiAcquireLockExclusiveLoop ( slow ) [
+#MACRO KepAcquireLockExclusiveLoop ( slow ) [
     cmp  [a0], 0
     ifnz rjmp slow
     mov  [a0], t1
@@ -184,26 +184,26 @@ KiAcquireLockSharedSlow:
 KeAcquireApcLockExclusive:
 .export KeAcquireApcLockExclusive
 
-    movz.8 a3, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
-    mov.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], KI_IPL_APC
+    movz.8 a3, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
+    mov.8 [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)], KEP_IPL_APC
 
-    mov  t1, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
-    or   t1, KI_LOCK_WRITE_LOCKED
+    mov  t1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+    or   t1, KEP_LOCK_WRITE_LOCKED
 
-KiAcquireApcLockExclusiveStart:
-.global KiAcquireApcLockExclusiveStart
+KepAcquireApcLockExclusiveStart:
+.global KepAcquireApcLockExclusiveStart
 
-    KiAcquireLockExclusiveLoop ( KiAcquireApcLockExclusiveSlow )
+    KepAcquireLockExclusiveLoop ( KepAcquireApcLockExclusiveSlow )
 
-KiAcquireApcLockExclusiveEnd:
-.global KiAcquireApcLockExclusiveEnd
+KepAcquireApcLockExclusiveEnd:
+.global KepAcquireApcLockExclusiveEnd
 
     ret
 
-KiAcquireApcLockExclusiveSlow:
+KepAcquireApcLockExclusiveSlow:
 
     mov  a1, a3
-    jmp  KiAcquireLockExclusive
+    jmp  KepAcquireLockExclusive
 
 // a0 - lock
 // outputs:
@@ -211,21 +211,21 @@ KiAcquireApcLockExclusiveSlow:
 KeTryAcquireLockExclusive:
 .export KeTryAcquireLockExclusive
 
-    mov  t1, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
-    or   t1, KI_LOCK_WRITE_LOCKED
+    mov  t1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+    or   t1, KEP_LOCK_WRITE_LOCKED
 
-KiTryAcquireLockExclusiveStart:
-.global KiTryAcquireLockExclusiveStart
+KepTryAcquireLockExclusiveStart:
+.global KepTryAcquireLockExclusiveStart
 
-    KiAcquireLockExclusiveLoop ( KiTryAcquireLockFailure )
+    KepAcquireLockExclusiveLoop ( KepTryAcquireLockFailure )
 
-KiTryAcquireLockExclusiveEnd:
-.global KiTryAcquireLockExclusiveEnd
+KepTryAcquireLockExclusiveEnd:
+.global KepTryAcquireLockExclusiveEnd
 
     movz.8 a3, 1
     ret
 
-KiTryAcquireLockFailure:
+KepTryAcquireLockFailure:
 
     movz.8 a3, 0
     ret
@@ -234,22 +234,22 @@ KiTryAcquireLockFailure:
 KeAcquireLockExclusive:
 .export KeAcquireLockExclusive
 
-    mov  t1, [(KI_CURRENT_PRB_ADDR + KiPrb_CurrentThread)]
-    or   t1, KI_LOCK_WRITE_LOCKED
+    mov  t1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+    or   t1, KEP_LOCK_WRITE_LOCKED
 
-KiAcquireLockExclusiveStart:
-.global KiAcquireLockExclusiveStart
+KepAcquireLockExclusiveStart:
+.global KepAcquireLockExclusiveStart
 
-    KiAcquireLockExclusiveLoop ( KiAcquireLockExclusiveSlow )
+    KepAcquireLockExclusiveLoop ( KepAcquireLockExclusiveSlow )
 
-KiAcquireLockExclusiveEnd:
-.global KiAcquireLockExclusiveEnd
+KepAcquireLockExclusiveEnd:
+.global KepAcquireLockExclusiveEnd
 
     ret
 
-KiAcquireLockExclusiveSlow:
-    movz.8 a1, [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)]
-    jmp  KiAcquireLockExclusive
+KepAcquireLockExclusiveSlow:
+    movz.8 a1, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
+    jmp  KepAcquireLockExclusive
 
 // Release
 
@@ -257,7 +257,7 @@ KiAcquireLockExclusiveSlow:
 
 #IF BLD_CHK
     cmp  [a0], 0
-    ifz  rjmp KiNotLocked
+    ifz  rjmp KepNotLocked
 #END
 
 startlabel:
@@ -270,19 +270,19 @@ startlabel:
     // Isolate the waiters bit.
 
     mov  t1, t0
-    and  t1, KI_LOCK_WAITERS
+    and  t1, KEP_LOCK_WAITERS
     ifnz jmp slow
 
     movz.8 t2, 0
 
     mov  t1, t0
-    and  t1, KI_LOCK_WRITE_LOCKED
+    and  t1, KEP_LOCK_WRITE_LOCKED
     ifnz rjmp .notshared
 
     // We're a shared holder, so decrement the share count.
 
     mov  t2, t0
-    sub  t2, KI_LOCK_SHARE_INC
+    sub  t2, KEP_LOCK_SHARE_INC
 
 .notshared:
 
@@ -299,7 +299,7 @@ endlabel:
 KeReleaseLock:
 .export KeReleaseLock
 
-    ReleaseLock ( KiReleaseLockStart, KiReleaseLockEnd, KiReleaseLock )
+    ReleaseLock ( KepReleaseLockStart, KepReleaseLockEnd, KepReleaseLock )
 
     ret
 
@@ -308,13 +308,13 @@ KeReleaseLock:
 KeReleaseApcLock:
 .export KeReleaseApcLock
 
-    ReleaseLock ( KiReleaseApcLockStart, KiReleaseApcLockEnd, KiReleaseApcLockSlow )
+    ReleaseLock ( KepReleaseApcLockStart, KepReleaseApcLockEnd, KepReleaseApcLockSlow )
 
     // The lock is APC-safe, so lower IPL.
 
-    mov.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], a1
+    mov.8 [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)], a1
 
-    mov  t0, [(KI_CURRENT_PRB_ADDR + KiPrb_PendingSoftwareInterrupts)]
+    mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)]
     srl  t0, a1
     ifnz rjmp KeReleaseApcLockDispatch
 
@@ -323,24 +323,24 @@ KeReleaseApcLock:
 KeReleaseApcLockDispatch:
 
     mov  a0, a1
-    jmp  KiDispatchSoftwareInterrupts
+    jmp  KepDispatchSoftwareInterrupts
 
-KiReleaseApcLockSlow:
+KepReleaseApcLockSlow:
 
     push fp
     mov  fp, sp
     push a1
     
-    call KiReleaseLock
+    call KepReleaseLock
 
     pop  a1
     pop  fp
 
     // The lock is APC-safe, so lower IPL.
 
-    mov.8 [(KI_CURRENT_PRB_ADDR + KiPrb_Ipl)], a1
+    mov.8 [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)], a1
 
-    mov  t0, [(KI_CURRENT_PRB_ADDR + KiPrb_PendingSoftwareInterrupts)]
+    mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)]
     srl  t0, a1
     ifnz rjmp KeReleaseApcLockDispatch
 
@@ -348,17 +348,17 @@ KiReleaseApcLockSlow:
 
 #IF BLD_CHK
 
-KiNotLocked:
+KepNotLocked:
 
     push fp
     mov  fp, sp
 
-    mov  a0, KiNotLockedMessage
+    mov  a0, KepNotLockedMessage
     mov  a1, 0
     mov  a2, 0
     call KeCrash
 
-KiNotLockedMessage:
+KepNotLockedMessage:
     .ds "KeReleaseLock: not locked\n"
     .db 0
 
@@ -367,7 +367,7 @@ KiNotLockedMessage:
 #END
 
 
-KiRestartableSectionsEnd:
-.global KiRestartableSectionsEnd
+KepRestartableSectionsEnd:
+.global KepRestartableSectionsEnd
 
 ]

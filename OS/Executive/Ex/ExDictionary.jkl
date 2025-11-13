@@ -7,13 +7,13 @@
 STRUCT ExpDictionaryEntry
     Entry : RtlAvlNode,
     OrderedEntry : RtlListEntry,
-    Key : ^ExName,
+    Key : ^ExuName,
     Value : ^VOID,
 END
 
 #SECTION "PAGEtext"
-FN ExInitializeDictionary (
-    IN dict : ^ExDictionary,
+FN ExuInitializeDictionary (
+    IN dict : ^ExuDictionary,
 )
 
     // Initialize a dictionary.
@@ -38,14 +38,14 @@ FN (RtlAvlLessThanF) ExpCompareDictionaryEntries (
     // Return whether A < B, lexicographically.
 
     RETURN CAST RtlCompareRtlString (
-        ExNameToString((CONTAINEROF a TO ExpDictionaryEntry.Entry)^.Key), // str1
-        ExNameToString((CONTAINEROF b TO ExpDictionaryEntry.Entry)^.Key), // str2
+        ExuNameToString((CONTAINEROF a TO ExpDictionaryEntry.Entry)^.Key), // str1
+        ExuNameToString((CONTAINEROF b TO ExpDictionaryEntry.Entry)^.Key), // str2
     ) TO WORD < 0
 END
 
 #SECTION "PAGEtext"
 FN ExpLookupDictionaryEntry (
-    IN dict : ^ExDictionary,
+    IN dict : ^ExuDictionary,
     IN key : ^RtlString,
     IN hash : UWORD,
 ) : ^ExpDictionaryEntry
@@ -72,7 +72,7 @@ FN ExpLookupDictionaryEntry (
 
         res := CAST RtlCompareRtlString (
             key, // str1
-            ExNameToString ( checknode^.Key ), // str2
+            ExuNameToString ( checknode^.Key ), // str2
         ) TO WORD
 
         IF res == 0 THEN
@@ -90,8 +90,8 @@ FN ExpLookupDictionaryEntry (
 END
 
 #SECTION "PAGEtext"
-FN ExLookupDictionary (
-    IN dict : ^ExDictionary,
+FN ExuLookupDictionary (
+    IN dict : ^ExuDictionary,
     IN key : ^RtlString,
 ) : ^VOID
 
@@ -113,7 +113,7 @@ END
 
 #SECTION "PAGEtext"
 FN ExpRemoveEntryFromDictionary (
-    IN dict : ^ExDictionary,
+    IN dict : ^ExuDictionary,
     IN entry : ^ExpDictionaryEntry,
     IN hash : UWORD,
 )
@@ -125,17 +125,17 @@ FN ExpRemoveEntryFromDictionary (
         &entry^.Entry, // node
     )
 
-    ExUnreferenceName ( entry^.Key )
+    ExuUnreferenceName ( entry^.Key )
 
-    MmFreePool (
+    MmuFreePool (
         entry, // entry
         'DcEn', // tag
     )
 END
 
 #SECTION "PAGEtext"
-FN ExRemoveFromDictionary (
-    IN dict : ^ExDictionary,
+FN ExuRemoveFromDictionary (
+    IN dict : ^ExuDictionary,
     IN key : ^RtlString,
 ) : ^VOID
 
@@ -166,8 +166,8 @@ FN ExRemoveFromDictionary (
 END
 
 #SECTION "PAGEtext"
-FN ExInsertInDictionary (
-    IN dict : ^ExDictionary,
+FN ExuInsertInDictionary (
+    IN dict : ^ExuDictionary,
     IN key : ^RtlString,
     IN value : ^VOID,
     IN canupdate : UWORD,
@@ -201,8 +201,8 @@ FN ExInsertInDictionary (
 
     // The entry doesn't exist, so create it.
 
-    entry = MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
+    entry = MmuAllocatePool (
+        MMU_PAGED_POOL, // poolindex
         SIZEOF ExpDictionaryEntry, // bytes
         'DcEn', // tag
         TRUE, // wait
@@ -212,10 +212,10 @@ FN ExInsertInDictionary (
         RETURN OS_STATUS_NO_MEMORY
     END
 
-    entry^.Key = ExFindName ( key )
+    entry^.Key = ExuFindName ( key )
 
     IF NOT entry^.Key THEN
-        MmFreePool (
+        MmuFreePool (
             entry, // entry
             'DcEn', // tag
         )
@@ -240,9 +240,9 @@ FN ExInsertInDictionary (
 END
 
 #SECTION "PAGEtext"
-FN ExEnumerateDictionary (
-    IN dict : ^ExDictionary,
-    IN func : ExEnumerateDictionaryF,
+FN ExuEnumerateDictionary (
+    IN dict : ^ExuDictionary,
+    IN func : ExuEnumerateDictionaryF,
     IN context : ^VOID,
     IN delete : UWORD,
 )
@@ -257,7 +257,7 @@ FN ExEnumerateDictionary (
         IF func THEN
             func (
                 dict, // dict
-                ExNameToString ( entry^.Key ), // key
+                ExuNameToString ( entry^.Key ), // key
                 entry^.Value, // value
                 context, // context
             )
@@ -267,7 +267,7 @@ FN ExEnumerateDictionary (
             ExpRemoveEntryFromDictionary (
                 dict, // dict
                 entry, // entry
-                ExpHash ( ExNameToString ( entry^.Key )^.Data ), // hash
+                ExpHash ( ExuNameToString ( entry^.Key )^.Data ), // hash
             )
         END
 

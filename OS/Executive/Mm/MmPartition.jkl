@@ -8,14 +8,14 @@
 //
 //  o Splitting the worker thread pool to be per-node.
 //  o Splitting the object and thread reaper lists to be per-node.
-//  o Splitting the object allocation caches (possibly by remodeling ObType to
+//  o Splitting the object allocation caches (possibly by remodeling ObuType to
 //    be itself a per-node thing).
 //  o Splitting the IO packet allocation caches and other caches.
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 
-FN MiInitializeAvailablePageList (
-    IN list : ^MiAvailablePageList,
+FN MmpInitializeAvailablePageList (
+    IN list : ^MmpAvailablePageList,
 )
 
     // Initialize a list of available pages.
@@ -24,16 +24,16 @@ FN MiInitializeAvailablePageList (
 
     i := 0
 
-    WHILE i < MI_COLOR_COUNT DO
+    WHILE i < MMP_COLOR_COUNT DO
         RtlInitializeList ( &list^.Heads[i] )
 
         i += 1
     END
 END
 
-FN MiInitializePartitionStage1 (
-    IN partition : ^MiPartition,
-    IN node : ^MiNode,
+FN MmpInitializePartitionStage1 (
+    IN partition : ^MmpPartition,
+    IN node : ^MmpNode,
 )
 
     // Perform the first part of initialization for a memory partition.
@@ -90,9 +90,9 @@ FN MiInitializePartitionStage1 (
     RtlInitializeList ( &partition^.ModifiedListHead )
     partition^.ModifiedPageCount = 0
 
-    MiInitializeAvailablePageList ( &partition^.FreeList )
-    MiInitializeAvailablePageList ( &partition^.ZeroList )
-    MiInitializeAvailablePageList ( &partition^.StandbyList )
+    MmpInitializeAvailablePageList ( &partition^.FreeList )
+    MmpInitializeAvailablePageList ( &partition^.ZeroList )
+    MmpInitializeAvailablePageList ( &partition^.StandbyList )
 
     partition^.AvailablePageCount = 0
     partition^.FluidPageCount = 0
@@ -110,11 +110,11 @@ FN MiInitializePartitionStage1 (
     partition^.ModifiedPageMaximum = 0
     partition^.ZeroingThreshold = 0
 
-    partition^.SizeLevel = MM_UNINITIALIZED_SYSTEM
+    partition^.SizeLevel = MMU_UNINITIALIZED_SYSTEM
 END
 
-FN MiSetPartitionSize (
-    IN partition : ^MiPartition,
+FN MmpSetPartitionSize (
+    IN partition : ^MmpPartition,
 )
 
     // Calculate the partition size and various threshold values.
@@ -125,37 +125,37 @@ FN MiSetPartitionSize (
     IF membytes <= 3 * 1024 * 1024 THEN
         // Tiny, 0-3MB.
 
-        size = MM_TINY_SYSTEM
+        size = MMU_TINY_SYSTEM
 
     ELSEIF membytes <= 5 * 1024 * 1024 THEN
         // Small, 3-5MB.
 
-        size = MM_SMALL_SYSTEM
+        size = MMU_SMALL_SYSTEM
 
     ELSEIF membytes <= 9 * 1024 * 1024 THEN
         // Medium, 5-9MB.
 
-        size = MM_MEDIUM_SYSTEM
+        size = MMU_MEDIUM_SYSTEM
 
     ELSEIF membytes <= 33 * 1024 * 1024 THEN
         // Large, 9-33MB.
 
-        size = MM_LARGE_SYSTEM
+        size = MMU_LARGE_SYSTEM
 
     ELSE
         // Massive, >33MB.
 
-        size = MM_MASSIVE_SYSTEM
+        size = MMU_MASSIVE_SYSTEM
     END
 
     partition^.SizeLevel = size
 
     // Set the modified page maximum.
 
-    IF size <= MM_TINY_SYSTEM THEN
+    IF size <= MMU_TINY_SYSTEM THEN
         partition^.ModifiedPageMaximum = 50
 
-    ELSEIF size <= MM_LARGE_SYSTEM THEN
+    ELSEIF size <= MMU_LARGE_SYSTEM THEN
         partition^.ModifiedPageMaximum = 100
 
     ELSE
@@ -164,10 +164,10 @@ FN MiSetPartitionSize (
 
     // Set the page zeroing threshold.
 
-    IF size <= MM_TINY_SYSTEM THEN
+    IF size <= MMU_TINY_SYSTEM THEN
         partition^.ZeroingThreshold = 75
 
-    ELSEIF size <= MM_MEDIUM_SYSTEM THEN
+    ELSEIF size <= MMU_MEDIUM_SYSTEM THEN
         partition^.ZeroingThreshold = 150
 
     ELSE
@@ -176,69 +176,69 @@ FN MiSetPartitionSize (
 
     // Set the paging thresholds.
 
-    IF size <= MM_TINY_SYSTEM THEN
-        partition^.LowPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 8
-        partition^.SufficientPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 50
+    IF size <= MMU_TINY_SYSTEM THEN
+        partition^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 8
+        partition^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 50
 
-    ELSEIF size <= MM_LARGE_SYSTEM THEN
-        partition^.LowPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 20
-        partition^.SufficientPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 100
+    ELSEIF size <= MMU_LARGE_SYSTEM THEN
+        partition^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 20
+        partition^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 100
 
     ELSE
-        partition^.LowPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 100
-        partition^.SufficientPageCount = MI_BLOCK_FOR_PAGES_THRESHOLD + 500
+        partition^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 100
+        partition^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 500
     END
 END
 
-FN MiInsertPageIntoList (
-    IN list : ^MiAvailablePageList,
-    IN pfe : ^MiPfe,
+FN MmpInsertPageIntoList (
+    IN list : ^MmpAvailablePageList,
+    IN pfe : ^MmpPfe,
     IN head : UWORD,
 )
 
     // Insert the page into the specified list, into the correct color bucket.
 
-    pfn := MiPfeToPfn ( pfe )
+    pfn := MmpPfeToPfn ( pfe )
 
     list^.Count += 1
 
     IF head THEN
         RtlInsertAtHeadList (
-            &list^.Heads[MiPfnColor ( pfn )], // head
+            &list^.Heads[MmpPfnColor ( pfn )], // head
             &pfe^.Entry, // entry
         )
 
     ELSE
         RtlInsertAtTailList (
-            &list^.Heads[MiPfnColor ( pfn )], // head
+            &list^.Heads[MmpPfnColor ( pfn )], // head
             &pfe^.Entry, // entry
         )
     END
 END
 
-FN MiAllocatePageFromList (
-    IN list : ^MiAvailablePageList,
+FN MmpAllocatePageFromList (
+    IN list : ^MmpAvailablePageList,
     IN color : UWORD,
-) : ^MiPfe
+) : ^MmpPfe
 
     // Allocate a page, preferably with the given color, from the list.
     // The caller already ensured there's a page to remove from the list.
 
     list^.Count -= 1
 
-#IF ( == MI_COLOR_COUNT 1 )
+#IF ( == MMP_COLOR_COUNT 1 )
     KeAssert ( NOT RtlEmptyList ( &list^.Heads[0] ) )
 
     entry := list^.Heads[0].Next
 
     RtlRemoveEntryList ( entry )
 
-    RETURN CONTAINEROF entry TO MiPfe.Entry
+    RETURN CONTAINEROF entry TO MmpPfe.Entry
 
 #ELSE
     i := 0
 
-    WHILE i < MI_COLOR_COUNT DO
+    WHILE i < MMP_COLOR_COUNT DO
         entry := list^.Heads[color].Next
 
         IF entry != &list^.Heads[color] THEN
@@ -246,10 +246,10 @@ FN MiAllocatePageFromList (
 
             RtlRemoveEntryList ( entry )
 
-            RETURN CONTAINEROF entry TO MiPfe.Entry
+            RETURN CONTAINEROF entry TO MmpPfe.Entry
         END
 
-        color = (color + 1) & (MI_COLOR_COUNT - 1)
+        color = (color + 1) & (MMP_COLOR_COUNT - 1)
         i += 1
     END
 
@@ -260,14 +260,14 @@ FN MiAllocatePageFromList (
 
 END
 
-FN MiAllocatePageFromStandbyList (
-    IN partition : ^MiPartition,
+FN MmpAllocatePageFromStandbyList (
+    IN partition : ^MmpPartition,
     IN color : UWORD,
-) : ^MiPfe
+) : ^MmpPfe
 
     // Allocate a page from the given standby list.
 
-    pfe := MiAllocatePageFromList (
+    pfe := MmpAllocatePageFromList (
         &partition^.StandbyList, // list
         color, // color
     )
@@ -289,10 +289,10 @@ FN MiAllocatePageFromStandbyList (
 
     pfe^.Object = NULLPTR
 
-    IF pfe^.Type == MI_BACKED_PFE_TYPE THEN
+    IF pfe^.Type == MMP_BACKED_PFE_TYPE THEN
         // Remove from AVL tree of object.
 
-        ob := CONTAINEROF object TO MmBackedObject.Hdr
+        ob := CONTAINEROF object TO MmuBackedObject.Hdr
 
         RtlRemoveAvl (
             &ob^.PageTreeRoot, // root
@@ -301,7 +301,7 @@ FN MiAllocatePageFromStandbyList (
 
     ELSE
 
-        KeAssert ( pfe^.Type == MI_ANON_PFE_TYPE )
+        KeAssert ( pfe^.Type == MMP_ANON_PFE_TYPE )
 
         // Reset the tracking table entry for this anonymous page.
 
@@ -323,16 +323,16 @@ FN MiAllocatePageFromStandbyList (
         // out of a page table is the province of architecture-specific pmap
         // code.
 
-        IF pfe^.Flags & MI_PAGED_POOL_PFE_FLAG == 0 THEN
-            poolpfe := MiPfnToPfe (
-                MiPfnFromPte (
-                    (MiPteAddress ( entry ))^
+        IF pfe^.Flags & MMP_PAGED_POOL_PFE_FLAG == 0 THEN
+            poolpfe := MmpPfnToPfe (
+                MmpPfnFromPte (
+                    (MmpPteAddress ( entry ))^
                 )
             )
 
             // Tracking pool should consist of anonymous pages.
 
-            KeAssert ( poolpfe^.Type == MI_ANON_PFE_TYPE )
+            KeAssert ( poolpfe^.Type == MMP_ANON_PFE_TYPE )
 
             // This page of tracking pool should have at least 2
             // references: one for being pinned (due to having this tracking
@@ -350,25 +350,25 @@ FN MiAllocatePageFromStandbyList (
     RETURN pfe
 END
 
-FN MiAllocatePage (
-    IN partition : ^MiPartition,
+FN MmpAllocatePage (
+    IN partition : ^MmpPartition,
     IN zeroed : UWORD,
     IN low : UWORD,
     IN color : UWORD,
-) : ^MiPfe
+) : ^MmpPfe
 
     // Allocate a page from the given partition. If none available, return
     // NULLPTR.
 
-    pfe : ^MiPfe = NULLPTR
+    pfe : ^MmpPfe = NULLPTR
     mustzero := FALSE
     listentry : ^RtlListEntry
 
     // Ensure color within range.
 
-    color &= MI_COLOR_COUNT - 1
+    color &= MMP_COLOR_COUNT - 1
 
-    ipl := MiAcquireListExclusive ( partition )
+    ipl := MmpAcquireListExclusive ( partition )
 
     avail := partition^.AvailablePageCount
 
@@ -378,7 +378,7 @@ FN MiAllocatePage (
         GOTO Out
     END
 
-    IF NOT low AND avail <= MI_BLOCK_FOR_PAGES_THRESHOLD THEN
+    IF NOT low AND avail <= MMP_BLOCK_FOR_PAGES_THRESHOLD THEN
         // Not enough pages.
 
         GOTO Out
@@ -386,7 +386,7 @@ FN MiAllocatePage (
 
     IF zeroed THEN
         IF partition^.ZeroList.Count THEN
-            pfe = MiAllocatePageFromList (
+            pfe = MmpAllocatePageFromList (
                 &partition^.ZeroList, // list
                 color, // color
             )
@@ -398,13 +398,13 @@ FN MiAllocatePage (
             mustzero = TRUE
 
             IF partition^.FreeList.Count THEN
-                pfe = MiAllocatePageFromList (
+                pfe = MmpAllocatePageFromList (
                     &partition^.FreeList, // list
                     color, // color
                 )
 
             ELSE
-                pfe = MiAllocatePageFromStandbyList (
+                pfe = MmpAllocatePageFromStandbyList (
                     partition, // partition
                     color, // color
                 )
@@ -412,19 +412,19 @@ FN MiAllocatePage (
         END
 
     ELSEIF partition^.FreeList.Count THEN
-        pfe = MiAllocatePageFromList (
+        pfe = MmpAllocatePageFromList (
             &partition^.FreeList, // list
             color, // color
         )
 
     ELSEIF partition^.ZeroList.Count THEN
-        pfe = MiAllocatePageFromList (
+        pfe = MmpAllocatePageFromList (
             &partition^.ZeroList, // list
             color, // color
         )
 
     ELSE
-        pfe = MiAllocatePageFromStandbyList (
+        pfe = MmpAllocatePageFromStandbyList (
             partition, // partition
             color, // color
         )
@@ -444,25 +444,25 @@ FN MiAllocatePage (
 
 @Out
 
-    MiReleaseList ( partition, ipl )
+    MmpReleaseList ( partition, ipl )
 
     IF mustzero THEN
         KeAssert ( pfe != NULLPTR )
 
-        MmZeroPage ( MiPfeToPfn ( pfe ) )
+        MmuZeroPage ( MmpPfeToPfn ( pfe ) )
     END
 
     RETURN pfe
 END
 
-FN MiFreePage (
-    IN partition : ^MiPartition,
-    IN pfe : ^MiPfe,
+FN MmpFreePage (
+    IN partition : ^MmpPartition,
+    IN pfe : ^MmpPfe,
 )
 
     // Free the page to the specified partition.
 
-    ipl := MiAcquireListExclusive ( partition )
+    ipl := MmpAcquireListExclusive ( partition )
 
     avail := partition^.AvailablePageCount
     avail += 1
@@ -471,7 +471,7 @@ FN MiFreePage (
 
     // Insert at the head so that we reuse it more quickly (hot in cache).
 
-    MiInsertPageIntoList (
+    MmpInsertPageIntoList (
         &partition^.FreeList, // list
         pfe, // pfe
         TRUE, // head
@@ -488,25 +488,25 @@ FN MiFreePage (
         )
     END
 
-    MiReleaseList ( partition, ipl )
+    MmpReleaseList ( partition, ipl )
 
     // Wake waiters for available pages.
 
-    MiNewAvailablePage ( partition, avail )
+    MmpNewAvailablePage ( partition, avail )
 END
 
-#DEFINE MI_MIN_LOOPS_FOR_BACKOFF 2
-#DEFINE MI_INITIAL_BACKOFF_MS 5
-#DEFINE MI_MAX_BACKOFF_MS 1000
+#DEFINE MMP_MIN_LOOPSU_FOR_BACKOFF 2
+#DEFINE MMP_INITIAL_BACKOFF_MS 5
+#DEFINE MMP_MAX_BACKOFF_MS 1000
 
-FN MiWaitForPages (
-    IN partition : ^MiPartition,
+FN MmpWaitForPages (
+    IN partition : ^MmpPartition,
     IN low : UWORD,
 ) : UWORD
 
     // Wait for available pages to exist from the given partition.
     // This function provides no guarantees - caller will have to repeatedly
-    // call it until MiAllocatePage yields a page.
+    // call it until MmpAllocatePage yields a page.
 
     // Returns TRUE if a timeout occurred, FALSE otherwise.
     // If a timeout occurred, that indicates that the partition did not have
@@ -524,18 +524,18 @@ FN MiWaitForPages (
     RtlSetUquadToUlong ( &timeout, 60000 )
 
     backoff : RtlUquad
-    backoffms := MI_INITIAL_BACKOFF_MS
+    backoffms := MMP_INITIAL_BACKOFF_MS
 
     IF low THEN
         threshold = 0
         event = &partition^.LowPageAvailableEvent
 
     ELSE
-        threshold = MI_BLOCK_FOR_PAGES_THRESHOLD
+        threshold = MMP_BLOCK_FOR_PAGES_THRESHOLD
         event = &partition^.PageAvailableEvent
     END
 
-    ipl := MiAcquireListExclusive ( partition )
+    ipl := MmpAcquireListExclusive ( partition )
 
     WHILE partition^.AvailablePageCount <= threshold DO
         // Wait on the event until we catch the available page count at a
@@ -543,14 +543,14 @@ FN MiWaitForPages (
 
         KeResetEvent ( event )
 
-        MiReleaseList ( partition, ipl )
+        MmpReleaseList ( partition, ipl )
 
-        IF loops >= MI_MIN_LOOPS_FOR_BACKOFF THEN
+        IF loops >= MMP_MIN_LOOPSU_FOR_BACKOFF THEN
             // Perform exponential backoff.
 
             seed : UWORD
 
-            IF loops == MI_MIN_LOOPS_FOR_BACKOFF THEN
+            IF loops == MMP_MIN_LOOPSU_FOR_BACKOFF THEN
                 // Initialize the xorshift seed which is the low bits of the
                 // current thread pointer shifted right by the natural
                 // alignment and XORed with the VPN and the current uptime.
@@ -570,7 +570,7 @@ FN MiWaitForPages (
 
             backoffms += seed & 7
 
-            IF backoffms >= MI_MAX_BACKOFF_MS THEN
+            IF backoffms >= MMP_MAX_BACKOFF_MS THEN
                 backoffms = 1 + (seed & 31)
             END
 
@@ -591,7 +591,7 @@ FN MiWaitForPages (
             seed $= seed << 5
         END
 
-        status := KeWaitForSingleObject (
+        status := KeuWaitForSingleObject (
             KE_KERNEL_MODE, // waitmode
             KE_UNALERTABLE, // alertable
             &timeout, // timeout
@@ -599,7 +599,7 @@ FN MiWaitForPages (
         )
 
         IF status == OS_STATUS_WAIT_TIMEOUT THEN
-            IF NOT MiIsPartitionPhysical ( partition ) THEN
+            IF NOT MmpIsPartitionPhysical ( partition ) THEN
                 // If a node partition is deadlocked, this is a fatal
                 // condition.
 
@@ -618,26 +618,26 @@ FN MiWaitForPages (
 
         loops += 1
 
-        ipl = MiAcquireListExclusive ( partition )
+        ipl = MmpAcquireListExclusive ( partition )
     END
 
-    MiReleaseList ( partition, ipl )
+    MmpReleaseList ( partition, ipl )
 
     RETURN FALSE
 END
 
-FN MiAllocatePageWait (
-    IN partition : ^MiPartition,
+FN MmpAllocatePageWait (
+    IN partition : ^MmpPartition,
     IN zeroed : UWORD,
     IN low : UWORD,
     IN color : UWORD,
-) : ^MiPfe
+) : ^MmpPfe
 
     // Allocate a page with the given parameters. Allowed to wait. Returns
     // NULLPTR on timeout (indicative of partition deadlock).
 
     WHILE TRUE DO
-        pfe := MiAllocatePage (
+        pfe := MmpAllocatePage (
             partition, // partition
             zeroed, // zeroed
             low, // low
@@ -648,7 +648,7 @@ FN MiAllocatePageWait (
             RETURN pfe
         END
 
-        IF MiWaitForPages (
+        IF MmpWaitForPages (
             partition, // partition
             low, // low
         ) THEN
@@ -657,8 +657,8 @@ FN MiAllocatePageWait (
     END
 END
 
-FN MmChargeCommit (
-    IN partition : ^MiPartition,
+FN MmuChargeCommit (
+    IN partition : ^MmpPartition,
     IN pages : UWORD,
     IN wait : UWORD,
 ) : OsStatus
@@ -705,7 +705,7 @@ FN MmChargeCommit (
     WHILE partition^.CommitUsage > partition^.CommitLimit DO
         KeReleaseApcLock ( &partition^.CommitLock, ipl )
 
-        status = MiExpandPageFiles (
+        status = MmpExpandPageFiles (
             partition, // partition
             wait, // wait
             FALSE, // full
@@ -739,8 +739,8 @@ FN MmChargeCommit (
     RETURN status
 END
 
-FN MmUnchargeCommit (
-    IN partition : ^MiPartition,
+FN MmuUnchargeCommit (
+    IN partition : ^MmpPartition,
     IN pages : UWORD,
 )
 
@@ -756,46 +756,46 @@ FN MmUnchargeCommit (
     KeAssert ( pages <= old )
 END
 
-FN MmGetSystemSize () : UWORD
+FN MmuGetSystemSize () : UWORD
 
     // Get the size of the current node.
 
-    RETURN PsCurrentPartition ()^.SizeLevel
+    RETURN PsuCurrentPartition ()^.SizeLevel
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) MiDeletePartitionObject (
+FN (ObuTypeDeleteF) MmpDeletePartitionObject (
     IN object : ^VOID,
 ) : UWORD
 
     // Delete a partition object.
 
-    KeCrash ( "TODO MiDeletePartitionObject\n" )
+    KeCrash ( "TODO MmpDeletePartitionObject\n" )
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeInitializeF) MiInitializePartitionObject (
+FN (ObuTypeInitializeF) MmpInitializePartitionObject (
     IN object : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
 
     // Initialize a partition object.
 
-    KeCrash ( "TODO MiInitializePartitionObject\n" )
+    KeCrash ( "TODO MmpInitializePartitionObject\n" )
 END
 
-PUBLIC MmPartitionType : ObType = {
+PUBLIC MmuPartitionType : ObuType = {
     [Name] = "Partition",
 
-    [Delete] = &MiDeletePartitionObject,
+    [Delete] = &MmpDeletePartitionObject,
 
-    [Initialize] = &MiInitializePartitionObject,
+    [Initialize] = &MmpInitializePartitionObject,
 
-    [WaitOffset] = OB_TYPE_NO_WAIT_OFFSET,
+    [WaitOffset] = OBU_TYPE_NO_WAIT_OFFSET,
     [TypeIdentifier] = OS_PARTITION_TYPE,
     [Tag] = 'MmPr',
 
-    [TypicalBodySize] = SIZEOF MiPartition,
+    [TypicalBodySize] = SIZEOF MmpPartition,
 
     [IsPaged] = FALSE,
 }

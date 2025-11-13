@@ -1,11 +1,11 @@
-#INCLUDE "../Ki.hjk"
+#INCLUDE "../Kep.hjk"
 
 #DEFINE TEST_TIMERS 32
 
-KeTestTimers : KeTimer[TEST_TIMERS]
-KeTestDpcs : KeDpc[TEST_TIMERS]
+KeuTestTimers : KeTimer[TEST_TIMERS]
+KeuTestDpcs : KeDpc[TEST_TIMERS]
 
-FN (KeDpcF) KiTestDpcF (
+FN (KeDpcF) KepTestDpcF (
     IN dpc : ^KeDpc,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -14,19 +14,19 @@ FN (KeDpcF) KiTestDpcF (
     RtlPrint ( "Expired " )
 END
 
-FN KiTest ()
+FN KepTest ()
 
     i := 0
 
     WHILE i < TEST_TIMERS DO
         KeInitializeDpc (
-            &KiTestDpcs[i], // dpc
-            &KiTestDpcF, // func
+            &KepTestDpcs[i], // dpc
+            &KepTestDpcF, // func
         )
 
         KeInitializeTimer (
-            &KiTestTimers[i], // timer
-            &KiTestDpcs[i], // dpc
+            &KepTestTimers[i], // timer
+            &KepTestDpcs[i], // dpc
             "Timer", // name
         )
 
@@ -34,7 +34,7 @@ FN KiTest ()
     END 
 END
 
-FN KiIdleLoopTest ()
+FN KepIdleLoopTest ()
 
     interval : RtlUquad
 
@@ -52,14 +52,14 @@ FN KiIdleLoopTest ()
 
         IF enq THEN
             KeEnqueueTimer (
-                &KiTestTimers[i], // timer
+                &KepTestTimers[i], // timer
                 &interval, // interval
                 0, // context1
                 0, // context2
             )
 
         ELSE
-            KeDequeueTimer ( &KiTestTimers[i] )
+            KeDequeueTimer ( &KepTestTimers[i] )
         END
 
         i += 1

@@ -16,110 +16,110 @@
 // this would have taken more time than I was willing to spend.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 
 #IF BLD_MP
 
-#MACRO KiAcquireChain ( chain ) [
-    KiAcquireSpinlockRaise ( &(chain)^.Spinlock )
+#MACRO KepAcquireChain ( chain ) [
+    KepAcquireSpinlockRaise ( &(chain)^.Spinlock )
 ]
 
-#MACRO KiReleaseChain ( chain, ipl ) [
-    KiReleaseSpinlockLower ( &(chain)^.Spinlock, ipl )
+#MACRO KepReleaseChain ( chain, ipl ) [
+    KepReleaseSpinlockLower ( &(chain)^.Spinlock, ipl )
 ]
 
-#MACRO KiAcquireChainElevated ( chain ) [
-    KiAcquireSpinlock ( &(chain)^.Spinlock )
+#MACRO KepAcquireChainElevated ( chain ) [
+    KepAcquireSpinlock ( &(chain)^.Spinlock )
 ]
 
-#MACRO KiReleaseChainElevated ( chain ) [
-    KiReleaseSpinlock ( &(chain)^.Spinlock )
+#MACRO KepReleaseChainElevated ( chain ) [
+    KepReleaseSpinlock ( &(chain)^.Spinlock )
 ]
 
-#MACRO KiAcquireTurnstileElevated ( turnstile ) [
-    KiAcquireSpinlock ( &(turnstile)^.Spinlock )
+#MACRO KepAcquireTurnstileElevated ( turnstile ) [
+    KepAcquireSpinlock ( &(turnstile)^.Spinlock )
 ]
 
-#MACRO KiReleaseTurnstileElevated ( turnstile ) [
-    KiReleaseSpinlock ( &(turnstile)^.Spinlock )
+#MACRO KepReleaseTurnstileElevated ( turnstile ) [
+    KepReleaseSpinlock ( &(turnstile)^.Spinlock )
 ]
 
-#MACRO KiReleaseTurnstileAndThreadElevated ( turnstile, thread ) [
-    KiReleaseTwoSpinlocks ( &(turnstile)^.Spinlock, &(thread)^.Spinlock )
+#MACRO KepReleaseTurnstileAndThreadElevated ( turnstile, thread ) [
+    KepReleaseTwoSpinlocks ( &(turnstile)^.Spinlock, &(thread)^.Spinlock )
 ]
 
 #ELSE
 
-#MACRO KiAcquireChain ( chain ) [
-    KiRaiseIpl ( KI_IPL_DPC )
+#MACRO KepAcquireChain ( chain ) [
+    KepRaiseIpl ( KEP_IPL_DPC )
 ]
 
-#MACRO KiReleaseChain ( chain, ipl ) [
-    KiLowerIpl ( ipl )
+#MACRO KepReleaseChain ( chain, ipl ) [
+    KepLowerIpl ( ipl )
 ]
 
-#MACRO KiAcquireChainElevated ( chain ) []
+#MACRO KepAcquireChainElevated ( chain ) []
 
-#MACRO KiReleaseChainElevated ( chain ) []
+#MACRO KepReleaseChainElevated ( chain ) []
 
-#MACRO KiAcquireTurnstileElevated ( turnstile ) []
+#MACRO KepAcquireTurnstileElevated ( turnstile ) []
 
-#MACRO KiReleaseTurnstileElevated ( turnstile ) []
+#MACRO KepReleaseTurnstileElevated ( turnstile ) []
 
-#MACRO KiReleaseTurnstileAndThreadElevated ( turnstile, thread ) []
+#MACRO KepReleaseTurnstileAndThreadElevated ( turnstile, thread ) []
 
 #END
 
-#DEFINE KI_TURNSTILE_CHAINS 128
+#DEFINE KEP_TURNSTILE_CHAINS 128
 
 #IF ( == BLD_BITS 32 )
 
-#DEFINE KI_TURNSTILE_HASH_SHIFT 2
+#DEFINE KEP_TURNSTILE_HASH_SHIFT 2
 
 #ELSE
 
-#DEFINE KI_TURNSTILE_HASH_SHIFT 3
+#DEFINE KEP_TURNSTILE_HASH_SHIFT 3
 
 #END
 
-#MACRO KiTurnstileHash ( address ) [
-    ((address >> KI_TURNSTILE_HASH_SHIFT) & (KI_TURNSTILE_CHAINS - 1))
+#MACRO KepTurnstileHash ( address ) [
+    ((address >> KEP_TURNSTILE_HASH_SHIFT) & (KEP_TURNSTILE_CHAINS - 1))
 ]
 
-STRUCT KiTurnstileChain
+STRUCT KepTurnstileChain
     Head : RtlListEntry,
 #IF BLD_MP
-    Spinlock : KiSpinlock,
+    Spinlock : KepSpinlock,
 #END
 END
 
-KiTurnstileChains : KiTurnstileChain[KI_TURNSTILE_CHAINS]
+KepTurnstileChains : KepTurnstileChain[KEP_TURNSTILE_CHAINS]
 
-#DEFINE KI_INITIAL_TURNSTILES [(KI_MAXIMUM_PROCESSORS + 1)]
+#DEFINE KEP_INITIAL_TURNSTILES [(KEP_MAXIMUM_PROCESSORS + 1)]
 
-#DEFINE KI_SPIN_CYCLES 400
+#DEFINE KEP_SPIN_CYCLES 400
 
-KiInitialTurnstiles : KiTurnstile[KI_INITIAL_TURNSTILES]
+KepInitialTurnstiles : KepTurnstile[KEP_INITIAL_TURNSTILES]
 
-KiTurnstileIndex : ULONG = 0
+KepTurnstileIndex : ULONG = 0
 
 #SECTION "INITtext"
-FN KeAllocateInitialTurnstile () : ^KiTurnstile
+FN KeuAllocateInitialTurnstile () : ^KepTurnstile
 
     // Allocate an initial turnstile.
 
     index := KeIncrementUlong (
-        &KiTurnstileIndex, // ptr
+        &KepTurnstileIndex, // ptr
         1, // inc
     )
 
-    KeAssert ( index < KI_INITIAL_TURNSTILES )
+    KeAssert ( index < KEP_INITIAL_TURNSTILES )
 
-    RETURN &KiInitialTurnstiles[index]
+    RETURN &KepInitialTurnstiles[index]
 END
 
 #SECTION "INITtext"
-FN KiInitializeTurnstiles ()
+FN KepInitializeTurnstiles ()
 
     // Initialize the turnstile package.
 
@@ -127,14 +127,14 @@ FN KiInitializeTurnstiles ()
 
     i := 0
 
-    WHILE i < KI_TURNSTILE_CHAINS DO
-        RtlInitializeList ( &KiTurnstileChains[i].Head )
+    WHILE i < KEP_TURNSTILE_CHAINS DO
+        RtlInitializeList ( &KepTurnstileChains[i].Head )
 
         i += 1
     END
 END
 
-FN (RtlLessThanF) KiCompareThreads (
+FN (RtlLessThanF) KepCompareThreads (
     IN a : ^RtlHeapEntry,
     IN b : ^RtlHeapEntry,
 ) : UWORD
@@ -146,8 +146,8 @@ FN (RtlLessThanF) KiCompareThreads (
     // Interactive threads are always greater than noninteractive threads.
     // If interactivity is the same, it's determined by the priority.
 
-    thread1 := CONTAINEROF a TO KeThread.TurnstileEntry
-    thread2 := CONTAINEROF b TO KeThread.TurnstileEntry
+    thread1 := CONTAINEROF a TO KeuThread.TurnstileEntry
+    thread2 := CONTAINEROF b TO KeuThread.TurnstileEntry
 
     IF thread1^.BestowedInteractivity OR
         thread1^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME THEN
@@ -171,8 +171,8 @@ FN (RtlLessThanF) KiCompareThreads (
     END
 END
 
-FN KiBoostPriority (
-    IN owner : ^KeThread,
+FN KepBoostPriority (
+    IN owner : ^KeuThread,
     IN interactive : UWORD,
     IN priority : UWORD,
 ) : UWORD
@@ -185,7 +185,7 @@ FN KiBoostPriority (
     WHILE TRUE DO
         // Boost the owner. His lock is held on entry, released on exit.
 
-        IF NOT KiRaisePriorityFloorThread (
+        IF NOT KepRaisePriorityFloorThread (
             owner, // thread
             interactive, // interactive
             priority, // priority
@@ -215,10 +215,10 @@ FN KiBoostPriority (
         // Move the waiter in the turnstile's maxheap to reflect a new
         // bestowed priority.
 
-        KiAcquireTurnstileElevated ( turnstile )
+        KepAcquireTurnstileElevated ( turnstile )
 
         RtlRemoveFromHeap (
-            &KiCompareThreads, // comparisonfunc
+            &KepCompareThreads, // comparisonfunc
             &turnstile^.WaiterHeapRoot, // rootptr
             &owner^.TurnstileEntry, // entry
         )
@@ -231,12 +231,12 @@ FN KiBoostPriority (
         // Re-insert.
 
         RtlInsertIntoHeap (
-            &KiCompareThreads, // comparisonfunc
+            &KepCompareThreads, // comparisonfunc
             &turnstile^.WaiterHeapRoot, // rootptr
             &owner^.TurnstileEntry, // entry
         )
 
-        KiReleaseTurnstileElevated ( turnstile )
+        KepReleaseTurnstileElevated ( turnstile )
 
         // NOTE: Previously we set an owner^.Boosted flag here which indicated
         //       to the owner that if he was in the middle of performing
@@ -251,7 +251,7 @@ FN KiBoostPriority (
 
         IF turnstile^.Event.Header.SignalCount THEN
             // The turnstile was already awoken and this thread just hasn't made
-            // its way out of KiBlockOnLock yet. Note that we aren't holding any
+            // its way out of KepBlockOnLock yet. Note that we aren't holding any
             // lock that guards this field so this is just a hint; it
             // could change from FALSE to TRUE at any moment after this (the
             // reverse, however, could not happen).
@@ -260,7 +260,7 @@ FN KiBoostPriority (
         END
 
 #IF BLD_MP
-        chain := &KiTurnstileChains[KiTurnstileHash(turnstile^.Key)]
+        chain := &KepTurnstileChains[KepTurnstileHash(turnstile^.Key)]
 
         // Try to acquire the chain spinlock. Note that this is out of order
         // with respect to the thread lock, so we only try-acquire it and retry
@@ -269,10 +269,10 @@ FN KiBoostPriority (
         // case the holder holds it along a codepath that never contends on the
         // out of order spinlock we're currently holding (which is most common).
 
-        IF NOT KiTryAcquireSpinlock ( &chain^.Spinlock ) THEN
+        IF NOT KepTryAcquireSpinlock ( &chain^.Spinlock ) THEN
             // Failed to acquire it.
 
-            KiReleaseThread ( owner, KI_IPL_APC )
+            KepReleaseThread ( owner, KEP_IPL_APC )
 
             // Indicate to caller that a retry is needed.
 
@@ -283,13 +283,13 @@ FN KiBoostPriority (
             // The turnstile was awoken before we could acquire the chain
             // spinlock.
 
-            KiReleaseChainElevated ( chain )
+            KepReleaseChainElevated ( chain )
 
             BREAK
         END
 #END
 
-        KiReleaseThreadElevated ( owner )
+        KepReleaseThreadElevated ( owner )
 
         // Acquire the spinlock of the current owning thread of this next
         // turnstile.
@@ -303,23 +303,23 @@ FN KiBoostPriority (
             KeCrash ( "Turnstile waiter cycle (deadlock!)\n" )
         END
 
-        KiAcquireThreadElevated ( owner )
+        KepAcquireThreadElevated ( owner )
 
-        KiReleaseChainElevated ( chain )
+        KepReleaseChainElevated ( chain )
     END
 
-    KiReleaseThread ( owner, KI_IPL_APC )
+    KepReleaseThread ( owner, KEP_IPL_APC )
 
     // Indicate to caller that no retry is necessary.
 
     RETURN FALSE
 END
 
-EXTERN FN MmWriteFaultOnLockWord (
+EXTERN FN MmuWriteFaultOnLockWord (
     IN lockptr : ^VOID,
 )
 
-FN KiBlockOnLock (
+FN KepBlockOnLock (
     IN lock : ^KeLock,
     IN current : UWORD,
 )
@@ -330,18 +330,18 @@ FN KiBlockOnLock (
 
     // Lock the turnstile chain.
 
-    chain := &KiTurnstileChains[KiTurnstileHash(lock)]
+    chain := &KepTurnstileChains[KepTurnstileHash(lock)]
 
-    turnstile : ^KiTurnstile
-    otherturnstile : ^KiTurnstile
+    turnstile : ^KepTurnstile
+    otherturnstile : ^KepTurnstile
 
-    owner : ^KeThread = NULLPTR
+    owner : ^KeuThread = NULLPTR
 
-    IF current & KI_LOCK_WRITE_LOCKED THEN
-        owner = CAST current & KI_LOCK_BITS TO ^KeThread
+    IF current & KEP_LOCK_WRITE_LOCKED THEN
+        owner = CAST current & KEP_LOCK_BITS TO ^KeuThread
     END
 
-    ipl := KiAcquireChain ( chain )
+    ipl := KepAcquireChain ( chain )
 
     // Set that there are waiters now. This will cause releasing threads to
     // signal the turnstile event.
@@ -358,7 +358,7 @@ FN KiBlockOnLock (
 
     IF KeCompareSwapPtrAbortOnFault (
         &lock^.Ptr, // ptr
-        current | KI_LOCK_WAITERS, // newvalue
+        current | KEP_LOCK_WAITERS, // newvalue
         current, // expectedvalue
         OUT aborted, // aborted
     ) != current THEN
@@ -372,7 +372,7 @@ FN KiBlockOnLock (
         // Also we're at an elevated IPL holding a spinlock so that's another
         // reason.
 
-        KiReleaseChain ( chain, ipl )
+        KepReleaseChain ( chain, ipl )
 
         IF aborted THEN
             // We were aborted because we faulted on the lock word.
@@ -380,7 +380,7 @@ FN KiBlockOnLock (
             // This is technically a layering violation but there's no other
             // decent way to accomplish this.
 
-            MmWriteFaultOnLockWord ( lock )
+            MmuWriteFaultOnLockWord ( lock )
         END
 
         LEAVE
@@ -409,7 +409,7 @@ FN KiBlockOnLock (
             turnstile^.Owner = owner
 
 #IF BLD_MP
-            KiInitializeSpinlock ( &turnstile^.Spinlock )
+            KepInitializeSpinlock ( &turnstile^.Spinlock )
 #END
 
             RtlInsertAtHeadList (
@@ -427,20 +427,20 @@ FN KiBlockOnLock (
             )
 
             IF owner THEN
-                KiAcquireThreadElevated ( owner )
+                KepAcquireThreadElevated ( owner )
 
                 RtlInsertAtHeadList (
                     &owner^.PiTurnstileListHead, // head
                     &turnstile^.PiEntry, // entry
                 )
 
-                KiReleaseThreadElevated ( owner )
+                KepReleaseThreadElevated ( owner )
             END
 
             BREAK
         END
 
-        turnstile = CONTAINEROF listentry TO KiTurnstile.ChainEntry
+        turnstile = CONTAINEROF listentry TO KepTurnstile.ChainEntry
 
         IF turnstile^.Key == lock AND
             turnstile^.Owner == owner THEN
@@ -472,13 +472,13 @@ FN KiBlockOnLock (
         // lock.
 
 #IF BLD_MP
-        IF owner^.Status == KI_THREAD_RUNNING THEN
+        IF owner^.Status == KE_THREAD_RUNNING THEN
             // The owner exists and is currently running on another processor.
             // Spin for a while to see if we can get the lock without blocking.
 
-            KiReleaseChain ( chain, KI_IPL_APC )
+            KepReleaseChain ( chain, KEP_IPL_APC )
 
-            i := KI_SPIN_CYCLES
+            i := KEP_SPIN_CYCLES
 
             WHILE i DO
                 IF turnstile^.Event.Header.SignalCount THEN
@@ -496,7 +496,7 @@ FN KiBlockOnLock (
                 i -= 1
             END
 
-            KiAcquireChain ( chain )
+            KepAcquireChain ( chain )
 
             IF turnstile^.Event.Header.SignalCount THEN
                 // Owner no longer valid.
@@ -508,7 +508,7 @@ FN KiBlockOnLock (
 
         // We're really going to wait, so do priority boosting.
 
-        KiAcquireThreadElevated ( thread )
+        KepAcquireThreadElevated ( thread )
 
         // Capture current priority as the BestowedPriority.
         //
@@ -518,7 +518,7 @@ FN KiBlockOnLock (
         //       for ourselves right here. It's assumed to be sufficient to just
         //       boost the waiter chain with whatever priority we had when we
         //       blocked, but if that assumption turns out to be faulty, it
-        //       wouldn't be difficult to extend KiSetPriorityThread to unblock
+        //       wouldn't be difficult to extend KepSetPriorityThread to unblock
         //       a thread blocked on a turnstile if its priority was raised,
         //       with an OS_STATUS_KERNEL_APC, which would cause the lock
         //       acquisition to be performed again and the waiters re-boosted
@@ -534,29 +534,29 @@ FN KiBlockOnLock (
 
         // Insert the thread into the turnstile's max heap.
 
-        KiAcquireTurnstileElevated ( turnstile )
+        KepAcquireTurnstileElevated ( turnstile )
 
         RtlInsertIntoHeap (
-            &KiCompareThreads, // comparisonfunc
+            &KepCompareThreads, // comparisonfunc
             &turnstile^.WaiterHeapRoot, // rootptr
             &thread^.TurnstileEntry, // entry
         )
 
-        KiReleaseTurnstileAndThreadElevated ( turnstile, thread )
+        KepReleaseTurnstileAndThreadElevated ( turnstile, thread )
 
         // Acquire the owning thread's spinlock and release the chain.
 
-        KiAcquireThreadElevated ( owner )
+        KepAcquireThreadElevated ( owner )
 
-        KiReleaseChainElevated ( chain )
+        KepReleaseChainElevated ( chain )
 
         IF owner^.PriorityFloor < priority OR
-            (interactive AND NOT KiIsInteractiveForFloor ( owner )) THEN
+            (interactive AND NOT KepIsInteractiveForFloor ( owner )) THEN
 
             // Raise the priority floor. Returns with the thread lock released.
 
 #IF BLD_MP
-            IF KiBoostPriority (
+            IF KepBoostPriority (
                 owner, // owner
                 interactive, // interactive
                 priority, // priority
@@ -568,7 +568,7 @@ FN KiBlockOnLock (
                 GOTO UnreferenceAndLeave
             END
 #ELSE
-            KiBoostPriority (
+            KepBoostPriority (
                 owner, // owner
                 interactive, // interactive
                 priority, // priority
@@ -576,29 +576,29 @@ FN KiBlockOnLock (
 #END
 
         ELSE
-            KiReleaseThread ( owner, KI_IPL_APC )
+            KepReleaseThread ( owner, KEP_IPL_APC )
         END
     
     ELSE
-        KiReleaseChain ( chain, KI_IPL_APC )
+        KepReleaseChain ( chain, KEP_IPL_APC )
     END
 
     // Wait on the turnstile event.
     // This wait can be cancelled if a kernel APC arrives, but the kernel APC
-    // will not be delivered since we're at KI_IPL_APC. This allows us to
+    // will not be delivered since we're at KEP_IPL_APC. This allows us to
     // clean up our usage of our turnstile, which lets the APC grab turnstile-
     // -backed locks once it is actually delivered when we lower IPL.
 
     alertable := KE_UNALERTABLE
 
-    IF ipl == KI_IPL_LOW THEN
+    IF ipl == KEP_IPL_LOW THEN
         // The lock was acquired at LOW IPL, so we should cancel the wait and
         // clean up if KAPCs arrive.
 
         alertable = KE_CANCEL_ON_KAPC
     END
 
-    KeWaitForSingleObject (
+    KeuWaitForSingleObject (
         KE_KERNEL_MODE, // waitmode
         alertable, // alertable
         NULLPTR, // timeout
@@ -607,26 +607,26 @@ FN KiBlockOnLock (
 
 @UnreferenceAndLeave
 
-    KiAcquireChain ( chain )
+    KepAcquireChain ( chain )
 
 @UnreferenceAndLeaveChainHeld
 
     IF thread^.BlockedOnTurnstile THEN
-        KiAcquireThreadElevated ( thread )
+        KepAcquireThreadElevated ( thread )
 
         // Remove the thread from the turnstile's maxheap.
 
         thread^.BlockedOnTurnstile = NULLPTR
 
-        KiAcquireTurnstileElevated ( turnstile )
+        KepAcquireTurnstileElevated ( turnstile )
 
         RtlRemoveFromHeap (
-            &KiCompareThreads, // comparisonfunc
+            &KepCompareThreads, // comparisonfunc
             &turnstile^.WaiterHeapRoot, // rootptr
             &thread^.TurnstileEntry, // entry
         )
 
-        KiReleaseTurnstileAndThreadElevated ( turnstile, thread )
+        KepReleaseTurnstileAndThreadElevated ( turnstile, thread )
     END
 
     // Make sure we didn't magically get a turnstile back.
@@ -657,29 +657,29 @@ FN KiBlockOnLock (
             RtlRemoveEntryList ( &turnstile^.ChainEntry )
 
             IF owner THEN
-                KiAcquireThreadElevated ( owner )
+                KepAcquireThreadElevated ( owner )
 
                 RtlRemoveEntryList ( &turnstile^.PiEntry )
 
-                KiReleaseThreadElevated ( owner )
+                KepReleaseThreadElevated ( owner )
             END
         END
     END
 
-    KiReleaseChain ( chain, ipl )
+    KepReleaseChain ( chain, ipl )
 
     // Return to retry the lock.
 END
 
-FN KiComputeFloor (
-    IN thread : ^KeThread,
+FN KepComputeFloor (
+    IN thread : ^KeuThread,
 )
 
     // Compute a new priority floor for the thread.
 
     head := &thread^.PiTurnstileListHead
 
-    ipl := KiAcquireThread ( thread )
+    ipl := KepAcquireThread ( thread )
 
     // Scan the turnstile list to find the highest priority.
 
@@ -688,13 +688,13 @@ FN KiComputeFloor (
     interactivityfloor := FALSE
 
     WHILE listentry != head DO
-        turnstile := CONTAINEROF listentry TO KiTurnstile.PiEntry
+        turnstile := CONTAINEROF listentry TO KepTurnstile.PiEntry
 
-        KiAcquireTurnstileElevated ( turnstile )
+        KepAcquireTurnstileElevated ( turnstile )
 
         IF turnstile^.WaiterHeapRoot THEN
             booster :=
-                CONTAINEROF turnstile^.WaiterHeapRoot TO KeThread.TurnstileEntry
+                CONTAINEROF turnstile^.WaiterHeapRoot TO KeuThread.TurnstileEntry
 
             IF booster^.BestowedPriority > floor THEN
                 floor = booster^.BestowedPriority
@@ -703,44 +703,44 @@ FN KiComputeFloor (
             interactivityfloor |= booster^.BestowedInteractivity
         END
 
-        KiReleaseTurnstileElevated ( turnstile )
+        KepReleaseTurnstileElevated ( turnstile )
 
         listentry = listentry^.Next
     END
 
     // Apply the new priority floor.
 
-    KiLowerPriorityFloorThread (
+    KepLowerPriorityFloorThread (
         thread, // thread
         interactivityfloor, // interactive
         floor, // priority
     )
 
-    KiReleaseThread ( thread, ipl )
+    KepReleaseThread ( thread, ipl )
 END
 
-FN KiWakeLock (
+FN KepWakeLock (
     IN lock : ^KeLock,
-    IN owner : ^KeThread,
+    IN owner : ^KeuThread,
 )
 
     // Wake all waiters on the lock.
 
     // Lock the turnstile chain.
 
-    chain := &KiTurnstileChains[KiTurnstileHash(lock)]
+    chain := &KepTurnstileChains[KepTurnstileHash(lock)]
 
-    turnstile : ^KiTurnstile
-    otherturnstile : ^KiTurnstile
+    turnstile : ^KepTurnstile
+    otherturnstile : ^KepTurnstile
 
     head := &chain^.Head
 
-    ipl := KiAcquireChain ( chain )
+    ipl := KepAcquireChain ( chain )
 
     listentry := head^.Next
 
     WHILE listentry != head DO
-        turnstile = CONTAINEROF listentry TO KiTurnstile.ChainEntry
+        turnstile = CONTAINEROF listentry TO KepTurnstile.ChainEntry
 
         IF turnstile^.Key == lock AND
             turnstile^.Owner == owner THEN
@@ -762,11 +762,11 @@ FN KiWakeLock (
                 // Remove from our list of turnstiles that gave us a priority
                 // boost.
 
-                KiAcquireThreadElevated ( owner )
+                KepAcquireThreadElevated ( owner )
 
                 RtlRemoveEntryList ( &turnstile^.PiEntry )
 
-                KiReleaseThreadElevated ( owner )
+                KepReleaseThreadElevated ( owner )
             END
 
             BREAK
@@ -775,7 +775,7 @@ FN KiWakeLock (
         listentry = listentry^.Next
     END
 
-    KiReleaseChain ( chain, ipl )
+    KepReleaseChain ( chain, ipl )
 
     IF owner THEN
         // Compute the new priority inheritance floor.
@@ -783,14 +783,14 @@ FN KiWakeLock (
         // turnstile didn't specify an owner, because there are cases where we
         // still may have received a priority boost from it.
 
-        KiComputeFloor ( owner )
+        KepComputeFloor ( owner )
     END
 END
 
 // The following routines deal with the slow path of KeLocks, if the fast path
 // routines (which are prefixed with Ke- and are written in assembly) failed.
 
-FN KiAcquireLockShared (
+FN KepAcquireLockShared (
     IN lock : ^KeLock,
     IN oldipl : UWORD,
 ) : UWORD
@@ -802,13 +802,13 @@ FN KiAcquireLockShared (
     new : UWORD
 
     WHILE TRUE DO
-        IF current & KI_LOCK_C_BITS == 0 THEN
+        IF current & KEP_LOCK_C_BITS == 0 THEN
             // The lock is free and has no exclusive waiters.
             // Try incrementing the share count.
 
             new = KeCompareSwapPtr (
                 &lock^.Ptr, // ptr
-                current + KI_LOCK_SHARE_INC, // newvalue
+                current + KEP_LOCK_SHARE_INC, // newvalue
                 current, // expectedvalue
             )
 
@@ -829,8 +829,8 @@ FN KiAcquireLockShared (
 
         // Make sure this isn't a recursive lock which is prohibited.
 
-        KeAssert ( (current & KI_LOCK_WRITE_LOCKED == 0) OR
-            (current & KI_LOCK_BITS != KeCurrentThread () ) )
+        KeAssert ( (current & KEP_LOCK_WRITE_LOCKED == 0) OR
+            (current & KEP_LOCK_BITS != KeCurrentThread () ) )
 
         // If any of the control bits are set, one of the following is true:
         //
@@ -839,7 +839,7 @@ FN KiAcquireLockShared (
         //
         // In either case we need to sleep on the turnstile and then retry.
 
-        KiBlockOnLock (
+        KepBlockOnLock (
             lock, // lock
             current, // current
         )
@@ -848,7 +848,7 @@ FN KiAcquireLockShared (
     END
 END
 
-FN KiAcquireLockExclusive (
+FN KepAcquireLockExclusive (
     IN lock : ^KeLock,
     IN oldipl : UWORD,
 ) : UWORD
@@ -867,7 +867,7 @@ FN KiAcquireLockExclusive (
 
             new = KeCompareSwapPtr (
                 &lock^.Ptr, // ptr
-                thread | KI_LOCK_WRITE_LOCKED, // newvalue
+                thread | KEP_LOCK_WRITE_LOCKED, // newvalue
                 current, // expectedvalue
             )
 
@@ -888,8 +888,8 @@ FN KiAcquireLockExclusive (
 
         // Make sure this isn't a recursive lock which is prohibited.
 
-        KeAssert ( (current & KI_LOCK_WRITE_LOCKED == 0) OR
-            (current & KI_LOCK_BITS != KeCurrentThread () ) )
+        KeAssert ( (current & KEP_LOCK_WRITE_LOCKED == 0) OR
+            (current & KEP_LOCK_BITS != KeCurrentThread () ) )
 
         // If the lock is nonzero, one of the following is true:
         //
@@ -898,7 +898,7 @@ FN KiAcquireLockExclusive (
         //
         // In either case we need to sleep on the turnstile and then retry.
 
-        KiBlockOnLock (
+        KepBlockOnLock (
             lock, // lock
             current, // current
         )
@@ -907,7 +907,7 @@ FN KiAcquireLockExclusive (
     END
 END
 
-FN KiReleaseLock (
+FN KepReleaseLock (
     IN lock : ^KeLock,
 )
 
@@ -918,10 +918,10 @@ FN KiReleaseLock (
     new : UWORD
 
     WHILE TRUE DO
-        IF current & KI_LOCK_WRITE_LOCKED THEN
+        IF current & KEP_LOCK_WRITE_LOCKED THEN
             // Locked exclusively.
 
-            KeAssert ( current & KI_LOCK_BITS == KeCurrentThread () )
+            KeAssert ( current & KEP_LOCK_BITS == KeCurrentThread () )
             
             // Try to zero out the lock.
 
@@ -939,12 +939,12 @@ FN KiReleaseLock (
                 CONTINUE
             END
 
-            IF current & KI_LOCK_WAITERS THEN
+            IF current & KEP_LOCK_WAITERS THEN
                 // Wake the waiters.
 
-                KiWakeLock (
+                KepWakeLock (
                     lock, // lock
-                    CAST current & KI_LOCK_BITS TO ^KeThread, // owner
+                    CAST current & KEP_LOCK_BITS TO ^KeuThread, // owner
                 )
             END
 
@@ -953,9 +953,9 @@ FN KiReleaseLock (
 
         // Locked shared.
 
-        KeAssert ( current & KI_LOCK_BITS != 0 )
+        KeAssert ( current & KEP_LOCK_BITS != 0 )
 
-        IF current & KI_LOCK_BITS == KI_LOCK_SHARE_INC THEN
+        IF current & KEP_LOCK_BITS == KEP_LOCK_SHARE_INC THEN
             // Only I have it locked shared. Try to zero out the lock.
 
             new = KeCompareSwapPtr (
@@ -972,10 +972,10 @@ FN KiReleaseLock (
                 CONTINUE
             END
 
-            IF current & KI_LOCK_WAITERS THEN
+            IF current & KEP_LOCK_WAITERS THEN
                 // Wake the waiters.
 
-                KiWakeLock (
+                KepWakeLock (
                     lock, // lock
                     NULLPTR, // owner
                 )
@@ -988,7 +988,7 @@ FN KiReleaseLock (
 
         new = KeCompareSwapPtr (
             &lock^.Ptr, // ptr
-            current - KI_LOCK_SHARE_INC, // newvalue
+            current - KEP_LOCK_SHARE_INC, // newvalue
             current, // expectedvalue
         )
 
@@ -1012,26 +1012,26 @@ EXPORT FN KeConvertLockToShared (
     new : UWORD
 
     WHILE TRUE DO
-        KeAssert ( current & KI_LOCK_WRITE_LOCKED != 0 )
-        KeAssert ( current & KI_LOCK_BITS == KeCurrentThread () )
+        KeAssert ( current & KEP_LOCK_WRITE_LOCKED != 0 )
+        KeAssert ( current & KEP_LOCK_BITS == KeCurrentThread () )
 
         // Try to set held shared with a single owner.
 
         new = KeCompareSwapPtr (
             &lock^.Ptr, // ptr
-            KI_LOCK_SHARE_INC, // newvalue
+            KEP_LOCK_SHARE_INC, // newvalue
             current, // expectedvalue
         )
 
         IF new == current THEN
             // Got it.
 
-            IF current & KI_LOCK_WAITERS THEN
+            IF current & KEP_LOCK_WAITERS THEN
                 // Wake the waiters.
 
-                KiWakeLock (
+                KepWakeLock (
                     lock, // lock
-                    CAST current & KI_LOCK_BITS TO ^KeThread, // owner
+                    CAST current & KEP_LOCK_BITS TO ^KeuThread, // owner
                 )
             END
 
@@ -1055,15 +1055,15 @@ EXPORT FN KeTryConvertLockToExclusive (
     thread := KeCurrentThread ()
 
     WHILE TRUE DO
-        IF current & KI_LOCK_WRITE_LOCKED THEN
+        IF current & KEP_LOCK_WRITE_LOCKED THEN
             // Already exclusive.
 
-            KeAssert ( current & KI_LOCK_BITS == thread )
+            KeAssert ( current & KEP_LOCK_BITS == thread )
 
             RETURN TRUE
         END
 
-        IF current & KI_LOCK_BITS != KI_LOCK_SHARE_INC THEN
+        IF current & KEP_LOCK_BITS != KEP_LOCK_SHARE_INC THEN
             // If there are other shared holders, we can't kick them out of the
             // lock, so return failure.
 
@@ -1074,18 +1074,18 @@ EXPORT FN KeTryConvertLockToExclusive (
 
         new = KeCompareSwapPtr (
             &lock^.Ptr, // ptr
-            KI_LOCK_WRITE_LOCKED | thread, // newvalue
+            KEP_LOCK_WRITE_LOCKED | thread, // newvalue
             current, // expectedvalue
         )
 
         IF new == current THEN
             // Got it.
 
-            IF current & KI_LOCK_WAITERS THEN
+            IF current & KEP_LOCK_WAITERS THEN
                 // Wake the waiters, since they're now operating under the
                 // incorrect assumption that the lock is held shared.
 
-                KiWakeLock (
+                KepWakeLock (
                     lock, // lock
                     NULLPTR, // owner
                 )

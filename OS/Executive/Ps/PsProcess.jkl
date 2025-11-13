@@ -7,23 +7,23 @@
 
 STRUCT PspProcessContext
     Name : ^RtlString,
-    Partition : ^MiPartition,
+    Partition : ^MmpPartition,
     QuotaUid : ULONG,
     Flags : ULONG,
 END
 
 // FORWARD
 EXTERN FN PspExitProcess (
-    IN process : ^PsProcess,
+    IN process : ^PsuProcess,
 )
 
 #SECTION "PAGEtext"
-FN PsBlockRundownProcess (
-    IN process : ^PsProcess,
+FN PsuBlockRundownProcess (
+    IN process : ^PsuProcess,
 ) : UWORD
 
     // Prevent the rundown (clean-up) of the process until the next
-    // PsUnblockRundownProcess. If it is already being run down, tell the
+    // PsuUnblockRundownProcess. If it is already being run down, tell the
     // caller.
 
     IF process^.Pcb.ThreadCount == 0 THEN
@@ -75,8 +75,8 @@ FN PsBlockRundownProcess (
 END
 
 #SECTION "PAGEtext"
-FN PsUnblockRundownProcess (
-    IN process : ^PsProcess,
+FN PsuUnblockRundownProcess (
+    IN process : ^PsuProcess,
 )
 
     // Decrement the rundown deferment count and perform process rundown if it
@@ -96,7 +96,7 @@ END
 
 #SECTION "PAGEtext"
 FN PspSignalActivation (
-    IN process : ^PsProcess,
+    IN process : ^PsuProcess,
     IN status : OsStatus,
 )
 
@@ -131,12 +131,12 @@ FN PspSignalActivation (
 
     // Decrement the reference count on the event counter.
 
-    ExUnreferenceEventCounter ( event )
+    ExuUnreferenceEventCounter ( event )
 END
 
 #SECTION "PAGEtext"
 FN PspAwaitActivation (
-    IN process : ^PsProcess,
+    IN process : ^PsuProcess,
     IN timeout : ^RtlUquad,
     IN alertable : UWORD,
     OUT activationstatus : OsStatus,
@@ -160,20 +160,20 @@ FN PspAwaitActivation (
         RETURN OS_STATUS_SUCCESS
     END
 
-    ExReferenceEventCounter ( event )
+    ExuReferenceEventCounter ( event )
 
     KeReleaseLock ( &paged^.ActivationLock )
 
     // Wait on the event counter.
 
-    status := KeWaitForSingleObject (
+    status := KeuWaitForSingleObject (
         KE_USER_MODE, // waitmode
         KE_ALERTABLE, // alertable
         timeout, // timeout
         &event^.Used.Event.Header, // object
     )
 
-    ExUnreferenceEventCounter ( event )
+    ExuUnreferenceEventCounter ( event )
 
     activationstatus = paged^.ActivationStatus
 
@@ -186,7 +186,7 @@ END
 
 #SECTION "PAGEtext"
 FN PspExitProcess (
-    IN process : ^PsProcess,
+    IN process : ^PsuProcess,
 )
 
     // The process has exited and exit-time teardown must be performed. This can
@@ -214,11 +214,11 @@ FN PspExitProcess (
 
     // Uninitialize the process with respect to Ob.
 
-    ObUninitializeProcess ( process )
+    ObuUninitializeProcess ( process )
 
     // Uninitialize the process's virtual memory structures.
 
-    MmUninitializeProcess ( process )
+    MmuUninitializeProcess ( process )
 
     // If activation hasn't been signaled, do so now in order to get rid of the
     // activation event counter.
@@ -239,13 +239,13 @@ FN PspExitProcess (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) PspDeleteProcessObject (
+FN (ObuTypeDeleteF) PspDeleteProcessObject (
     IN object : ^VOID,
 ) : UWORD
 
     // Delete a process object.
 
-    process := CAST object TO ^PsProcess
+    process := CAST object TO ^PsuProcess
 
     paged := process^.Paged
 
@@ -266,7 +266,7 @@ FN (ObTypeDeleteF) PspDeleteProcessObject (
 
     RtlRemoveEntryList ( &paged^.GlobalEntry )
 
-    PsActiveProcessCount -= 1
+    PsuActiveProcessCount -= 1
 
     KeReleaseLock ( &PspProcessListLock )
 
@@ -298,67 +298,67 @@ FN (ObTypeDeleteF) PspDeleteProcessObject (
 
     // Uninitialize the root and current directory of the process.
 
-    NsUninitializeProcess ( process )
+    NsuUninitializeProcess ( process )
 
     // Perform deletion of the page directory, etc.
 
-    MmDeleteProcess ( process )
+    MmuDeleteProcess ( process )
 
     // Unreference the name.
 
-    ExUnreferenceName ( paged^.Name )
+    ExuUnreferenceName ( paged^.Name )
 
     // Unreference the quota block.
 
-    MmUnreferenceQuotaBlock ( paged^.HandleTable.QuotaBlock )
+    MmuUnreferenceQuotaBlock ( paged^.HandleTable.QuotaBlock )
 
     RETURN TRUE
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeInitializeF) PspInitializeProcessObject (
+FN (ObuTypeInitializeF) PspInitializeProcessObject (
     IN object : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
 
-    process := CAST object TO ^PsProcess
+    process := CAST object TO ^PsuProcess
     ctx := CAST context TO ^PspProcessContext
 
     status : OsStatus
 
     // Initialize the process object.
 
-    currentprocess := PsCurrentProcess ()
+    currentprocess := PsuCurrentProcess ()
 
     flags := ctx^.Flags
 
     IF flags & OS_PROCESS_DETACH_JOB AND
-        NOT PsCheckPrivilege ( currentprocess, OS_PRIVILEGE_DETACH_JOB ) THEN
+        NOT PsuCheckPrivilege ( currentprocess, OS_PRIVILEGE_DETACH_JOB ) THEN
 
         RETURN OS_STATUS_PRIVILEGE_NOT_HELD
     END
 
     IF flags & OS_PROCESS_NEW_SESSION AND
-        NOT PsCheckPrivilege ( currentprocess, OS_PRIVILEGE_NEW_SESSION ) THEN
+        NOT PsuCheckPrivilege ( currentprocess, OS_PRIVILEGE_NEW_SESSION ) THEN
 
         RETURN OS_STATUS_PRIVILEGE_NOT_HELD
     END
 
     // Set the paged part.
 
-    paged := CAST ObFindPagedPart ( process ) TO ^PsPagedProcess
+    paged := CAST ObuFindPagedPart ( process ) TO ^PsuPagedProcess
 
     process^.Paged = paged
     paged^.Process = process
 
-    quotablock : ^MiQuotaBlock = NULLPTR
+    quotablock : ^MmpQuotaBlock = NULLPTR
 
     IF flags & (OS_PROCESS_NEW_SESSION | OS_PROCESS_DETACH_QUOTA) ==
         (OS_PROCESS_NEW_SESSION | OS_PROCESS_DETACH_QUOTA) THEN
 
         // Assign a new quota block.
 
-        quotablock = MmLookupQuotaBlock (
+        quotablock = MmuLookupQuotaBlock (
             ctx^.QuotaUid, // uid
             quotablock, // copyquotablock
         )
@@ -370,9 +370,9 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     ELSE
         // Inherit the current process's quota block.
 
-        quotablock = PsQuotaBlock ( currentprocess )
+        quotablock = PsuQuotaBlock ( currentprocess )
 
-        MmReferenceQuotaBlock ( quotablock )
+        MmuReferenceQuotaBlock ( quotablock )
     END
 
     // Initialize the process for usage by Ke.
@@ -382,10 +382,10 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     // part of the process object.
 
     process^.Pcb.AsidTable =
-        CAST (process + SIZEOF PsProcess) TO ^KiAsidInfoEntry
+        CAST (process + SIZEOF PsuProcess) TO ^KepAsidInfoEntry
 #END
 
-    KeInitializeProcess (
+    KeuInitializeProcess (
         &process^.Pcb, // process
         ctx^.Name^.Data, // name
     )
@@ -393,7 +393,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
     // Initialize the process for usage by Ob.
     // This also sets the quotablock for the process.
 
-    ObInitializeProcess (
+    ObuInitializeProcess (
         currentprocess, // parentprocess
         process, // process
         quotablock, // quotablock
@@ -401,14 +401,14 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     // Initialize the process for usage by Ns.
 
-    NsInitializeProcess (
+    NsuInitializeProcess (
         process, // process
         currentprocess, // parentprocess
     )
 
     // Initialize the process for usage by Mm.
 
-    status = MmInitializeProcess (
+    status = MmuInitializeProcess (
         currentprocess, // parentprocess
         process, // process
         ctx^.Partition, // partition
@@ -446,7 +446,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     // Intern the name.
 
-    paged^.Name = ExFindName ( ctx^.Name )
+    paged^.Name = ExuFindName ( ctx^.Name )
 
     IF NOT paged^.Name THEN
         status = OS_STATUS_NO_MEMORY
@@ -476,7 +476,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     // Create the activation event.
 
-    paged^.ActivationEvent = ExAllocateEventCounter ( TRUE )
+    paged^.ActivationEvent = ExuAllocateEventCounter ( TRUE )
 
     IF NOT paged^.ActivationEvent THEN
         status = OS_STATUS_NO_MEMORY
@@ -522,7 +522,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
         &paged^.GlobalEntry, // entry
     )
 
-    PsActiveProcessCount += 1
+    PsuActiveProcessCount += 1
 
     KeReleaseLock ( &PspProcessListLock )
 
@@ -546,7 +546,7 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
     RtlRemoveEntryList ( &paged^.GlobalEntry )
 
-    PsActiveProcessCount -= 1
+    PsuActiveProcessCount -= 1
 
     KeReleaseLock ( &PspProcessListLock )
 
@@ -560,32 +560,32 @@ FN (ObTypeInitializeF) PspInitializeProcessObject (
 
 @Error6
 
-    ExUnreferenceEventCounter ( paged^.ActivationEvent )
+    ExuUnreferenceEventCounter ( paged^.ActivationEvent )
 
 @Error5
 
-    ExUnreferenceName ( paged^.Name )
+    ExuUnreferenceName ( paged^.Name )
 
 @Error4
 
-    MmUninitializeProcess ( process )
+    MmuUninitializeProcess ( process )
 
-    MmDeleteProcess ( process )
+    MmuDeleteProcess ( process )
 
 @Error3
 
-    NsUninitializeProcess ( process )
+    NsuUninitializeProcess ( process )
 
-    ObUninitializeProcess ( process )
+    ObuUninitializeProcess ( process )
 
-    MmUnreferenceQuotaBlock ( quotablock )
+    MmuUnreferenceQuotaBlock ( quotablock )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsEnablePrivilegeProcessObject (
-    IN process : ^PsProcess,
+FN PsuEnablePrivilegeProcessObject (
+    IN process : ^PsuProcess,
     IN privilege : UWORD,
 ) : OsStatus
 
@@ -632,12 +632,12 @@ FN OsEnablePrivilegeProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -652,21 +652,21 @@ FN OsEnablePrivilegeProcess (
         GOTO Exit
     END
 
-    status = PsEnablePrivilegeProcessObject (
+    status = PsuEnablePrivilegeProcessObject (
         process, // process
         privilege, // privilege
     )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsDisablePrivilegeProcessObject (
-    IN process : ^PsProcess,
+FN PsuDisablePrivilegeProcessObject (
+    IN process : ^PsuProcess,
     IN privilege : UWORD,
 ) : OsStatus
 
@@ -717,12 +717,12 @@ FN OsDisablePrivilegeProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -737,33 +737,33 @@ FN OsDisablePrivilegeProcess (
         GOTO Exit
     END
 
-    status = PsDisablePrivilegeProcessObject (
+    status = PsuDisablePrivilegeProcessObject (
         process, // process
         privilege, // privilege
     )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsGrantPrivilegeProcessObject (
-    IN process : ^PsProcess,
+FN PsuGrantPrivilegeProcessObject (
+    IN process : ^PsuProcess,
     IN privilege : UWORD,
 ) : OsStatus
 
     // Grant a privilege to the specified process.
 
-    currentprocess := PsCurrentProcess ()
+    currentprocess := PsuCurrentProcess ()
 
     // We can only grant this privilege if we either already have it or are an
     // admin.
 
-    IF NOT PsCheckPrivilege ( currentprocess, privilege ) AND
-        NOT PsCheckPrivilege ( currentprocess, OS_PRIVILEGE_ADMIN ) THEN
+    IF NOT PsuCheckPrivilege ( currentprocess, privilege ) AND
+        NOT PsuCheckPrivilege ( currentprocess, OS_PRIVILEGE_ADMIN ) THEN
 
         RETURN OS_STATUS_PRIVILEGE_NOT_HELD
     END
@@ -794,12 +794,12 @@ FN OsGrantPrivilegeProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -814,21 +814,21 @@ FN OsGrantPrivilegeProcess (
         GOTO Exit
     END
 
-    status = PsGrantPrivilegeProcessObject (
+    status = PsuGrantPrivilegeProcessObject (
         process, // process
         privilege, // privilege
     )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsRevokePrivilegeProcessObject (
-    IN process : ^PsProcess,
+FN PsuRevokePrivilegeProcessObject (
+    IN process : ^PsuProcess,
     IN privilege : UWORD,
 ) : OsStatus
 
@@ -860,12 +860,12 @@ FN OsRevokePrivilegeProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -880,14 +880,14 @@ FN OsRevokePrivilegeProcess (
         GOTO Exit
     END
 
-    status = PsRevokePrivilegeProcessObject (
+    status = PsuRevokePrivilegeProcessObject (
         process, // process
         privilege, // privilege
     )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
@@ -900,16 +900,16 @@ FN OsSignalProcess (
 
     // Signal a process, system service.
 
-    IF KeInvalidSignal ( signal ) THEN
+    IF KeuInvalidSignal ( signal ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -931,7 +931,7 @@ FN OsSignalProcess (
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
@@ -944,7 +944,7 @@ FN OsSignalActivationProcess (
     // Signal activation for the current process, system service.
 
     PspSignalActivation (
-        PsCurrentProcess (), // process
+        PsuCurrentProcess (), // process
         status, // status
     )
 END
@@ -959,13 +959,13 @@ FN OsAwaitActivationProcess (
 
     // Await activation for the given process, system service.
 
-    IF KeInvalidAlertability ( alertable ) THEN
+    IF KeuInvalidAlertability ( alertable ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
     sysinterval : RtlUquad
 
-    status := MmSafeCopyIn (
+    status := MmuSafeCopyIn (
         &sysinterval, // dest
         timeout, // src
         SIZEOF RtlUquad, // size
@@ -975,12 +975,12 @@ FN OsAwaitActivationProcess (
         RETURN status
     END
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status = ObReferenceByHandle (
+    status = ObuReferenceByHandle (
         handle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -996,36 +996,36 @@ FN OsAwaitActivationProcess (
         OUT activationstatus, // activationstatus
     )
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
 
-PUBLIC PsProcessType : ObType = {
+PUBLIC PsuProcessType : ObuType = {
     [Name] = "Process",
 
     [Delete] = &PspDeleteProcessObject,
 
     [Initialize] = &PspInitializeProcessObject,
 
-    [WaitOffset] = OFFSETOF PsProcess.TerminationEvent,
+    [WaitOffset] = OFFSETOF PsuProcess.TerminationEvent,
     [TypeIdentifier] = OS_PROCESS_TYPE,
     [Tag] = 'Proc',
 
-    [TypicalBodySize] = SIZEOF PsProcess,
-    [TypicalPgBodySize] = SIZEOF PsPagedProcess,
+    [TypicalBodySize] = SIZEOF PsuProcess,
+    [TypicalPgBodySize] = SIZEOF PsuPagedProcess,
 
     [IsPaged] = FALSE,
 }
 
 #SECTION "PAGEtext"
-FN PsCreateProcessObject (
-    IN params : ^NsOpenParameters,
-    IN partition : ^MiPartition,
+FN PsuCreateProcessObject (
+    IN params : ^NsuOpenParameters,
+    IN partition : ^MmpPartition,
     IN name : ^RtlString,
     IN quotauid : UWORD,
     IN flags : UWORD,
-    OUT process : ^PsProcess,
+    OUT process : ^PsuProcess,
 ) : OsStatus
 
     // Create a process object.
@@ -1037,15 +1037,15 @@ FN PsCreateProcessObject (
     ctx.Flags = flags
     ctx.Partition = partition
 
-    obparams : ObParameters
+    obparams : ObuParameters
 
-    NsInitializeObjectParameters (
+    NsuInitializeObjectParameters (
         &obparams, // obparams
         params, // params
-        &PsProcessType, // type
+        &PsuProcessType, // type
         &ctx, // context
-        SIZEOF PsProcess, // bodysize
-        SIZEOF PsPagedProcess, // pagedbodysize
+        SIZEOF PsuProcess, // bodysize
+        SIZEOF PsuPagedProcess, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
     )
@@ -1054,21 +1054,21 @@ FN PsCreateProcessObject (
     // Put enough space at the end of the nonpaged part of the process for the
     // ASID table.
 
-    obparams.BodySize += SIZEOF KiAsidInfoEntry * KeQueryProcessorCount ()
+    obparams.BodySize += SIZEOF KepAsidInfoEntry * KeQueryProcessorCount ()
 #END
 
-    RETURN NsCreateObject (
+    RETURN NsuCreateObject (
         params, // params
         &obparams, // obparams
         OUT process, // object
     )
 END
 
-EXTERN MmPartitionType : ObType
+EXTERN MmuPartitionType : ObuType
 
 #SECTION "PAGEtext"
-FN PsCreateProcess (
-    IN params : ^NsOpenParameters,
+FN PsuCreateProcess (
+    IN params : ^NsuOpenParameters,
     IN partitionhandle : UWORD,
     IN name : ^RtlString,
     IN quotauid : UWORD,
@@ -1078,14 +1078,14 @@ FN PsCreateProcess (
 
     // Create a process object - handle interface.
 
-    partition : ^MiPartition = NULLPTR
+    partition : ^MmpPartition = NULLPTR
     access : UWORD
     status : OsStatus
 
     IF partitionhandle != OS_NULL_HANDLE THEN
-        status = ObReferenceByHandle (
+        status = ObuReferenceByHandle (
             partitionhandle, // handle
-            &MmPartitionType, // type
+            &MmuPartitionType, // type
             OUT partition, // object
             OUT access, // access
         )
@@ -1103,9 +1103,9 @@ FN PsCreateProcess (
         END
     END
 
-    process : ^PsProcess
+    process : ^PsuProcess
 
-    status = PsCreateProcessObject (
+    status = PsuCreateProcessObject (
         params, // params
         partition, // partition
         name, // name
@@ -1118,21 +1118,21 @@ FN PsCreateProcess (
         GOTO Exit
     END
 
-    status = ObInsertObject (
-        PsCurrentProcess (), // process
+    status = ObuInsertObject (
+        PsuCurrentProcess (), // process
         process, // object
         params^.Captured.Access, // access
         OUT handle, // handle
     )
 
     IF OsError ( status ) THEN
-        ObUnreferenceObject ( process )
+        ObuUnreferenceObject ( process )
     END
 
 @Exit
 
     IF partition THEN
-        ObUnreferenceObject ( partition )
+        ObuUnreferenceObject ( partition )
     END
 
     RETURN status
@@ -1152,7 +1152,7 @@ FN OsCreateProcess (
 
     sysname : RtlString
 
-    status := MmCaptureString (
+    status := MmuCaptureString (
         name, // string
         &sysname, // output
         OS_NAME_MAX, // maxlen
@@ -1162,9 +1162,9 @@ FN OsCreateProcess (
         RETURN status
     END
 
-    sysparams : NsOpenParameters
+    sysparams : NsuOpenParameters
 
-    status = NsCaptureOpenParameters (
+    status = NsuCaptureOpenParameters (
         params, // userparams
         &sysparams, // sysparams
     )
@@ -1173,7 +1173,7 @@ FN OsCreateProcess (
         GOTO Exit
     END
 
-    status = PsCreateProcess (
+    status = PsuCreateProcess (
         &sysparams, // params
         partitionhandle, // partitionhandle
         &sysname, // name
@@ -1182,11 +1182,11 @@ FN OsCreateProcess (
         OUT handle, // handle
     )
 
-    NsFreeOpenParameters ( &sysparams )
+    NsuFreeOpenParameters ( &sysparams )
 
 @Exit
 
-    MmFreeCapturedString ( &sysname )
+    MmuFreeCapturedString ( &sysname )
 
     RETURN status
 END
@@ -1200,13 +1200,13 @@ FN OsOpenProcessByPid (
 
     // Open a process object by PID, system service.
 
-    process : ^PsProcess
+    process : ^PsuProcess
 
     // Get a referenced pointer to the process object.
 
     status := PspReferenceById (
         pid, // pid
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
     )
 
@@ -1216,7 +1216,7 @@ FN OsOpenProcessByPid (
 
     // Check for appropriate access rights to the process.
 
-    IF NOT ObCheckAccessForCurrent (
+    IF NOT ObuCheckAccessForCurrent (
         process, // object
         access, // access
     ) THEN
@@ -1228,8 +1228,8 @@ FN OsOpenProcessByPid (
 
     // Insert the process object into the handle table.
 
-    status = ObInsertObject (
-        PsCurrentProcess (), // process
+    status = ObuInsertObject (
+        PsuCurrentProcess (), // process
         process, // process
         access, // access
         OUT handle, // handle
@@ -1243,14 +1243,14 @@ FN OsOpenProcessByPid (
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsReadStatusProcessObject (
-    IN process : ^PsProcess,
+FN PsuReadStatusProcessObject (
+    IN process : ^PsuProcess,
 ) : OsStatus
 
     // Read the termination status of a process.
@@ -1269,12 +1269,12 @@ FN OsReadStatusProcess (
 
     // Read the termination status of a process, system service.
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -1289,18 +1289,18 @@ FN OsReadStatusProcess (
         GOTO Exit
     END
 
-    status = PsReadStatusProcessObject ( process )
+    status = PsuReadStatusProcessObject ( process )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsQueryProcessObject (
-    IN process : ^PsProcess,
+FN PsuQueryProcessObject (
+    IN process : ^PsuProcess,
     IN query : ^OsProcessQuery,
 )
 
@@ -1344,14 +1344,14 @@ FN PsQueryProcessObject (
 
     KeReleaseLock ( &paged^.GroupLock )
 
-    MmQueryProcess (
+    MmuQueryProcess (
         process, // process
         query, // query
     )
 
     RtlCopyString (
         &query^.Name[0], // dest
-        ExNameToString ( paged^.Name )^.Data, // src
+        ExuNameToString ( paged^.Name )^.Data, // src
         OS_NAME_MAX + 1, // bufsize
     )
 
@@ -1359,19 +1359,19 @@ FN PsQueryProcessObject (
 END
 
 #SECTION "PAGEtext"
-FN PsQueryProcess (
+FN PsuQueryProcess (
     IN handle : UWORD,
     IN query : ^OsProcessQuery,
 ) : OsStatus
 
     // Query information about a process handle.
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -1386,14 +1386,14 @@ FN PsQueryProcess (
         GOTO Exit
     END
 
-    PsQueryProcessObject (
+    PsuQueryProcessObject (
         process, // process
         query, // query
     )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
@@ -1408,7 +1408,7 @@ FN OsQueryProcess (
 
     sysquery : OsProcessQuery
 
-    status := PsQueryProcess (
+    status := PsuQueryProcess (
         handle, // handle
         &sysquery, // query
     )
@@ -1419,7 +1419,7 @@ FN OsQueryProcess (
 
     // Copy the information to userspace.
 
-    RETURN MmSafeCopyOut (
+    RETURN MmuSafeCopyOut (
         query, // dest
         &sysquery, // src
         SIZEOF OsProcessQuery, // size
@@ -1427,20 +1427,20 @@ FN OsQueryProcess (
 END
 
 #SECTION "PAGEtext"
-FN PsQueryProcessByPid (
+FN PsuQueryProcessByPid (
     IN pid : UWORD,
     IN query : ^OsProcessQuery,
 ) : OsStatus
 
     // Open a process object by PID, system service.
 
-    process : ^PsProcess
+    process : ^PsuProcess
 
     // Get a referenced pointer to the process object.
 
     status := PspReferenceById (
         pid, // pid
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
     )
 
@@ -1450,7 +1450,7 @@ FN PsQueryProcessByPid (
 
     // Check for appropriate access rights to the process.
 
-    IF NOT ObCheckAccessForCurrent (
+    IF NOT ObuCheckAccessForCurrent (
         process, // object
         OS_ACCESS_READ, // access
     ) THEN
@@ -1462,14 +1462,14 @@ FN PsQueryProcessByPid (
 
     // Query the process object.
 
-    PsQueryProcessObject (
+    PsuQueryProcessObject (
         process, // process
         query, // query
     )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
@@ -1484,7 +1484,7 @@ FN OsQueryProcessByPid (
 
     sysquery : OsProcessQuery
 
-    status := PsQueryProcessByPid (
+    status := PsuQueryProcessByPid (
         pid, // pid
         &sysquery, // query
     )
@@ -1495,7 +1495,7 @@ FN OsQueryProcessByPid (
 
     // Copy the information to userspace.
 
-    RETURN MmSafeCopyOut (
+    RETURN MmuSafeCopyOut (
         query, // dest
         &sysquery, // src
         SIZEOF OsProcessQuery, // size
@@ -1514,12 +1514,12 @@ FN OsSetBasePriorityProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -1537,10 +1537,10 @@ FN OsSetBasePriorityProcess (
     IF priority >= process^.Pcb.BasePriority THEN
         // Raising base priority requires special privileges.
 
-        currentprocess := PsCurrentProcess ()
+        currentprocess := PsuCurrentProcess ()
 
         IF priority >= OS_PRIORITY_LOW_REALTIME THEN
-            IF NOT PsCheckPrivilege ( currentprocess,
+            IF NOT PsuCheckPrivilege ( currentprocess,
                 OS_PRIVILEGE_RAISE_PRIORITY_REALTIME ) THEN
 
                 status = OS_STATUS_PRIVILEGE_NOT_HELD
@@ -1548,7 +1548,7 @@ FN OsSetBasePriorityProcess (
                 GOTO Exit
             END
 
-        ELSEIF NOT PsCheckPrivilege ( currentprocess,
+        ELSEIF NOT PsuCheckPrivilege ( currentprocess,
             OS_PRIVILEGE_RAISE_PRIORITY ) THEN
 
             status = OS_STATUS_PRIVILEGE_NOT_HELD
@@ -1564,14 +1564,14 @@ FN OsSetBasePriorityProcess (
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsTerminateProcessObject (
-    IN process : ^PsProcess,
+FN PsuTerminateProcessObject (
+    IN process : ^PsuProcess,
     IN status : OsStatus,
 )
 
@@ -1595,12 +1595,12 @@ FN OsTerminateProcess (
 
     // Terminate a process, system service.
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    retstatus := ObReferenceByHandle (
+    retstatus := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -1615,14 +1615,14 @@ FN OsTerminateProcess (
         GOTO Exit
     END
 
-    PsTerminateProcessObject (
+    PsuTerminateProcessObject (
         process, // process
         status, // status
     )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN retstatus
 END
@@ -1632,7 +1632,7 @@ FN OsQueryProcessCount () : UWORD
 
     // Return the number of processes in the system.
 
-    RETURN PsActiveProcessCount
+    RETURN PsuActiveProcessCount
 END
 
 #SECTION "PAGEtext"
@@ -1667,9 +1667,9 @@ FN OsQueryProcesses (
 
     buf : ^VOID
 
-    status := MmAllocateAndChargeSysBuffer (
+    status := MmuAllocateAndChargeSysBuffer (
         bufsize, // bytes
-        MM_PAGED_POOL, // poolindex
+        MMU_PAGED_POOL, // poolindex
         'PsQu', // tag
         OUT buf, // ptr
     )
@@ -1682,7 +1682,7 @@ FN OsQueryProcesses (
 
     KeAcquireLockExclusive ( &PspProcessListLock )
 
-    IF maxcount != PsActiveProcessCount THEN
+    IF maxcount != PsuActiveProcessCount THEN
         // Caller should re-query the process count and try again.
 
         status = OS_STATUS_TRY_AGAIN
@@ -1697,9 +1697,9 @@ FN OsQueryProcesses (
 
     WHILE listentry != listhead DO
         process :=
-            (CONTAINEROF listentry TO PsPagedProcess.GlobalEntry)^.Process
+            (CONTAINEROF listentry TO PsuPagedProcess.GlobalEntry)^.Process
 
-        PsQueryProcessObject (
+        PsuQueryProcessObject (
             process, // process
             sysquery, // query
         )
@@ -1715,7 +1715,7 @@ FN OsQueryProcesses (
     IF NOT OsError ( status ) THEN
         // Copy out to the user buffer outside of the process list lock.
 
-        status = MmSafeCopyOut (
+        status = MmuSafeCopyOut (
             query, // dest
             buf, // src
             bufsize, // sz
@@ -1724,30 +1724,30 @@ FN OsQueryProcesses (
 
     // Deallocate the system buffer.
 
-    MmDeallocateAndUnchargeSysBuffer (
+    MmuDeallocateAndUnchargeSysBuffer (
         buf, // ptr
         'PsQu', // tag
         bufsize, // bytes
-        MM_PAGED_POOL, // poolindex
+        MMU_PAGED_POOL, // poolindex
     )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsSetQuotaProcess (
+FN PsuSetQuotaProcess (
     IN processhandle : UWORD,
     IN quota : ^OsQuotaQuery,
 ) : OsStatus
 
     // Set the quota for a process, handle interface.
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -1762,14 +1762,14 @@ FN PsSetQuotaProcess (
         GOTO Exit
     END
 
-    MmSetQuotaLimits (
-        PsQuotaBlock ( process ), // quotablock
+    MmuSetQuotaLimits (
+        PsuQuotaBlock ( process ), // quotablock
         quota, // quota
     )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
@@ -1782,7 +1782,7 @@ FN OsSetQuotaProcess (
 
     // Set the quota for a process, system service.
 
-    IF NOT PsCheckPrivilege ( PsCurrentProcess (), OS_PRIVILEGE_SET_QUOTA ) THEN
+    IF NOT PsuCheckPrivilege ( PsuCurrentProcess (), OS_PRIVILEGE_SET_QUOTA ) THEN
         RETURN OS_STATUS_PRIVILEGE_NOT_HELD
     END
 
@@ -1790,7 +1790,7 @@ FN OsSetQuotaProcess (
 
     // Copy the userspace quota buffer into system space.
 
-    status := MmSafeCopyIn (
+    status := MmuSafeCopyIn (
         &sysquota, // dest
         quota, // src
         SIZEOF OsQuotaQuery, // sz
@@ -1802,26 +1802,26 @@ FN OsSetQuotaProcess (
 
     // Call the handle oriented interface.
 
-    RETURN PsSetQuotaProcess (
+    RETURN PsuSetQuotaProcess (
         processhandle, // processhandle
         &sysquota, // quota
     )
 END
 
 #SECTION "PAGEtext"
-FN PsQueryQuotaProcess (
+FN PsuQueryQuotaProcess (
     IN processhandle : UWORD,
     IN quota : ^OsQuotaQuery,
 ) : OsStatus
 
     // Query the quota for a process, handle interface.
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -1836,14 +1836,14 @@ FN PsQueryQuotaProcess (
         GOTO Exit
     END
 
-    MmQueryQuota (
-        PsQuotaBlock ( process ), // quotablock
+    MmuQueryQuota (
+        PsuQuotaBlock ( process ), // quotablock
         quota, // query
     )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
@@ -1858,7 +1858,7 @@ FN OsQueryQuotaProcess (
 
     sysquota : OsQuotaQuery
 
-    status := PsQueryQuotaProcess (
+    status := PsuQueryQuotaProcess (
         processhandle, // processhandle
         &sysquota, // query
     )
@@ -1867,7 +1867,7 @@ FN OsQueryQuotaProcess (
         RETURN status
     END
 
-    RETURN MmSafeCopyOut (
+    RETURN MmuSafeCopyOut (
         quota, // dest
         &sysquota, // src
         SIZEOF OsQuotaQuery, // sz

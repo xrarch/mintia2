@@ -1,0 +1,521 @@
+//
+// Private header file for the Memory Management component of the MINTIA
+// Executive.
+//
+
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "<inc>/Keu.hjk"
+#INCLUDE "<inc>/Mmu.hjk"
+#INCLUDE "<inc>/Obu.hjk"
+#INCLUDE "<inc>/Psu.hjk"
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    #INCLUDE "xr17032/Mmp.hjk"
+
+#ELSEIF ( STRCMP ARCHITECTURE "fox32" )
+    #INCLUDE "fox32/Mmp.hjk"
+
+#ELSE
+    #ERROR "Unknown architecture"
+#END
+
+#DEFINE MMP_UNINITIALIZED_PFE_TYPE 0
+#DEFINE MMP_FREE_PFE_TYPE 1
+#DEFINE MMP_BACKED_PFE_TYPE 2
+#DEFINE MMP_ANON_PFE_TYPE 3
+
+#DEFINE MMP_MODIFIED_PFE_FLAG 1
+#DEFINE MMP_DELETED_PFE_FLAG 2
+#DEFINE MMP_PAGED_POOL_PFE_FLAG 4
+
+STRUCT MmpFreePfe
+    Next : ^MmpPfe,
+END
+
+STRUCT MmpBackedPfe
+    OffsetInObject : RtlUquad,
+    Entry : RtlAvlNode,
+END
+
+STRUCT MmpAnonPfe
+    TrackingTableEntry : ^MmpPte,
+    Backing : MmpPte,
+END
+
+UNION MmpInUseUnion
+    Backed : MmpBackedPfe,
+    Anon : MmpAnonPfe,
+END
+
+STRUCT MmpPfe
+    U : MmpInUseUnion,
+    Object : ^MmuObject,
+    Entry : RtlListEntry,
+
+    References : ULONG,
+    Type : UBYTE,
+    Flags : UBYTE,
+END
+
+STRUCT MmpAvailablePageList
+    Heads : RtlListEntry[MMP_COLOR_COUNT],
+    Count : UWORD,
+END
+
+STRUCT MmpPartition
+    FreeList : MmpAvailablePageList,
+    ZeroList : MmpAvailablePageList,
+    StandbyList : MmpAvailablePageList,
+    ModifiedListHead : RtlListEntry,
+
+    AvailablePageCount : UWORD,
+    FluidPageCount : UWORD,
+    ModifiedPageCount : UWORD,
+
+    CommitUsage : UWORD,
+    CommitLimit : UWORD,
+    TheoreticalCommitLimit : UWORD,
+
+    TotalPages : UWORD,
+
+    LowPageCount : UWORD,
+    SufficientPageCount : UWORD,
+    ModifiedPageMaximum : UWORD,
+    ZeroingThreshold : UWORD,
+
+    ListLock : KeLock,
+
+    LowMemoryEvent : KeEvent,
+    PageAvailableEvent : KeEvent,
+    LowPageAvailableEvent : KeEvent,
+    ModifiedPageEvent : KeEvent,
+    ZeroPageEvent : KeEvent,
+
+    CommitLock : KeLock,
+
+    Node : ^MmpNode,
+
+    SizeLevel : UBYTE,
+END
+
+#MACRO MmpIsPartitionPhysical ( partition ) [
+    (&(partition)^.Node^.Partition == (partition))
+]
+
+#MACRO MmpNewAvailablePage ( partition, avail ) [
+    IF (avail) > MMP_BLOCK_FOR_PAGES_THRESHOLD AND
+        (partition)^.PageAvailableEvent.Header.SignalCount == 0 THEN
+
+        // Signal the available page event.
+
+        KeSignalEvent (
+            &(partition)^.PageAvailableEvent, // event
+            0, // priorityboost
+        )
+    END
+
+    IF (partition)^.LowPageAvailableEvent.Header.SignalCount == 0 THEN
+        // Signal the low page available event.
+
+        KeSignalEvent (
+            &(partition)^.LowPageAvailableEvent, // event
+            0, // priorityboost
+        )
+    END
+]
+
+EXTERN MmuPartitionType : ObuType
+
+EXTERN MmpBootNode : ^MmpNode
+
+EXTERN MmpPfnDatabase : ^MmpPfe
+
+EXTERN MmpSystemSize : UWORD
+
+// Keep this synchronized with Loader.hjk
+
+#IF ( == BLD_BITS 32 )
+    #DEFINE MMP_PFE_SIZE 40
+#ELSE
+    #DEFINE MMP_PFE_SIZE 64
+#END
+
+#MACRO MmpPfnToPfe ( pfn ) [
+    (CAST ((pfn) * MMP_PFE_SIZE) + MmpPfnDatabase TO ^MmpPfe)
+]
+
+#MACRO MmpPfeToPfn ( pfe ) [
+    (CAST (((pfe) - MmpPfnDatabase) / MMP_PFE_SIZE) TO UWORD)
+]
+
+EXTERN FN MmpInitializePartitionStage1 (
+    IN partition : ^MmpPartition,
+    IN node : ^MmpNode,
+)
+
+EXTERN FN MmpSetPartitionSize (
+    IN partition : ^MmpPartition,
+)
+
+EXTERN FN MmpAllocateChunkSpace (
+    IN chunkspace : ^MmpChunkSpace,
+) : ^VOID
+
+EXTERN FN MmpFreeChunkSpace (
+    IN chunkspace : ^MmpChunkSpace,
+    IN ptr : ^VOID,
+    IN flush : UWORD,
+)
+
+#DEFINE MMP_MAXIMUM_CHUNKS_PENDING_FLUSH 128
+
+STRUCT MmpChunkSpace
+    EntryShift : UWORD,
+    EntryCount : UWORD,
+    FreeListHead : ^MmpChunkEntry,
+    Lock : KeLock,
+
+    PendingFlush : ^VOID[MMP_MAXIMUM_CHUNKS_PENDING_FLUSH],
+    PendingFlushCount : UBYTE,
+END
+
+EXTERN MmpPoolSpace : MmpChunkSpace
+EXTERN MmpCacheSpace : MmpChunkSpace
+
+EXTERN MmpCacheSpaceChunkPages : UWORD
+
+EXTERN FN MmpInitializeSystemVa (
+    IN node : ^MmpNode,
+)
+
+EXTERN FN MmpInitializeSpaceNodeAllocation (
+    IN node : ^MmpNode,
+)
+
+EXTERN FN MmpInitializePools (
+    IN node : ^MmpNode,
+)
+
+#DEFINE MMP_QUICK_PER_CPU 4
+
+EXTERN FN MmpInitializeQuickPages (
+    IN node : ^MmpNode,
+)
+
+#DEFINE MMP_BLOCK_FOR_PAGES_THRESHOLD 4
+
+STRUCT MmpDynamicSpaceDemandNode
+    MappedObject : ^MmuObject,
+    Offset : RtlUquad,
+END
+
+STRUCT MmpDynamicSpacePoolNode
+    Pool : ^MmpPool,
+    Tag : ULONG,
+END
+
+UNION MmpDynamicSpaceNodeUnion
+    Demand : MmpDynamicSpaceDemandNode,
+    Pool : MmpDynamicSpacePoolNode,
+END
+
+// XXX The sanity of using a pool cache for this depends on the
+//     MmpDynamicSpaceNode being small enough to not trigger page-aligned
+//     pool allocation when slabs are created for it.
+
+STRUCT MmpDynamicSpaceNode
+    Entry : RtlAvlNode,
+    
+    StartVa : ^VOID,
+    EndVa : ^VOID,
+
+    U : MmpDynamicSpaceNodeUnion,
+END
+
+EXTERN FN MmpFindDynamicSpaceNode (
+    IN ptr : ^VOID,
+) : ^MmpDynamicSpaceNode
+
+EXTERN FN MmpAllocateDynamicPages (
+    IN node : ^MmpNode,
+    IN pages : UWORD,
+) : ^VOID
+
+EXTERN FN MmpReleaseDynamicPages (
+    IN node : ^MmpNode,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+    IN flush : UWORD,
+)
+
+EXTERN FN MmpAllocateDynamicSpace (
+    IN node : ^MmpNode,
+    IN pages : UWORD,
+    IN wait : UWORD,
+) : ^MmpDynamicSpaceNode
+
+EXTERN FN MmpReleaseDynamicSpace (
+    IN node : ^MmpNode,
+    IN spacenode : ^MmpDynamicSpaceNode,
+    IN flush : UWORD,
+)
+
+EXTERN FN MmpAllocatePage (
+    IN partition : ^MmpPartition,
+    IN zeroed : UWORD,
+    IN low : UWORD,
+    IN color : UWORD,
+) : ^MmpPfe
+
+EXTERN FN MmpFreePage (
+    IN partition : ^MmpPartition,
+    IN pfe : ^MmpPfe,
+)
+
+EXTERN FN MmpWaitForPages (
+    IN partition : ^MmpPartition,
+    IN low : UWORD,
+) : UWORD
+
+EXTERN FN MmpAllocatePageWait (
+    IN partition : ^MmpPartition,
+    IN zeroed : UWORD,
+    IN low : UWORD,
+    IN color : UWORD,
+) : ^MmpPfe
+
+EXTERN FN MmpAllocatePageFromList (
+    IN list : ^MmpAvailablePageList,
+    IN color : UWORD,
+) : ^MmpPfe
+
+EXTERN FN MmpInsertPageIntoList (
+    IN list : ^MmpAvailablePageList,
+    IN pfe : ^MmpPfe,
+    IN head : UWORD,
+)
+
+#MACRO MmpAcquireListExclusive ( partition ) [
+    KeAcquireApcLockExclusive ( &(partition)^.ListLock )
+]
+
+#MACRO MmpReleaseList ( partition, ipl ) [
+    KeReleaseApcLock ( &(partition)^.ListLock, ipl )
+]
+
+#MACRO MmpAcquireObjectExclusive ( object ) [
+    KeAcquireApcLockExclusive ( &(object)^.Pushlock )
+]
+
+#MACRO MmpAcquireObjectShared ( object ) [
+    KeAcquireApcLockShared ( &(object)^.Pushlock )
+]
+
+#MACRO MmpReleaseObject ( object, ipl ) [
+    KeReleaseApcLock ( &(object)^.Pushlock, ipl )
+]
+
+STRUCT MmpQuotaLimit
+    Used : UWORD,
+    Limit : UWORD,
+END
+
+STRUCT MmpQuotaBlock
+    Entry : RtlListEntry,
+
+    Pool : MmpQuotaLimit[MMU_MAXIMUM_POOL],
+    VmPages : MmpQuotaLimit,
+
+    References : ULONG,
+    Uid : ULONG,
+END
+
+EXTERN FN MmpInitializeQuota ()
+
+EXTERN FN MmpInitializeQuotaBlock (
+    IN quotablock : ^MmpQuotaBlock,
+    IN nplimit : UWORD,
+    IN pglimit : UWORD,
+    IN vmlimit : UWORD,
+    IN uid : UWORD,
+)
+
+EXTERN FN MmpExpandPageFiles (
+    IN partition : ^MmpPartition,
+    IN wait : UWORD,
+    IN full : UWORD,
+) : OsStatus
+
+EXTERN FN MmpInitializeArchitecture ()
+
+EXTERN FN MmpInitializeMdlCache (
+    IN node : ^MmpNode,
+)
+
+EXTERN FN MmpInitializeKernelStackCache (
+    IN node : ^MmpNode,
+)
+
+#MACRO MmpPfnColor ( pfn ) [
+    ((pfn) & (MMP_COLOR_COUNT - 1))
+]
+
+#MACRO MmpVirtualAddressColor ( vaddr ) [
+    ((vaddr >> RTL_PAGE_SHIFT) & (MMP_COLOR_COUNT - 1))
+]
+
+EXTERN FN MmpInitializePoolCache (
+    IN node : ^MmpNode,
+)
+
+// Internal pool constants
+
+// This is the shift for the minimum block size (i.e. 1 << 5 = 32).
+
+#DEFINE MMP_BLOCK_SIZE_SHIFT 5
+#DEFINE MMP_BLOCK_MIN_SIZE [(1 << MMP_BLOCK_SIZE_SHIFT)]
+#DEFINE MMP_BLOCK_SIZE_MASK [(MMP_BLOCK_MIN_SIZE - 1)]
+
+// We track block sizes in units of minimum block sizes. Since we store this in
+// a byte, the maximum block size is the minimum block size times 256 (or,
+// shifted left by 8). Actually, here we use 6 (1 << 6 = 64 units max) to keep
+// the size of the pool structures, and time spent scanning list heads down.
+
+#DEFINE MMP_BLOCK_MAX_UNITS_SHIFT 6
+#DEFINE MMP_BLOCK_MAX_SIZE_SHIFT [(MMP_BLOCK_SIZE_SHIFT + MMP_BLOCK_MAX_UNITS_SHIFT)]
+#DEFINE MMP_BLOCK_MAX_SIZE [(1 << MMP_BLOCK_MAX_SIZE_SHIFT)]
+#DEFINE MMP_BLOCK_MAX_SIZE_MASK [(MMP_BLOCK_MAX_SIZE - 1)]
+
+// The maximum request size is four units less than the maximum size.
+// This avoids some weird edge cases. It's also more time-efficient to use the
+// page-aligned allocator for larger requests.
+
+#DEFINE MMP_BLOCK_MAX_REQUEST_UNITS [((1 << MMP_BLOCK_MAX_UNITS_SHIFT) - 4)]
+#DEFINE MMP_BLOCK_MAX_REQUEST_SIZE [(MMP_BLOCK_MAX_REQUEST_UNITS << MMP_BLOCK_SIZE_SHIFT)]
+
+EXTERN FN MmpAdjustPoolCaches (
+    IN list : ^MmpPoolCacheList,
+    IN purgepercpu : UWORD,
+    IN empty : UWORD,
+)
+
+STRUCT MmpSlabCache
+    Size : UWORD,
+
+    Lock : KeLock,
+
+    FreeListHead : RtlListEntry,
+
+    Node : ^MmpNode,
+
+    Tag : ULONG,
+    SlabSize : ULONG,
+    ActiveSlabCount : ULONG,
+
+    BlocksPerSlab : UBYTE,
+    PoolIndex : UBYTE,
+END
+
+STRUCT MmpMagazineType
+    PoolCache : ^MmpPoolCache,
+    Size : UBYTE,
+END
+
+ENUM MmpMagazineTypes : UBYTE
+    MMP_MAGAZINE_SMALL,
+    MMP_MAGAZINE_LARGE,
+
+    MMP_MAGAZINE_MAX,
+END
+
+#DEFINE MMP_BLOCK_LOG_BUCKETS [(MMP_BLOCK_MAX_UNITS_SHIFT + 1)]
+#DEFINE MMP_BLOCK_SIZE_BUCKETS [(1 << MMP_BLOCK_MAX_UNITS_SHIFT) + 1]
+
+FNPTR MmpPoolGetMemoryF (
+    IN partition : ^MmpPartition,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+    IN low : UWORD,
+    IN wait : UWORD,
+) : UWORD
+
+FNPTR MmpPoolReturnMemoryF (
+    IN partition : ^MmpPartition,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
+
+STRUCT MmpPool
+    Lock : KeLock,
+
+    Partition : ^MmpPartition,
+    Node : ^MmpNode,
+
+    GetMemory : MmpPoolGetMemoryF,
+    ReturnMemory : MmpPoolReturnMemoryF,
+
+    BytesUsedInternally : UWORD,
+    BytesUsedExternally : UWORD,
+    BytesUsedPeak : UWORD,
+
+    LogListHeads : RtlListEntry[MMP_BLOCK_LOG_BUCKETS],
+    SizeListHeads : RtlListEntry[MMP_BLOCK_SIZE_BUCKETS],
+
+    Flags : UBYTE,
+END
+
+STRUCT MmpPoolCacheList
+    Head : RtlListEntry,
+    MasterListLock : KeLock,
+END
+
+#DEFINE MMP_DEFERRED_FLUSH_PAIRS 64
+
+STRUCT MmpDeferredFlush
+    Ptr : ^VOID,
+    Pages : UWORD,
+END
+
+STRUCT MmpNode
+    PoolTable : ^MmpPool[MMU_MAXIMUM_POOL],
+
+    DynamicSpaceRoot : RtlAvlNode,
+    DynamicSpaceLock : KeLock,
+    DynamicSpaceTreeLock : KeLock,
+    DynamicSpaceBitmap : RtlBitmapHeader,
+    DynamicSpaceHint : UWORD,
+    DynamicSpaceBase : ^VOID,
+
+    DeferredFlushIndex : UWORD,
+    DeferredFlushPages : UWORD,
+
+    SpaceNodeCache : ^MmpPoolCache,
+    MdlCache : ^MmpPoolCache,
+    KernelStackCache : ^MmpPoolCache,
+
+    QuickPteBase : ^MmpPte,
+
+    QuickPteBlocks : ^MmpQuickPteBlock,
+
+    Id : UBYTE,
+    PgPoolCacheAdjustActive : UBYTE,
+
+    PoolSpace : MmpChunkSpace,
+    CacheSpace : MmpChunkSpace,
+
+    Partition : MmpPartition,
+
+    PoolRecords : MmpPool[MMU_MAXIMUM_POOL],
+
+    MagazineTypeTable : MmpMagazineType[MMP_MAGAZINE_MAX],
+
+    PoolCacheSlabs : MmpSlabCache,
+    SlabCacheSlabs : MmpSlabCache,
+
+    NpPoolCacheList : MmpPoolCacheList,
+    PgPoolCacheList : MmpPoolCacheList,
+
+    PgPoolCacheAdjustItem : ExuWorkItem,
+
+    DeferredFlushTable : MmpDeferredFlush[MMP_DEFERRED_FLUSH_PAIRS],
+END

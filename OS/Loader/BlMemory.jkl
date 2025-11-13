@@ -313,7 +313,7 @@ FN BlFreeKernelSpace (
     )
 END
 
-FN BlMapIoRegion (
+FN BlMapIouRegion (
     IN pages : UWORD,
     IN phyaddr : ^VOID,
     IN noncached : UWORD,
@@ -673,12 +673,12 @@ FN BlInitializeMemory ()
 
     // Create the dynamic system virtual memory areas.
 
-    // MI_POOL_SPACE is equal to 4x physical memory.
+    // MMP_POOL_SPACE is equal to 4x physical memory.
 
     pages = BlTotalPages * 4
 
-    IF pages > (MI_POOL_SPACE_SIZE / RTL_PAGE_SIZE) THEN
-        pages = MI_POOL_SPACE_SIZE / RTL_PAGE_SIZE
+    IF pages > (MMP_POOL_SPACE_SIZE / RTL_PAGE_SIZE) THEN
+        pages = MMP_POOL_SPACE_SIZE / RTL_PAGE_SIZE
     END
 
     // The true page count is returned by BxCreateVirtualSpace since it will
@@ -686,33 +686,33 @@ FN BlInitializeMemory ()
     // space available.
 
     BlInfoBlock.PoolSpaceSize = BxCreateVirtualSpace (
-        MI_POOL_SPACE, // base
+        MMP_POOL_SPACE, // base
         pages, // pages
     )
 
-    // MI_CACHE_SPACE is equal to 4x physical memory.
+    // MMP_CACHE_SPACE is equal to 4x physical memory.
 
     pages = BlTotalPages * 4
 
-    IF pages > (MI_CACHE_SPACE_SIZE / RTL_PAGE_SIZE) THEN
-        pages = MI_CACHE_SPACE_SIZE / RTL_PAGE_SIZE
+    IF pages > (MMP_CACHE_SPACE_SIZE / RTL_PAGE_SIZE) THEN
+        pages = MMP_CACHE_SPACE_SIZE / RTL_PAGE_SIZE
     END
 
     BlInfoBlock.CacheSpaceSize = BxCreateVirtualSpace (
-        MI_CACHE_SPACE, // base
+        MMP_CACHE_SPACE, // base
         pages, // pages
     )
 
-    // MI_DYNAMIC_SPACE is equal to 8x physical memory.
+    // MMP_DYNAMIC_SPACE is equal to 8x physical memory.
 
     pages = BlTotalPages * 8
 
-    IF pages > (MI_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE) THEN
-        pages = MI_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE
+    IF pages > (MMP_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE) THEN
+        pages = MMP_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE
     END
 
     BlInfoBlock.DynamicSpaceSize = BxCreateVirtualSpace (
-        MI_DYNAMIC_SPACE, // base
+        MMP_DYNAMIC_SPACE, // base
         pages, // pages
     )
 

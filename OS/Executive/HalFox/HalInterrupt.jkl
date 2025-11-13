@@ -4,20 +4,20 @@
 
 #INCLUDE "Halp.hjk"
 
-FN HalRaiseHardwareIpl (
+FN HaluRaiseHardwareIpl (
     IN ipl : UWORD,
 ) : UWORD
 
-    // This isn't part of KiRaiseIpl since that is written in a tightly
+    // This isn't part of KepRaiseIpl since that is written in a tightly
     // optimized manner around the most common usage (changing between software
     // IPLs, which need not reprogram the hardware interrupt masks).
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
     oldipl := prb^.Ipl
 
-    IF ipl > KI_IPL_DPC THEN
-        KiDisableInterrupts ()
+    IF ipl > KEP_IPL_DPC THEN
+        KepDisableInterrupts ()
     END
 
     prb^.Ipl = ipl
@@ -25,33 +25,33 @@ FN HalRaiseHardwareIpl (
     RETURN oldipl
 END
 
-FN HalLowerHardwareIpl (
+FN HaluLowerHardwareIpl (
     IN ipl : UWORD,
 )
 
-    // This isn't part of KiLowerIpl since that is written in a tightly
+    // This isn't part of KepLowerIpl since that is written in a tightly
     // optimized manner around the most common usage (changing between software
     // IPLs, which need not reprogram the hardware interrupt masks).
 
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
     prb^.Ipl = ipl
 
-    IF ipl <= KI_IPL_DPC THEN
-        KiEnableInterrupts ()
+    IF ipl <= KEP_IPL_DPC THEN
+        KepEnableInterrupts ()
     END
 
     // We don't need to check this in the disabled interrupts section because if
     // we get a stale PendingSoftwareInterrupts value from another processor, we
-    // will harmlessly call KiDispatchSoftwareInterrupts which does nothing. And
+    // will harmlessly call KepDispatchSoftwareInterrupts which does nothing. And
     // we can't "miss" any since all events that switch us to another processor
     // will cause software interrupt dispatch anyway.
 
     IF prb^.PendingSoftwareInterrupts >> ipl THEN
-        KiDispatchSoftwareInterrupts ( ipl )
+        KepDispatchSoftwareInterrupts ( ipl )
     END
 END
 
-FN (KeInterruptF) HalHandleDeviceInterrupt (
+FN (KeInterruptF) HaluHandleDeviceInterrupt (
     IN interrupt : ^KeInterrupt,
     IN context : ^OsContext,
 )
@@ -61,14 +61,14 @@ FN (KeInterruptF) HalHandleDeviceInterrupt (
     // necessary to link the kernel.
 END
 
-FN HalInterrupt (
+FN HaluInterrupt (
     IN context : ^OsContext,
     IN vector : UWORD,
 )
 
     // Called by architecture-specific code in Ke when an interrupt is detected.
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
     int := prb^.IrqDispatchTable[vector]
 

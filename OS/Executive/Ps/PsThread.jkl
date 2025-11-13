@@ -9,21 +9,21 @@ STRUCT PspThreadContext
     StartFunc : KeStartThreadF,
     Context1 : UWORD,
     Context2 : UWORD,
-    Process : ^PsProcess,
+    Process : ^PsuProcess,
     Flags : ULONG,
 END
 
-PUBLIC PspTurnstileCache : ^MiPoolCache
+PUBLIC PspTurnstileCache : ^MmpPoolCache
 
 #MACRO PspAllocateTurnstile () [
-    MmAllocateFromPoolCache (
+    MmuAllocateFromPoolCache (
         PspTurnstileCache, // cache
         TRUE, // wait
     )
 ]
 
 #MACRO PspFreeTurnstile ( turnstile ) [
-    MmFreeToPoolCache (
+    MmuFreeToPoolCache (
         PspTurnstileCache, // cache
         turnstile, // ptr
     )
@@ -31,7 +31,7 @@ PUBLIC PspTurnstileCache : ^MiPoolCache
 
 #SECTION "PAGEtext"
 FN PspPerformEagerThreadCleanup (
-    IN thread : ^PsThread,
+    IN thread : ^PsuThread,
 )
 
     // Perform the parts of thread cleanup that can be done "eagerly" after the
@@ -48,9 +48,9 @@ FN PspPerformEagerThreadCleanup (
 
     // Free the kernel stack.
 
-    MmFreeKernelStack (
-        CONTAINEROF thread^.Tcb.Process TO PsProcess.Pcb, // process
-        thread^.Tcb.KernelStackTop - (KE_STACK_PAGES << RTL_PAGE_SHIFT), // kstack
+    MmuFreeKernelStack (
+        CONTAINEROF thread^.Tcb.Process TO PsuProcess.Pcb, // process
+        thread^.Tcb.KernelStackTop - (KEU_STACK_PAGES << RTL_PAGE_SHIFT), // kstack
     )
 
     // Free the turnstile.
@@ -60,7 +60,7 @@ FN PspPerformEagerThreadCleanup (
     IF paged^.IpcBlock THEN
         // Free the IPC block.
 
-        MmFreePool (
+        MmuFreePool (
             paged^.IpcBlock, // ptr
             'Ipcb', // tag
         )
@@ -68,17 +68,17 @@ FN PspPerformEagerThreadCleanup (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) PspDeleteThreadObject (
+FN (ObuTypeDeleteF) PspDeleteThreadObject (
     IN object : ^VOID,
 ) : UWORD
 
     // Delete a thread object.
 
-    thread := CAST object TO ^PsThread
+    thread := CAST object TO ^PsuThread
 
     paged := thread^.Paged
 
-    process := CONTAINEROF thread^.Tcb.Process TO PsProcess.Pcb
+    process := CONTAINEROF thread^.Tcb.Process TO PsuProcess.Pcb
 
     // Delete the TID.
 
@@ -86,7 +86,7 @@ FN (ObTypeDeleteF) PspDeleteThreadObject (
 
     // Unreference the interned name.
 
-    ExUnreferenceName ( paged^.Name )
+    ExuUnreferenceName ( paged^.Name )
 
     // Perform eager cleanup if it hasn't been done.
 
@@ -94,20 +94,20 @@ FN (ObTypeDeleteF) PspDeleteThreadObject (
 
     // Unreference the process.
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN TRUE
 END
 
 #SECTION "PAGEtext"
-EXPORT FN PsExitThread ()
+EXPORT FN PsuExitThread ()
 
     // This thread has reached the end of its life. Usermode will never regain
     // control.
 
-    thread := PsCurrentThread ()
+    thread := PsuCurrentThread ()
 
-    process := PsCurrentProcess ()
+    process := PsuCurrentProcess ()
 
     // Make our priority the lowest real-time priority to expedite the releasing
     // of this thread's resources.
@@ -119,7 +119,7 @@ EXPORT FN PsExitThread ()
 
     // Ignore events so nothing weird happens while we're cleaning up.
 
-    KeIgnoreEvents ()
+    KeuIgnoreEvents ()
 
     // If there are any asynchronous I/O operations in-flight, try to cancel
     // them and wait for completion.
@@ -131,19 +131,19 @@ EXPORT FN PsExitThread ()
         // can asynchronously remove items from it in our context, but that
         // doesn't matter when we're just checking for emptiness.
 
-        IoRundownThread ( thread )
+        IouRundownThread ( thread )
     END
 
     // Uninitialize the thread with respect to Mm.
 
-    MmUninitializeThread (
+    MmuUninitializeThread (
         process, // process
         thread, // thread
     )
 
     // Uninitialize the thread with respect to Ke.
 
-    IF KeUninitializeThread ( &thread^.Tcb ) THEN
+    IF KeuUninitializeThread ( &thread^.Tcb ) THEN
         // Ke marked the thread's process terminated. Threads can no longer be
         // created within the process and early exit processing should be
         // performed.
@@ -155,13 +155,13 @@ EXPORT FN PsExitThread ()
             process^.Paged^.TerminationStatus = thread^.Paged^.TerminationStatus
         END
 
-        PsUnblockRundownProcess ( process )
+        PsuUnblockRundownProcess ( process )
     END
 
     // Now exit the thread. This does not return.
     // The thread object will be enqueued to the reaper thread.
 
-    KeExitThread ( &thread^.Tcb )
+    KeuExitThread ( &thread^.Tcb )
 END
 
 #SECTION "PAGEtext"
@@ -172,7 +172,7 @@ FN (KeStartThreadF) PspUserThreadEntry (
 
     // Entry point for all usermode threads.
 
-    thread := PsCurrentThread ()
+    thread := PsuCurrentThread ()
 
     // Build the TEB.
 
@@ -190,12 +190,12 @@ FN (KeStartThreadF) PspUserThreadEntry (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeInitializeF) PspInitializeThreadObject (
+FN (ObuTypeInitializeF) PspInitializeThreadObject (
     IN object : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
 
-    thread := CAST object TO ^PsThread
+    thread := CAST object TO ^PsuThread
     ctx := CAST context TO ^PspThreadContext
 
     status : OsStatus
@@ -205,13 +205,13 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     flags := ctx^.Flags
     process := ctx^.Process
 
-    paged := CAST ObFindPagedPart ( thread ) TO ^PsPagedThread
+    paged := CAST ObuFindPagedPart ( thread ) TO ^PsuPagedThread
 
     thread^.Paged = paged
 
     // Intern the name.
 
-    paged^.Name = ExFindName ( ctx^.Name )
+    paged^.Name = ExuFindName ( ctx^.Name )
 
     IF NOT paged^.Name THEN
         RETURN OS_STATUS_NO_MEMORY
@@ -221,7 +221,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     kstack : ^VOID
 
-    status = MmCreateKernelStack (
+    status = MmuCreateKernelStack (
         process, // process
         OUT kstack, // kstack
     )
@@ -266,7 +266,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     // Initialize the thread for usage by Mm.
 
-    status = MmInitializeThread (
+    status = MmuInitializeThread (
         process, // process
         thread, // thread
         paged^.Mode, // mode
@@ -307,12 +307,12 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
         FALSE, // try
     )
 
-    IF NOT KeInitializeThread (
+    IF NOT KeuInitializeThread (
         &process^.Pcb, // process
         &thread^.Tcb, // thread
         ctx^.Name^.Data, // name
         kstack, // kstack
-        KE_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
+        KEU_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
         turnstile, // turnstile
         ctx^.StartFunc, // startfunc
         ctx^.Context1, // context1
@@ -331,7 +331,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     // Inherit the signal mask from the current thread.
 
-    current := PsCurrentThread ()
+    current := PsuCurrentThread ()
 
     thread^.Tcb.SignalAcceptMask[0] |= current^.Tcb.SignalAcceptMask[0]
     thread^.Tcb.SignalAcceptMask[1] |= current^.Tcb.SignalAcceptMask[1]
@@ -341,13 +341,13 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
     // kernel stack and other resources should remain in existence. This bias is
     // removed by the reaper thread after the thread terminates.
 
-    ObReferenceObject ( thread )
+    ObuReferenceObject ( thread )
 
     // Bias the reference count of the process object.
     // This reflects an active thread existing within it. This bias is removed
     // when the thread object is deleted.
 
-    ObReferenceObject ( process )
+    ObuReferenceObject ( process )
 
     IF flags & OS_THREAD_SUSPENDED THEN
         // Suspend the thread. It will block on the suspension event upon return
@@ -358,7 +358,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
     // Set the thread a-runnin'.
     //
-    // KeReadyThread ( &thread^.Tcb )
+    // KeuReadyThread ( &thread^.Tcb )
     //
     // Nevermind, the caller will do that. Basically there might still be outer
     // failure modes and we can't know at this stage whether the thread should
@@ -368,7 +368,7 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
 @Error6
 
-    MmUninitializeThread (
+    MmuUninitializeThread (
         process, // process
         thread, // thread
     )
@@ -383,40 +383,40 @@ FN (ObTypeInitializeF) PspInitializeThreadObject (
 
 @Error3
 
-    MmFreeKernelStack (
+    MmuFreeKernelStack (
         process, // process
         kstack, // kstack
     )
 
 @Error2
 
-    ExUnreferenceName ( paged^.Name )
+    ExuUnreferenceName ( paged^.Name )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN (KeProcessCustodyListF) PspReapThread (
-    IN list : ^KeCustodyList,
+FN (KeuProcessCustodyListF) PspReapThread (
+    IN list : ^KeuCustodyList,
     IN object : ^VOID,
     IN context : ^VOID,
 )
 
-    // Called to reap a thread as a KeProcessCustodyList callback.
+    // Called to reap a thread as a KeuProcessCustodyList callback.
 
     // Ke uses the ready queue link of the thread as the custody list link.
     // This is fine since it is useless at this point in the thread's lifetime.
 
-    thread := CONTAINEROF object TO KeThread.ReadyEntry.Next
-    psthrd := CONTAINEROF thread TO PsThread.Tcb
+    thread := CONTAINEROF object TO KeuThread.ReadyEntry.Next
+    psthrd := CONTAINEROF thread TO PsuThread.Tcb
 
-    threadlisthead := CAST context TO ^^KeThread
+    threadlisthead := CAST context TO ^^KeuThread
 
 #IF BLD_MP
     // Execute the reaper barrier to make sure the thread has fully switched off
     // its stack.
 
-    KeReaperBarrier ( thread )
+    KeuReaperBarrier ( thread )
 #END
 
     // Perform eager cleanup of the thread object to rid ourselves of resources
@@ -431,18 +431,18 @@ FN (KeProcessCustodyListF) PspReapThread (
 END
 
 #SECTION "PAGEtext"
-FN (ExWorkItemF) PsReaperWorker (
+FN (ExuWorkItemF) PsuReaperWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
     // Implements the thread reaper.
 
-    threadlisthead : ^KeThread[1]
+    threadlisthead : ^KeuThread[1]
     threadlisthead[0] = NULLPTR
 
-    KeProcessCustodyList (
-        &KeReaperCustodyList, // list
+    KeuProcessCustodyList (
+        &KeuReaperCustodyList, // list
         &PspReapThread, // callback
         &threadlisthead[0], // context
     )
@@ -457,22 +457,22 @@ FN (ExWorkItemF) PsReaperWorker (
     thread := threadlisthead[0]
 
     WHILE thread DO
-        next := CAST thread^.ReadyEntry.Next TO ^KeThread
-        psthrd := CONTAINEROF thread TO PsThread.Tcb
+        next := CAST thread^.ReadyEntry.Next TO ^KeuThread
+        psthrd := CONTAINEROF thread TO PsuThread.Tcb
 
         // Remove the reference from the thread object that signified that there
         // was an active execution context that depended on it. There no longer
         // is (and its last act was to place itself on our reaper list), so
         // unreference it.
 
-        ObUnreferenceObject ( psthrd )
+        ObuUnreferenceObject ( psthrd )
 
         thread = next
     END
 END
 
-FN (KeCustodyListActivateF) PspActivateReaper (
-    IN list : ^KeCustodyList,
+FN (KeuCustodyListActivateF) PspActivateReaper (
+    IN list : ^KeuCustodyList,
 )
 
     // Called by Ke when the reaper list transitions to non-empty.
@@ -483,9 +483,9 @@ FN (KeCustodyListActivateF) PspActivateReaper (
 
     RtlSetUquadToUlong ( &interval, 100 )
 
-    ExEnqueueTimedWorkItem (
+    ExuEnqueueTimedWorkItem (
         &PspReaperTimedWorkItem, // item
-        EX_HIGH_WORK_PRIORITY, // priority
+        EXU_HIGH_WORK_PRIORITY, // priority
         &interval, // interval
         0, // context1
         0, // context2
@@ -493,8 +493,8 @@ FN (KeCustodyListActivateF) PspActivateReaper (
 END
 
 #SECTION "PAGEtext"
-FN PsTerminateThreadObject (
-    IN thread : ^PsThread,
+FN PsuTerminateThreadObject (
+    IN thread : ^PsuThread,
     IN status : OsStatus,
 )
 
@@ -518,12 +518,12 @@ FN OsTerminateThread (
 
     // Terminate a thread, system service.
 
-    thread : ^PsThread
+    thread : ^PsuThread
     access : UWORD
 
-    retstatus := ObReferenceByHandle (
+    retstatus := ObuReferenceByHandle (
         handle, // handle
-        &PsThreadType, // type
+        &PsuThreadType, // type
         OUT thread, // object
         OUT access, // access
     )
@@ -538,14 +538,14 @@ FN OsTerminateThread (
         GOTO Exit
     END
 
-    PsTerminateThreadObject (
+    PsuTerminateThreadObject (
         thread, // thread
         status, // status
     )
 
 @Exit
 
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 
     RETURN retstatus
 END
@@ -557,12 +557,12 @@ FN OsSuspendThread (
 
     // Suspend a thread, system service.
 
-    thread : ^PsThread
+    thread : ^PsuThread
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsThreadType, // type
+        &PsuThreadType, // type
         OUT thread, // object
         OUT access, // access
     )
@@ -581,7 +581,7 @@ FN OsSuspendThread (
 
 @Exit
 
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -594,12 +594,12 @@ FN OsUnsuspendThread (
 
     // Unsuspend a thread, system service.
 
-    thread : ^PsThread
+    thread : ^PsuThread
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsThreadType, // type
+        &PsuThreadType, // type
         OUT thread, // object
         OUT access, // access
     )
@@ -621,14 +621,14 @@ FN OsUnsuspendThread (
 
 @Exit
 
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsReadStatusThreadObject (
-    IN thread : ^PsThread,
+FN PsuReadStatusThreadObject (
+    IN thread : ^PsuThread,
 ) : OsStatus
 
     // Read the termination status of a thread.
@@ -647,12 +647,12 @@ FN OsReadStatusThread (
 
     // Read the termination status of a thread, system service.
 
-    thread : ^PsThread
+    thread : ^PsuThread
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsThreadType, // type
+        &PsuThreadType, // type
         OUT thread, // object
         OUT access, // access
     )
@@ -667,18 +667,18 @@ FN OsReadStatusThread (
         GOTO Exit
     END
 
-    status = PsReadStatusThreadObject ( thread )
+    status = PsuReadStatusThreadObject ( thread )
 
 @Exit
 
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsQueryThreadObject (
-    IN thread : ^PsThread,
+FN PsuQueryThreadObject (
+    IN thread : ^PsuThread,
     IN query : ^OsThreadQuery,
 )
 
@@ -713,19 +713,19 @@ FN PsQueryThreadObject (
 END
 
 #SECTION "PAGEtext"
-FN PsQueryThread (
+FN PsuQueryThread (
     IN handle : UWORD,
     IN query : ^OsThreadQuery,
 ) : OsStatus
 
     // Query information about a thread handle.
 
-    thread : ^PsThread
+    thread : ^PsuThread
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsThreadType, // type
+        &PsuThreadType, // type
         OUT thread, // object
         OUT access, // access
     )
@@ -740,14 +740,14 @@ FN PsQueryThread (
         GOTO Exit
     END
 
-    PsQueryThreadObject (
+    PsuQueryThreadObject (
         thread, // thread
         query, // query
     )
 
 @Exit
 
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -762,7 +762,7 @@ FN OsQueryThread (
 
     sysquery : OsThreadQuery
 
-    status := PsQueryThread (
+    status := PsuQueryThread (
         handle, // handle
         &sysquery, // query
     )
@@ -773,7 +773,7 @@ FN OsQueryThread (
 
     // Copy the information to userspace.
 
-    RETURN MmSafeCopyOut (
+    RETURN MmuSafeCopyOut (
         query, // dest
         &sysquery, // src
         SIZEOF OsThreadQuery, // size
@@ -788,16 +788,16 @@ FN OsSignalThread (
 
     // Signal a thread, system service.
 
-    IF KeInvalidSignal ( signal ) THEN
+    IF KeuInvalidSignal ( signal ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    thread : ^PsThread
+    thread : ^PsuThread
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsThreadType, // type
+        &PsuThreadType, // type
         OUT thread, // object
         OUT access, // access
     )
@@ -833,7 +833,7 @@ FN OsSignalThread (
 
 @Exit
 
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -847,16 +847,16 @@ FN OsMaskSignalThread (
 
     // Mask a signal in a thread, system service.
 
-    IF KeInvalidSignal ( signal ) THEN
+    IF KeuInvalidSignal ( signal ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    thread : ^PsThread
+    thread : ^PsuThread
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsThreadType, // type
+        &PsuThreadType, // type
         OUT thread, // object
         OUT access, // access
     )
@@ -871,7 +871,7 @@ FN OsMaskSignalThread (
         GOTO Exit
     END
 
-    KeMaskSignalThread (
+    KeuMaskSignalThread (
         &thread^.Tcb, // thread
         signal, // signal
         enable, // enable
@@ -879,7 +879,7 @@ FN OsMaskSignalThread (
 
 @Exit
 
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -893,16 +893,16 @@ FN OsDeliverOnWaitSignalThread (
 
     // Deliver-on-wait a signal in a thread, system service.
 
-    IF KeInvalidSignal ( signal ) THEN
+    IF KeuInvalidSignal ( signal ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    thread : ^PsThread
+    thread : ^PsuThread
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsThreadType, // type
+        &PsuThreadType, // type
         OUT thread, // object
         OUT access, // access
     )
@@ -917,7 +917,7 @@ FN OsDeliverOnWaitSignalThread (
         GOTO Exit
     END
 
-    KeDeliverOnWaitSignalThread (
+    KeuDeliverOnWaitSignalThread (
         &thread^.Tcb, // thread
         signal, // signal
         enable, // enable
@@ -925,7 +925,7 @@ FN OsDeliverOnWaitSignalThread (
 
 @Exit
 
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -937,12 +937,12 @@ FN OsGetFaultStatusThread (
 
     // Get the status for the last fault that the thread incurred.
 
-    thread : ^PsThread
+    thread : ^PsuThread
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsThreadType, // type
+        &PsuThreadType, // type
         OUT thread, // object
         OUT access, // access
     )
@@ -961,7 +961,7 @@ FN OsGetFaultStatusThread (
 
 @Exit
 
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -974,13 +974,13 @@ FN OsSleepThread (
 
     // Put the current thread to sleep for the specified number of milliseconds.
 
-    IF KeInvalidAlertability ( alertable ) THEN
+    IF KeuInvalidAlertability ( alertable ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
     sysinterval : RtlUquad
 
-    status := MmSafeCopyIn (
+    status := MmuSafeCopyIn (
         &sysinterval, // dest
         interval, // src
         SIZEOF RtlUquad, // size
@@ -997,33 +997,33 @@ FN OsSleepThread (
     )
 END
 
-PUBLIC PsThreadType : ObType = {
+PUBLIC PsuThreadType : ObuType = {
     [Name] = "Thread",
 
     [Delete] = &PspDeleteThreadObject,
 
     [Initialize] = &PspInitializeThreadObject,
 
-    [WaitOffset] = OFFSETOF PsThread.Tcb.TerminationEvent,
+    [WaitOffset] = OFFSETOF PsuThread.Tcb.TerminationEvent,
     [TypeIdentifier] = OS_THREAD_TYPE,
     [Tag] = 'Thrd',
 
-    [TypicalBodySize] = SIZEOF PsThread,
-    [TypicalPgBodySize] = SIZEOF PsPagedThread,
+    [TypicalBodySize] = SIZEOF PsuThread,
+    [TypicalPgBodySize] = SIZEOF PsuPagedThread,
 
     [IsPaged] = FALSE,
 }
 
 #SECTION "PAGEtext"
-FN PsCreateThreadObject (
-    IN params : ^NsOpenParameters,
+FN PsuCreateThreadObject (
+    IN params : ^NsuOpenParameters,
     IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
-    IN process : ^PsProcess,
+    IN process : ^PsuProcess,
     IN flags : UWORD,
-    OUT thread : ^PsThread,
+    OUT thread : ^PsuThread,
 ) : OsStatus
 
     // Create a thread object.
@@ -1037,20 +1037,20 @@ FN PsCreateThreadObject (
     ctx.Process = process
     ctx.Flags = flags
 
-    obparams : ObParameters
+    obparams : ObuParameters
 
-    NsInitializeObjectParameters (
+    NsuInitializeObjectParameters (
         &obparams, // obparams
         params, // params
-        &PsThreadType, // type
+        &PsuThreadType, // type
         &ctx, // context
-        SIZEOF PsThread, // bodysize
-        SIZEOF PsPagedThread, // pagedbodysize
+        SIZEOF PsuThread, // bodysize
+        SIZEOF PsuPagedThread, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
     )
 
-    RETURN NsCreateObject (
+    RETURN NsuCreateObject (
         params, // params
         &obparams, // obparams
         OUT thread, // object
@@ -1058,33 +1058,33 @@ FN PsCreateThreadObject (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN PsCreateExecutiveThread (
+EXPORT FN PsuCreateExecutiveThread (
     IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
     IN flags : UWORD,
-    OUT thread : ^PsThread,
+    OUT thread : ^PsuThread,
 ) : OsStatus
 
     // Helper function for creating a thread that only executes code in the
     // system executive.
 
-    params : NsOpenParameters
+    params : NsuOpenParameters
 
     params.Path.Data = NULLPTR
 
     params.Captured.Flags = 0
-    params.Captured.ObFlags = 0
+    params.Captured.ObuFlags = 0
     params.Captured.Permissions = OS_ACCESS_OWNER_ALL
 
-    status := PsCreateThreadObject (
+    status := PsuCreateThreadObject (
         &params, // params
         name, // name
         startfunc, // startfunc
         context1, // context1
         context2, // context2
-        PsSystemProcess, // process
+        PsuSystemProcess, // process
         0, // flags
         OUT thread, // thread
     )
@@ -1096,15 +1096,15 @@ EXPORT FN PsCreateExecutiveThread (
     IF flags & OS_THREAD_SUSPENDED == 0 THEN
         // Set the thread running.
 
-        KeReadyThread ( &thread^.Tcb )
+        KeuReadyThread ( &thread^.Tcb )
     END
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsCreateThread (
-    IN params : ^NsOpenParameters,
+FN PsuCreateThread (
+    IN params : ^NsuOpenParameters,
     IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
@@ -1116,12 +1116,12 @@ FN PsCreateThread (
 
     // Create a thread object - handle interface.
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -1138,9 +1138,9 @@ FN PsCreateThread (
         GOTO Exit
     END
 
-    thread : ^PsThread
+    thread : ^PsuThread
 
-    status = PsCreateThreadObject (
+    status = PsuCreateThreadObject (
         params, // params
         name, // name
         startfunc, // startfunc
@@ -1155,44 +1155,44 @@ FN PsCreateThread (
         GOTO Exit
     END
 
-    status = ObInsertObject (
-        PsCurrentProcess (), // process
+    status = ObuInsertObject (
+        PsuCurrentProcess (), // process
         thread, // object
         params^.Captured.Access, // access
         OUT handle, // handle
     )
 
     IF OsError ( status ) THEN
-        IF params^.ResultFlags & NS_RESULT_CREATED THEN
+        IF params^.ResultFlags & NSU_RESULT_CREATED THEN
             // We created the thread object successfully, but we failed to
             // insert it into the handle table (quota limit reached or some
             // such). Set the thread terminated and ready it so that it kills
             // itself.
 
-            PsTerminateThreadObject (
+            PsuTerminateThreadObject (
                 thread, // thread
                 status, // status
             )
 
-            KeReadyThread ( &thread^.Tcb )
+            KeuReadyThread ( &thread^.Tcb )
         END
 
-        ObUnreferenceObject ( thread )
+        ObuUnreferenceObject ( thread )
 
-    ELSEIF params^.ResultFlags & NS_RESULT_CREATED THEN
-        // Ready the thread because PsCreateThreadObject didn't do it yet.
+    ELSEIF params^.ResultFlags & NSU_RESULT_CREATED THEN
+        // Ready the thread because PsuCreateThreadObject didn't do it yet.
         // We need to do this after a successful handle table insertion so that
         // the thread is only set loose when we know the caller will receive a
         // successful status. Otherwise we could get a situation where a user
         // process is very confused when a thread executed some stuff even
         // though it got an error back from the thread creation call.
 
-        KeReadyThread ( &thread^.Tcb )
+        KeuReadyThread ( &thread^.Tcb )
     END
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
@@ -1212,7 +1212,7 @@ FN OsCreateThread (
 
     sysname : RtlString
 
-    status := MmCaptureString (
+    status := MmuCaptureString (
         name, // string
         &sysname, // output
         OS_NAME_MAX, // maxlen
@@ -1222,9 +1222,9 @@ FN OsCreateThread (
         RETURN status
     END
 
-    sysparams : NsOpenParameters
+    sysparams : NsuOpenParameters
 
-    status = NsCaptureOpenParameters (
+    status = NsuCaptureOpenParameters (
         params, // userparams
         &sysparams, // sysparams
     )
@@ -1233,7 +1233,7 @@ FN OsCreateThread (
         GOTO Exit
     END
 
-    status = PsCreateThread (
+    status = PsuCreateThread (
         &sysparams, // params
         &sysname, // name
         &PspUserThreadEntry, // startfunc
@@ -1244,11 +1244,11 @@ FN OsCreateThread (
         OUT handle, // handle
     )
 
-    NsFreeOpenParameters ( &sysparams )
+    NsuFreeOpenParameters ( &sysparams )
 
 @Exit
 
-    MmFreeCapturedString ( &sysname )
+    MmuFreeCapturedString ( &sysname )
 
     RETURN status
 END

@@ -20,10 +20,10 @@ STRUCT ExpFreeHandle
 END
 
 #SECTION "PAGEtext"
-FN ExInitializeHandleTable (
-    IN handletable : ^ExHandleTable,
+FN ExuInitializeHandleTable (
+    IN handletable : ^ExuHandleTable,
     IN entrysizelog : UWORD,
-    IN quotablock : ^MiQuotaBlock,
+    IN quotablock : ^MmpQuotaBlock,
 )
 
     // Initialize a handle table.
@@ -35,12 +35,12 @@ FN ExInitializeHandleTable (
     handletable^.FreeListHead = -1
     handletable^.Table = NULLPTR
 
-    MmReferenceQuotaBlock ( quotablock )
+    MmuReferenceQuotaBlock ( quotablock )
 END
 
 #SECTION "PAGEtext"
-FN ExLookupHandle (
-    IN handletable : ^ExHandleTable,
+FN ExuLookupHandle (
+    IN handletable : ^ExuHandleTable,
     IN handle : UWORD,
 ) : ^VOID
 
@@ -62,9 +62,9 @@ FN ExLookupHandle (
 END
 
 #SECTION "PAGEtext"
-FN ExEnumerateHandleTable (
-    IN handletable : ^ExHandleTable,
-    IN func : ExHandleTableEnumerationF,
+FN ExuEnumerateHandleTable (
+    IN handletable : ^ExuHandleTable,
+    IN func : ExuHandleTableEnumerationF,
     IN context : UWORD,
 )
 
@@ -74,7 +74,7 @@ FN ExEnumerateHandleTable (
     entries := handletable^.Entries
 
     WHILE i < entries DO
-        entryptr := ExLookupHandle (
+        entryptr := ExuLookupHandle (
             handletable, // handletable
             i, // handle
         )
@@ -93,9 +93,9 @@ FN ExEnumerateHandleTable (
 END
 
 #SECTION "PAGEtext"
-FN ExDeleteHandleTable (
-    IN handletable : ^ExHandleTable,
-    IN func : ExHandleTableEnumerationF,
+FN ExuDeleteHandleTable (
+    IN handletable : ^ExuHandleTable,
+    IN func : ExuHandleTableEnumerationF,
     IN context : UWORD,
 )
 
@@ -104,7 +104,7 @@ FN ExDeleteHandleTable (
     IF func THEN
         // Call a function for each handle.
 
-        ExEnumerateHandleTable (
+        ExuEnumerateHandleTable (
             handletable, // handletable
             func, // func
             context, // context
@@ -116,24 +116,24 @@ FN ExDeleteHandleTable (
     table := handletable^.Table
 
     IF table THEN
-        MmFreePool (
+        MmuFreePool (
             table, // ptr
             'HnTb', // tag
         )
 
-        MmUnchargePoolQuota (
+        MmuUnchargePoolQuota (
             handletable^.QuotaBlock, // quotablock
             handletable^.Entries << handletable^.EntrySizeLog, // charge
-            MM_PAGED_POOL, // poolindex
+            MMU_PAGED_POOL, // poolindex
         )
     END
 
-    MmUnreferenceQuotaBlock ( handletable^.QuotaBlock )
+    MmuUnreferenceQuotaBlock ( handletable^.QuotaBlock )
 END
 
 #SECTION "PAGEtext"
-FN ExDeleteHandle (
-    IN handletable : ^ExHandleTable,
+FN ExuDeleteHandle (
+    IN handletable : ^ExuHandleTable,
     IN handle : UWORD,
     IN entry : ^VOID,
 ) : UWORD
@@ -142,7 +142,7 @@ FN ExDeleteHandle (
     // otherwise FALSE. Copy the contents of the table entry to the provided
     // pointer.
 
-    entryptr := CAST ExLookupHandle (
+    entryptr := CAST ExuLookupHandle (
         handletable, // handletable
         handle, // handle
     ) TO ^ExpFreeHandle
@@ -175,8 +175,8 @@ FN ExDeleteHandle (
 END
 
 #SECTION "PAGEtext"
-FN ExCreateHandle (
-    IN handletable : ^ExHandleTable,
+FN ExuCreateHandle (
+    IN handletable : ^ExuHandleTable,
     IN lock : ^KeLock,
     OUT handle : UWORD,
     OUT entryptr : ^VOID,
@@ -215,10 +215,10 @@ FN ExCreateHandle (
 
     // First charge quota for the new table.
 
-    status := MmChargePoolQuota (
+    status := MmuChargePoolQuota (
         handletable^.QuotaBlock, // quotablock
         newsize, // charge
-        MM_PAGED_POOL, // poolindex
+        MMU_PAGED_POOL, // poolindex
     )
 
     IF OsError ( status ) THEN
@@ -227,18 +227,18 @@ FN ExCreateHandle (
 
     // Now allocate it.
 
-    newtable := MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
+    newtable := MmuAllocatePool (
+        MMU_PAGED_POOL, // poolindex
         newsize, // bytes
         'HnTb', // tag
         lock == NULLPTR, // wait
     )
 
     IF NOT newtable THEN
-        MmUnchargePoolQuota (
+        MmuUnchargePoolQuota (
             handletable^.QuotaBlock, // quotablock
             newsize, // charge
-            MM_PAGED_POOL, // poolindex
+            MMU_PAGED_POOL, // poolindex
         )
 
         IF lock THEN
@@ -249,7 +249,7 @@ FN ExCreateHandle (
 
             KeReleaseLock ( lock )
 
-            MmWaitForPoolMemory ()
+            MmuWaitForPoolMemory ()
 
             KeAcquireLockExclusive ( lock )
 
@@ -272,17 +272,17 @@ FN ExCreateHandle (
 
         // Free old table.
 
-        MmFreePool (
+        MmuFreePool (
             table, // ptr
             'HnTb', // tag
         )
 
         // Uncharge old quota.
 
-        MmUnchargePoolQuota (
+        MmuUnchargePoolQuota (
             handletable^.QuotaBlock, // quotablock
             oldsize, // charge
-            MM_PAGED_POOL, // poolindex
+            MMU_PAGED_POOL, // poolindex
         )
     END
 

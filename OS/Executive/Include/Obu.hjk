@@ -1,0 +1,251 @@
+//
+// Undocumented header for object management for the MINTIA Executive.
+//
+
+#INCLUDE "<ll>/Executive/Ob.hjk"
+
+#INCLUDE "<inc>/Keu.hjk"
+
+#INCLUDE "<inc>/Exu.hjk"
+
+#INCLUDE "<ll>/System/OsObject.hjk"
+
+FNPTR ObuTypeOpenF (
+    IN process : ^PsuProcess,
+    IN object : ^VOID,
+    IN access : UWORD,
+) : OsStatus
+
+FNPTR ObuTypeCloseF (
+    IN object : ^VOID,
+    IN access : UWORD,
+    IN lasthandlecount : UWORD,
+)
+
+FNPTR ObuTypeDeleteF (
+    IN object : ^VOID,
+) : UWORD
+
+FNPTR ObuTypeSetSecurityF (
+    IN object : ^VOID,
+    IN permissions : ^ObuPermissions,
+) : OsStatus
+
+FNPTR ObuTypeNamespaceLookupF (
+    IN context : ^NsuLookupContext,
+) : OsStatus
+
+FNPTR ObuTypeInitializeF (
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+#DEFINE OBU_NAME_MAX 256
+
+#DEFINE OBU_FLAG_PERMANENT 1
+
+#DEFINE OBU_TYPE_NO_WAIT_OFFSET 0xFFFFFFFF
+
+STRUCT ObuType
+    Name : ^UBYTE,
+
+    NpPartCache : ^MmpPoolCache,
+    PgPartCache : ^MmpPoolCache,
+
+    Open : ObuTypeOpenF,
+    Close : ObuTypeCloseF,
+    Delete : ObuTypeDeleteF,
+    SetSecurity : ObuTypeSetSecurityF,
+    NamespaceLookup : ObuTypeNamespaceLookupF,
+
+    Initialize : ObuTypeInitializeF,
+
+    WaitOffset : ULONG,
+    TypeIdentifier : ULONG,
+    Tag : ULONG,
+
+    TypicalBodySize : ULONG,
+    TypicalPgBodySize : ULONG,
+
+    CachedNpBodySize : ULONG,
+    CachedPgBodySize : ULONG,
+
+    IsPaged : UBYTE,
+END
+
+STRUCT ObuCredentials
+    Uid : ULONG,
+    Gid : ULONG,
+END
+
+STRUCT ObuPermissions
+    Cred : ObuCredentials,
+    Access : ULONG,
+END
+
+STRUCT ObuHeader
+    Type : ^ObuType,
+
+    QuotaBlock : ^MmpQuotaBlock,
+
+    Lock : KeLock,
+
+    NamespaceEntry : ^NsuEntry,
+
+    Permissions : ObuPermissions,
+
+    HandleCount : ULONG,
+
+    PagedQuotaCharge : ULONG,
+    NonpagedQuotaCharge : ULONG,
+
+    Flags : UBYTE,
+    InternalFlags : UBYTE,
+END
+
+STRUCT ObpCommonHeader
+    Header : ^ObuHeader,
+    PointerCount : UWORD,
+    NextToReap : ^VOID,
+END
+
+STRUCT ObuParameters
+    Type : ^ObuType,
+
+    Context : ^VOID,
+
+    Permissions : ObuPermissions,
+    Flags : ULONG,
+    BodySize : ULONG,
+    PagedBodySize : ULONG,
+    NpQuotaBias : ULONG,
+    PgQuotaBias : ULONG,
+END
+
+#MACRO ObuInitializeParameters ( obparams, type, context, cred, access, flags, bodysize, pagedbodysize, npquotabias, pgquotabias ) [
+    NOTHING (obparams)^.Type = (type)
+    NOTHING (obparams)^.Context = (context)
+    ObuMoveCredentials (
+        &(obparams)^.Permissions.Cred, // dest
+        (cred), // src
+    )
+    NOTHING (obparams)^.Permissions.Access = (access)
+    NOTHING (obparams)^.Flags = (flags)
+    NOTHING (obparams)^.BodySize = (bodysize)
+    NOTHING (obparams)^.PagedBodySize = (pagedbodysize)
+    NOTHING (obparams)^.NpQuotaBias = (npquotabias)
+    NOTHING (obparams)^.PgQuotaBias = (pgquotabias)
+]
+
+#MACRO ObuFindObjectFromCommonHeader ( commonheader ) [
+    (CAST (commonheader + SIZEOF ObpCommonHeader) TO ^VOID)
+]
+
+#MACRO ObuFindCommonHeader ( object ) [
+    (CAST (object - SIZEOF ObpCommonHeader) TO ^ObpCommonHeader)
+]
+
+#MACRO ObuFindHeader ( object ) [
+    (ObuFindCommonHeader ( object )^.Header)
+]
+
+#MACRO ObuFindPagedPart ( object ) [
+    (ObuFindHeader ( object ) + SIZEOF ObuHeader)
+]
+
+#MACRO ObuMoveCredentials ( dest, src ) [
+    srcsrc := (src)
+
+    NOTHING (dest)^.Uid = srcsrc^.Uid
+    NOTHING (dest)^.Gid = srcsrc^.Gid
+]
+
+EXTERN FN ObuInitialize ()
+
+EXTERN FN ObuCheckAccess (
+    IN permissions : ^ObuPermissions,
+    IN cred : ^ObuCredentials,
+    IN access : UWORD,
+) : UWORD
+
+EXTERN FN ObuCheckAccessForCurrent (
+    IN object : ^VOID,
+    IN access : UWORD,
+) : UWORD
+
+EXTERN FN ObuAllocateObject (
+    IN obparams : ^ObuParameters,
+    OUT object : ^VOID,
+) : OsStatus
+
+EXTERN FN ObuFreeObject (
+    IN object : ^VOID,
+)
+
+EXTERN FN ObuDeleteObject (
+    IN object : ^VOID,
+)
+
+EXTERN FN ObuConditionallyReferenceObject (
+    IN object : ^VOID,
+) : UWORD
+
+EXTERN FN ObuUnreferenceObjectDeferDelete (
+    IN object : ^VOID,
+)
+
+EXTERN FN ObuUnreferenceObject (
+    IN object : ^VOID,
+)
+
+EXTERN FN ObuReferenceObject (
+    IN object : ^VOID,
+)
+
+EXTERN FN ObuInitializeProcess (
+    IN parentprocess : ^PsuProcess,
+    IN process : ^PsuProcess,
+    IN quotablock : ^MmpQuotaBlock,
+)
+
+EXTERN FN ObuUninitializeProcess (
+    IN process : ^PsuProcess,
+)
+
+EXTERN FN ObuInsertObject (
+    IN process : ^PsuProcess,
+    IN object : ^VOID,
+    IN access : UWORD,
+    OUT handle : UWORD,
+) : OsStatus
+
+EXTERN FN ObuCloseObject (
+    IN process : ^PsuProcess,
+    IN handle : UWORD,
+) : OsStatus
+
+EXTERN FN ObuReferenceByHandleObject (
+    IN process : ^PsuProcess,
+    IN handle : UWORD,
+    IN type : ^ObuType,
+    OUT object : ^VOID,
+    OUT access : UWORD,
+) : OsStatus
+
+EXTERN FN ObuReferenceByHandle (
+    IN handle : UWORD,
+    IN type : ^ObuType,
+    OUT object : ^VOID,
+    OUT access : UWORD,
+) : OsStatus
+
+EXTERN FN ObuInitializeType (
+    IN type : ^ObuType,
+) : OsStatus
+
+EXTERN FN (ExuWorkItemF) ObuDeferredDeletionWorker (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN ObuDeferredDeletionListHead : ^ObuHeader

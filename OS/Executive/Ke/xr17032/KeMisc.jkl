@@ -2,8 +2,8 @@
 // Various architecture-specific functions.
 //
 
-#INCLUDE "../Ki.hjk"
-#INCLUDE "../../Mm/xr17032/Mi.hjk"
+#INCLUDE "../Kep.hjk"
+#INCLUDE "../../Mm/xr17032/Mmp.hjk"
 
 #ASM [
 
@@ -27,14 +27,14 @@ KeExceptionJacket:
 
     // Acquire a pointer to the current thread.
 
-    subi t0, zero, KI_PRB_LESS_ZERO
-    mov  s1, long [t0 + KiPrb_CurrentThread]
+    subi t0, zero, KEP_PRB_LESS_ZERO
+    mov  s1, long [t0 + KepPrb_CurrentThread]
 
     // Bias the current thread pointer by 4 * ExecutingKapc.
-    // This makes it so when we add the offset KeThread_AbortListHead later,
+    // This makes it so when we add the offset KeuThread_AbortListHead later,
     // we point to the right list head.
 
-    mov  t0, byte [s1 + KeThread_ExecutingKapc]
+    mov  t0, byte [s1 + KeuThread_ExecutingKapc]
     add  s1, s1, t0 LSH 2
 
     // Initialize the abort block.
@@ -65,9 +65,9 @@ KeExceptionJacket:
     // Link it into the thread. No sync needed because we only access the abort
     // list from the context of this thread.
 
-    mov  t1, long [s1 + KeThread_AbortListHead]
+    mov  t1, long [s1 + KeuThread_AbortListHead]
     mov  long [s0 + KeAbortBlock_Next], t1
-    mov  long [s1 + KeThread_AbortListHead], s0
+    mov  long [s1 + KeuThread_AbortListHead], s0
 
     // Call the function.
 
@@ -79,7 +79,7 @@ KeExceptionJacket:
     // Unlink the abort block.
 
     mov  t0, long [s0 + KeAbortBlock_Next]
-    mov  long [s1 + KeThread_AbortListHead], t0
+    mov  long [s1 + KeuThread_AbortListHead], t0
 
     // Return normally.
 
@@ -92,8 +92,8 @@ KeExceptionJacket:
 
 // s0 - abortblock
 // s1 - thread
-KiAbortVector:
-.global KiAbortVector
+KepAbortVector:
+.global KepAbortVector
 
     // We get vectored here when an abort occurred. We have to restore state
     // from the abort block.
@@ -127,8 +127,8 @@ KiAbortVector:
 
 // outputs:
 // a3 - old interrupt state
-KiDisableInterrupts:
-.global KiDisableInterrupts
+KepDisableInterrupts:
+.global KepDisableInterrupts
 
     mfcr a3, rs                     // Load current value of RS.
     subi t0, zero, 3                // t0 = 0xFFFFFFFD
@@ -138,15 +138,15 @@ KiDisableInterrupts:
     ret
 
 // a0 - old interrupt state
-KiRestoreInterrupts:
-.global KiRestoreInterrupts
+KepRestoreInterrupts:
+.global KepRestoreInterrupts
 
     mtcr rs, a0                     // Write new RS.
 
     ret
 
-KiEnableInterrupts:
-.global KiEnableInterrupts
+KepEnableInterrupts:
+.global KepEnableInterrupts
 
     mfcr t0, rs
     ori  t0, t0, 2
@@ -157,8 +157,8 @@ KiEnableInterrupts:
 // Debugger doorstop
 .dl 0
 
-KiWaitForInterrupt:
-.global KiWaitForInterrupt
+KepWaitForInterrupt:
+.global KepWaitForInterrupt
 
     hlt
 
@@ -166,8 +166,8 @@ KiWaitForInterrupt:
 
 // outputs:
 // a3 - processor id
-KiCurrentProcessor:
-.global KiCurrentProcessor
+KepCurrentProcessor:
+.global KepCurrentProcessor
 
     mfcr a3, whami                  // Load WHO-AM-I control register.
 
@@ -175,11 +175,11 @@ KiCurrentProcessor:
 
 // outputs:
 // a3 - current ipl
-KiCurrentIpl:
-.global KiCurrentIpl
+KepCurrentIpl:
+.global KepCurrentIpl
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KiPrb_Ipl]  // Load IPL.
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
+    mov  a3, byte [t0 + KepPrb_Ipl]  // Load IPL.
 
     ret
 
@@ -246,31 +246,31 @@ KeCompareSwapUlongAbortOnFault:
     mb                              // Ensure coherence with other processors.
 #END
 
-KiStartAbortCasRegion:
-.global KiStartAbortCasRegion
+KepStartAbortCasRegion:
+.global KepStartAbortCasRegion
 
 .retry:
     ll   a3, a0                     // Load-locked the location.
     sub  t0, a3, a2                 // Compare equality with expected value.
-    bne  t0, KiExitAbortCas         // Not equal, leave.
+    bne  t0, KepExitAbortCas         // Not equal, leave.
     sc   t0, a0, a1                 // Conditionally store the new value.
     beq  t0, .retry                 // If store failed, retry.
 
-KiEndAbortCasRegion:
-.global KiEndAbortCasRegion
+KepEndAbortCasRegion:
+.global KepEndAbortCasRegion
 
 #IF BLD_MP
     mb                              // Ensure coherence with other processors.
 #END
 
-KiExitAbortCas:
+KepExitAbortCas:
 
     li   a2, 0
 
     ret
 
-KiAbortCas:
-.global KiAbortCas
+KepAbortCas:
+.global KepAbortCas
 
     // We took a page fault while attempting the CAS. Return something that
     // is guaranteed not to be equal to the expectedvalue, thereby making the
@@ -365,16 +365,16 @@ KeBreakpoint:
 
     ret
 
-KiFlushMyIcache:
-.global KiFlushMyIcache
+KepFlushMyIcache:
+.global KepFlushMyIcache
     
     li   t0, 3
     mtcr icachectrl, t0
 
     ret
 
-KiFlushMyDcache:
-.global KiFlushMyDcache
+KepFlushMyDcache:
+.global KepFlushMyDcache
     
     li   t0, 3
     mtcr dcachectrl, t0
@@ -383,8 +383,8 @@ KiFlushMyDcache:
 
 // inputs:
 // a0 - keepglobal
-KeSweepMyTb:
-.global KeSweepMyTb
+KeuSweepMyTb:
+.global KeuSweepMyTb
 
     beq  a0, .flushglobal
 
@@ -405,8 +405,8 @@ KeSweepMyTb:
 
 // inputs:
 // a0 - address
-KeFlushMyTbAddress:
-.global KeFlushMyTbAddress
+KeuFlushMyTbAddress:
+.global KeuFlushMyTbAddress
 
     // Ensure zeroes in the low 12 bits.
 
@@ -420,8 +420,8 @@ KeFlushMyTbAddress:
 
 // inputs:
 // a0 - pfn
-KiFlushMyIcacheByPhys:
-.global KiFlushMyIcacheByPhys
+KepFlushMyIcacheByPhys:
+.global KepFlushMyIcacheByPhys
 
     // Flush a physical page from the icache.
 
@@ -439,8 +439,8 @@ KiFlushMyIcacheByPhys:
 
 // inputs:
 // a0 - pfn
-KiFlushMyDcacheByPhys:
-.global KiFlushMyDcacheByPhys
+KepFlushMyDcacheByPhys:
+.global KepFlushMyDcacheByPhys
 
     // Flush a physical page from the dcache.
 
@@ -460,27 +460,27 @@ KiFlushMyDcacheByPhys:
 
 #IF BLD_MP
 
-FN (KiIpiF) KiSweepTb (
+FN (KepIpiF) KepSweepTb (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
     // Executes on the target processor of a TB shootdown.
 
-    KeSweepMyTb ( context1 )
+    KeuSweepMyTb ( context1 )
 END
 
-FN (KiIpiF) KiFlushSingleTb (
+FN (KepIpiF) KepFlushSingleTb (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
     // Executes on the target processor of a TB shootdown.
 
-    KeFlushMyTbAddress ( CAST context1 TO ^VOID )
+    KeuFlushMyTbAddress ( CAST context1 TO ^VOID )
 END
 
-FN (KiIpiF) KiFlushMultipleTb (
+FN (KepIpiF) KepFlushMultipleTb (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -490,24 +490,24 @@ FN (KiIpiF) KiFlushMultipleTb (
     vaddrtable := CAST context1 TO ^^VOID
 
     WHILE context2 DO
-        KeFlushMyTbAddress ( vaddrtable^ )
+        KeuFlushMyTbAddress ( vaddrtable^ )
 
         vaddrtable += SIZEOF ^VOID
         context2 -= 1
     END
 END
 
-FN (KiIpiF) KiSweepDcache (
+FN (KepIpiF) KepSweepDcache (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
     // Executes on the target processor of a Dcache shootdown.
 
-    KiFlushMyDcache ()
+    KepFlushMyDcache ()
 END
 
-FN (KiIpiF) KiFlushMultipleDcache (
+FN (KepIpiF) KepFlushMultipleDcache (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -517,24 +517,24 @@ FN (KiIpiF) KiFlushMultipleDcache (
     pfntable := CAST context1 TO ^^VOID
 
     WHILE context2 DO
-        KiFlushMyDcacheByPhys ( pfntable^ )
+        KepFlushMyDcacheByPhys ( pfntable^ )
 
         pfntable += SIZEOF ^VOID
         context2 -= 1
     END
 END
 
-FN (KiIpiF) KiSweepIcache (
+FN (KepIpiF) KepSweepIcache (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
     // Executes on the target processor of an Icache shootdown.
 
-    KiFlushMyIcache ()
+    KepFlushMyIcache ()
 END
 
-FN (KiIpiF) KiFlushMultipleIcache (
+FN (KepIpiF) KepFlushMultipleIcache (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -544,7 +544,7 @@ FN (KiIpiF) KiFlushMultipleIcache (
     pfntable := CAST context1 TO ^^VOID
 
     WHILE context2 DO
-        KiFlushMyIcacheByPhys ( pfntable^ )
+        KepFlushMyIcacheByPhys ( pfntable^ )
 
         pfntable += SIZEOF ^VOID
         context2 -= 1
@@ -553,51 +553,51 @@ END
 
 #END
 
-FN KeSweepTb (
+FN KeuSweepTb (
     IN keepglobal : UWORD,
 )
 
     // Flush the entire TB on all processors.
 
 #IF BLD_MP
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
-    KiExecuteOnEveryoneElse (
-        &KiSweepTb, // function
+    KepExecuteOnEveryoneElse (
+        &KepSweepTb, // function
         keepglobal, // context1
         0, // context2
-        KI_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
+        KEP_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
     )
 
-    KiLowerIpl ( ipl )
+    KepLowerIpl ( ipl )
 #END
 
-    KeSweepMyTb ( keepglobal )
+    KeuSweepMyTb ( keepglobal )
 END
 
-FN KeFlushSingleTb (
+FN KeuFlushSingleTb (
     IN vaddr : ^VOID,
 )
 
     // Flush a single TB entry on all processors.
 
 #IF BLD_MP
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
-    KiExecuteOnEveryoneElse (
-        &KiFlushSingleTb, // function
+    KepExecuteOnEveryoneElse (
+        &KepFlushSingleTb, // function
         vaddr, // context1
         0, // context2
-        KI_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
+        KEP_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
     )
 
-    KiLowerIpl ( ipl )
+    KepLowerIpl ( ipl )
 #END
 
-    KeFlushMyTbAddress ( vaddr )
+    KeuFlushMyTbAddress ( vaddr )
 END
 
-FN KeFlushMultipleTb (
+FN KeuFlushMultipleTb (
     IN vaddrtable : ^^VOID,
     IN pagecount : UWORD,
 )
@@ -605,47 +605,47 @@ FN KeFlushMultipleTb (
     // Flush multiple TB entries on all processors.
 
 #IF BLD_MP
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
-    KiExecuteOnEveryoneElse (
-        &KiFlushMultipleTb, // function
+    KepExecuteOnEveryoneElse (
+        &KepFlushMultipleTb, // function
         vaddrtable, // context1
         pagecount, // context2
-        KI_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
+        KEP_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
     )
 
-    KiLowerIpl ( ipl )
+    KepLowerIpl ( ipl )
 #END
 
     WHILE pagecount DO
-        KeFlushMyTbAddress ( vaddrtable^ )
+        KeuFlushMyTbAddress ( vaddrtable^ )
 
         vaddrtable += SIZEOF ^VOID
         pagecount -= 1
     END
 END
 
-FN KeSweepDcache ()
+FN KeuSweepDcache ()
 
     // Flush the entire Dcache on all processors.
 
 #IF BLD_MP
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
-    KiExecuteOnEveryoneElse (
-        &KiSweepDcache, // function
+    KepExecuteOnEveryoneElse (
+        &KepSweepDcache, // function
         0, // context1
         0, // context2
-        KI_DEFERRED_IDLE_DCACHE_SHOOTDOWN, // deferred
+        KEP_DEFERRED_IDLE_DCACHE_SHOOTDOWN, // deferred
     )
 
-    KiLowerIpl ( ipl )
+    KepLowerIpl ( ipl )
 #END
 
-    KiFlushMyDcache ()
+    KepFlushMyDcache ()
 END
 
-FN KeFlushDcachePages (
+FN KeuFlushDcachePages (
     IN pfntable : ^^VOID,
     IN pagecount : UWORD,
 )
@@ -653,47 +653,47 @@ FN KeFlushDcachePages (
     // Flush pages of the Dcache on all processors.
 
 #IF BLD_MP
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
-    KiExecuteOnEveryoneElse (
-        &KiFlushMultipleDcache, // function
+    KepExecuteOnEveryoneElse (
+        &KepFlushMultipleDcache, // function
         pfntable, // context1
         pagecount, // context2
-        KI_DEFERRED_IDLE_DCACHE_SHOOTDOWN, // deferred
+        KEP_DEFERRED_IDLE_DCACHE_SHOOTDOWN, // deferred
     )
 
-    KiLowerIpl ( ipl )
+    KepLowerIpl ( ipl )
 #END
 
     WHILE pagecount DO
-        KiFlushMyDcacheByPhys ( pfntable^ )
+        KepFlushMyDcacheByPhys ( pfntable^ )
 
         pfntable += SIZEOF ^VOID
         pagecount -= 1
     END
 END
 
-FN KeSweepIcache ()
+FN KeuSweepIcache ()
 
     // Flush the entire Icache on all processors.
 
 #IF BLD_MP
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
-    KiExecuteOnEveryoneElse (
-        &KiSweepIcache, // function
+    KepExecuteOnEveryoneElse (
+        &KepSweepIcache, // function
         0, // context1
         0, // context2
-        KI_DEFERRED_IDLE_ICACHE_SHOOTDOWN, // deferred
+        KEP_DEFERRED_IDLE_ICACHE_SHOOTDOWN, // deferred
     )
 
-    KiLowerIpl ( ipl )
+    KepLowerIpl ( ipl )
 #END
 
-    KiFlushMyIcache ()
+    KepFlushMyIcache ()
 END
 
-FN KeFlushIcachePages (
+FN KeuFlushIcachePages (
     IN pfntable : ^^VOID,
     IN pagecount : UWORD,
 )
@@ -701,20 +701,20 @@ FN KeFlushIcachePages (
     // Flush pages of the Icache on all processors.
 
 #IF BLD_MP
-    ipl := KiRaiseIpl ( KI_IPL_DPC )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
-    KiExecuteOnEveryoneElse (
-        &KiFlushMultipleIcache, // function
+    KepExecuteOnEveryoneElse (
+        &KepFlushMultipleIcache, // function
         pfntable, // context1
         pagecount, // context2
-        KI_DEFERRED_IDLE_ICACHE_SHOOTDOWN, // deferred
+        KEP_DEFERRED_IDLE_ICACHE_SHOOTDOWN, // deferred
     )
 
-    KiLowerIpl ( ipl )
+    KepLowerIpl ( ipl )
 #END
 
     WHILE pagecount DO
-        KiFlushMyIcacheByPhys ( pfntable^ )
+        KepFlushMyIcacheByPhys ( pfntable^ )
 
         pfntable += SIZEOF ^VOID
         pagecount -= 1

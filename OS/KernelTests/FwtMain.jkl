@@ -4,7 +4,7 @@
 
 #INCLUDE "Fwt.hjk"
 
-PUBLIC FwtDataCache : ^MiPoolCache
+PUBLIC FwtDataCache : ^MmpPoolCache
 
 FN (KeStartThreadF) FwtMainThread (
     IN context1 : UWORD,
@@ -45,13 +45,13 @@ FN FwtMain ()
 
     // Perform the fireworks test.
     
-    thread : ^PsThread
+    thread : ^PsuThread
     
-    FwtDataCache = MmCreatePoolCache (
-        PsCurrentNode (), // node
+    FwtDataCache = MmuCreatePoolCache (
+        PsuCurrentNode (), // node
         "Fireworks Data", // name
         SIZEOF FwtData, // size
-        MM_NONPAGED_POOL, // poolindex
+        MMU_NONPAGED_POOL, // poolindex
         'FwtD', // tag
     )
 
@@ -62,7 +62,7 @@ FN FwtMain ()
     name : RtlString
     RtlInitializeString ( &name, "FireworksMain" )
     
-    status := PsCreateExecutiveThread (
+    status := PsuCreateExecutiveThread (
         &name, // name
         &FwtMainThread, // startfunc
         NULLPTR, // context1
@@ -74,12 +74,12 @@ FN FwtMain ()
     IF OsError ( status ) THEN
         RtlPrint ( "FwtMain: Could not create main thread\n" )
 
-        MmDeletePoolCache ( FwtDataCache )
+        MmuDeletePoolCache ( FwtDataCache )
 
         LEAVE
     END
     
-    ObUnreferenceObject ( thread )
+    ObuUnreferenceObject ( thread )
 END
 
 EXPORT FN KtMain ()

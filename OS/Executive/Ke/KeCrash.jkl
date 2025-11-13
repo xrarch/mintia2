@@ -2,63 +2,63 @@
 // Implementation of lithobraking for the MINTIA Executive.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 
 #IF BLD_MP
 
-KiLinePrintSpinlock : KiSpinlock = KI_INITIAL_SPINLOCK
+KepLinePrintSpinlock : KepSpinlock = KEP_INITIAL_SPINLOCK
 
 #END
 
-EXPORT KeDebuggerEntry : KeDebuggerEntryF
+EXPORT KeuDebuggerEntry : KeuDebuggerEntryF
 
-KiCrashVerticalListHead : RtlListEntry
-KiCrashHorizListHead : RtlListEntry
-KiCrashCallbackListHead : RtlListEntry
+KepCrashVerticalListHead : RtlListEntry
+KepCrashHorizListHead : RtlListEntry
+KepCrashCallbackListHead : RtlListEntry
 
-KiCrashModuleListCallback : KeCrashCallback
+KepCrashModuleListCallback : KeCrashCallback
 
-KiCrashGate : ULONG = 0
+KepCrashGate : ULONG = 0
 
-KiRemainingRows : UINT = 0
-KiRemainingColumns : UINT = 0
-KiColumns : UINT = 0
-KiResetX : UINT = 0
-KiNextRow : UINT = 0
-KiCrashVerticalCount : UINT = 0
-KiCrashHorizCount : UINT = 0
-KiCrashPrints : UBYTE = FALSE
+KepRemainingRows : UINT = 0
+KepRemainingColumns : UINT = 0
+KepColumns : UINT = 0
+KepResetX : UINT = 0
+KepNextRow : UINT = 0
+KepCrashVerticalCount : UINT = 0
+KepCrashHorizCount : UINT = 0
+KepCrashPrints : UBYTE = FALSE
 
 #DEFINE PLATFORM_FULL_NAME_STR ( STRCAT ( STRCAT "\"" PLATFORM_FULL_NAME ) "\"" )
 
-FN KiCrashPutCharacter (
+FN KepCrashPutCharacter (
     IN byte : UBYTE,
 )
 
-    IF NOT KiRemainingRows THEN
+    IF NOT KepRemainingRows THEN
         LEAVE
     END
 
-    HalPutCharacter ( byte )
+    HaluPutCharacter ( byte )
 
     next := FALSE
 
     IF byte == '\n' THEN
         next = TRUE
     ELSE
-        KiRemainingColumns -= 1
+        KepRemainingColumns -= 1
 
-        IF KiRemainingColumns == 0 THEN
+        IF KepRemainingColumns == 0 THEN
             next = TRUE
         END
     END
 
     IF next THEN
-        KiRemainingRows -= 1
-        KiRemainingColumns = KiColumns
-        KiNextRow += 1
+        KepRemainingRows -= 1
+        KepRemainingColumns = KepColumns
+        KepNextRow += 1
 
-        HalSetConsolePosition ( KiResetX, KiNextRow )
+        HaluSetConsolePosition ( KepResetX, KepNextRow )
     END
 END
 
@@ -67,10 +67,10 @@ FN (RtlPrintCallbackF) RtljPrintCallback (
     IN context : ^VOID,
 )
 
-    IF KiCrashPrints THEN
-        KiCrashPutCharacter ( byte )
+    IF KepCrashPrints THEN
+        KepCrashPutCharacter ( byte )
     ELSE
-        HalPutCharacter ( byte )
+        HaluPutCharacter ( byte )
     END
 END
 
@@ -80,11 +80,11 @@ FN RtljLockStream (
 
     // Called by RTL before it prints a line.
 
-    lockcontext := KiDisableInterrupts ()
+    lockcontext := KepDisableInterrupts ()
 
 #IF BLD_MP
     // Only try 50000 times to acquire the spinlock in case it's jammed shut.
-    // Note that KiTryAcquireSpinlock is already written to spin for a while
+    // Note that KepTryAcquireSpinlock is already written to spin for a while
     // before giving up, so this is really 50000 * 128 attempts or however many.
 
 @Retry
@@ -92,7 +92,7 @@ FN RtljLockStream (
     i := 50000
 
     WHILE i DO
-        IF KiTryAcquireSpinlock ( &KiLinePrintSpinlock ) THEN
+        IF KepTryAcquireSpinlock ( &KepLinePrintSpinlock ) THEN
             BREAK
         END
 
@@ -107,7 +107,7 @@ FN RtljLockStream (
         // guarantee atomicity of line printing. So this (by itself) should be
         // harmless.
 
-        KiForceReleaseSpinlock ( &KiLinePrintSpinlock )
+        KepForceReleaseSpinlock ( &KepLinePrintSpinlock )
 
         // Retry.
 
@@ -126,13 +126,13 @@ FN RtljUnlockStream (
     // Called by RTL after it prints a line.
 
 #IF BLD_MP
-    KiReleaseSpinlock ( &KiLinePrintSpinlock )
+    KepReleaseSpinlock ( &KepLinePrintSpinlock )
 #END
 
-    KiRestoreInterrupts ( lockcontext )
+    KepRestoreInterrupts ( lockcontext )
 END
 
-FN (KeCrashCallbackF) KiCrashModuleListFunc (
+FN (KeCrashCallbackF) KepCrashModuleListFunc (
     IN columns : UWORD,
 )
 
@@ -156,7 +156,7 @@ FN (KeCrashCallbackF) KiCrashModuleListFunc (
 
     RtlPrint ( "\n" )
 
-    listhead := &KeLoaderBlock.DllListHead
+    listhead := &KeuLoaderBlock.DllListHead
     listentry := listhead^.Next
     i = 0
 
@@ -184,25 +184,25 @@ FN (KeCrashCallbackF) KiCrashModuleListFunc (
 END
 
 #SECTION "INITtext"
-FN KiInitializeCrashing ()
+FN KepInitializeCrashing ()
 
     // Initialize the list heads.
 
-    RtlInitializeList ( &KiCrashVerticalListHead )
-    RtlInitializeList ( &KiCrashHorizListHead )
-    RtlInitializeList ( &KiCrashCallbackListHead )
+    RtlInitializeList ( &KepCrashVerticalListHead )
+    RtlInitializeList ( &KepCrashHorizListHead )
+    RtlInitializeList ( &KepCrashCallbackListHead )
 
     // Now initialize the standard callbacks.
 
     KeRegisterCrashCallback (
-        &KiCrashModuleListCallback, // callback
-        &KiCrashModuleListFunc, // function
+        &KepCrashModuleListCallback, // callback
+        &KepCrashModuleListFunc, // function
         TRUE, // doesprint
         TRUE, // horizontal
     )
 END
 
-FN KiDoCrashPrints (
+FN KepDoCrashPrints (
     IN width : UWORD,
     IN height : UWORD,
     IN fmt : ^UBYTE,
@@ -212,13 +212,13 @@ FN KiDoCrashPrints (
 
     RtlPrint ( "\n" )
 
-    HalSetConsolePosition ( 0, 0 )
+    HaluSetConsolePosition ( 0, 0 )
 
     procname := "?"
     thrdname := "?"
     attprocname := "?"
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
     IF prb^.CurrentThread THEN
         thrdname = &prb^.CurrentThread^.Name[0]
@@ -254,7 +254,7 @@ FN KiDoCrashPrints (
     x : UWORD
     y : UWORD
 
-    HalQueryConsolePosition (
+    HaluQueryConsolePosition (
         OUT x, // x
         OUT y, // y
     )
@@ -263,93 +263,93 @@ FN KiDoCrashPrints (
     // These each get a horizontal section of the console that they can greedily
     // consume.
 
-    KiCrashPrints = TRUE
+    KepCrashPrints = TRUE
 
-    KiColumns = width
-    KiRemainingColumns = KiColumns
-    KiResetX = 0
-    KiRemainingRows = height - y - 4
+    KepColumns = width
+    KepRemainingColumns = KepColumns
+    KepResetX = 0
+    KepRemainingRows = height - y - 4
 
     callback : ^KeCrashCallback
 
-    listhead := &KiCrashHorizListHead
+    listhead := &KepCrashHorizListHead
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
         callback = CONTAINEROF listentry TO KeCrashCallback.Entry
 
-        HalQueryConsolePosition (
+        HaluQueryConsolePosition (
             OUT x, // x
             OUT y, // y
         )
 
-        KiRemainingColumns = KiColumns
-        KiRemainingRows = height - y - 4
-        KiNextRow = y + 1
+        KepRemainingColumns = KepColumns
+        KepRemainingRows = height - y - 4
+        KepNextRow = y + 1
 
-        HalSetConsolePosition (
+        HaluSetConsolePosition (
             0, // x
-            KiNextRow, // y
+            KepNextRow, // y
         )
 
-        callback^.Function ( KiColumns )
+        callback^.Function ( KepColumns )
 
-        IF NOT KiRemainingRows THEN
+        IF NOT KepRemainingRows THEN
             BREAK
         END
 
         listentry = listentry^.Next
     END
 
-    IF KiRemainingRows AND KiCrashVerticalCount THEN
+    IF KepRemainingRows AND KepCrashVerticalCount THEN
         // Call each callback. They each get a column of the console.
 
-        HalQueryConsolePosition (
+        HaluQueryConsolePosition (
             OUT x, // x
             OUT y, // y
         )
 
         resetrows := height - y - 4
 
-        colwidth := width / KiCrashVerticalCount
+        colwidth := width / KepCrashVerticalCount
 
-        IF KiCrashVerticalCount != 1 THEN
+        IF KepCrashVerticalCount != 1 THEN
             colwidth -= 1
         END
 
-        KiColumns = colwidth
+        KepColumns = colwidth
 
-        listhead = &KiCrashVerticalListHead
+        listhead = &KepCrashVerticalListHead
         listentry = listhead^.Next
 
         WHILE listentry != listhead DO
             callback = CONTAINEROF listentry TO KeCrashCallback.Entry
 
-            KiRemainingRows = resetrows
-            KiRemainingColumns = colwidth
-            KiNextRow = y + 1
+            KepRemainingRows = resetrows
+            KepRemainingColumns = colwidth
+            KepNextRow = y + 1
 
-            HalSetConsolePosition (
-                KiResetX, // x
-                KiNextRow, // y
+            HaluSetConsolePosition (
+                KepResetX, // x
+                KepNextRow, // y
             )
 
             callback^.Function ( colwidth )
 
-            KiResetX += colwidth + 1
+            KepResetX += colwidth + 1
 
             listentry = listentry^.Next
         END
     END
 
-    KiCrashPrints = FALSE
+    KepCrashPrints = FALSE
 
-    HalSetConsolePosition ( 0, height - 2 )
+    HaluSetConsolePosition ( 0, height - 2 )
 
-    HalCenterPrint ( "An error occurred! Please take a screenshot and report the issue.\n" )
-    HalCenterPrint ( "The repository can be found at http://www.github.com/xrarch/mintia2." )
+    HaluCenterPrint ( "An error occurred! Please take a screenshot and report the issue.\n" )
+    HaluCenterPrint ( "The repository can be found at http://www.github.com/xrarch/mintia2." )
 
-    HalSetConsolePosition ( 0, 0 )
+    HaluSetConsolePosition ( 0, 0 )
 END
 
 EXPORT FN KeCrash (
@@ -359,21 +359,21 @@ EXPORT FN KeCrash (
 
     // Disable interrupts ASAP.
 
-    KiDisableInterrupts ()
+    KepDisableInterrupts ()
 
     // Only one processor should get through the crash gate.
     // Implement this with an atomic increment.
     // This is compiled in on UP builds too since it also catches nested entries
     // into KeCrash.
 
-    oldvalue := KeIncrementUlong ( &KiCrashGate, 1 )
+    oldvalue := KeIncrementUlong ( &KepCrashGate, 1 )
 
     IF oldvalue THEN
         // We weren't the first. Complain and hang forever.
 
         RtlPrint (
             "KeCrash: Nested on %u: \n", // fmt
-            KiCurrentProcessor (),
+            KepCurrentProcessor (),
         )
 
         RtlPrintByVarTable (
@@ -384,7 +384,7 @@ EXPORT FN KeCrash (
         )
 
         WHILE TRUE DO
-            KiWaitForInterrupt ()
+            KepWaitForInterrupt ()
         END
     END
 
@@ -396,12 +396,12 @@ EXPORT FN KeCrash (
     // processor crashed simultaneously and didn't make it through the gate.
     // In any case, we just proceed.
 
-    KiFreezeOtherProcessors ()
+    KepFreezeOtherProcessors ()
 #END
 
     // Call all the non-printing callbacks.
 
-    listhead := &KiCrashCallbackListHead
+    listhead := &KepCrashCallbackListHead
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
@@ -415,18 +415,18 @@ EXPORT FN KeCrash (
     // Call the HAL to do stuff with the console to make the crash visible to
     // the user.
 
-    HalCrashConsole ()
+    HaluCrashConsole ()
 
     width : UWORD
     height : UWORD
 
-    HalQueryConsoleSize (
+    HaluQueryConsoleSize (
         OUT width, // width
         OUT height, // height
     )
 
     IF width >= 80 AND height >= 24 THEN
-        KiDoCrashPrints (
+        KepDoCrashPrints (
             width, // width
             height, // height
             fmt, // fmt
@@ -437,12 +437,12 @@ EXPORT FN KeCrash (
 
     // If there's a debugger, call it. Otherwise, do nothing forever.
 
-    IF KeDebuggerEntry THEN
+    IF KeuDebuggerEntry THEN
         KeBreakpoint ()
     END
 
     WHILE TRUE DO
-        KiWaitForInterrupt ()
+        KepWaitForInterrupt ()
     END
 END
 
@@ -462,24 +462,24 @@ EXPORT FN KeRegisterCrashCallback (
     IF doesprint THEN
         IF horizontal THEN
             RtlInsertAtTailList (
-                &KiCrashHorizListHead, // head
+                &KepCrashHorizListHead, // head
                 &callback^.Entry, // entry
             )
 
-            KiCrashHorizCount += 1
+            KepCrashHorizCount += 1
 
         ELSE
             RtlInsertAtTailList (
-                &KiCrashVerticalListHead, // head
+                &KepCrashVerticalListHead, // head
                 &callback^.Entry, // entry
             )
 
-            KiCrashVerticalCount += 1
+            KepCrashVerticalCount += 1
         END
 
     ELSE
         RtlInsertAtTailList (
-            &KiCrashCallbackListHead, // head
+            &KepCrashCallbackListHead, // head
             &callback^.Entry, // entry
         )
     END

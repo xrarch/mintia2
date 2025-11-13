@@ -2,14 +2,14 @@
 // Initialization of the Kernel (Ke) subcomponent of the MINTIA Executive.
 //
 
-#INCLUDE "Ki.hjk"
-#INCLUDE "<inc>/Ps.hjk"
+#INCLUDE "Kep.hjk"
+#INCLUDE "<inc>/Psu.hjk"
 
-PUBLIC KeIdleProcess : PsProcess
+PUBLIC KeuIdleProcess : PsuProcess
 
-EXPORT KeLoaderBlock : BlInfoRecord
+EXPORT KeuLoaderBlock : BlInfoRecord
 
-PUBLIC KeSystemPageDirectoryPfn : UWORD
+PUBLIC KeuSystemPageDirectoryPfn : UWORD
 
 FNPTR DbgMainF ()
 
@@ -17,72 +17,72 @@ EXPORT KeSharedUserPage : ^OsSharedUserPage
 
 #IF BLD_CHK
 
-EXPORT KiAssertionMessage : UBYTE[40]
+EXPORT KepAssertionMessage : UBYTE[40]
 
 #END
 
 #IF BLD_MP
 
-KiInitializeCount : ULONG
+KepInitializeCount : ULONG
 
-KiAnnounceSpinlock : KiSpinlock = KI_INITIAL_SPINLOCK
+KepAnnounceSpinlock : KepSpinlock = KEP_INITIAL_SPINLOCK
 
-PUBLIC KiWorkBalanceDpc : KeDpc
+PUBLIC KepWorkBalanceDpc : KeDpc
 
-PUBLIC KiMaximumBalanceIterations : ULONG
+PUBLIC KepMaximumBalanceIterations : ULONG
 
-#MACRO KiAcquireAnnounce () [
-    KiAcquireSpinlockRaise ( &KiAnnounceSpinlock )
+#MACRO KepAcquireAnnounce () [
+    KepAcquireSpinlockRaise ( &KepAnnounceSpinlock )
 ]
 
-#MACRO KiReleaseAnnounce ( oldipl ) [
-    KiReleaseSpinlockLower ( &KiAnnounceSpinlock, oldipl )
+#MACRO KepReleaseAnnounce ( oldipl ) [
+    KepReleaseSpinlockLower ( &KepAnnounceSpinlock, oldipl )
 ]
 
 #ELSE
 
-#MACRO KiAcquireAnnounce () [
-    KiRaiseIpl ( KI_IPL_DPC )
+#MACRO KepAcquireAnnounce () [
+    KepRaiseIpl ( KEP_IPL_DPC )
 ]
 
-#MACRO KiReleaseAnnounce ( oldipl ) [
-    KiLowerIpl ( oldipl )
+#MACRO KepReleaseAnnounce ( oldipl ) [
+    KepLowerIpl ( oldipl )
 ]
 
 #END
 
 // FORWARD
-EXTERN FN (KeStartThreadF) KiThreadedMain (
+EXTERN FN (KeStartThreadF) KepThreadedMain (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
-FN (KeStartThreadF) KiIdleLoop (
+FN (KeStartThreadF) KepIdleLoop (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
 
-    ipl := KiAcquireAnnounce ()
+    ipl := KepAcquireAnnounce ()
 
-    RtlPrint ( "KiIdleLoop: Processor %u idling\n", KiCurrentProcessor () )
+    RtlPrint ( "KepIdleLoop: Processor %u idling\n", KepCurrentProcessor () )
 
-    KiReleaseAnnounce ( ipl )
+    KepReleaseAnnounce ( ipl )
 
 #IF BLD_MP
-    prb := KI_CURRENT_PRB_LOCAL
+    prb := KEP_CURRENT_PRB_LOCAL
 
     // Atomically decrement the initialization count to indicate to the boot
     // processor that we made it into our idle thread.
 
     KeIncrementUlong (
-        &KiInitializeCount, // ptr
+        &KepInitializeCount, // ptr
         0xFFFFFFFF, // ulong
     )
 #END
 
     WHILE TRUE DO
-        KiWaitForInterrupt ()
+        KepWaitForInterrupt ()
 
 #IF BLD_MP
         IF prb^.StealWork THEN
@@ -90,15 +90,15 @@ FN (KeStartThreadF) KiIdleLoop (
 
             prb^.StealWork = FALSE
 
-            KiStealWork ()
+            KepStealWork ()
         END
 #END
     END
 END
 
 #SECTION "INITtext"
-FN KiInitializePrb (
-    IN prb : ^KiPrb,
+FN KepInitializePrb (
+    IN prb : ^KepPrb,
     IN bootprocessor : UWORD,
 )
 
@@ -129,10 +129,10 @@ FN KiInitializePrb (
     prb^.IrqDispatchTable = CAST irqdt TO ^VOID
     prb^.IdleStackBase = CAST stackbase TO ^VOID
 
-    // On some architectures, the thing we get from KI_CURRENT_PRB_LOCAL is not
+    // On some architectures, the thing we get from KEP_CURRENT_PRB_LOCAL is not
     // a globally visible address for this Prb.
 
-#IF KI_VIRTUAL_PRB
+#IF KEP_VIRTUAL_PRB
     prb^.RealVirtual = prb
 #END
 
@@ -141,19 +141,19 @@ FN KiInitializePrb (
     RtlInitializeList ( &prb^.StackSwapCandidateListHead )
 
 #IF BLD_MP
-    KiInitializeSpinlock ( &prb^.DpcQueueLock )
-    KiInitializeSpinlock ( &prb^.ReadyQueueLock )
-    KiInitializeSpinlock ( &prb^.TimerTreeLock )
-    KiInitializeSpinlock ( &prb^.StackSwapListLock )
+    KepInitializeSpinlock ( &prb^.DpcQueueLock )
+    KepInitializeSpinlock ( &prb^.ReadyQueueLock )
+    KepInitializeSpinlock ( &prb^.TimerTreeLock )
+    KepInitializeSpinlock ( &prb^.StackSwapListLock )
 
-    prb^.StashedCurrentThreadInfo = KiSetIdleInStash ( 0, TRUE )
+    prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
     prb^.IdleDeferredIpiEvents = 0
     prb^.InIdleLoop = TRUE
 #END
 
     KeInitializeDpc (
         &prb^.TimerExpirationDpc, // dpc
-        &KiTimerExpiration, // function
+        &KepTimerExpiration, // function
     )
 
 #IF ( == BLD_BITS 64 )
@@ -164,14 +164,14 @@ FN KiInitializePrb (
     prb^.EarliestTimerMs.High = 0xFFFFFFFF
 #END
 
-    prb^.Ipl = KI_IPL_LOW
+    prb^.Ipl = KEP_IPL_LOW
 
     // Initialize the IRQ dispatch table.
 
     i := 0
 
-    WHILE i < HAL_VECTOR_MAX DO
-        prb^.IrqDispatchTable[i] = &KiUnexpectedInterruptObject
+    WHILE i < HALU_VECTOR_MAX DO
+        prb^.IrqDispatchTable[i] = &KepUnexpectedInterruptObject
 
         i += 1
     END
@@ -190,7 +190,7 @@ FN KiInitializePrb (
 
     i = 0
 
-    WHILE i < KI_TIMESHARED_QUEUES DO
+    WHILE i < KEP_TIMESHARED_QUEUES DO
         RtlInitializeList ( &prb^.CalendarListHeads[i] )
 
         i += 1
@@ -205,19 +205,19 @@ FN KiInitializePrb (
     startfunc : KeStartThreadF
 
     IF bootprocessor THEN
-        startfunc = &KiThreadedMain
+        startfunc = &KepThreadedMain
 
     ELSE
-        startfunc = &KiIdleLoop
+        startfunc = &KepIdleLoop
     END
 
-    KeInitializeThread (
-        &KeIdleProcess.Pcb, // process
+    KeuInitializeThread (
+        &KeuIdleProcess.Pcb, // process
         &prb^.IdleThread, // thread
         "IdleThread", // name
         prb^.IdleStackBase, // kstack
         BL_IDLE_STACK_SIZE, // kstacksize
-        KeAllocateInitialTurnstile (), // turnstile
+        KeuAllocateInitialTurnstile (), // turnstile
         startfunc, // startfunc
         0, // context1
         0, // context2
@@ -237,40 +237,40 @@ FN KiInitializePrb (
 
     // Stash the Prb ID.
 
-    KiStashPrbId ( prb, id )
+    KepStashPrbId ( prb, id )
 END
 
 #IF BLD_MP
 
 #SECTION "INITtext"
-FN (HalStartProcessorF) KiStartOtherProcessor ()
+FN (HaluStartProcessorF) KepStartOtherProcessor ()
 
     // This is the first code that runs in the context of a non-boot processor.
     // We assume any context required to access the Prb has been set up by the
     // Loader. We have to initialize ourselves and then jump into our idle
     // thread to wait for work.
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
     // Initialize architectural support.
 
-    KiInitializeArchitecture ( prb )
+    KepInitializeArchitecture ( prb )
 
     // Initialize HAL.
 
-    HalProcessorInitialize ( prb )
+    HaluProcessorInitialize ( prb )
 
     // Become a subject of the dispatcher.
 
-    KiJumpIntoIdleThread ( prb )
+    KepJumpIntoIdleThread ( prb )
 END
 
 #END
 
-EXTERN FN ExStartExecutive ()
+EXTERN FN ExuStartExecutive ()
 
 #SECTION "INITtext"
-FN (KeStartThreadF) KiThreadedMain (
+FN (KeStartThreadF) KepThreadedMain (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -278,33 +278,33 @@ FN (KeStartThreadF) KiThreadedMain (
     // This is the first code that runs in thread context during the lifetime of
     // the system. We need to perform phase 0 initialization of the Executive.
 
-    ExStartExecutive ()
+    ExuStartExecutive ()
 
     // Go into the idle loop.
 
-    KiIdleLoop (
+    KepIdleLoop (
         context1, // context1
         context2, // context2
     )
 END
 
 #SECTION "INITtext"
-FN KiFixupLoaderBlockLists ()
+FN KepFixupLoaderBlockLists ()
 
     // Fix up the circular lists in the loader block so that they still point to
     // the newly relocated list heads.
 
-    listhead := &KeLoaderBlock.ResourceListHead
+    listhead := &KeuLoaderBlock.ResourceListHead
 
     listhead^.Next^.Prev = listhead
     listhead^.Prev^.Next = listhead
 
-    listhead = &KeLoaderBlock.DllListHead
+    listhead = &KeuLoaderBlock.DllListHead
 
     listhead^.Next^.Prev = listhead
     listhead^.Prev^.Next = listhead
 
-    listhead = &KeLoaderBlock.DescriptorListHead
+    listhead = &KeuLoaderBlock.DescriptorListHead
 
     listhead^.Next^.Prev = listhead
     listhead^.Prev^.Next = listhead
@@ -341,7 +341,7 @@ EXPORT FN KeMain (
     // Set this up so that we don't waste space on repeated strings.
 
     RtlCopyString (
-        &KiAssertionMessage[0], // dest
+        &KepAssertionMessage[0], // dest
         "ASSERTION FAILED IN %s() AT %s:%d\n%s\n", // src
         40, // bufsize
     )
@@ -349,42 +349,42 @@ EXPORT FN KeMain (
 
     // Initialize the KeCrash module.
 
-    KiInitializeCrashing ()
+    KepInitializeCrashing ()
 
     // Start by copying the loader block into the Executive.
 
     RtlCopyBytes (
-        &KeLoaderBlock, // dest
+        &KeuLoaderBlock, // dest
         loaderblock, // src
         SIZEOF BlInfoRecord, // sz
     )
 
     // Fix up loader block lists.
 
-    KiFixupLoaderBlockLists ()
+    KepFixupLoaderBlockLists ()
 
     // Initialize the idle process.
 
-    KeInitializeProcess (
-        &KeIdleProcess.Pcb, // process
+    KeuInitializeProcess (
+        &KeuIdleProcess.Pcb, // process
         "Idle", // name
     )
 
-    KeIdleProcess.Pcb.PageDirectoryPfn = KeLoaderBlock.SystemPageDirectoryPfn
+    KeuIdleProcess.Pcb.PageDirectoryPfn = KeuLoaderBlock.SystemPageDirectoryPfn
 
     // Initialize turnstiles.
 
-    KiInitializeTurnstiles ()
+    KepInitializeTurnstiles ()
 
     // Initialize the Prbs.
 
-    prb := KiPrbFromNumber ( 0 )
+    prb := KepPrbFromNumber ( 0 )
 
     initprb := prb
     i := 0
 
-    WHILE i < KeLoaderBlock.ProcessorCount DO
-        KiInitializePrb (
+    WHILE i < KeuLoaderBlock.ProcessorCount DO
+        KepInitializePrb (
             initprb, // prb
             i == 0, // bootprocessor
         )
@@ -395,39 +395,39 @@ EXPORT FN KeMain (
 
     // Initialize architectural support.
 
-    KiInitializeArchitecture ( prb )
+    KepInitializeArchitecture ( prb )
 
     // Perform early initialization of the HAL. This will perform baseline
     // initialization of integral platform components such as the interval
     // timer. Also, we get a boot console which is guaranteed to stay sane
     // throughout the lifetime of the system and at any IPL.
 
-    HalEarlyInitialize ()
+    HaluEarlyInitialize ()
 
     // Now that we have a console, announce ourselves.
 
-    HalCenterPrint ( "== MINTIA2 BOOT CONSOLE ==\n" )
+    HaluCenterPrint ( "== MINTIA2 BOOT CONSOLE ==\n" )
 
     // Perform platform-specific initialization for the boot processor.
 
-    KeAssert ( SIZEOF KiPrb <= BL_PRB_SIZE )
+    KeAssert ( SIZEOF KepPrb <= BL_PRB_SIZE )
 
-    HalProcessorInitialize ( prb )
+    HaluProcessorInitialize ( prb )
 
     // Initialize the shared user page.
 
-    KeSharedUserPage = KeLoaderBlock.VirtualSharedUserPage
+    KeSharedUserPage = KeuLoaderBlock.VirtualSharedUserPage
 
-    KiUpdateTime ( prb )
+    KepUpdateTime ( prb )
 
     // Export the page directory PFN.
 
-    KeSystemPageDirectoryPfn = KeLoaderBlock.SystemPageDirectoryPfn
+    KeuSystemPageDirectoryPfn = KeuLoaderBlock.SystemPageDirectoryPfn
 
     // Perform early initialization of the debugger.
 
-    IF KeLoaderBlock.DbgMain THEN
-        dbgmain := CAST KeLoaderBlock.DbgMain TO DbgMainF
+    IF KeuLoaderBlock.DbgMain THEN
+        dbgmain := CAST KeuLoaderBlock.DbgMain TO DbgMainF
 
         dbgmain ()
     END
@@ -436,7 +436,7 @@ EXPORT FN KeMain (
     // of Mm which outswaps kernel stacks and processes.
 
     KeInitializeEvent (
-        &KeStackSwapperEvent, // event
+        &KeuStackSwapperEvent, // event
         "StackSwap", // name
         FALSE, // notification
         FALSE, // signalstate
@@ -446,8 +446,8 @@ EXPORT FN KeMain (
     // Initialize the work balancing DPC.
 
     KeInitializeDpc (
-        &KiWorkBalanceDpc, // dpc
-        &KiBalanceWork, // func
+        &KepWorkBalanceDpc, // dpc
+        &KepBalanceWork, // func
     )
 
     // Compute the maximum number of balance iterations as the number of
@@ -456,24 +456,24 @@ EXPORT FN KeMain (
     //
     // This is calculated as n choose 2 which simplifies to n(n-1)/2 + 1.
 
-    KiMaximumBalanceIterations = (KeLoaderBlock.ProcessorCount *
-        (KeLoaderBlock.ProcessorCount - 1)) / 2 + 1
+    KepMaximumBalanceIterations = (KeuLoaderBlock.ProcessorCount *
+        (KeuLoaderBlock.ProcessorCount - 1)) / 2 + 1
 
-    IF KiMaximumBalanceIterations > 64 THEN
-        KiMaximumBalanceIterations = 64
+    IF KepMaximumBalanceIterations > 64 THEN
+        KepMaximumBalanceIterations = 64
     END
 
     // We're ready to pull the other processors into the system.
 
-    KiInitializeCount = KeLoaderBlock.ProcessorCount - 1
+    KepInitializeCount = KeuLoaderBlock.ProcessorCount - 1
 
     // Bring em in.
 
-    HalStartProcessors ( &KiStartOtherProcessor )
+    HaluStartProcessors ( &KepStartOtherProcessor )
 
     // Wait for them to signal that they've been initialized.
 
-    WHILE KiInitializeCount DO
+    WHILE KepInitializeCount DO
         // Language BARRIER to stop this loop from being optimized out.
 
         BARRIER
@@ -482,9 +482,9 @@ EXPORT FN KeMain (
 
     // Become a subject of the dispatcher.
 
-    KiJumpIntoIdleThread ( prb )
+    KepJumpIntoIdleThread ( prb )
 
-    KeCrash ( "KiJumpIntoThread returned\n" )
+    KeCrash ( "KepJumpIntoThread returned\n" )
 END
 
 #IF BLD_MP
@@ -493,7 +493,7 @@ EXPORT FN KeQueryProcessorCount () : UWORD
 
     // Query the number of processors in the system.
 
-    RETURN KeLoaderBlock.ProcessorCount
+    RETURN KeuLoaderBlock.ProcessorCount
 END
 
 #END

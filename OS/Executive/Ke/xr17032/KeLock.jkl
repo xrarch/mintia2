@@ -4,7 +4,7 @@
 // architecture, to ensure that they are efficient.
 //
 
-#INCLUDE "../Ki.hjk"
+#INCLUDE "../Kep.hjk"
 
 #ASM [
 
@@ -14,9 +14,9 @@
 KeTryAcquireLockExclusive:
 .export KeTryAcquireLockExclusive
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
-    mov  t1, long [t0 + KiPrb_CurrentThread]
-    ori  t1, t1, KI_LOCK_WRITE_LOCKED
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
+    mov  t1, long [t0 + KepPrb_CurrentThread]
+    ori  t1, t1, KEP_LOCK_WRITE_LOCKED
 
 #IF BLD_MP
     mb                              // Ensure coherence with other processors.
@@ -45,8 +45,8 @@ KeTryAcquireLockExclusive:
 KeAcquireLockShared:
 .export KeAcquireLockShared
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KiPrb_Ipl]  // Load old IPL.
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
+    mov  a3, byte [t0 + KepPrb_Ipl]  // Load old IPL.
 
 .acquire:
 
@@ -59,9 +59,9 @@ KeAcquireLockShared:
 .retry:
 
     ll   t0, a0                     // Load-locked the lock word.
-    andi t1, t0, KI_LOCK_C_BITS     // Isolate the control bits.
+    andi t1, t0, KEP_LOCK_C_BITS     // Isolate the control bits.
     bne  t1, .slow                  // If not equal to zero, take slow path.
-    addi t0, t0, KI_LOCK_SHARE_INC  // Increment share count.
+    addi t0, t0, KEP_LOCK_SHARE_INC  // Increment share count.
     sc   t2, a0, t0                 // Conditionally store the new word.
     beq  t2, .retry                 // If failed, retry.
 
@@ -74,7 +74,7 @@ KeAcquireLockShared:
 .slow:
 
     mov  a1, a3
-    j    KiAcquireLockShared
+    j    KepAcquireLockShared
 
 // a0 - lock
 // outputs:
@@ -82,9 +82,9 @@ KeAcquireLockShared:
 KeAcquireApcLockShared:
 .export KeAcquireApcLockShared
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KiPrb_Ipl]  // Load old IPL.
-    mov  byte [t0 + KiPrb_Ipl], KI_IPL_APC
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
+    mov  a3, byte [t0 + KepPrb_Ipl]  // Load old IPL.
+    mov  byte [t0 + KepPrb_Ipl], KEP_IPL_APC
 
     b    KeAcquireLockShared.acquire
 
@@ -92,13 +92,13 @@ KeAcquireApcLockShared:
 KeAcquireLockExclusive:
 .export KeAcquireLockExclusive
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KiPrb_Ipl]
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
+    mov  a3, byte [t0 + KepPrb_Ipl]
 
 .acquire:
 
-    mov  t1, long [t0 + KiPrb_CurrentThread]
-    ori  t1, t1, KI_LOCK_WRITE_LOCKED
+    mov  t1, long [t0 + KepPrb_CurrentThread]
+    ori  t1, t1, KEP_LOCK_WRITE_LOCKED
 
 #IF BLD_MP
     mb                              // Ensure coherence with other processors.
@@ -119,7 +119,7 @@ KeAcquireLockExclusive:
 
 .slow:
     mov  a1, a3
-    j    KiAcquireLockExclusive
+    j    KepAcquireLockExclusive
 
 // a0 - lock
 // outputs:
@@ -127,9 +127,9 @@ KeAcquireLockExclusive:
 KeAcquireApcLockExclusive:
 .export KeAcquireApcLockExclusive
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KiPrb_Ipl]  // Load old IPL.
-    mov  byte [t0 + KiPrb_Ipl], KI_IPL_APC
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
+    mov  a3, byte [t0 + KepPrb_Ipl]  // Load old IPL.
+    mov  byte [t0 + KepPrb_Ipl], KEP_IPL_APC
 
     b    KeAcquireLockExclusive.acquire
 
@@ -139,7 +139,7 @@ KeAcquireApcLockExclusive:
 
 #IF BLD_CHK
     mov  t0, long [a0]
-    beq  t0, KiNotLocked
+    beq  t0, KepNotLocked
 #END
 
 #IF BLD_MP
@@ -152,17 +152,17 @@ KeAcquireApcLockExclusive:
 
     // Isolate the waiters bit.
 
-    andi t1, t0, KI_LOCK_WAITERS
+    andi t1, t0, KEP_LOCK_WAITERS
     bne  t1, .slow                  // If not zero, take slow path.
 
     li   t2, 0
 
-    andi t1, t0, KI_LOCK_WRITE_LOCKED
+    andi t1, t0, KEP_LOCK_WRITE_LOCKED
     bne  t1, .notshared
 
     // We're a shared holder, so decrement the share count.
 
-    subi t2, t0, KI_LOCK_SHARE_INC
+    subi t2, t0, KEP_LOCK_SHARE_INC
 
 .notshared:
 
@@ -185,7 +185,7 @@ KeReleaseLock:
 
 .slow:
 
-    j    KiReleaseLock
+    j    KepReleaseLock
 
 // a0 - lock
 // a1 - oldipl
@@ -195,11 +195,11 @@ KeReleaseApcLock:
     ReleaseLock ( x )
 
     // The lock is APC-safe, so restore the old IPL.
-    // This is KiLowerIpl inlined.
+    // This is KepLowerIpl inlined.
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
-    mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.
-    mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
+    mov  byte [t0 + KepPrb_Ipl], a1  // Store the new IPL.
+    mov  t1, long [t0 + KepPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a1                 // Right shift pending by new IPL.
     bne  t2, .dispatch              // If zero, none pending at new IPL.
 
@@ -208,7 +208,7 @@ KeReleaseApcLock:
 .dispatch:
 
     mov  a0, a1
-    j    KiDispatchSoftwareInterrupts
+    j    KepDispatchSoftwareInterrupts
 
 .slow:
 
@@ -216,18 +216,18 @@ KeReleaseApcLock:
     mov  long [sp], a1
     mov  long [sp + 4], lr
 
-    jal  KiReleaseLock
+    jal  KepReleaseLock
 
     mov  a1, long [sp]
     mov  lr, long [sp + 4]
     addi sp, sp, 8
 
     // The lock is APC-safe, so restore the old IPL.
-    // This is KiLowerIpl inlined.
+    // This is KepLowerIpl inlined.
 
-    subi t0, zero, KI_PRB_LESS_ZERO // Calculate Prb address.
-    mov  byte [t0 + KiPrb_Ipl], a1  // Store the new IPL.
-    mov  t1, long [t0 + KiPrb_PendingSoftwareInterrupts]
+    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
+    mov  byte [t0 + KepPrb_Ipl], a1  // Store the new IPL.
+    mov  t1, long [t0 + KepPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a1                 // Right shift pending by new IPL.
     bne  t2, .dispatch              // If zero, none pending at new IPL.
 
@@ -236,18 +236,18 @@ KeReleaseApcLock:
 
 #IF BLD_CHK
 
-KiNotLocked:
+KepNotLocked:
     // Create stack frame for debugger traces.
 
     subi sp, sp, 4
     mov  long [sp], lr
 
-    la   a0, KiNotLockedMessage
+    la   a0, KepNotLockedMessage
     li   a1, 0
     li   a2, 0
     jal  KeCrash
 
-KiNotLockedMessage:
+KepNotLockedMessage:
     .ds "KeReleaseLock: not locked\n"
     .db 0
 

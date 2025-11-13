@@ -7,14 +7,14 @@
 HalpUseFramebuffer := FALSE
 HalpDebugConsole := FALSE
 HalpFramebufferBytes := 0
-PUBLIC HalpFont : ^HalConsoleFont
+PUBLIC HalpFont : ^HaluConsoleFont
 HalpCursorX := 0
 HalpCursorY := 0
 HalpWidth := 0
 HalpHeight := 0
 
-#DEFINE HAL_CONSOLE_FG 0xFFFFFFFF
-#DEFINE HAL_CONSOLE_BG 0xFF674764
+#DEFINE HALU_CONSOLE_FG 0xFFFFFFFF
+#DEFINE HALU_CONSOLE_BG 0xFF674764
 
 FN HalpDrawCharacter (
     IN c : UWORD,
@@ -38,7 +38,7 @@ FN HalpDrawCharacter (
 
     mod := (width - w) * 4
 
-    bmp := CAST font + SIZEOF HalConsoleFont TO ^UBYTE
+    bmp := CAST font + SIZEOF HaluConsoleFont TO ^UBYTE
     bmp += ((w + 7) >> 3) * h * c
 
     IF font^.Flags & HCF_FLAG_REVERSE == 0 THEN
@@ -222,9 +222,9 @@ FN HalpClearScreen ()
     // Fill the framebuffer with blue pixels.
 
     RtlFillMemoryWithUlong (
-        KeLoaderBlock.BootFbBase, // ptr
+        KeuLoaderBlock.BootFbBase, // ptr
         HalpFramebufferBytes, // sz
-        HAL_CONSOLE_BG, // ulong
+        HALU_CONSOLE_BG, // ulong
     )
 
     HalpCursorX = 0
@@ -242,29 +242,29 @@ FN HalpScrollScreen ()
     font := HalpFont
 
     RtlCopyBytes (
-        KeLoaderBlock.BootFbBase, // dest
-        KeLoaderBlock.BootFbBase +
-        KeLoaderBlock.BootFbWidth * font^.Height * 4, // src
-        KeLoaderBlock.BootFbWidth *
-        (KeLoaderBlock.BootFbHeight - font^.Height) * 4, // sz
+        KeuLoaderBlock.BootFbBase, // dest
+        KeuLoaderBlock.BootFbBase +
+        KeuLoaderBlock.BootFbWidth * font^.Height * 4, // src
+        KeuLoaderBlock.BootFbWidth *
+        (KeuLoaderBlock.BootFbHeight - font^.Height) * 4, // sz
     )
 
     // Clear the last line.
 
     RtlFillMemoryWithUlong (
-        KeLoaderBlock.BootFbBase +
-        KeLoaderBlock.BootFbWidth *
+        KeuLoaderBlock.BootFbBase +
+        KeuLoaderBlock.BootFbWidth *
         (HalpHeight - 1) * font^.Height * 4, // ptr
-        KeLoaderBlock.BootFbWidth * font^.Height * 4, // sz
-        HAL_CONSOLE_BG, // ulong
+        KeuLoaderBlock.BootFbWidth * font^.Height * 4, // sz
+        HALU_CONSOLE_BG, // ulong
     )
 END
 
-FN HalPutCharacter (
+FN HaluPutCharacter (
     IN byte : UBYTE,
 )
 
-    oldstate := KiDisableInterrupts ()
+    oldstate := KepDisableInterrupts ()
 
     IF NOT HalpDebugConsole AND HalpUseFramebuffer THEN
         // Write to the framebuffer console.
@@ -286,10 +286,10 @@ FN HalPutCharacter (
                 byte, // c
                 HalpCursorX * HalpFont^.Width, // x
                 HalpCursorY * HalpFont^.Height, // y
-                KeLoaderBlock.BootFbBase, // base
-                KeLoaderBlock.BootFbWidth, // width
-                HAL_CONSOLE_FG, // fg
-                HAL_CONSOLE_BG, // bg
+                KeuLoaderBlock.BootFbBase, // base
+                KeuLoaderBlock.BootFbWidth, // width
+                HALU_CONSOLE_FG, // fg
+                HALU_CONSOLE_BG, // bg
             )
 
             HalpCursorX += 1
@@ -298,13 +298,13 @@ FN HalPutCharacter (
     ELSE
         // Write to debugger window.
 
-        HalDebugWrite ( byte )
+        HaluDebugWrite ( byte )
     END
 
-    KiRestoreInterrupts ( oldstate )
+    KepRestoreInterrupts ( oldstate )
 END
 
-FN HalCrashConsole ()
+FN HaluCrashConsole ()
 
     // We assume the system is in a globally single-threaded uniprocessor state
     // right now (since KeCrash has disabled interrupts and made any other
@@ -318,12 +318,12 @@ FN HalCrashConsole ()
 
         // Draw a cool shutter effect.
 
-        addr := CAST KeLoaderBlock.BootFbBase TO ^ULONG
+        addr := CAST KeuLoaderBlock.BootFbBase TO ^ULONG
 
-        height := KeLoaderBlock.BootFbHeight
+        height := KeuLoaderBlock.BootFbHeight
 
         WHILE height DO
-            width := KeLoaderBlock.BootFbWidth
+            width := KeuLoaderBlock.BootFbWidth
 
             off := height & 1
 
@@ -339,7 +339,7 @@ FN HalCrashConsole ()
     END
 END
 
-FN HalQueryConsoleSize (
+FN HaluQueryConsoleSize (
     OUT width : UWORD,
     OUT height : UWORD,
 )
@@ -356,7 +356,7 @@ FN HalQueryConsoleSize (
     END
 END
 
-FN HalQueryConsolePosition (
+FN HaluQueryConsolePosition (
     OUT x : UWORD,
     OUT y : UWORD,
 )
@@ -371,7 +371,7 @@ FN HalQueryConsolePosition (
     END
 END
 
-FN HalSetConsolePosition (
+FN HaluSetConsolePosition (
     IN x : UWORD,
     IN y : UWORD,
 )
@@ -388,7 +388,7 @@ FN HalSetConsolePosition (
     HalpCursorY = y
 END
 
-FN HalCenterPrint (
+FN HaluCenterPrint (
     IN str : ^UBYTE,
 )
 
@@ -414,11 +414,11 @@ FN HalpInitializeConsole ()
 
     // First see if we got a boot framebuffer.
 
-    IF KeLoaderBlock.BootFbBase THEN
+    IF KeuLoaderBlock.BootFbBase THEN
         // We did! Try to find the HAL console font resource.
 
         rsrc := KeFindResource (
-            "HalFont", // name
+            "HaluFont", // name
             OUT HalpFont, // data
         )
 
@@ -428,10 +428,10 @@ FN HalpInitializeConsole ()
             HalpUseFramebuffer = TRUE
 
             HalpFramebufferBytes =
-                KeLoaderBlock.BootFbWidth * KeLoaderBlock.BootFbHeight * 4
+                KeuLoaderBlock.BootFbWidth * KeuLoaderBlock.BootFbHeight * 4
 
-            HalpWidth = KeLoaderBlock.BootFbWidth / HalpFont^.Width
-            HalpHeight = KeLoaderBlock.BootFbHeight / HalpFont^.Height
+            HalpWidth = KeuLoaderBlock.BootFbWidth / HalpFont^.Width
+            HalpHeight = KeuLoaderBlock.BootFbHeight / HalpFont^.Height
 
             // Draw the background.
 
@@ -440,11 +440,11 @@ FN HalpInitializeConsole ()
     END
 END
 
-EXPORT FN HalSetDebugConsole (
+EXPORT FN HaluSetDebugConsole (
     IN new : UWORD,
 ) : UWORD
 
-    oldstate := KiDisableInterrupts ()
+    oldstate := KepDisableInterrupts ()
 
     old := HalpDebugConsole
 
@@ -456,7 +456,7 @@ EXPORT FN HalSetDebugConsole (
         HalpSetDbgOverlay ( new )
     END
 
-    KiRestoreInterrupts ( oldstate )
+    KepRestoreInterrupts ( oldstate )
 
     RETURN old
 END

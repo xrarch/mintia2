@@ -37,8 +37,8 @@ FN (RtlAvlLessThanF) ExpCompareNameNodes (
     // Return whether A < B, lexicographically.
 
     RETURN CAST RtlCompareRtlString (
-        ExNameToString ( CONTAINEROF a TO ExName.Entry ), // str1
-        ExNameToString ( CONTAINEROF b TO ExName.Entry ), // str2
+        ExuNameToString ( CONTAINEROF a TO ExuName.Entry ), // str1
+        ExuNameToString ( CONTAINEROF b TO ExuName.Entry ), // str2
     ) TO WORD < 0
 END
 
@@ -67,9 +67,9 @@ FN ExpHash (
 END
 
 #SECTION "PAGEtext"
-FN ExFindName (
+FN ExuFindName (
     IN str : ^RtlString,
-) : ^ExName
+) : ^ExuName
 
     // Find a name in the string internment buckets.
 
@@ -101,11 +101,11 @@ FN ExFindName (
             BREAK
         END
 
-        checknode := CONTAINEROF avlnode TO ExName.Entry
+        checknode := CONTAINEROF avlnode TO ExuName.Entry
 
         res := CAST RtlCompareRtlString (
             str, // str1
-            ExNameToString ( checknode ), // str2
+            ExuNameToString ( checknode ), // str2
         ) TO WORD
 
         IF res == 0 THEN
@@ -125,9 +125,9 @@ FN ExFindName (
         END
     END
 
-    node : ^ExName = MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
-        SIZEOF ExName + SIZEOF RtlString + len + 1, // bytes
+    node : ^ExuName = MmuAllocatePool (
+        MMU_PAGED_POOL, // poolindex
+        SIZEOF ExuName + SIZEOF RtlString + len + 1, // bytes
         'Name', // tag
         FALSE, // wait
     )
@@ -135,7 +135,7 @@ FN ExFindName (
     IF NOT node THEN
         KeReleaseLock ( &bucket^.Lock )
 
-        MmWaitForPoolMemory ()
+        MmuWaitForPoolMemory ()
 
         GOTO Retry
     END
@@ -145,7 +145,7 @@ FN ExFindName (
     node^.References = 1
     node^.BucketIndex = hash & (EXP_NAME_BUCKETS - 1)
 
-    newstr := ExNameToString ( node )
+    newstr := ExuNameToString ( node )
 
     newstr^.Length = len
     newstr^.Data = CAST newstr + SIZEOF RtlString TO ^UBYTE
@@ -172,8 +172,8 @@ FN ExFindName (
 END
 
 #SECTION "PAGEtext"
-FN ExUnreferenceName (
-    IN name : ^ExName,
+FN ExuUnreferenceName (
+    IN name : ^ExuName,
 )
 
     // Unreference the name node.
@@ -201,7 +201,7 @@ FN ExUnreferenceName (
 
         // Free outside the bucket lock.
 
-        MmFreePool (
+        MmuFreePool (
             name, // ptr
             'Name', // tag
         )
@@ -215,8 +215,8 @@ FN ExUnreferenceName (
 END
 
 #SECTION "PAGEtext"
-FN ExReferenceName (
-    IN name : ^ExName,
+FN ExuReferenceName (
+    IN name : ^ExuName,
 )
 
     // Reference the name node.
@@ -237,7 +237,7 @@ FN ExReferenceName (
 END
 
 #SECTION "PAGEtext"
-FN ExDuplicateString (
+FN ExuDuplicateString (
     IN outputstring : ^RtlString,
     IN inputstring : ^RtlString,
     IN poolindex : UWORD,
@@ -252,7 +252,7 @@ FN ExDuplicateString (
 
     // Create a new string buffer (this is the important work).
 
-    outputstring^.Data = MmAllocatePool (
+    outputstring^.Data = MmuAllocatePool (
         poolindex, // poolindex
         inputstring^.Length + 1, // bytes
         tag, // tag

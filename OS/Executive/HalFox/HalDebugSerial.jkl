@@ -4,8 +4,8 @@
 
 #INCLUDE "Halp.hjk"
 
-#DEFINE HAL_DBG_FG 0xFF000000
-#DEFINE HAL_DBG_BG 0xFFFFFFFF
+#DEFINE HALU_DBG_FG 0xFF000000
+#DEFINE HALU_DBG_BG 0xFFFFFFFF
 
 HalpDbgCursorX := 0
 HalpDbgCursorY := 0
@@ -17,9 +17,9 @@ FN HalpDbgClearScreen ()
     // Fill the framebuffer with blue pixels.
 
     RtlFillMemoryWithUlong (
-        KeLoaderBlock.U.Fox.DbgOverlayBase, // ptr
+        KeuLoaderBlock.U.Fox.DbgOverlayBase, // ptr
         BL_FOX_DBG_WIDTH * BL_FOX_DBG_HEIGHT * 4, // sz
-        HAL_DBG_BG, // ulong
+        HALU_DBG_BG, // ulong
     )
 
     HalpDbgCursorX = 0
@@ -37,8 +37,8 @@ FN HalpDbgScrollScreen ()
     font := HalpFont
 
     RtlCopyBytes (
-        KeLoaderBlock.U.Fox.DbgOverlayBase, // dest
-        KeLoaderBlock.U.Fox.DbgOverlayBase +
+        KeuLoaderBlock.U.Fox.DbgOverlayBase, // dest
+        KeuLoaderBlock.U.Fox.DbgOverlayBase +
         BL_FOX_DBG_WIDTH * font^.Height * 4, // src
         BL_FOX_DBG_WIDTH *
         (BL_FOX_DBG_HEIGHT - font^.Height) * 4, // sz
@@ -47,15 +47,15 @@ FN HalpDbgScrollScreen ()
     // Clear the last line.
 
     RtlFillMemoryWithUlong (
-        KeLoaderBlock.U.Fox.DbgOverlayBase +
+        KeuLoaderBlock.U.Fox.DbgOverlayBase +
         BL_FOX_DBG_WIDTH *
         (HalpDbgHeight - 1) * font^.Height * 4, // ptr
         BL_FOX_DBG_WIDTH * font^.Height * 4, // sz
-        HAL_DBG_BG, // ulong
+        HALU_DBG_BG, // ulong
     )
 END
 
-EXPORT FN HalDebugWrite (
+EXPORT FN HaluDebugWrite (
     IN byte : UWORD,
 )
 
@@ -89,10 +89,10 @@ EXPORT FN HalDebugWrite (
             byte, // c
             HalpDbgCursorX * HalpFont^.Width, // x
             HalpDbgCursorY * HalpFont^.Height, // y
-            KeLoaderBlock.U.Fox.DbgOverlayBase, // base
+            KeuLoaderBlock.U.Fox.DbgOverlayBase, // base
             BL_FOX_DBG_WIDTH, // width
-            HAL_DBG_FG, // fg
-            HAL_DBG_BG, // bg
+            HALU_DBG_FG, // fg
+            HALU_DBG_BG, // bg
         )
 
         HalpDbgCursorX += 1
@@ -106,12 +106,12 @@ EXTERN HalpFoxKeyboardCaps : UBYTE[84]
 HalpShift := 0
 HalpCaps := 0
 
-EXPORT FN HalDebugRead () : UWORD
+EXPORT FN HaluDebugRead () : UWORD
 
     // Read a character from the keyboard.
     // Non-blocking. Return -1 if none available.
 
-    scan := HalFox32In ( 0x80000500 )
+    scan := HaluFox32In ( 0x80000500 )
 
     IF scan == 0 THEN
         RETURN -1
@@ -158,7 +158,7 @@ FN HalpSetDbgOverlay (
     IF NOT state THEN
         // Disable debug overlay.
 
-        HalFox32Out (
+        HaluFox32Out (
             0x8000031F, // port
             0, // value
         )
@@ -170,28 +170,28 @@ FN HalpSetDbgOverlay (
         // Enable debug overlay.
         // Set upper left corner to 80,96 so that the 480x288 box is centered.
 
-        HalFox32Out (
+        HaluFox32Out (
             0x8000001F, // port
             0x00600050, // value
         )
 
         // Set to 480x288.
 
-        HalFox32Out (
+        HaluFox32Out (
             0x8000011F, // port
             0x012001E0, // value
         )
 
         // Set pointer.
 
-        HalFox32Out (
+        HaluFox32Out (
             0x8000021F, // port
-            KeLoaderBlock.U.Fox.DbgOverlayBasePhys, // value
+            KeuLoaderBlock.U.Fox.DbgOverlayBasePhys, // value
         )
 
         // Enable.
 
-        HalFox32Out (
+        HaluFox32Out (
             0x8000031F, // port
             1, // value
         )

@@ -7,7 +7,7 @@
 HalpUseFramebuffer := FALSE
 HalpDebugConsole := FALSE
 HalpFramebufferBytes := 0
-HalpFont : ^HalConsoleFont
+HalpFont : ^HaluConsoleFont
 HalpCursorX := 0
 HalpCursorY := 0
 HalpWidth := 0
@@ -15,12 +15,12 @@ HalpHeight := 0
 
 #IF BLD_MP
 
-PUBLIC HalpConsoleLock : HalSpinlock
+PUBLIC HalpConsoleLock : HaluSpinlock
 
 #END
 
-#DEFINE HAL_CONSOLE_FG 0x00
-#DEFINE HAL_CONSOLE_BG 0xFF
+#DEFINE HALU_CONSOLE_FG 0x00
+#DEFINE HALU_CONSOLE_BG 0xFF
 
 FN HalpDrawCharacter (
     IN c : UWORD,
@@ -37,11 +37,11 @@ FN HalpDrawCharacter (
     left : UWORD
 
     dest : ^UBYTE =
-        KeLoaderBlock.BootFbBase + x + (y * KeLoaderBlock.BootFbWidth)
+        KeuLoaderBlock.BootFbBase + x + (y * KeuLoaderBlock.BootFbWidth)
 
-    mod := KeLoaderBlock.BootFbWidth - w
+    mod := KeuLoaderBlock.BootFbWidth - w
 
-    bmp := CAST font + SIZEOF HalConsoleFont TO ^UBYTE
+    bmp := CAST font + SIZEOF HaluConsoleFont TO ^UBYTE
     bmp += ((w + 7) >> 3) * h * c
 
     IF font^.Flags & HCF_FLAG_REVERSE == 0 THEN
@@ -52,51 +52,51 @@ FN HalpDrawCharacter (
                 byte = bmp^
 
                 IF byte & 128 THEN
-                    dest[0] = HAL_CONSOLE_FG
+                    dest[0] = HALU_CONSOLE_FG
                 ELSE
-                    dest[0] = HAL_CONSOLE_BG
+                    dest[0] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 64 THEN
-                    dest[1] = HAL_CONSOLE_FG
+                    dest[1] = HALU_CONSOLE_FG
                 ELSE
-                    dest[1] = HAL_CONSOLE_BG
+                    dest[1] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 32 THEN
-                    dest[2] = HAL_CONSOLE_FG
+                    dest[2] = HALU_CONSOLE_FG
                 ELSE
-                    dest[2] = HAL_CONSOLE_BG
+                    dest[2] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 16 THEN
-                    dest[3] = HAL_CONSOLE_FG
+                    dest[3] = HALU_CONSOLE_FG
                 ELSE
-                    dest[3] = HAL_CONSOLE_BG
+                    dest[3] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 8 THEN
-                    dest[4] = HAL_CONSOLE_FG
+                    dest[4] = HALU_CONSOLE_FG
                 ELSE
-                    dest[4] = HAL_CONSOLE_BG
+                    dest[4] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 4 THEN
-                    dest[5] = HAL_CONSOLE_FG
+                    dest[5] = HALU_CONSOLE_FG
                 ELSE
-                    dest[5] = HAL_CONSOLE_BG
+                    dest[5] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 2 THEN
-                    dest[6] = HAL_CONSOLE_FG
+                    dest[6] = HALU_CONSOLE_FG
                 ELSE
-                    dest[6] = HAL_CONSOLE_BG
+                    dest[6] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 1 THEN
-                    dest[7] = HAL_CONSOLE_FG
+                    dest[7] = HALU_CONSOLE_FG
                 ELSE
-                    dest[7] = HAL_CONSOLE_BG
+                    dest[7] = HALU_CONSOLE_BG
                 END
 
                 dest += 8
@@ -119,9 +119,9 @@ FN HalpDrawCharacter (
 
                 WHILE left DO
                     IF byte & j THEN
-                        dest^ = HAL_CONSOLE_FG
+                        dest^ = HALU_CONSOLE_FG
                     ELSE
-                        dest^ = HAL_CONSOLE_BG
+                        dest^ = HALU_CONSOLE_BG
                     END
 
                     dest += 1
@@ -142,51 +142,51 @@ FN HalpDrawCharacter (
                 byte = bmp^
 
                 IF byte & 128 THEN
-                    dest[7] = HAL_CONSOLE_FG
+                    dest[7] = HALU_CONSOLE_FG
                 ELSE
-                    dest[7] = HAL_CONSOLE_BG
+                    dest[7] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 64 THEN
-                    dest[6] = HAL_CONSOLE_FG
+                    dest[6] = HALU_CONSOLE_FG
                 ELSE
-                    dest[6] = HAL_CONSOLE_BG
+                    dest[6] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 32 THEN
-                    dest[5] = HAL_CONSOLE_FG
+                    dest[5] = HALU_CONSOLE_FG
                 ELSE
-                    dest[5] = HAL_CONSOLE_BG
+                    dest[5] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 16 THEN
-                    dest[4] = HAL_CONSOLE_FG
+                    dest[4] = HALU_CONSOLE_FG
                 ELSE
-                    dest[4] = HAL_CONSOLE_BG
+                    dest[4] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 8 THEN
-                    dest[3] = HAL_CONSOLE_FG
+                    dest[3] = HALU_CONSOLE_FG
                 ELSE
-                    dest[3] = HAL_CONSOLE_BG
+                    dest[3] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 4 THEN
-                    dest[2] = HAL_CONSOLE_FG
+                    dest[2] = HALU_CONSOLE_FG
                 ELSE
-                    dest[2] = HAL_CONSOLE_BG
+                    dest[2] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 2 THEN
-                    dest[1] = HAL_CONSOLE_FG
+                    dest[1] = HALU_CONSOLE_FG
                 ELSE
-                    dest[1] = HAL_CONSOLE_BG
+                    dest[1] = HALU_CONSOLE_BG
                 END
 
                 IF byte & 1 THEN
-                    dest[0] = HAL_CONSOLE_FG
+                    dest[0] = HALU_CONSOLE_FG
                 ELSE
-                    dest[0] = HAL_CONSOLE_BG
+                    dest[0] = HALU_CONSOLE_BG
                 END
 
                 dest += 8
@@ -203,9 +203,9 @@ FN HalpDrawCharacter (
 
                 WHILE left DO
                     IF byte & j THEN
-                        dest^ = HAL_CONSOLE_FG
+                        dest^ = HALU_CONSOLE_FG
                     ELSE
-                        dest^ = HAL_CONSOLE_BG
+                        dest^ = HALU_CONSOLE_BG
                     END
 
                     dest += 1
@@ -224,13 +224,13 @@ FN HalpClearScreen ()
 
     // Fill the framebuffer with blue pixels.
 
-    ulong := (HAL_CONSOLE_BG << 24) |
-        (HAL_CONSOLE_BG << 16) |
-        (HAL_CONSOLE_BG << 8) |
-        HAL_CONSOLE_BG
+    ulong := (HALU_CONSOLE_BG << 24) |
+        (HALU_CONSOLE_BG << 16) |
+        (HALU_CONSOLE_BG << 8) |
+        HALU_CONSOLE_BG
 
     RtlFillMemoryWithUlong (
-        KeLoaderBlock.BootFbBase, // ptr
+        KeuLoaderBlock.BootFbBase, // ptr
         HalpFramebufferBytes, // sz
         ulong, // ulong
     )
@@ -250,30 +250,30 @@ FN HalpScrollScreen ()
     font := HalpFont
 
     RtlCopyBytes (
-        KeLoaderBlock.BootFbBase, // dest
-        KeLoaderBlock.BootFbBase +
-        KeLoaderBlock.BootFbWidth * font^.Height, // src
-        KeLoaderBlock.BootFbWidth *
-        (KeLoaderBlock.BootFbHeight - font^.Height), // sz
+        KeuLoaderBlock.BootFbBase, // dest
+        KeuLoaderBlock.BootFbBase +
+        KeuLoaderBlock.BootFbWidth * font^.Height, // src
+        KeuLoaderBlock.BootFbWidth *
+        (KeuLoaderBlock.BootFbHeight - font^.Height), // sz
     )
 
     // Clear the last line.
 
-    ulong := (HAL_CONSOLE_BG << 24) |
-        (HAL_CONSOLE_BG << 16) |
-        (HAL_CONSOLE_BG << 8) |
-        HAL_CONSOLE_BG
+    ulong := (HALU_CONSOLE_BG << 24) |
+        (HALU_CONSOLE_BG << 16) |
+        (HALU_CONSOLE_BG << 8) |
+        HALU_CONSOLE_BG
 
     RtlFillMemoryWithUlong (
-        KeLoaderBlock.BootFbBase +
-        KeLoaderBlock.BootFbWidth *
+        KeuLoaderBlock.BootFbBase +
+        KeuLoaderBlock.BootFbWidth *
         (HalpHeight - 1) * font^.Height, // ptr
-        KeLoaderBlock.BootFbWidth * font^.Height, // sz
+        KeuLoaderBlock.BootFbWidth * font^.Height, // sz
         ulong, // ulong
     )
 END
 
-FN HalPutCharacter (
+FN HaluPutCharacter (
     IN byte : UBYTE,
 )
 
@@ -313,7 +313,7 @@ FN HalPutCharacter (
     ELSE
         // Write to serial port.
 
-        HalDebugWrite ( byte )
+        HaluDebugWrite ( byte )
     END
 
     IF NOT dbg THEN
@@ -321,7 +321,7 @@ FN HalPutCharacter (
     END
 END
 
-FN HalCrashConsole ()
+FN HaluCrashConsole ()
 
     // We assume the system is in a globally single-threaded uniprocessor state
     // right now (since KeCrash has disabled interrupts and made any other
@@ -336,12 +336,12 @@ FN HalCrashConsole ()
         // Draw a cool shutter effect.
 
         size := HalpFramebufferBytes
-        addr := CAST KeLoaderBlock.BootFbBase TO ^UBYTE
+        addr := CAST KeuLoaderBlock.BootFbBase TO ^UBYTE
 
-        height := KeLoaderBlock.BootFbHeight
+        height := KeuLoaderBlock.BootFbHeight
 
         WHILE height DO
-            width := KeLoaderBlock.BootFbWidth
+            width := KeuLoaderBlock.BootFbWidth
 
             off := height & 1
 
@@ -357,7 +357,7 @@ FN HalCrashConsole ()
     END
 END
 
-FN HalQueryConsoleSize (
+FN HaluQueryConsoleSize (
     OUT width : UWORD,
     OUT height : UWORD,
 )
@@ -374,7 +374,7 @@ FN HalQueryConsoleSize (
     END
 END
 
-FN HalQueryConsolePosition (
+FN HaluQueryConsolePosition (
     OUT x : UWORD,
     OUT y : UWORD,
 )
@@ -389,7 +389,7 @@ FN HalQueryConsolePosition (
     END
 END
 
-FN HalSetConsolePosition (
+FN HaluSetConsolePosition (
     IN x : UWORD,
     IN y : UWORD,
 )
@@ -406,7 +406,7 @@ FN HalSetConsolePosition (
     HalpCursorY = y
 END
 
-FN HalCenterPrint (
+FN HaluCenterPrint (
     IN str : ^UBYTE,
 )
 
@@ -432,7 +432,7 @@ FN HalpInitializeConsole ()
 
     // First see if we got a boot framebuffer.
 
-    IF KeLoaderBlock.BootFbBase THEN
+    IF KeuLoaderBlock.BootFbBase THEN
         // We did! Try to find the HAL console font resource.
 
         rsrc := KeFindResource (
@@ -446,10 +446,10 @@ FN HalpInitializeConsole ()
             HalpUseFramebuffer = TRUE
 
             HalpFramebufferBytes =
-                KeLoaderBlock.BootFbWidth * KeLoaderBlock.BootFbHeight
+                KeuLoaderBlock.BootFbWidth * KeuLoaderBlock.BootFbHeight
 
-            HalpWidth = KeLoaderBlock.BootFbWidth / HalpFont^.Width
-            HalpHeight = KeLoaderBlock.BootFbHeight / HalpFont^.Height
+            HalpWidth = KeuLoaderBlock.BootFbWidth / HalpFont^.Width
+            HalpHeight = KeuLoaderBlock.BootFbHeight / HalpFont^.Height
 
             // Draw the background.
 
@@ -458,7 +458,7 @@ FN HalpInitializeConsole ()
     END
 END
 
-EXPORT FN HalSetDebugConsole (
+EXPORT FN HaluSetDebugConsole (
     IN new : UWORD,
 ) : UWORD
 

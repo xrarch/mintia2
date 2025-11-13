@@ -2,15 +2,15 @@
 // Implements support for the interrupt object.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 
 #IF BLD_MP
 
-KiInterruptAssignmentCounter : ULONG = 0
+KepInterruptAssignmentCounter : ULONG = 0
 
 #END
 
-FN (KeInterruptF) KiUnexpectedInterrupt (
+FN (KeInterruptF) KepUnexpectedInterrupt (
     IN interrupt : ^KeInterrupt,
     IN context : ^OsContext,
 )
@@ -19,15 +19,15 @@ FN (KeInterruptF) KiUnexpectedInterrupt (
 END
 
 #SECTION "text"
-PUBLIC KiUnexpectedInterruptObject : KeInterrupt = {
-    [Routine] = &KiUnexpectedInterrupt,
-    [Ipl] = KI_IPL_HIGH,
+PUBLIC KepUnexpectedInterruptObject : KeInterrupt = {
+    [Routine] = &KepUnexpectedInterrupt,
+    [Ipl] = KEP_IPL_HIGH,
 #IF BLD_MP
-    [Spinlock] = KI_INITIAL_SPINLOCK,
+    [Spinlock] = KEP_INITIAL_SPINLOCK,
 #END
 }
 
-EXPORT FN KeInitializeInterrupt (
+EXPORT FN KeuInitializeInterrupt (
     IN interrupt : ^KeInterrupt,
     IN routine : KeInterruptF,
     IN context : UWORD,
@@ -41,23 +41,23 @@ EXPORT FN KeInitializeInterrupt (
     // Initialize an interrupt object.
 
 #IF BLD_MP
-    IF procid == KE_AUTOMATIC_INTERRUPT_PROCESSOR THEN
+    IF procid == KEU_AUTOMATIC_INTERRUPT_PROCESSOR THEN
         // Automatically choose the processor ID that should service this
         // interrupt. Use an incrementing counter to spread the load.
 
         procid = KeIncrementUlong (
-            &KiInterruptAssignmentCounter, // ptr
+            &KepInterruptAssignmentCounter, // ptr
             1, // ulong
         )
 
-        procid %= KeLoaderBlock.ProcessorCount
+        procid %= KeuLoaderBlock.ProcessorCount
     END
 
 #ELSE
     procid = 0
 #END
 
-    interrupt^.Handler = &HalHandleDeviceInterrupt
+    interrupt^.Handler = &HaluHandleDeviceInterrupt
     interrupt^.Routine = routine
     interrupt^.Context = context
     interrupt^.Vector = vector
@@ -68,28 +68,28 @@ EXPORT FN KeInitializeInterrupt (
     interrupt^.Connected = FALSE
 
 #IF BLD_MP
-    KiInitializeSpinlock ( &interrupt^.Spinlock )
+    KepInitializeSpinlock ( &interrupt^.Spinlock )
 #END
 
 END
 
-EXPORT FN KeSynchronizeWithInterrupt (
+EXPORT FN KeuSynchronizeWithInterrupt (
     IN interrupt : ^KeInterrupt,
 ) : UWORD
 
     // Synchronize with the ISR by raising IPL to match its level and
     // acquiring its spinlock.
 
-    oldipl := HalRaiseHardwareIpl ( interrupt^.Ipl )
+    oldipl := HaluRaiseHardwareIpl ( interrupt^.Ipl )
 
 #IF BLD_MP
-    KiAcquireSpinlock ( &interrupt^.Spinlock )
+    KepAcquireSpinlock ( &interrupt^.Spinlock )
 #END
 
     RETURN oldipl
 END
 
-EXPORT FN KeDesynchronizeFromInterrupt (
+EXPORT FN KeuDesynchronizeFromInterrupt (
     IN interrupt : ^KeInterrupt,
     IN oldipl : UWORD,
 )
@@ -97,19 +97,19 @@ EXPORT FN KeDesynchronizeFromInterrupt (
     // Desynchronize from the ISR by releasing its spinlock and lowering IPL.
 
 #IF BLD_MP
-    KiReleaseSpinlock ( &interrupt^.Spinlock )
+    KepReleaseSpinlock ( &interrupt^.Spinlock )
 #END
 
-    HalLowerHardwareIpl ( oldipl )
+    HaluLowerHardwareIpl ( oldipl )
 END
 
 #IF BLD_MP
 
-KiNextWorkBalanceMs : WORD = KI_WORK_BALANCE_INTERVAL
+KepNextWorkBalanceMs : WORD = KEP_WORK_BALANCE_INTERVAL
 
 #END
 
-FN (KeInterruptF) KiClockTick (
+FN (KeInterruptF) KepClockTick (
     IN interrupt : ^KeInterrupt,
     IN context : ^OsContext,
 )
@@ -119,7 +119,7 @@ FN (KeInterruptF) KiClockTick (
     // enqueuing the expiration DPC to process them. Also triggers the
     // scheduler when the current thread's quantum expires.
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
     thread := prb^.CurrentThread
 
@@ -133,32 +133,32 @@ FN (KeInterruptF) KiClockTick (
 
     // Increment count of clock ticks on this processor.
 
-    RtlAddUlongToUquad ( &prb^.ClockTicks, HAL_TIMER_INTERVAL )
+    RtlAddUlongToUquad ( &prb^.ClockTicks, HALU_TIMER_INTERVAL )
 
     // Update time spent at previous IPL on this processor.
 
-    RtlAddUlongToUquad ( &prb^.IplTimes[previpl], HAL_TIMER_INTERVAL )
+    RtlAddUlongToUquad ( &prb^.IplTimes[previpl], HALU_TIMER_INTERVAL )
 
     IF prb^.DpcActive THEN
         // Update time spent executing DPCs on this processor.
 
-        RtlAddUlongToUquad ( &prb^.DpcTimeMs, HAL_TIMER_INTERVAL )
+        RtlAddUlongToUquad ( &prb^.DpcTimeMs, HALU_TIMER_INTERVAL )
 
     ELSEIF thread THEN
         IF OsWasUsermodeContext ( context ) THEN
             // Update time this thread has spent in usermode.
 
-            RtlAddUlongToUquad ( &thread^.UserTimeMs, HAL_TIMER_INTERVAL )
+            RtlAddUlongToUquad ( &thread^.UserTimeMs, HALU_TIMER_INTERVAL )
 
-        ELSEIF previpl == KI_IPL_DPC THEN
+        ELSEIF previpl == KEP_IPL_DPC THEN
             // Update time this thread has spent at elevated IPL.
 
-            RtlAddUlongToUquad ( &thread^.DpcTimeMs, HAL_TIMER_INTERVAL )
+            RtlAddUlongToUquad ( &thread^.DpcTimeMs, HALU_TIMER_INTERVAL )
 
         ELSE
             // Update time this thread has spent in the system.
 
-            RtlAddUlongToUquad ( &thread^.SystemTimeMs, HAL_TIMER_INTERVAL )
+            RtlAddUlongToUquad ( &thread^.SystemTimeMs, HALU_TIMER_INTERVAL )
         END
     END
 
@@ -168,7 +168,7 @@ FN (KeInterruptF) KiClockTick (
     idx := prb^.CalendarEnqueueIndex
 
     IF idx == ridx THEN
-        prb^.CalendarEnqueueIndex = (idx + 1) % KI_TIMESHARED_QUEUES
+        prb^.CalendarEnqueueIndex = (idx + 1) % KEP_TIMESHARED_QUEUES
 
         IF RtlEmptyList ( &prb^.CalendarListHeads[ridx] ) THEN
             prb^.CalendarRunIndex = prb^.CalendarEnqueueIndex
@@ -183,7 +183,7 @@ FN (KeInterruptF) KiClockTick (
 
         // If we're processor zero, then update the time.
 
-        KiUpdateTime ( prb )
+        KepUpdateTime ( prb )
 
         RtlMoveUquad (
             &currentticks, // dest
@@ -191,22 +191,22 @@ FN (KeInterruptF) KiClockTick (
         )
 
 #IF BLD_MP
-        KiNextWorkBalanceMs -= HAL_TIMER_INTERVAL
+        KepNextWorkBalanceMs -= HALU_TIMER_INTERVAL
 
-        IF KiNextWorkBalanceMs <= 0 THEN
+        IF KepNextWorkBalanceMs <= 0 THEN
             // Enqueue the work balance DPC.
 
-            KiNextWorkBalanceMs = KI_WORK_BALANCE_INTERVAL
+            KepNextWorkBalanceMs = KEP_WORK_BALANCE_INTERVAL
 
             KeEnqueueDpc (
-                &KiWorkBalanceDpc, // dpc
+                &KepWorkBalanceDpc, // dpc
                 0, // context1
                 0, // context2
             )
         END
 
     ELSE
-        KiCaptureCurrentTicks ( &currentticks )
+        KepCaptureCurrentTicks ( &currentticks )
     END
 #END
 
@@ -231,13 +231,13 @@ FN (KeInterruptF) KiClockTick (
 
     // Increment the time that the current thread ran for.
 
-    thread^.RunMs += HAL_TIMER_INTERVAL << KI_TICK_SHIFT
+    thread^.RunMs += HALU_TIMER_INTERVAL << KEP_TICK_SHIFT
 
     // Update the interactivity score.
     // If an update must be made to the thread's interactivity, it is deferred
     // to a lower IPL.
 
-    KiUpdateInteractivity (
+    KepUpdateInteractivity (
         thread, // thread
         TRUE, // deferupdate
     )
@@ -252,7 +252,7 @@ FN (KeInterruptF) KiClockTick (
         LEAVE
     END
 
-    q -= HAL_TIMER_INTERVAL
+    q -= HALU_TIMER_INTERVAL
 
     // If quantum has run down, request a quantum end interrupt at IPLDPC.
 
@@ -261,7 +261,7 @@ FN (KeInterruptF) KiClockTick (
 
         // Have to use an atomic OR here in case an IPI comes in.
 
-        KiSoftInterruptSelf ( prb, KI_IPL_DPC )
+        KepSoftInterruptSelf ( prb, KEP_IPL_DPC )
 
         q = 0
     END

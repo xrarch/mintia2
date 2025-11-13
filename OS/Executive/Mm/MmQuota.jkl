@@ -2,22 +2,22 @@
 // Implements quota management.
 //
 
-#INCLUDE "Mi.hjk"
+#INCLUDE "Mmp.hjk"
 #INCLUDE "<ll>/System/OsQuota.hjk"
 
-MiQuotaBlockListHead : RtlListEntry
+MmpQuotaBlockListHead : RtlListEntry
 
-MiQuotaListLock : KeLock = KE_INITIAL_LOCK
+MmpQuotaListLock : KeLock = KE_INITIAL_LOCK
 
 #SECTION "INITtext"
-FN MiInitializeQuota ()
+FN MmpInitializeQuota ()
 
-    RtlInitializeList ( &MiQuotaBlockListHead )
+    RtlInitializeList ( &MmpQuotaBlockListHead )
 END
 
 #SECTION "PAGEtext"
-FN MiInitializeQuotaBlock (
-    IN quotablock : ^MiQuotaBlock,
+FN MmpInitializeQuotaBlock (
+    IN quotablock : ^MmpQuotaBlock,
     IN nplimit : UWORD,
     IN pglimit : UWORD,
     IN vmlimit : UWORD,
@@ -31,11 +31,11 @@ FN MiInitializeQuotaBlock (
     quotablock^.Uid = uid
     quotablock^.References = 1
 
-    quotablock^.Pool[MM_NONPAGED_POOL].Used = 0
-    quotablock^.Pool[MM_NONPAGED_POOL].Limit = nplimit
+    quotablock^.Pool[MMU_NONPAGED_POOL].Used = 0
+    quotablock^.Pool[MMU_NONPAGED_POOL].Limit = nplimit
 
-    quotablock^.Pool[MM_PAGED_POOL].Used = 0
-    quotablock^.Pool[MM_PAGED_POOL].Limit = pglimit
+    quotablock^.Pool[MMU_PAGED_POOL].Used = 0
+    quotablock^.Pool[MMU_PAGED_POOL].Limit = pglimit
 
     quotablock^.VmPages.Used = 0
     quotablock^.VmPages.Limit = vmlimit
@@ -43,14 +43,14 @@ FN MiInitializeQuotaBlock (
     // Insert in the quota block list.
 
     RtlInsertAtTailList (
-        &MiQuotaBlockListHead, // head
+        &MmpQuotaBlockListHead, // head
         &quotablock^.Entry, // entry
     )
 END
 
 #SECTION "PAGEtext"
-FN MmReferenceQuotaBlock (
-    IN quotablock : ^MiQuotaBlock,
+FN MmuReferenceQuotaBlock (
+    IN quotablock : ^MmpQuotaBlock,
 )
 
     // Increment the refcount of the quota block.
@@ -70,13 +70,13 @@ FN MmReferenceQuotaBlock (
 END
 
 #SECTION "PAGEtext"
-FN MmUnreferenceQuotaBlock (
-    IN quotablock : ^MiQuotaBlock,
+FN MmuUnreferenceQuotaBlock (
+    IN quotablock : ^MmpQuotaBlock,
 )
 
     // Decrement the refcount of the quota block.
 
-    KeAcquireLockExclusive ( &MiQuotaListLock )
+    KeAcquireLockExclusive ( &MmpQuotaListLock )
 
     oldcount := KeIncrementUlong (
         &quotablock^.References, // ptr
@@ -89,12 +89,12 @@ FN MmUnreferenceQuotaBlock (
         RtlRemoveEntryList ( &quotablock^.Entry )
     END
 
-    KeReleaseLock ( &MiQuotaListLock )
+    KeReleaseLock ( &MmpQuotaListLock )
 
     IF oldcount == 1 THEN
         // Free.
 
-        MmFreePool (
+        MmuFreePool (
             quotablock, // ptr
             'Quot', // tag
         )
@@ -102,29 +102,29 @@ FN MmUnreferenceQuotaBlock (
 END
 
 #SECTION "PAGEtext"
-FN MmLookupQuotaBlock (
+FN MmuLookupQuotaBlock (
     IN uid : UWORD,
-    IN copyquotablock : ^MiQuotaBlock,
-) : ^MiQuotaBlock
+    IN copyquotablock : ^MmpQuotaBlock,
+) : ^MmpQuotaBlock
 
     // Look up the specified quota block by UID.
     // If it can't be located, create a new one, copying in the parameters of
     // the copyquotablock.
 
-    listhead := &MiQuotaBlockListHead
+    listhead := &MmpQuotaBlockListHead
 
-    KeAcquireLockExclusive ( &MiQuotaListLock )
+    KeAcquireLockExclusive ( &MmpQuotaListLock )
 
-    quotablock : ^MiQuotaBlock
+    quotablock : ^MmpQuotaBlock
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
-        quotablock = CONTAINEROF listentry TO MiQuotaBlock.Entry
+        quotablock = CONTAINEROF listentry TO MmpQuotaBlock.Entry
 
         IF quotablock^.Uid == uid THEN
-            MmReferenceQuotaBlock ( quotablock )
+            MmuReferenceQuotaBlock ( quotablock )
 
-            KeReleaseLock ( &MiQuotaListLock )
+            KeReleaseLock ( &MmpQuotaListLock )
 
             RETURN quotablock
         END
@@ -135,44 +135,44 @@ FN MmLookupQuotaBlock (
     IF NOT copyquotablock THEN
         // Just return failure.
 
-        KeReleaseLock ( &MiQuotaListLock )
+        KeReleaseLock ( &MmpQuotaListLock )
 
         RETURN NULLPTR
     END
 
     // Allocate a quota block from paged pool.
 
-    quotablock = CAST MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
-        SIZEOF MiQuotaBlock, // bytes
+    quotablock = CAST MmuAllocatePool (
+        MMU_PAGED_POOL, // poolindex
+        SIZEOF MmpQuotaBlock, // bytes
         'Quot', // tag
         TRUE, // wait
-    ) TO ^MiQuotaBlock
+    ) TO ^MmpQuotaBlock
 
     IF NOT quotablock THEN
         // Just return failure.
 
-        KeReleaseLock ( &MiQuotaListLock )
+        KeReleaseLock ( &MmpQuotaListLock )
 
         RETURN NULLPTR
     END
 
-    MiInitializeQuotaBlock (
+    MmpInitializeQuotaBlock (
         quotablock, // quotablock
-        copyquotablock^.Pool[MM_NONPAGED_POOL].Limit, // nplimit
-        copyquotablock^.Pool[MM_PAGED_POOL].Limit, // pglimit
+        copyquotablock^.Pool[MMU_NONPAGED_POOL].Limit, // nplimit
+        copyquotablock^.Pool[MMU_PAGED_POOL].Limit, // pglimit
         copyquotablock^.VmPages.Limit, // vmlimit
         uid, // uid
     )
 
-    KeReleaseLock ( &MiQuotaListLock )
+    KeReleaseLock ( &MmpQuotaListLock )
 
     RETURN quotablock
 END
 
 #SECTION "PAGEtext"
-FN MmChargePoolQuota (
-    IN quotablock : ^MiQuotaBlock,
+FN MmuChargePoolQuota (
+    IN quotablock : ^MmpQuotaBlock,
     IN charge : UWORD,
     IN poolindex : UWORD,
 ) : OsStatus
@@ -207,8 +207,8 @@ FN MmChargePoolQuota (
 END
 
 #SECTION "PAGEtext"
-FN MmUnchargePoolQuota (
-    IN quotablock : ^MiQuotaBlock,
+FN MmuUnchargePoolQuota (
+    IN quotablock : ^MmpQuotaBlock,
     IN charge : UWORD,
     IN poolindex : UWORD,
 )
@@ -224,9 +224,9 @@ FN MmUnchargePoolQuota (
 END
 
 #SECTION "PAGEtext"
-FN MmChargeVmQuota (
-    IN partition : ^MiPartition,
-    IN quotablock : ^MiQuotaBlock,
+FN MmuChargeVmQuota (
+    IN partition : ^MmpPartition,
+    IN quotablock : ^MmpQuotaBlock,
     IN pages : UWORD,
 ) : OsStatus
 
@@ -257,7 +257,7 @@ FN MmChargeVmQuota (
 
     // Charge commit.
 
-    status := MmChargeCommit (
+    status := MmuChargeCommit (
         partition, // partition
         pages, // pages
         TRUE, // wait
@@ -276,9 +276,9 @@ FN MmChargeVmQuota (
 END
 
 #SECTION "PAGEtext"
-FN MmUnchargeVmQuota (
-    IN partition : ^MiPartition,
-    IN quotablock : ^MiQuotaBlock,
+FN MmuUnchargeVmQuota (
+    IN partition : ^MmpPartition,
+    IN quotablock : ^MmpQuotaBlock,
     IN pages : UWORD,
 )
 
@@ -293,38 +293,38 @@ FN MmUnchargeVmQuota (
 
     // Remove the commit charge.
 
-    MmUnchargeCommit (
+    MmuUnchargeCommit (
         partition, // partition
         pages, // pages
     )
 END
 
 #SECTION "PAGEtext"
-FN MmSetQuotaLimits (
-    IN quotablock : ^MiQuotaBlock,
+FN MmuSetQuotaLimits (
+    IN quotablock : ^MmpQuotaBlock,
     IN query : ^OsQuotaQuery,
 )
 
     // Set new limits on the quota block.
 
-    quotablock^.Pool[MM_NONPAGED_POOL].Limit = query^.NpPoolLimit
-    quotablock^.Pool[MM_PAGED_POOL].Limit = query^.PgPoolLimit
+    quotablock^.Pool[MMU_NONPAGED_POOL].Limit = query^.NpPoolLimit
+    quotablock^.Pool[MMU_PAGED_POOL].Limit = query^.PgPoolLimit
     quotablock^.VmPages.Limit = query^.VmLimit
 END
 
 #SECTION "PAGEtext"
-FN MmQueryQuota (
-    IN quotablock : ^MiQuotaBlock,
+FN MmuQueryQuota (
+    IN quotablock : ^MmpQuotaBlock,
     IN query : ^OsQuotaQuery,
 )
 
     // Query the quota block.
 
-    query^.NpPoolUsed = quotablock^.Pool[MM_NONPAGED_POOL].Used
-    query^.NpPoolLimit = quotablock^.Pool[MM_NONPAGED_POOL].Limit
+    query^.NpPoolUsed = quotablock^.Pool[MMU_NONPAGED_POOL].Used
+    query^.NpPoolLimit = quotablock^.Pool[MMU_NONPAGED_POOL].Limit
 
-    query^.PgPoolUsed = quotablock^.Pool[MM_PAGED_POOL].Used
-    query^.PgPoolLimit = quotablock^.Pool[MM_PAGED_POOL].Limit
+    query^.PgPoolUsed = quotablock^.Pool[MMU_PAGED_POOL].Used
+    query^.PgPoolLimit = quotablock^.Pool[MMU_PAGED_POOL].Limit
 
     query^.VmUsed = quotablock^.VmPages.Used
     query^.VmLimit = quotablock^.VmPages.Limit

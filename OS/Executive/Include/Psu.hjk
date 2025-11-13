@@ -1,22 +1,25 @@
 //
-// Public header for process and thread management for the MINTIA Executive.
+// Undocumented header for process and thread management for the MINTIA
+// Executive.
 //
 
-#INCLUDE "<inc>/Ke.hjk"
-#INCLUDE "<inc>/Ex.hjk"
-#INCLUDE "<inc>/Mm.hjk"
-#INCLUDE "<inc>/Ob.hjk"
-#INCLUDE "<inc>/Ns.hjk"
+#INCLUDE "<ll>/Executive/Ps.hjk"
+
+#INCLUDE "<inc>/Keu.hjk"
+#INCLUDE "<inc>/Exu.hjk"
+#INCLUDE "<inc>/Mmu.hjk"
+#INCLUDE "<inc>/Obu.hjk"
+#INCLUDE "<inc>/Nsu.hjk"
 
 #INCLUDE "<ll>/System/OsProcess.hjk"
 
-EXTERN PsProcessType : ObType
+EXTERN PsuProcessType : ObuType
 
-EXTERN PsThreadType : ObType
+EXTERN PsuThreadType : ObuType
 
-EXTERN PsGroupType : ObType
+EXTERN PsuGroupType : ObuType
 
-STRUCT PsProcessGroup
+STRUCT PsuProcessGroup
     ProcessListHead : RtlListEntry,
 
     Lock : KeLock,
@@ -27,27 +30,27 @@ STRUCT PsProcessGroup
     LeaderDied : UBYTE,
 END
 
-STRUCT PsPagedProcess
+STRUCT PsuPagedProcess
     GlobalEntry : RtlListEntry,
     JobEntry : RtlListEntry,
     GroupEntry : RtlListEntry,
 
-    Process : ^PsProcess,
+    Process : ^PsuProcess,
 
-    HandleTable : ExHandleTable,
+    HandleTable : ExuHandleTable,
 
-    Cred : ObCredentials,
+    Cred : ObuCredentials,
 
-    RootHandle : NsHandle,
+    RootHandle : NsuHandle,
 
-    Name : ^ExName,
+    Name : ^ExuName,
 
-    ActivationEvent : ^ExEventCounter,
+    ActivationEvent : ^ExuEventCounter,
 
-    Job : ^PsJob,
+    Job : ^PsuJob,
 
-    ProcessGroup : ^PsProcessGroup,
-    SessionGroup : ^PsProcessGroup,
+    ProcessGroup : ^PsuProcessGroup,
+    SessionGroup : ^PsuProcessGroup,
 
     RootLock : KeLock,
     ActivationLock : KeLock,
@@ -67,18 +70,18 @@ STRUCT PsPagedProcess
     EnabledPrivileges : UBYTE[(OS_PRIVILEGE_MAX + 7) / 8],
 END
 
-#MACRO PsCheckPrivilege ( process, privilege ) [
+#MACRO PsuCheckPrivilege ( process, privilege ) [
     ((process)^.Paged^.EnabledPrivileges[(privilege) / 8] &
         (1 << ((privilege) & 7)))
 ]
 
-STRUCT PsProcess
-    Pcb : KeProcess,
+STRUCT PsuProcess
+    Pcb : KeuProcess,
 
-    Paged : ^PsPagedProcess,
+    Paged : ^PsuPagedProcess,
 
-    Partition : ^MiPartition,
-    Node : ^MiNode,
+    Partition : ^MmpPartition,
+    Node : ^MmpNode,
 
     TerminationEvent : KeEvent,
 
@@ -86,12 +89,12 @@ STRUCT PsProcess
     PageFaultCount : ULONG,
 END
 
-STRUCT PsPagedThread
-    Name : ^ExName,
+STRUCT PsuPagedThread
+    Name : ^ExuName,
 
     IpcBlock : ^IpcpThreadBlock,
 
-    DeferredObjectHead : ^ObHeader,
+    DeferredObjectHead : ^ObuHeader,
 
     Tid : ULONG,
     TerminationStatus : OsStatus,
@@ -102,10 +105,10 @@ STRUCT PsPagedThread
     CleanedUp : UBYTE,
 END
 
-STRUCT PsThread
-    Tcb : KeThread,
+STRUCT PsuThread
+    Tcb : KeuThread,
 
-    Paged : ^PsPagedThread,
+    Paged : ^PsuPagedThread,
 
     IopListHead : RtlListEntry,
 
@@ -113,7 +116,7 @@ STRUCT PsThread
 
     DeferredCompletionListHead : RtlListEntry,
 
-    CurrentTrampoline : ^IoTrampoline,
+    CurrentTrampoline : ^IouTrampoline,
 
     UpwardFlowingPacket : UBYTE,
 
@@ -127,9 +130,9 @@ STRUCT PsThread
     VmPrivileged : UBYTE,
 END
 
-STRUCT PsJob
-    RootJob : ^PsJob,
-    ParentJob : ^PsJob,
+STRUCT PsuJob
+    RootJob : ^PsuJob,
+    ParentJob : ^PsuJob,
 
     Entry : RtlListEntry,
 
@@ -154,92 +157,92 @@ STRUCT PsJob
     CleanedUp : UBYTE,
 END
 
-EXTERN PsSystemProcess : ^PsProcess
+EXTERN PsuSystemProcess : ^PsuProcess
 
-EXTERN PsActiveProcessCount : UWORD
+EXTERN PsuActiveProcessCount : UWORD
 
-EXTERN FN PsExitThread ()
+EXTERN FN PsuExitThread ()
 
-EXTERN FN PsInitializeIdleProcess ()
+EXTERN FN PsuInitializeIdleProcess ()
 
-EXTERN FN PsInitializeStage1 ()
+EXTERN FN PsuInitializeStage1 ()
 
-EXTERN FN PsInitializeStage2 ()
+EXTERN FN PsuInitializeStage2 ()
 
-EXTERN FN PsCreateProcessObject (
-    IN params : ^NsOpenParameters,
-    IN partition : ^MiPartition,
+EXTERN FN PsuCreateProcessObject (
+    IN params : ^NsuOpenParameters,
+    IN partition : ^MmpPartition,
     IN name : ^RtlString,
     IN quotauid : UWORD,
     IN flags : UWORD,
-    OUT process : ^PsProcess,
+    OUT process : ^PsuProcess,
 ) : OsStatus
 
-EXTERN FN PsCreateThreadObject (
-    IN params : ^NsOpenParameters,
+EXTERN FN PsuCreateThreadObject (
+    IN params : ^NsuOpenParameters,
     IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
-    IN process : ^PsProcess,
+    IN process : ^PsuProcess,
     IN flags : UWORD,
-    OUT thread : ^PsThread,
+    OUT thread : ^PsuThread,
 ) : OsStatus
 
-EXTERN FN PsCreateExecutiveThread (
+EXTERN FN PsuCreateExecutiveThread (
     IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
     IN flags : UWORD,
-    OUT thread : ^PsThread,
+    OUT thread : ^PsuThread,
 ) : OsStatus
 
-EXTERN FN PsSetGroupProcess (
-    IN process : ^PsProcess,
-    IN group : ^PsProcessGroup,
+EXTERN FN PsuSetGroupProcess (
+    IN process : ^PsuProcess,
+    IN group : ^PsuProcessGroup,
     IN newsession : UWORD,
 ) : OsStatus
 
-EXTERN FN (ExWorkItemF) PsReaperWorker (
+EXTERN FN (ExuWorkItemF) PsuReaperWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
-EXTERN KeIdleProcess : PsProcess
+EXTERN KeuIdleProcess : PsuProcess
 
-#MACRO PsCurrentProcess () [
-    (CONTAINEROF KeCurrentProcess () TO PsProcess.Pcb)
+#MACRO PsuCurrentProcess () [
+    (CONTAINEROF KeCurrentProcess () TO PsuProcess.Pcb)
 ]
 
-#MACRO PsCurrentThread () [
-    (CONTAINEROF KeCurrentThread () TO PsThread.Tcb)
+#MACRO PsuCurrentThread () [
+    (CONTAINEROF KeCurrentThread () TO PsuThread.Tcb)
 ]
 
-#MACRO PsCurrentCredentials () [
-    (&PsCurrentProcess()^.Paged^.Cred)
+#MACRO PsuCurrentCredentials () [
+    (&PsuCurrentProcess()^.Paged^.Cred)
 ]
 
-#MACRO PsSystemCredentials () [
-    (&PsSystemProcess^.Paged^.Cred)
+#MACRO PsuSystemCredentials () [
+    (&PsuSystemProcess^.Paged^.Cred)
 ]
 
-#MACRO PsQuotaBlock ( process ) [
+#MACRO PsuQuotaBlock ( process ) [
     ((process)^.Paged^.HandleTable.QuotaBlock)
 ]
 
-#MACRO PsCurrentPartition () [
-    (PsCurrentProcess()^.Partition)
+#MACRO PsuCurrentPartition () [
+    (PsuCurrentProcess()^.Partition)
 ]
 
-#MACRO PsCurrentNode () [
-    (PsCurrentProcess()^.Node)
+#MACRO PsuCurrentNode () [
+    (PsuCurrentProcess()^.Node)
 ]
 
-EXTERN FN PsBlockRundownProcess (
-    IN process : ^PsProcess,
+EXTERN FN PsuBlockRundownProcess (
+    IN process : ^PsuProcess,
 ) : UWORD
 
-EXTERN FN PsUnblockRundownProcess (
-    IN process : ^PsProcess,
+EXTERN FN PsuUnblockRundownProcess (
+    IN process : ^PsuProcess,
 )

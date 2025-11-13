@@ -14,17 +14,17 @@ PUBLIC PspJobHierarchyLock : KeLock = KE_INITIAL_LOCK
     KeReleaseLock ( &PspJobHierarchyLock )
 ]
 
-#DEFINE PSP_MAX_JOB_DEPTH 50
+#DEFINE PSP_MAX_JOBU_DEPTH 50
 
 STRUCT PspJobContext
     Flags : UWORD,
     SignalOnClose : UWORD,
-    ParentJob : ^PsJob,
+    ParentJob : ^PsuJob,
 END
 
 #SECTION "PAGEtext"
 FN PspSignalJobObjectWork (
-    IN job : ^PsJob,
+    IN job : ^PsuJob,
     IN signal : UWORD,
 )
 
@@ -45,7 +45,7 @@ FN PspSignalJobObjectWork (
 
         KeSignalProcess (
             &(CONTAINEROF listentry TO
-                PsPagedProcess.JobEntry)^.Process^.Pcb, // process
+                PsuPagedProcess.JobEntry)^.Process^.Pcb, // process
             signal, // signal
         )
 
@@ -55,7 +55,7 @@ END
 
 #SECTION "PAGEtext"
 FN PspSignalJobObject (
-    IN job : ^PsJob,
+    IN job : ^PsuJob,
     IN signal : UWORD,
     IN propagate : UWORD,
 )
@@ -89,7 +89,7 @@ FN PspSignalJobObject (
     WHILE NOT RtlEmptyList ( &worklisthead ) DO
         // Pop a job object from the list.
 
-        job = CONTAINEROF worklisthead.Next TO PsJob.WorkListEntry
+        job = CONTAINEROF worklisthead.Next TO PsuJob.WorkListEntry
 
         RtlRemoveEntryList ( &job^.WorkListEntry )
 
@@ -99,7 +99,7 @@ FN PspSignalJobObject (
         listentry := listhead^.Next
 
         WHILE listentry != listhead DO
-            subjob := CONTAINEROF listentry TO PsJob.Entry
+            subjob := CONTAINEROF listentry TO PsuJob.Entry
 
             RtlInsertAtTailList (
                 &worklisthead, // head
@@ -119,7 +119,7 @@ FN PspSignalJobObject (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeCloseF) PspCloseJobObject (
+FN (ObuTypeCloseF) PspCloseJobObject (
     IN object : ^VOID,
     IN access : UWORD,
     IN lasthandlecount : UWORD,
@@ -133,7 +133,7 @@ FN (ObTypeCloseF) PspCloseJobObject (
         LEAVE
     END
 
-    job := CAST object TO ^PsJob
+    job := CAST object TO ^PsuJob
 
     IF NOT job^.SignalOnClose THEN
         // Signal-on-close not specified.
@@ -156,7 +156,7 @@ END
 
 #SECTION "PAGEtext"
 FN PspDecrementActiveCountJob (
-    IN job : ^PsJob,
+    IN job : ^PsuJob,
 )
 
     // Decrement the active count of a job.
@@ -200,7 +200,7 @@ FN PspDecrementActiveCountJob (
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeDeleteF) PspDeleteJobObject (
+FN (ObuTypeDeleteF) PspDeleteJobObject (
     IN object : ^VOID,
 ) : UWORD
 
@@ -209,7 +209,7 @@ FN (ObTypeDeleteF) PspDeleteJobObject (
     // subprocess list is empty, and the subjob list is empty. This means that
     // we just need to remove this job from its parent.
 
-    job := CAST object TO ^PsJob
+    job := CAST object TO ^PsuJob
 
     parent := job^.ParentJob
 
@@ -234,20 +234,20 @@ FN (ObTypeDeleteF) PspDeleteJobObject (
 
     PspUnlockHierarchy ()
 
-    ObUnreferenceObject ( parent )
+    ObuUnreferenceObject ( parent )
 
     RETURN TRUE
 END
 
 #SECTION "PAGEtext"
-FN (ObTypeInitializeF) PspInitializeJobObject (
+FN (ObuTypeInitializeF) PspInitializeJobObject (
     IN object : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
 
     // Initialize a new job object.
 
-    job := CAST object TO ^PsJob
+    job := CAST object TO ^PsuJob
     ctx := CAST context TO ^PspJobContext
 
     KeInitializeEvent (
@@ -270,7 +270,7 @@ FN (ObTypeInitializeF) PspInitializeJobObject (
 
     job^.SignalOnClose = ctx^.SignalOnClose
 
-    IF KeInvalidSignal ( ctx^.SignalOnClose ) THEN
+    IF KeuInvalidSignal ( ctx^.SignalOnClose ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
@@ -281,7 +281,7 @@ FN (ObTypeInitializeF) PspInitializeJobObject (
     IF NOT parentjob THEN
         // No parent job specified. Inherit from the current process.
 
-        currentprocess := PsCurrentProcess ()
+        currentprocess := PsuCurrentProcess ()
 
         parentjob = currentprocess^.Paged^.Job
 
@@ -300,15 +300,15 @@ FN (ObTypeInitializeF) PspInitializeJobObject (
 
         PspUnlockHierarchy ()
 
-        RETURN OS_STATUS_JOB_IS_TERMINATED
+        RETURN OS_STATUS_JOBU_IS_TERMINATED
     END
 
-    IF parentjob^.Depth >= PSP_MAX_JOB_DEPTH THEN
+    IF parentjob^.Depth >= PSP_MAX_JOBU_DEPTH THEN
         // The maximum depth for the job tree is exceeded.
 
         PspUnlockHierarchy ()
 
-        RETURN OS_STATUS_JOB_DEPTH
+        RETURN OS_STATUS_JOBU_DEPTH
     END
 
     // Add to head of parent job list.
@@ -328,7 +328,7 @@ FN (ObTypeInitializeF) PspInitializeJobObject (
 
     // Reference parent job to reflect the new child job.
 
-    ObReferenceObject ( parentjob )
+    ObuReferenceObject ( parentjob )
 
 @Out
 
@@ -341,14 +341,14 @@ END
 
 // FORWARD
 EXTERN FN PspRemoveProcessJob (
-    IN process : ^PsProcess,
+    IN process : ^PsuProcess,
     IN toancestor : UWORD,
 ) : OsStatus
 
 #SECTION "PAGEtext"
 FN PspAddProcessJob (
-    IN job : ^PsJob,
-    IN process : ^PsProcess,
+    IN job : ^PsuJob,
+    IN process : ^PsuProcess,
 ) : OsStatus
 
     // Hierarchy lock is held.
@@ -356,7 +356,7 @@ FN PspAddProcessJob (
     IF job^.Terminated THEN
         // Don't allow processes to be added to terminated jobs.
 
-        RETURN OS_STATUS_JOB_IS_TERMINATED
+        RETURN OS_STATUS_JOBU_IS_TERMINATED
     END
 
     paged := process^.Paged
@@ -397,14 +397,14 @@ FN PspAddProcessJob (
 
     job^.ActiveCount += 1
 
-    ObReferenceObject ( job )
+    ObuReferenceObject ( job )
 
     RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
 FN PspRemoveProcessJob (
-    IN process : ^PsProcess,
+    IN process : ^PsuProcess,
     IN toancestor : UWORD,
 ) : OsStatus
 
@@ -446,14 +446,14 @@ FN PspRemoveProcessJob (
     // Defer deletion if we dropped the refcount to 0 because we are holding the
     // hierarchy lock, which is taken by the deletion routine as well.
 
-    ObUnreferenceObjectDeferDelete ( job )
+    ObuUnreferenceObjectDeferDelete ( job )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
 FN PspExitJobProcess (
-    IN process : ^PsProcess,
+    IN process : ^PsuProcess,
 )
 
     // A process belonging to this job has exited.
@@ -470,8 +470,8 @@ END
 
 #SECTION "PAGEtext"
 FN PspInheritJob (
-    IN child : ^PsProcess,
-    IN parent : ^PsProcess,
+    IN child : ^PsuProcess,
+    IN parent : ^PsuProcess,
 ) : OsStatus
 
     // Inherit the job object of the parent process in the child process.
@@ -498,7 +498,7 @@ FN PspInheritJob (
     RETURN status
 END
 
-PUBLIC PsJobType : ObType = {
+PUBLIC PsuJobType : ObuType = {
     [Name] = "Job",
 
     [Close] = &PspCloseJobObject,
@@ -506,22 +506,22 @@ PUBLIC PsJobType : ObType = {
 
     [Initialize] = &PspInitializeJobObject,
 
-    [WaitOffset] = OFFSETOF PsJob.TerminationEvent,
-    [TypeIdentifier] = OS_JOB_TYPE,
+    [WaitOffset] = OFFSETOF PsuJob.TerminationEvent,
+    [TypeIdentifier] = OS_JOBU_TYPE,
     [Tag] = 'JobO',
 
-    [TypicalBodySize] = SIZEOF PsJob,
+    [TypicalBodySize] = SIZEOF PsuJob,
 
     [IsPaged] = FALSE,
 }
 
 #SECTION "PAGEtext"
-FN PsCreateJobObject (
-    IN params : ^NsOpenParameters,
+FN PsuCreateJobObject (
+    IN params : ^NsuOpenParameters,
     IN flags : UWORD,
     IN signalonclose : UWORD,
-    IN parentjob : ^PsJob,
-    OUT job : ^PsJob,
+    IN parentjob : ^PsuJob,
+    OUT job : ^PsuJob,
 ) : OsStatus
 
     // Create a job object.
@@ -532,20 +532,20 @@ FN PsCreateJobObject (
     ctx.SignalOnClose = signalonclose
     ctx.ParentJob = parentjob
 
-    obparams : ObParameters
+    obparams : ObuParameters
 
-    NsInitializeObjectParameters (
+    NsuInitializeObjectParameters (
         &obparams, // obparams
         params, // params
-        &PsJobType, // type
+        &PsuJobType, // type
         &ctx, // context
-        SIZEOF PsJob, // bodysize
+        SIZEOF PsuJob, // bodysize
         0, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
     )
 
-    RETURN NsCreateObject (
+    RETURN NsuCreateObject (
         params, // params
         &obparams, // obparams
         OUT job, // object
@@ -561,12 +561,12 @@ FN OsAddProcessJob (
     // Insert a process into a job object. The process must either not be in a
     // job object, or be in one that is in the same tree as the target job.
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -583,11 +583,11 @@ FN OsAddProcessJob (
         GOTO Exit
     END
 
-    job : ^PsJob
+    job : ^PsuJob
 
-    status = ObReferenceByHandle (
+    status = ObuReferenceByHandle (
         jobhandle, // handle
-        &PsJobType, // type
+        &PsuJobType, // type
         OUT job, // object
         OUT access, // access
     )
@@ -604,7 +604,7 @@ FN OsAddProcessJob (
         GOTO Exit2
     END
 
-    IF NOT PsBlockRundownProcess ( process ) THEN
+    IF NOT PsuBlockRundownProcess ( process ) THEN
         // Process isn't living.
 
         status = OS_STATUS_WAS_TERMINATED
@@ -621,15 +621,15 @@ FN OsAddProcessJob (
 
     PspUnlockHierarchy ()
 
-    PsUnblockRundownProcess ( process )
+    PsuUnblockRundownProcess ( process )
 
 @Exit2
 
-    ObUnreferenceObject ( job )
+    ObuUnreferenceObject ( job )
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
@@ -642,12 +642,12 @@ FN OsRemoveProcessJob (
     // Remove a process from its job object.
     // This will insert it into the parent of the current job.
 
-    process : ^PsProcess
+    process : ^PsuProcess
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsProcessType, // type
+        &PsuProcessType, // type
         OUT process, // object
         OUT access, // access
     )
@@ -675,7 +675,7 @@ FN OsRemoveProcessJob (
 
 @Exit
 
-    ObUnreferenceObject ( process )
+    ObuUnreferenceObject ( process )
 
     RETURN status
 END
@@ -689,16 +689,16 @@ FN OsSignalJob (
 
     // Signal a job tree.
 
-    IF KeInvalidSignal ( signal ) THEN
+    IF KeuInvalidSignal ( signal ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    job : ^PsJob
+    job : ^PsuJob
     access : UWORD
 
-    status := ObReferenceByHandle (
+    status := ObuReferenceByHandle (
         handle, // handle
-        &PsJobType, // type
+        &PsuJobType, // type
         OUT job, // object
         OUT access, // access
     )
@@ -727,14 +727,14 @@ FN OsSignalJob (
 
 @Exit
 
-    ObUnreferenceObject ( job )
+    ObuUnreferenceObject ( job )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN PsCreateJob (
-    IN params : ^NsOpenParameters,
+FN PsuCreateJob (
+    IN params : ^NsuOpenParameters,
     IN flags : UWORD,
     IN signalonclose : UWORD,
     IN parentjobhandle : UWORD,
@@ -743,7 +743,7 @@ FN PsCreateJob (
 
     // Create a job object handle.
 
-    parentjob : ^PsJob = NULLPTR
+    parentjob : ^PsuJob = NULLPTR
 
     status : OsStatus
 
@@ -752,9 +752,9 @@ FN PsCreateJob (
 
         access : UWORD
 
-        status = ObReferenceByHandle (
+        status = ObuReferenceByHandle (
             parentjobhandle, // handle
-            &PsJobType, // type
+            &PsuJobType, // type
             OUT parentjob, // object
             OUT access, // access
         )
@@ -772,9 +772,9 @@ FN PsCreateJob (
         END
     END
 
-    object : ^PsJob
+    object : ^PsuJob
 
-    status = PsCreateJobObject (
+    status = PsuCreateJobObject (
         params, // params
         flags, // flags
         signalonclose, // signalonclose
@@ -786,21 +786,21 @@ FN PsCreateJob (
         GOTO Exit
     END
 
-    status = ObInsertObject (
-        PsCurrentProcess (), // process
+    status = ObuInsertObject (
+        PsuCurrentProcess (), // process
         object, // object
         params^.Captured.Access, // access
         OUT handle, // handle
     )
 
     IF OsError ( status ) THEN
-        ObUnreferenceObject ( object )
+        ObuUnreferenceObject ( object )
     END
 
 @Exit
 
     IF parentjob THEN
-        ObUnreferenceObject ( parentjob )
+        ObuUnreferenceObject ( parentjob )
     END
 
     RETURN status
@@ -817,13 +817,13 @@ FN OsCreateJob (
 
     // Create a job object, system service.
 
-    IF KeInvalidSignal ( signalonclose ) THEN
+    IF KeuInvalidSignal ( signalonclose ) THEN
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    sysparams : NsOpenParameters
+    sysparams : NsuOpenParameters
 
-    status := NsCaptureOpenParameters (
+    status := NsuCaptureOpenParameters (
         params, // userparams
         &sysparams, // sysparams
     )
@@ -832,7 +832,7 @@ FN OsCreateJob (
         RETURN status
     END
 
-    status = PsCreateJob (
+    status = PsuCreateJob (
         &sysparams, // params
         flags, // flags
         signalonclose, // signalonclose
@@ -840,7 +840,7 @@ FN OsCreateJob (
         OUT handle, // handle
     )
 
-    NsFreeOpenParameters ( &sysparams )
+    NsuFreeOpenParameters ( &sysparams )
 
     RETURN status
 END

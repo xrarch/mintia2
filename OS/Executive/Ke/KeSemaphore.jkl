@@ -2,7 +2,7 @@
 // Implements support for KeSemaphore dispatcher objects.
 //
 
-#INCLUDE "Ki.hjk"
+#INCLUDE "Kep.hjk"
 
 EXPORT FN KeInitializeSemaphore (
     IN semaphore : ^KeSemaphore,
@@ -10,10 +10,10 @@ EXPORT FN KeInitializeSemaphore (
     IN initialcount : UWORD,
 )
 
-    KiInitializeDispatchObject (
+    KepInitializeDispatchObject (
         &semaphore^.Header, // hdr
         name, // name
-        KI_DISPATCH_EVENT_SYNCH, // type
+        KEP_DISPATCH_EVENT_SYNCH, // type
     )
 
     semaphore^.Header.SignalCount = initialcount
@@ -27,14 +27,14 @@ EXPORT FN KeReleaseSemaphore (
 
     // Signal the semaphore object and return its previous state.
 
-    ipl := KiAcquireObject ( &semaphore^.Header )
+    ipl := KepAcquireObject ( &semaphore^.Header )
 
     oldcount := semaphore^.Header.SignalCount
 
     IF oldcount + count < count THEN
         // oldcount+count overflows
 
-        KiReleaseObject ( &semaphore^.Header, ipl )
+        KepReleaseObject ( &semaphore^.Header, ipl )
 
         RETURN oldcount
     END
@@ -45,7 +45,7 @@ EXPORT FN KeReleaseSemaphore (
 
         semaphore^.Header.SignalCount = oldcount + count
 
-        KiReleaseObject ( &semaphore^.Header, ipl )
+        KepReleaseObject ( &semaphore^.Header, ipl )
 
         RETURN oldcount
     END
@@ -53,7 +53,7 @@ EXPORT FN KeReleaseSemaphore (
     // Satisfy waits.
 
     WHILE count DO
-        IF NOT KiSatisfyObject (
+        IF NOT KepSatisfyObject (
             &semaphore^.Header, // object
             priorityboost, // priorityboost
             FALSE, // all
@@ -68,7 +68,7 @@ EXPORT FN KeReleaseSemaphore (
 
         IF NOT semaphore^.Header.WaiterCount THEN
             // We satisfied the last waiter. Break out rather than uselessly
-            // call KiSatisfyObject again.
+            // call KepSatisfyObject again.
 
             BREAK
         END
@@ -78,7 +78,7 @@ EXPORT FN KeReleaseSemaphore (
 
     semaphore^.Header.SignalCount = oldcount + count
 
-    KiReleaseObject ( &semaphore^.Header, ipl )
+    KepReleaseObject ( &semaphore^.Header, ipl )
 
     RETURN 0
 END

@@ -1,13 +1,13 @@
-#DEFINE KI_TEST_THREADS 24
-#DEFINE KI_TEST_EVENTS 8
+#DEFINE KEP_TEST_THREADS 24
+#DEFINE KEP_TEST_EVENTS 8
 
-KiTestThreads : KeThread[KI_TEST_THREADS]
-KiTestThreadsStacks : ULONG[512 * KI_TEST_THREADS]
-KiTestEvents : KeEvent[KI_TEST_EVENTS]
-KiTestSemaphore : KeSemaphore
-KiTestQueue : KeBalancedQueue
+KepTestThreads : KeuThread[KEP_TEST_THREADS]
+KepTestThreadsStacks : ULONG[512 * KEP_TEST_THREADS]
+KepTestEvents : KeEvent[KEP_TEST_EVENTS]
+KepTestSemaphore : KeSemaphore
+KepTestQueue : KeBalancedQueue
 
-PUBLIC KiTestPushlock : KePushlock
+PUBLIC KepTestPushlock : KeuPushlock
 
 TestListHead : RtlListEntry
 TestListItem1 : RtlListEntry
@@ -17,19 +17,19 @@ Item2Inserted : UBYTE
 
 PUBLIC Counter := 0
 
-FN (KeStartThreadF) KiTestThread (
+FN (KeStartThreadF) KepTestThread (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
-    objecttable : ^KiDispatchHeader[2]
+    objecttable : ^KepDispatchHeader[2]
 
     timeout : RtlUquad
 
     timeout.High = 0
     timeout.Low = 50 + context1 * 50
 
-    i := context1 % KI_TEST_EVENTS
+    i := context1 % KEP_TEST_EVENTS
     j := i + 1
     n := 0
     gork := 0
@@ -37,26 +37,26 @@ FN (KeStartThreadF) KiTestThread (
     item : ^RtlListEntry = NULLPTR
 
     WHILE TRUE DO
-        IF j == KI_TEST_EVENTS THEN
+        IF j == KEP_TEST_EVENTS THEN
             n += 1
             j = 0
         END
 
-        IF i >= KI_TEST_EVENTS THEN
-            i %= KI_TEST_EVENTS
+        IF i >= KEP_TEST_EVENTS THEN
+            i %= KEP_TEST_EVENTS
         END
 
-        objecttable[0] = &KiTestEvents[i].Header
-        objecttable[1] = &KiTestEvents[j].Header
+        objecttable[0] = &KepTestEvents[i].Header
+        objecttable[1] = &KepTestEvents[j].Header
 
         status : OsStatus
 
         IF n == 100 THEN
             spin := 0
 
-            ipl := KiAcquireAnnounce ()
+            ipl := KepAcquireAnnounce ()
 
-            KiReleaseAnnounce ( ipl )
+            KepReleaseAnnounce ( ipl )
 
             WHILE spin < 5000000 DO
                 spin += 1
@@ -66,11 +66,11 @@ FN (KeStartThreadF) KiTestThread (
 
 
 #IF 0
-            status = KeWaitForSingleObject (
+            status = KeuWaitForSingleObject (
                 KE_KERNEL_MODE, // waitmode
                 FALSE, // alertable
                 NULLPTR, // timeout
-                &KiTestSemaphore.Header, // object
+                &KepTestSemaphore.Header, // object
             )
 #END
 
@@ -88,11 +88,11 @@ FN (KeStartThreadF) KiTestThread (
             )
 
         ELSE
-            status = KeWaitForSingleObject (
+            status = KeuWaitForSingleObject (
                 KE_USER_MODE, // waitmode
                 FALSE, // alertable
                 &timeout, // timeout
-                &KiTestEvents[i].Header, // object
+                &KepTestEvents[i].Header, // object
             )
 
         END
@@ -100,18 +100,18 @@ FN (KeStartThreadF) KiTestThread (
         Counter = context1
 
         KeSignalEvent (
-            &KiTestEvents[j], // event
+            &KepTestEvents[j], // event
             2, // priorityboost
         )
 
         ipl2 : UWORD
 
         IF context1 & 2 THEN
-            ipl2 = KeAcquireApcSafePushlockShared ( &KiTestPushlock )
+            ipl2 = KeuAcquireApcSafePushlockShared ( &KepTestPushlock )
 
 
         ELSE
-            ipl2 = KeAcquireApcSafePushlockExclusive ( &KiTestPushlock )
+            ipl2 = KeuAcquireApcSafePushlockExclusive ( &KepTestPushlock )
 
             IF context1 & 1 THEN
                 Item1Inserted $= 1
@@ -145,24 +145,24 @@ FN (KeStartThreadF) KiTestThread (
             END
         END
 
-        IF KiCurrentIpl () != KI_IPL_APC THEN
+        IF KepCurrentIpl () != KEP_IPL_APC THEN
             KeCrash ( "Not APC\n" )
         END
 
-        KeReleaseApcSafePushlock ( &KiTestPushlock, ipl2 )
+        KeuReleaseApcSafePushlock ( &KepTestPushlock, ipl2 )
 
-        IF KiCurrentIpl () != KI_IPL_LOW THEN
+        IF KepCurrentIpl () != KEP_IPL_LOW THEN
             KeCrash ( "Not LOW\n" )
         END
 
         nexti := i + 1
 
-        IF nexti >= KI_TEST_EVENTS THEN
-            nexti %= KI_TEST_EVENTS
+        IF nexti >= KEP_TEST_EVENTS THEN
+            nexti %= KEP_TEST_EVENTS
         END
 
         KeSignalEvent (
-            &KiTestEvents[nexti], // event
+            &KepTestEvents[nexti], // event
             3, // priorityboost
         )
 
@@ -171,7 +171,7 @@ FN (KeStartThreadF) KiTestThread (
     END
 END
 
-FN (KeStartThreadF) KiTestThreadPinning (
+FN (KeStartThreadF) KepTestThreadPinning (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -205,28 +205,28 @@ FN (KeStartThreadF) KiTestThreadPinning (
     testitem4 : RtlListEntry
 
     KeInsertIntoBalancedQueue (
-        &KiTestQueue, // queue
+        &KepTestQueue, // queue
         &testitem1, // item
         FALSE, // head
         0, // priorityboost
     )
 
     KeInsertIntoBalancedQueue (
-        &KiTestQueue, // queue
+        &KepTestQueue, // queue
         &testitem2, // item
         FALSE, // head
         0, // priorityboost
     )
 
     KeInsertIntoBalancedQueue (
-        &KiTestQueue, // queue
+        &KepTestQueue, // queue
         &testitem3, // item
         FALSE, // head
         0, // priorityboost
     )
 
     KeInsertIntoBalancedQueue (
-        &KiTestQueue, // queue
+        &KepTestQueue, // queue
         &testitem4, // item
         FALSE, // head
         0, // priorityboost
@@ -245,11 +245,11 @@ FN (KeStartThreadF) KiTestThreadPinning (
 
         IF i THEN
             RtlPrint ( "LOWER" )
-            KiLowerIpl ( KI_IPL_LOW )
+            KepLowerIpl ( KEP_IPL_LOW )
 
         ELSE
             RtlPrint ( "RAISE" )
-            KiRaiseIpl ( KI_IPL_APC )
+            KepRaiseIpl ( KEP_IPL_APC )
 
             q := 0
 
@@ -264,7 +264,7 @@ FN (KeStartThreadF) KiTestThreadPinning (
     END
 END
 
-FN (KeApcF) KiTestApcFunction (
+FN (KeApcF) KepTestApcFunction (
     IN apc : ^KeApc,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -276,7 +276,7 @@ FN (KeApcF) KiTestApcFunction (
     RtlPrint ( "P%p ", thread )
 END
 
-FN (KeStartThreadF) KiTestThreadApc (
+FN (KeStartThreadF) KepTestThreadApc (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -288,11 +288,11 @@ FN (KeStartThreadF) KiTestThreadApc (
 
     apc : KeApc
 
-    KeInitializeApc (
+     (
         &apc, // apc
-        &KiTestApcFunction, // func
+        &KepTestApcFunction, // func
         KE_APC_KERNEL, // type
-        &KiTestThreads[0], // thread
+        &KepTestThreads[0], // thread
     )
 
     WHILE TRUE DO
@@ -313,56 +313,56 @@ FN (KeStartThreadF) KiTestThreadApc (
     END
 END
 
-FN KiInitializeTest ()
+FN KepInitializeTest ()
 
-    prb := KI_CURRENT_PRB
+    prb := KEP_CURRENT_PRB
 
     IF prb^.Id == 0 THEN
-        KeInitializePushlock ( &KiTestPushlock )
+        KeuInitializePushlock ( &KepTestPushlock )
 
         RtlInitializeList ( &TestListHead )
 
         KeInitializeSemaphore (
-            &KiTestSemaphore, // semaphore
+            &KepTestSemaphore, // semaphore
             "TestSemaphore", // name
             0, // initialcount
         )
 
         KeInitializeBalancedQueue (
-            &KiTestQueue, // queue
+            &KepTestQueue, // queue
             "TestQueue", // name
             2, // maxthreads
         )
 
-        ipl := KiRaiseIpl ( KI_IPL_DPC )
+        ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
-        KeInitializeThread (
-            &KeIdleProcess, // process
-            &KiTestThreads[0], // thread
+        KeuInitializeThread (
+            &KeuIdleProcess, // process
+            &KepTestThreads[0], // thread
             "TestThread", // name
-            &KiTestThreadsStacks[0], // kstack
+            &KepTestThreadsStacks[0], // kstack
             2048, // kstacksize
-            &KiTestThreadPinning, // startfunc
+            &KepTestThreadPinning, // startfunc
             0, // context1
             0, // context2
         )
 
-        KeInitializeThread (
-            &KeIdleProcess, // process
-            &KiTestThreads[1], // thread
+        KeuInitializeThread (
+            &KeuIdleProcess, // process
+            &KepTestThreads[1], // thread
             "TestThread", // name
-            &KiTestThreadsStacks[512], // kstack
+            &KepTestThreadsStacks[512], // kstack
             2048, // kstacksize
-            &KiTestThreadApc, // startfunc
+            &KepTestThreadApc, // startfunc
             0, // context1
             0, // context2
         )
 
         i := 0
 
-        WHILE i < KI_TEST_EVENTS DO
+        WHILE i < KEP_TEST_EVENTS DO
             KeInitializeEvent (
-                &KiTestEvents[i], // event
+                &KepTestEvents[i], // event
                 "TestEvent", // name
                 FALSE, // notification
                 0, // signalstate
@@ -373,14 +373,14 @@ FN KiInitializeTest ()
 
         i = 2
 
-        WHILE i < KI_TEST_THREADS DO
-            KeInitializeThread (
-                &KeIdleProcess, // process
-                &KiTestThreads[i], // thread
+        WHILE i < KEP_TEST_THREADS DO
+            KeuInitializeThread (
+                &KeuIdleProcess, // process
+                &KepTestThreads[i], // thread
                 "TestThread", // name
-                &KiTestThreadsStacks[512 * i], // kstack
+                &KepTestThreadsStacks[512 * i], // kstack
                 2048, // kstacksize
-                &KiTestThread, // startfunc
+                &KepTestThread, // startfunc
                 i, // context1
                 0, // context2
             )
@@ -390,12 +390,12 @@ FN KiInitializeTest ()
 
         i = 0
 
-        WHILE i < KI_TEST_THREADS DO
-            KiReadyThread ( &KiTestThreads[i] )
+        WHILE i < KEP_TEST_THREADS DO
+            KepReadyThread ( &KepTestThreads[i] )
 
             i += 1
         END
 
-        KiLowerIpl ( ipl )
+        KepLowerIpl ( ipl )
     END
 END
