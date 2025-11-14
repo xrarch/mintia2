@@ -12,7 +12,7 @@
 #DEFINE MMP_POOL_ADJUSTMENT_INTERVAL_MS 5000
 #DEFINE MMP_POOL_PURGE_INTERVAL_MS 10000
 
-FN (ExuWorkItemF) MmpAdjustPagedPoolCacheWorker (
+FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -64,9 +64,9 @@ FN MmpAdjustAllPoolCachesSafely (
     IF NOT node^.PgPoolCacheAdjustActive THEN
         node^.PgPoolCacheAdjustActive = TRUE
 
-        ExuEnqueueWorkItem (
+        ExEnqueueWorkItem (
             &node^.PgPoolCacheAdjustItem, // item
-            EXU_HIGH_WORK_PRIORITY, // priority
+            EX_HIGH_WORK_PRIORITY, // priority
             CAST node TO UWORD, // context1
             purgepercpu, // context2
         )
@@ -106,7 +106,7 @@ FN MmuBalanceManager ()
     IF MmpIsPartitionPhysical ( partition ) THEN
         node^.PgPoolCacheAdjustActive = FALSE
 
-        ExuInitializeWorkItem (
+        ExInitializeWorkItem (
             &node^.PgPoolCacheAdjustItem, // item
             &MmpAdjustPagedPoolCacheWorker, // routine
         )

@@ -3,3 +3,162 @@
 // Executive.
 //
 
+#INCLUDE "<ll>/Executive/Ke.hjk"
+
+EXTERN FN ExAllocateEventCounter (
+    IN wait : UWORD,
+) : ^ExuEventCounter
+
+EXTERN FN ExReferenceEventCounter (
+    IN counter : ^ExuEventCounter,
+)
+
+EXTERN FN ExUnreferenceEventCounter (
+    IN counter : ^ExuEventCounter,
+)
+
+EXTERN FN ExFindName (
+    IN str : ^RtlString,
+) : ^ExuName
+
+EXTERN FN ExUnreferenceName (
+    IN name : ^ExuName,
+)
+
+EXTERN FN ExReferenceName (
+    IN name : ^ExuName,
+)
+
+EXTERN FN ExDuplicateString (
+    IN outputstring : ^RtlString,
+    IN inputstring : ^RtlString,
+    IN poolindex : UWORD,
+    IN tag : UWORD,
+) : OsStatus
+
+#MACRO ExInitializeWorkItem ( item, routine ) [
+    NOTHING (item)^.Routine = (routine)
+]
+
+FNPTR ExWorkItemF (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+STRUCT ExWorkItem
+    QueueEntry : RtlListEntry,
+    Routine : ExWorkItemF,
+    Context1 : UWORD,
+    Context2 : UWORD,
+END
+
+ENUM ExWorkQueuePriority : UBYTE
+    // These priorities can be used for pretty much anything.
+
+    EX_LOW_WORK_PRIORITY,
+    EX_HIGH_WORK_PRIORITY,
+
+    // This priority is reserved for nonpaged work such as page-out IO
+    // completion. These worker threads may NEVER block on memory allocation.
+    // They are VM-privileged.
+
+    EX_NONPAGED_WORK_PRIORITY,
+
+    EX_MAX_WORK_PRIORITY,
+END
+
+EXTERN FN ExEnqueueWorkItem (
+    IN item : ^ExWorkItem,
+    IN priority : ExWorkQueuePriority,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+STRUCT ExTimedWorkItem
+    Item : ExWorkItem,
+    Dpc : KeDpc,
+    Timer : KeTimer,
+    Priority : ExWorkQueuePriority,
+END
+
+EXTERN FN ExEnqueueTimedWorkItem (
+    IN item : ^ExTimedWorkItem,
+    IN priority : ExWorkQueuePriority,
+    IN interval : ^RtlUquad,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN ExInitializeTimedWorkItem (
+    IN item : ^ExTimedWorkItem,
+    IN routine : ExWorkItemF,
+)
+
+EXTERN FN ExRemoveObjectFromSetByIndex (
+    IN set : ^ExuObjectSet,
+    IN index : UWORD,
+)
+
+EXTERN FN ExFindObjectInSet (
+    IN set : ^ExuObjectSet,
+    IN object : ^VOID,
+) : UWORD
+
+EXTERN FN ExAppendSet (
+    IN set : ^ExuObjectSet,
+    IN object : ^VOID,
+) : OsStatus
+
+EXTERN FN ExRemoveObjectFromSet (
+    IN set : ^ExuObjectSet,
+    IN object : ^VOID,
+) : UWORD
+
+FNPTR ExEnumerateSetF (
+    IN set : ^ExuObjectSet,
+    IN object : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+EXTERN FN ExEnumerateSet (
+    IN set : ^ExuObjectSet,
+    IN enumfunc : ExEnumerateSetF,
+    IN context : ^VOID,
+) : OsStatus
+
+EXTERN FN ExEmptySet (
+    IN set : ^ExuObjectSet,
+    IN enumfunc : ExEnumerateSetF,
+    IN context : ^VOID,
+)
+
+FNPTR ExEnumerateDictionaryF (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+    IN value : ^VOID,
+    IN context : ^VOID,
+)
+
+EXTERN FN ExLookupDictionary (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+) : ^VOID
+
+EXTERN FN ExRemoveFromDictionary (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+) : ^VOID
+
+EXTERN FN ExInsertInDictionary (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+    IN value : ^VOID,
+    IN canupdate : UWORD,
+) : OsStatus
+
+EXTERN FN ExEnumerateDictionary (
+    IN dict : ^ExuDictionary,
+    IN func : ExEnumerateDictionaryF,
+    IN context : ^VOID,
+    IN delete : UWORD,
+)

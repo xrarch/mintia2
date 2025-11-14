@@ -15,13 +15,13 @@ FN ExuInitializeSet (
     // Initialize a set.
 
     set^.Index = 0
-    set^.Capacity = EXU_SET_INITIAL_BUFFER
+    set^.Capacity = EXP_SET_INITIAL_BUFFER
     set^.Buffer = &set^.InitialBuffer[0]
     set^.Tag = tag
     set^.PoolIndex = poolindex
 END
 
-FN ExuAppendSet (
+FN ExAppendSet (
     IN set : ^ExuObjectSet,
     IN object : ^VOID,
 ) : OsStatus
@@ -88,7 +88,7 @@ FN ExuAppendSet (
     GOTO Insert
 END
 
-FN ExuFindObjectInSet (
+FN ExFindObjectInSet (
     IN set : ^ExuObjectSet,
     IN object : ^VOID,
 ) : UWORD
@@ -110,7 +110,7 @@ FN ExuFindObjectInSet (
     RETURN -1
 END
 
-FN ExuRemoveObjectFromSetByIndex (
+FN ExRemoveObjectFromSetByIndex (
     IN set : ^ExuObjectSet,
     IN index : UWORD,
 )
@@ -152,10 +152,10 @@ FN ExuRemoveObjectFromSetByIndex (
 
     newbuffer : ^^VOID
 
-    IF newcapacity <= EXU_SET_INITIAL_BUFFER THEN
+    IF newcapacity <= EXP_SET_INITIAL_BUFFER THEN
         // Use the inlined initial buffer again.
 
-        newcapacity = EXU_SET_INITIAL_BUFFER
+        newcapacity = EXP_SET_INITIAL_BUFFER
 
         newbuffer = &set^.InitialBuffer[0]
 
@@ -199,7 +199,7 @@ FN ExuRemoveObjectFromSetByIndex (
     set^.Capacity = newcapacity
 END
 
-FN ExuRemoveObjectFromSet (
+FN ExRemoveObjectFromSet (
     IN set : ^ExuObjectSet,
     IN object : ^VOID,
 ) : UWORD
@@ -207,7 +207,7 @@ FN ExuRemoveObjectFromSet (
     // Remove the specified object from the set. Returns TRUE if removed, FALSE
     // if not found.
 
-    index := ExuFindObjectInSet (
+    index := ExFindObjectInSet (
         set, // set
         object, // object
     )
@@ -216,7 +216,7 @@ FN ExuRemoveObjectFromSet (
         RETURN FALSE
     END
 
-    ExuRemoveObjectFromSetByIndex (
+    ExRemoveObjectFromSetByIndex (
         set, // set
         index, // index
     )
@@ -224,9 +224,9 @@ FN ExuRemoveObjectFromSet (
     RETURN TRUE
 END
 
-FN ExuEnumerateSet (
+FN ExEnumerateSet (
     IN set : ^ExuObjectSet,
-    IN enumfunc : ExuEnumerateSetF,
+    IN enumfunc : ExEnumerateSetF,
     IN context : ^VOID,
 ) : OsStatus
 
@@ -253,16 +253,16 @@ FN ExuEnumerateSet (
     RETURN OS_STATUS_SUCCESS
 END
 
-FN ExuEmptySet (
+FN ExEmptySet (
     IN set : ^ExuObjectSet,
-    IN enumfunc : ExuEnumerateSetF,
+    IN enumfunc : ExEnumerateSetF,
     IN context : ^VOID,
 )
 
     // Empty an object set.
 
     IF enumfunc THEN
-        ExuEnumerateSet (
+        ExEnumerateSet (
             set, // set
             enumfunc, // enumfunc
             context, // context

@@ -6,7 +6,7 @@
 
 PUBLIC ObpDeferredDeletionList : KeuCustodyList
 
-PUBLIC ObpDeferredDeletionTimedWorkItem : ExuTimedWorkItem
+PUBLIC ObpDeferredDeletionTimedWorkItem : ExTimedWorkItem
 
 #MACRO ObpCalculatePagedBlockSize ( bodysize ) [
     (SIZEOF ObuHeader + SIZEOF ObpCommonHeader + (bodysize))
@@ -507,7 +507,7 @@ FN (KeuProcessCustodyListF) ObpDeferredDeleteObject (
 END
 
 #SECTION "PAGEtext"
-FN (ExuWorkItemF) ObuDeferredDeletionWorker (
+FN (ExWorkItemF) ObuDeferredDeletionWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -547,9 +547,9 @@ FN (KeuCustodyListActivateF) ObpActivateDeletionWorker (
         100, // interval
     )
 
-    ExuEnqueueTimedWorkItem (
+    ExEnqueueTimedWorkItem (
         &ObpDeferredDeletionTimedWorkItem, // item
-        EXU_HIGH_WORK_PRIORITY, // priority
+        EX_HIGH_WORK_PRIORITY, // priority
         &interval, // interval
         0, // context1
         0, // context2

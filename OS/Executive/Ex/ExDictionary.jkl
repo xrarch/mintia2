@@ -90,7 +90,7 @@ FN ExpLookupDictionaryEntry (
 END
 
 #SECTION "PAGEtext"
-FN ExuLookupDictionary (
+FN ExLookupDictionary (
     IN dict : ^ExuDictionary,
     IN key : ^RtlString,
 ) : ^VOID
@@ -125,7 +125,7 @@ FN ExpRemoveEntryFromDictionary (
         &entry^.Entry, // node
     )
 
-    ExuUnreferenceName ( entry^.Key )
+    ExUnreferenceName ( entry^.Key )
 
     MmuFreePool (
         entry, // entry
@@ -134,7 +134,7 @@ FN ExpRemoveEntryFromDictionary (
 END
 
 #SECTION "PAGEtext"
-FN ExuRemoveFromDictionary (
+FN ExRemoveFromDictionary (
     IN dict : ^ExuDictionary,
     IN key : ^RtlString,
 ) : ^VOID
@@ -166,7 +166,7 @@ FN ExuRemoveFromDictionary (
 END
 
 #SECTION "PAGEtext"
-FN ExuInsertInDictionary (
+FN ExInsertInDictionary (
     IN dict : ^ExuDictionary,
     IN key : ^RtlString,
     IN value : ^VOID,
@@ -212,7 +212,7 @@ FN ExuInsertInDictionary (
         RETURN OS_STATUS_NO_MEMORY
     END
 
-    entry^.Key = ExuFindName ( key )
+    entry^.Key = ExFindName ( key )
 
     IF NOT entry^.Key THEN
         MmuFreePool (
@@ -240,9 +240,9 @@ FN ExuInsertInDictionary (
 END
 
 #SECTION "PAGEtext"
-FN ExuEnumerateDictionary (
+FN ExEnumerateDictionary (
     IN dict : ^ExuDictionary,
-    IN func : ExuEnumerateDictionaryF,
+    IN func : ExEnumerateDictionaryF,
     IN context : ^VOID,
     IN delete : UWORD,
 )

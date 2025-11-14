@@ -86,7 +86,7 @@ FN (ObuTypeDeleteF) PspDeleteThreadObject (
 
     // Unreference the interned name.
 
-    ExuUnreferenceName ( paged^.Name )
+    ExUnreferenceName ( paged^.Name )
 
     // Perform eager cleanup if it hasn't been done.
 
@@ -211,7 +211,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     // Intern the name.
 
-    paged^.Name = ExuFindName ( ctx^.Name )
+    paged^.Name = ExFindName ( ctx^.Name )
 
     IF NOT paged^.Name THEN
         RETURN OS_STATUS_NO_MEMORY
@@ -390,7 +390,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
 @Error2
 
-    ExuUnreferenceName ( paged^.Name )
+    ExUnreferenceName ( paged^.Name )
 
     RETURN status
 END
@@ -431,7 +431,7 @@ FN (KeuProcessCustodyListF) PspReapThread (
 END
 
 #SECTION "PAGEtext"
-FN (ExuWorkItemF) PsuReaperWorker (
+FN (ExWorkItemF) PsuReaperWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -483,9 +483,9 @@ FN (KeuCustodyListActivateF) PspActivateReaper (
 
     RtlSetUquadToUlong ( &interval, 100 )
 
-    ExuEnqueueTimedWorkItem (
+    ExEnqueueTimedWorkItem (
         &PspReaperTimedWorkItem, // item
-        EXU_HIGH_WORK_PRIORITY, // priority
+        EX_HIGH_WORK_PRIORITY, // priority
         &interval, // interval
         0, // context1
         0, // context2

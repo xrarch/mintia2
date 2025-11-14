@@ -131,7 +131,7 @@ FN PspSignalActivation (
 
     // Decrement the reference count on the event counter.
 
-    ExuUnreferenceEventCounter ( event )
+    ExUnreferenceEventCounter ( event )
 END
 
 #SECTION "PAGEtext"
@@ -160,7 +160,7 @@ FN PspAwaitActivation (
         RETURN OS_STATUS_SUCCESS
     END
 
-    ExuReferenceEventCounter ( event )
+    ExReferenceEventCounter ( event )
 
     KeReleaseLock ( &paged^.ActivationLock )
 
@@ -173,7 +173,7 @@ FN PspAwaitActivation (
         &event^.Event.Header, // object
     )
 
-    ExuUnreferenceEventCounter ( event )
+    ExUnreferenceEventCounter ( event )
 
     activationstatus = paged^.ActivationStatus
 
@@ -306,7 +306,7 @@ FN (ObuTypeDeleteF) PspDeleteProcessObject (
 
     // Unreference the name.
 
-    ExuUnreferenceName ( paged^.Name )
+    ExUnreferenceName ( paged^.Name )
 
     // Unreference the quota block.
 
@@ -446,7 +446,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
     // Intern the name.
 
-    paged^.Name = ExuFindName ( ctx^.Name )
+    paged^.Name = ExFindName ( ctx^.Name )
 
     IF NOT paged^.Name THEN
         status = OS_STATUS_NO_MEMORY
@@ -476,7 +476,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
     // Create the activation event.
 
-    paged^.ActivationEvent = ExuAllocateEventCounter ( TRUE )
+    paged^.ActivationEvent = ExAllocateEventCounter ( TRUE )
 
     IF NOT paged^.ActivationEvent THEN
         status = OS_STATUS_NO_MEMORY
@@ -560,11 +560,11 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
 @Error6
 
-    ExuUnreferenceEventCounter ( paged^.ActivationEvent )
+    ExUnreferenceEventCounter ( paged^.ActivationEvent )
 
 @Error5
 
-    ExuUnreferenceName ( paged^.Name )
+    ExUnreferenceName ( paged^.Name )
 
 @Error4
 

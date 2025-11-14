@@ -36,7 +36,7 @@ FN NspInitializeEntry (
     RtlInitializeList ( &entry^.VirtualChildListHead )
 
     IF name THEN
-        entry^.Name = ExuFindName ( name )
+        entry^.Name = ExFindName ( name )
 
         IF NOT entry^.Name THEN
             RETURN FALSE
@@ -96,7 +96,7 @@ FN NspDeleteEntry (
 
     // First unreference the interned name.
 
-    ExuUnreferenceName ( entry^.Name )
+    ExUnreferenceName ( entry^.Name )
 
     // Unreference the object.
 
@@ -107,7 +107,7 @@ FN NspDeleteEntry (
     // Delete the bounce path if this is a symlink.
 
     IF entry^.BouncePath THEN
-        ExuUnreferenceName ( entry^.BouncePath )
+        ExUnreferenceName ( entry^.BouncePath )
     END
 
     // Now delete the entry itself.
@@ -616,7 +616,7 @@ FN NsuLookupEntryByPath (
 
             event = currententry^.Object
 
-            ExuReferenceEventCounter ( event )
+            ExReferenceEventCounter ( event )
 
             // Drop the lock.
 
@@ -633,7 +633,7 @@ FN NsuLookupEntryByPath (
 
             // Unreference the event counter.
 
-            ExuUnreferenceEventCounter ( event )
+            ExUnreferenceEventCounter ( event )
 
             // Re-take the lock.
 
@@ -818,12 +818,12 @@ FN NsuLookupEntryByPath (
                 END
 
                 IF symstate.SymlinkCookie THEN
-                    ExuUnreferenceName ( symstate.SymlinkCookie )
+                    ExUnreferenceName ( symstate.SymlinkCookie )
                 END
 
                 symstate.SymlinkCookie = child^.BouncePath
 
-                ExuReferenceName ( symstate.SymlinkCookie )
+                ExReferenceName ( symstate.SymlinkCookie )
 
                 // Set the lookup path to the symlink path.
 
@@ -954,7 +954,7 @@ FN NsuLookupEntryByPath (
         // Then the lock is reacquired and the transition entry is awoken and
         // destroyed.
 
-        event = ExuAllocateEventCounter ( TRUE )
+        event = ExAllocateEventCounter ( TRUE )
 
         IF NOT event THEN
             NspUnlockTree ()
@@ -976,7 +976,7 @@ FN NsuLookupEntryByPath (
             IF NOT child THEN
                 NspUnlockTree ()
 
-                ExuUnreferenceEventCounter ( event )
+                ExUnreferenceEventCounter ( event )
 
                 status = OS_STATUS_NO_MEMORY
 
@@ -1124,7 +1124,7 @@ FN NsuLookupEntryByPath (
             )
         END
 
-        ExuUnreferenceEventCounter ( event )
+        ExUnreferenceEventCounter ( event )
 
         IF OsError ( status ) THEN
             IF status == OS_STATUS_NOT_FOUND THEN
@@ -1254,7 +1254,7 @@ FN NsuLookupEntryByPath (
     IF symstate.SymlinkCookie THEN
         // We were keeping a symlink path around for parsing. Unreference it.
 
-        ExuUnreferenceName ( symstate.SymlinkCookie )
+        ExUnreferenceName ( symstate.SymlinkCookie )
     END
 
     IF roothandle.Entry THEN

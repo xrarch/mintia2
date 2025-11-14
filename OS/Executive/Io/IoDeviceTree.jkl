@@ -199,7 +199,7 @@ FN IouAttachNodes (
 
     // Insert as a parent of the child.
 
-    status = ExuAppendSet (
+    status = ExAppendSet (
         &childparents^.RelationSets[IO_RELATION_PARENTS], // set
         parent, // object
     )
@@ -210,7 +210,7 @@ FN IouAttachNodes (
 
     // Insert as a child of the parent.
 
-    status = ExuAppendSet (
+    status = ExAppendSet (
         &parentchildren^.RelationSets[IO_RELATION_CHILDREN], // set
         child, // object
     )
@@ -218,7 +218,7 @@ FN IouAttachNodes (
     IF OsError ( status ) THEN
         // Undo the parent addition.
 
-        ExuRemoveObjectFromSet (
+        ExRemoveObjectFromSet (
             &childparents^.RelationSets[IO_RELATION_PARENTS], // set
             parent, // object
         )
@@ -264,14 +264,14 @@ FN IouDetachNodes (
 
     KeAssert ( childparents != NULLPTR )
 
-    removed := ExuRemoveObjectFromSet (
+    removed := ExRemoveObjectFromSet (
         &childparents^.RelationSets[IO_RELATION_PARENTS], // set
         parent, // object
     )
 
     KeAssert ( removed != FALSE )
 
-    removed = ExuRemoveObjectFromSet (
+    removed = ExRemoveObjectFromSet (
         &parentchildren^.RelationSets[IO_RELATION_CHILDREN], // set
         child, // object
     )
@@ -288,7 +288,7 @@ FN IouDetachNodes (
 END
 
 #SECTION "PAGEtext"
-FN (ExuEnumerateSetF) IopEnumerateRelationsFunc (
+FN (ExEnumerateSetF) IopEnumerateRelationsFunc (
     IN set : ^ExuObjectSet,
     IN object : ^VOID,
     IN context : ^VOID,
@@ -303,7 +303,7 @@ FN (ExuEnumerateSetF) IopEnumerateRelationsFunc (
         RETURN OS_STATUS_SUCCESS
     END
 
-    status := ExuAppendSet (
+    status := ExAppendSet (
         CAST context TO ^ExuObjectSet, // set
         object, // object
     )
@@ -320,7 +320,7 @@ FN (ExuEnumerateSetF) IopEnumerateRelationsFunc (
 END
 
 #SECTION "PAGEtext"
-FN (ExuEnumerateSetF) IopEnumerateDestroyRelationsFunc (
+FN (ExEnumerateSetF) IopEnumerateDestroyRelationsFunc (
     IN set : ^ExuObjectSet,
     IN object : ^VOID,
     IN context : ^VOID,
@@ -341,7 +341,7 @@ FN IouEmptyRelationSet (
 
     // Uninitialize a set previously filled by a call to IouEnumerateRelations.
 
-    ExuEmptySet (
+    ExEmptySet (
         set, // set
         &IopEnumerateDestroyRelationsFunc, // enumfunc
         NULLPTR, // context
@@ -385,7 +385,7 @@ FN IouEnumerateRelations (
         GOTO Exit
     END
 
-    status = ExuEnumerateSet (
+    status = ExEnumerateSet (
         &planeentry^.RelationSets[relation], // set
         &IopEnumerateRelationsFunc, // enumfunc
         set, // context
