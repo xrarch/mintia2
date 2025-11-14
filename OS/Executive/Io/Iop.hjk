@@ -4,8 +4,6 @@
 
 #INCLUDE "<ll>/Rtl.hjk"
 
-#DEFINE IOU_INTERNAL 1
-
 #INCLUDE "<inc>/Iou.hjk"
 #INCLUDE "<inc>/Psu.hjk"
 
@@ -23,6 +21,31 @@ EXTERN FN IopParseConfiguration (
     OUT class : ^IopKnownClass,
 ) : OsStatus
 
-EXTERN IouFileType : ObuType
+EXTERN IoFileType : ObuType
 
-EXTERN IouFcbType : ObuType
+EXTERN IoFcbType : ObuType
+
+// The location was allocated from a zone.
+
+#DEFINE IOP_LOCATION_FROM_ZONE 1
+
+// The location should not be freed.
+
+#DEFINE IOP_LOCATION_DONT_FREE 2
+
+ENUM IopPacketType : UBYTE
+    IOP_PACKET_TYPE_NORMAL,
+    IOP_PACKET_TYPE_USERASYNC,
+
+    IOP_PACKET_TYPE_MAX,
+END
+
+// Don't free the trampoline.
+
+#DEFINE IOP_TRAMPOLINE_DONT_FREE 2
+
+#MACRO IopInitializeTreeNode ( node ) [
+    RtlInitializeList ( &(node)^.PlaneNodeListHead )
+
+    KeInitializeLock ( &(node)^.Lock )
+]

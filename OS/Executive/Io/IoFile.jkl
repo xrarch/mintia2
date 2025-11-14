@@ -14,7 +14,7 @@ FN (ObuTypeOpenF) IopOpenFileObject (
 
     // Call the driver's file object open function, if present.
 
-    file := CAST object TO ^IouFile
+    file := CAST object TO ^IoFile
 
     fcb := file^.Fcb
 
@@ -40,7 +40,7 @@ FN (ObuTypeCloseF) IopCloseFileObject (
 
     // Call the driver's file object close function, if present.
 
-    file := CAST object TO ^IouFile
+    file := CAST object TO ^IoFile
 
     fcb := file^.Fcb
 
@@ -64,7 +64,7 @@ FN (ObuTypeDeleteF) IopDeleteFileObject (
 
     // Delete a file object.
 
-    file := CAST object TO ^IouFile
+    file := CAST object TO ^IoFile
 
     // Call the driver's file object deletion function, if present.
 
@@ -90,7 +90,7 @@ FN (ObuTypeSetSecurityF) IopSetSecurityFileObject (
     // Acquire a pointer to the namespace entry and call the driver's file
     // object security function, if present.
 
-    file := CAST object TO ^IouFile
+    file := CAST object TO ^IoFile
 
     fcb := file^.Fcb
 
@@ -113,7 +113,7 @@ FN (ObuTypeDeleteF) IopDeleteFcbObject (
 
     // Delete an FCB object.
 
-    fcb := CAST object TO ^IouFcb
+    fcb := CAST object TO ^IoFcb
 
     // Call the driver's FCB deletion function, if present.
 
@@ -127,12 +127,12 @@ FN (ObuTypeNamespaceLookupF) IopNamespaceLookupFcbObject (
 
     // Lookup a name under this FCB.
 
-    fcb := CAST context^.Object TO ^IouFcb
+    fcb := CAST context^.Object TO ^IoFcb
 
     RETURN fcb^.Dispatch^.NamespaceLookup ( context )
 END
 
-PUBLIC IouFileType : ObuType = {
+PUBLIC IoFileType : ObuType = {
     [Name] = "File",
 
     [Open] = &IopOpenFileObject,
@@ -144,12 +144,12 @@ PUBLIC IouFileType : ObuType = {
     [TypeIdentifier] = OS_FILE_TYPE,
     [Tag] = 'File',
 
-    [TypicalBodySize] = SIZEOF IouFile,
+    [TypicalBodySize] = SIZEOF IoFile,
 
     [IsPaged] = TRUE,
 }
 
-PUBLIC IouFcbType : ObuType = {
+PUBLIC IoFcbType : ObuType = {
     [Name] = "Fcb",
 
     [Delete] = &IopDeleteFcbObject,
@@ -159,7 +159,7 @@ PUBLIC IouFcbType : ObuType = {
     [TypeIdentifier] = OS_FCB_TYPE,
     [Tag] = 'Fcb',
 
-    [TypicalBodySize] = SIZEOF IouFcb,
+    [TypicalBodySize] = SIZEOF IoFcb,
 
     [IsPaged] = FALSE,
 }

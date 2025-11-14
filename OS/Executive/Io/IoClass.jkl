@@ -14,7 +14,7 @@ STRUCT IouClass
 
     Entry : RtlAvlNode,
 
-    DispatchTable : ^IouPacketBasedCallF,
+    DispatchTable : ^IoPacketBasedCallF,
 
     InstantiationCount : ULONG,
     SubclassCount : ULONG,
@@ -26,9 +26,9 @@ IopClassLookupTree : RtlAvlNode
 
 IopClassLock : KeLock = KE_INITIAL_LOCK
 
-FN (IouPacketBasedCallF) IopUninitializedDispatch (
-    IN packet : ^IouPacket,
-    IN trampoline : ^IouTrampoline,
+FN (IoPacketBasedCallF) IopUninitializedDispatch (
+    IN packet : ^IoPacket,
+    IN trampoline : ^IoTrampoline,
 ) : OsStatus
 
     KeCrash ( "Uninitialized dispatch table entry\n" )
@@ -95,7 +95,7 @@ FN IouCreateClass (
     IN module : ^ExuLoadedModule,
     IN classname : ^RtlString,
     IN superclass : ^IouClass,
-    IN dispatchtable : ^IouPacketBasedCallF,
+    IN dispatchtable : ^IoPacketBasedCallF,
     IN dispatchtablesize : UWORD,
     OUT class : ^IouClass,
 ) : OsStatus
@@ -127,7 +127,7 @@ FN IouCreateClass (
     // Enough space was allocated at the end of the class object for the
     // dispatch table.
 
-    mydispatch := CAST (class + SIZEOF IouClass) TO ^IouPacketBasedCallF
+    mydispatch := CAST (class + SIZEOF IouClass) TO ^IoPacketBasedCallF
 
     class^.DispatchTable = mydispatch
     class^.DispatchTableSize = dispatchtablesize
@@ -147,9 +147,9 @@ FN IouCreateClass (
             mydispatch^ = superdispatch^
         END
 
-        superdispatch += SIZEOF IouPacketBasedCallF
-        dispatchtable += SIZEOF IouPacketBasedCallF
-        mydispatch += SIZEOF IouPacketBasedCallF
+        superdispatch += SIZEOF IoPacketBasedCallF
+        dispatchtable += SIZEOF IoPacketBasedCallF
+        mydispatch += SIZEOF IoPacketBasedCallF
     END
 
     // Now fill in the entries that are unique to the subclass.
@@ -163,8 +163,8 @@ FN IouCreateClass (
             mydispatch^ = &IopUninitializedDispatch
         END
 
-        dispatchtable += SIZEOF IouPacketBasedCallF
-        mydispatch += SIZEOF IouPacketBasedCallF
+        dispatchtable += SIZEOF IoPacketBasedCallF
+        mydispatch += SIZEOF IoPacketBasedCallF
     END
 
     // Insert into the class lookup tree.

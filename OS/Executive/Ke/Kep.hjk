@@ -210,7 +210,7 @@ STRUCT KepPrb
 
     TimerTreeRoot : ^RtlHeapEntry,
 
-    IrqDispatchTable : ^^KeInterrupt,
+    IrqDispatchTable : ^^KeuInterrupt,
     IdleStackBase : ^VOID,
 
 #IF KEP_VIRTUAL_PRB
@@ -223,7 +223,7 @@ STRUCT KepPrb
 
     IdleListHead : RtlListEntry,
 
-    TimerInterrupt : KeInterrupt,
+    TimerInterrupt : KeuInterrupt,
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     AsidSequenceNumber : RtlUquad,
@@ -283,8 +283,8 @@ STRUCT KepPrb
     IdleThread : KeuThread,
 
 #IF BLD_MP
-    IpiInterrupt1 : KeInterrupt,
-    IpiInterrupt2 : KeInterrupt,
+    IpiInterrupt1 : KeuInterrupt,
+    IpiInterrupt2 : KeuInterrupt,
 #END
 
     ClockTicks : RtlUquad,
@@ -359,6 +359,13 @@ END
 #DEFINE KEP_REQUEST_CURRENT 2
 #DEFINE KEP_REQUEST_CANCELLED 3
 #DEFINE KEP_REQUEST_COMPLETED 4
+
+#DEFINE KEP_LOCK_WAITERS 0x1
+#DEFINE KEP_LOCK_WRITE_LOCKED 0x2
+#DEFINE KEP_LOCK_SHARE_INC 0x4
+#DEFINE KEP_LOCK_SHARE_SHIFT 2
+#DEFINE KEP_LOCK_BITS ( - 0 KEP_LOCK_SHARE_INC )
+#DEFINE KEP_LOCK_C_BITS ( ~ KEP_LOCK_BITS )
 
 #MACRO KepAreTherePendingSignals ( thread ) [
     ((thread^.SignalAcceptMask[0] &
@@ -499,7 +506,7 @@ EXTERN FN (KeDpcF) KepTimerExpiration (
 )
 
 EXTERN FN (KeInterruptF) KepClockTick (
-    IN interrupt : ^KeInterrupt,
+    IN interrupt : ^KeuInterrupt,
     IN context : ^OsContext,
 )
 
@@ -547,7 +554,7 @@ EXTERN FN KepDisassociateFromBalancedQueue (
     IN thread : ^KeuThread,
 )
 
-EXTERN KepUnexpectedInterruptObject : KeInterrupt
+EXTERN KepUnexpectedInterruptObject : KeuInterrupt
 
 EXTERN FN KepSoftInterruptSelfSet (
     IN prb : ^KepPrb,
@@ -580,7 +587,7 @@ EXTERN FN KepFreezeOtherProcessors ()
 EXTERN FN KepUnfreezeOtherProcessors ()
 
 EXTERN FN (KeInterruptF) KepServiceIpi (
-    IN interrupt : ^KeInterrupt,
+    IN interrupt : ^KeuInterrupt,
     IN context : ^OsContext,
 )
 

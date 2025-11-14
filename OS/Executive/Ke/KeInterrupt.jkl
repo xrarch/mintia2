@@ -11,7 +11,7 @@ KepInterruptAssignmentCounter : ULONG = 0
 #END
 
 FN (KeInterruptF) KepUnexpectedInterrupt (
-    IN interrupt : ^KeInterrupt,
+    IN interrupt : ^KeuInterrupt,
     IN context : ^OsContext,
 )
 
@@ -19,7 +19,7 @@ FN (KeInterruptF) KepUnexpectedInterrupt (
 END
 
 #SECTION "text"
-PUBLIC KepUnexpectedInterruptObject : KeInterrupt = {
+PUBLIC KepUnexpectedInterruptObject : KeuInterrupt = {
     [Routine] = &KepUnexpectedInterrupt,
     [Ipl] = KEP_IPL_HIGH,
 #IF BLD_MP
@@ -28,7 +28,7 @@ PUBLIC KepUnexpectedInterruptObject : KeInterrupt = {
 }
 
 EXPORT FN KeuInitializeInterrupt (
-    IN interrupt : ^KeInterrupt,
+    IN interrupt : ^KeuInterrupt,
     IN routine : KeInterruptF,
     IN context : UWORD,
     IN vector : UWORD,
@@ -74,7 +74,7 @@ EXPORT FN KeuInitializeInterrupt (
 END
 
 EXPORT FN KeuSynchronizeWithInterrupt (
-    IN interrupt : ^KeInterrupt,
+    IN interrupt : ^KeuInterrupt,
 ) : UWORD
 
     // Synchronize with the ISR by raising IPL to match its level and
@@ -90,7 +90,7 @@ EXPORT FN KeuSynchronizeWithInterrupt (
 END
 
 EXPORT FN KeuDesynchronizeFromInterrupt (
-    IN interrupt : ^KeInterrupt,
+    IN interrupt : ^KeuInterrupt,
     IN oldipl : UWORD,
 )
 
@@ -110,7 +110,7 @@ KepNextWorkBalanceMs : WORD = KEP_WORK_BALANCE_INTERVAL
 #END
 
 FN (KeInterruptF) KepClockTick (
-    IN interrupt : ^KeInterrupt,
+    IN interrupt : ^KeuInterrupt,
     IN context : ^OsContext,
 )
 

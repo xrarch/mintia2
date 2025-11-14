@@ -44,12 +44,12 @@ STRUCT IouPlaneEntry
 
     TreeNode : ^IouTreeNode,
 
-    RelationSets : ExuObjectSet[IOU_RELATION_MAX],
+    RelationSets : ExuObjectSet[IO_RELATION_MAX],
 
     Entry : RtlListEntry,
 END
 
-EXPORT IouServicePlane : ^IouPlane
+EXPORT IoServicePlane : ^IouPlane
 
 IopServicePlane : IouPlane
 
@@ -86,10 +86,10 @@ FN IopInitializeDeviceTree ()
 
     // Initialize the device tree.
 
-    IouServicePlane = &IopServicePlane
+    IoServicePlane = &IopServicePlane
 
     IouInitializePlane (
-        IouServicePlane, // plane
+        IoServicePlane, // plane
         "IouService", // name
     )
 END
@@ -139,7 +139,7 @@ FN IopFindPlaneEntry (
 
     i := 0
 
-    WHILE i < IOU_RELATION_MAX DO
+    WHILE i < IO_RELATION_MAX DO
         ExuInitializeSet (
             &node^.RelationSets[i], // set
             'IoRs', // tag
@@ -200,7 +200,7 @@ FN IouAttachNodes (
     // Insert as a parent of the child.
 
     status = ExAppendSet (
-        &childparents^.RelationSets[IOU_RELATION_PARENTS], // set
+        &childparents^.RelationSets[IO_RELATION_PARENTS], // set
         parent, // object
     )
 
@@ -211,7 +211,7 @@ FN IouAttachNodes (
     // Insert as a child of the parent.
 
     status = ExAppendSet (
-        &parentchildren^.RelationSets[IOU_RELATION_CHILDREN], // set
+        &parentchildren^.RelationSets[IO_RELATION_CHILDREN], // set
         child, // object
     )
 
@@ -219,7 +219,7 @@ FN IouAttachNodes (
         // Undo the parent addition.
 
         ExRemoveObjectFromSet (
-            &childparents^.RelationSets[IOU_RELATION_PARENTS], // set
+            &childparents^.RelationSets[IO_RELATION_PARENTS], // set
             parent, // object
         )
 
@@ -265,14 +265,14 @@ FN IouDetachNodes (
     KeAssert ( childparents != NULLPTR )
 
     removed := ExRemoveObjectFromSet (
-        &childparents^.RelationSets[IOU_RELATION_PARENTS], // set
+        &childparents^.RelationSets[IO_RELATION_PARENTS], // set
         parent, // object
     )
 
     KeAssert ( removed != FALSE )
 
     removed = ExRemoveObjectFromSet (
-        &parentchildren^.RelationSets[IOU_RELATION_CHILDREN], // set
+        &parentchildren^.RelationSets[IO_RELATION_CHILDREN], // set
         child, // object
     )
 
@@ -353,7 +353,7 @@ FN IouEnumerateRelations (
     IN plane : ^IouPlane,
     IN treenode : ^IouTreeNode,
     IN set : ^ExuObjectSet,
-    IN relation : IouNodeRelation,
+    IN relation : IoNodeRelation,
 ) : OsStatus
 
     // Enumerate the relations of the tree node into the provided object set.

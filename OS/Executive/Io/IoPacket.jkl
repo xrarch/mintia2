@@ -4,15 +4,15 @@
 
 #INCLUDE "Iop.hjk"
 
-IopPacketCaches : ^MmpPoolCache[IOU_PACKET_TYPE_MAX]
+IopPacketCaches : ^MmpPoolCache[IOP_PACKET_TYPE_MAX]
 
 IopLocationCache : ^MmpPoolCache
 
 IopTrampolineCache : ^MmpPoolCache
 
-IopPacketSize : UBYTE[IOU_PACKET_TYPE_MAX] = {
-    [IOU_PACKET_TYPE_NORMAL] = SIZEOF IouPacket,
-    [IOU_PACKET_TYPE_USERASYNC] = SIZEOF IouUserAsyncPacket,
+IopPacketSize : UBYTE[IOP_PACKET_TYPE_MAX] = {
+    [IOP_PACKET_TYPE_NORMAL] = SIZEOF IoPacket,
+    [IOP_PACKET_TYPE_USERASYNC] = SIZEOF IouUserAsyncPacket,
 }
 
 #SECTION "INITtext"
@@ -48,15 +48,15 @@ FN IopInitPacketZones ()
     // Create normal cache.
 
     IopInitPacketCache (
-        &IopPacketCaches[IOU_PACKET_TYPE_NORMAL], // cache
-        SIZEOF IouPacket, // headersize
+        &IopPacketCaches[IOP_PACKET_TYPE_NORMAL], // cache
+        SIZEOF IoPacket, // headersize
         "Packet Headers", // name
     )
 
     // Create user async cache.
 
     IopInitPacketCache (
-        &IopPacketCaches[IOU_PACKET_TYPE_USERASYNC], // cache
+        &IopPacketCaches[IOP_PACKET_TYPE_USERASYNC], // cache
         SIZEOF IouUserAsyncPacket, // headersize
         "Async Packet Headers", // name
     )
@@ -65,7 +65,7 @@ FN IopInitPacketZones ()
 
     IopInitPacketCache (
         &IopLocationCache, // cache
-        SIZEOF IouLocation, // headersize
+        SIZEOF IoLocation, // headersize
         "Packet Locations", // name
     )
 
@@ -73,24 +73,24 @@ FN IopInitPacketZones ()
 
     IopInitPacketCache (
         &IopTrampolineCache, // cache
-        SIZEOF IouTrampoline, // headersize
+        SIZEOF IoTrampoline, // headersize
         "Trampolines", // name
     )
 END
 
 FN IopFreeLocation (
-    IN location : ^IouLocation,
+    IN location : ^IoLocation,
 )
 
-    // Free an IouLocation.
+    // Free an IoLocation.
 
-    IF location^.Flags & IOP_LOCATION_DONT_FREE THEN
+    IF location^.InternalFlags & IOP_LOCATION_DONT_FREE THEN
         // Nevermind.
 
         LEAVE
     END
 
-    IF location^.Flags & IOP_LOCATION_FROM_ZONE THEN
+    IF location^.InternalFlags & IOP_LOCATION_FROM_ZONE THEN
         // Return to cache.
 
         MmuFreeToPoolCache (
@@ -110,27 +110,27 @@ FN IopFreeLocation (
 END
 
 EXPORT FN IouCreateLocation (
-    IN packet : ^IouPacket,
+    IN packet : ^IoPacket,
     IN contextsize : UWORD,
-) : ^IouLocation
+) : ^IoLocation
 
     // Allocate a packet location with the given context size and append it to
     // the provided packet.
 
-    location : ^IouLocation = NULLPTR
+    location : ^IoLocation = NULLPTR
 
-    IF contextsize <= IOU_LOCATION_AVERAGE_CONTEXT THEN
+    IF contextsize <= IO_LOCATION_AVERAGE_CONTEXT THEN
         // The context size is less or equal to the expected average so we can
         // allocate the location from the inlined one or the zone.
 
-        IF packet^.IopFlags & IOU_PACKET_INLINE_LOC_USED == 0 THEN
+        IF packet^.Flags & IO_PACKET_INLINE_LOC_USED == 0 THEN
             // The inline location is still available, so allocate it.
 
-            packet^.IopFlags |= IOU_PACKET_INLINE_LOC_USED
+            packet^.Flags |= IO_PACKET_INLINE_LOC_USED
 
             location = &packet^.Inlined.Location
 
-            location^.Flags = IOP_LOCATION_DONT_FREE
+            location^.InternalFlags = IOP_LOCATION_DONT_FREE
 
         ELSE
             // Try to allocate from the location zone.
@@ -144,7 +144,7 @@ EXPORT FN IouCreateLocation (
                 RETURN NULLPTR
             END
 
-            location^.Flags = IOP_LOCATION_FROM_ZONE
+            location^.InternalFlags = IOP_LOCATION_FROM_ZONE
         END
     END
 
@@ -153,7 +153,7 @@ EXPORT FN IouCreateLocation (
 
         location = MmuAllocatePool (
             MMU_NONPAGED_POOL, // poolindex
-            SIZEOF IouLocation + contextsize +
+            SIZEOF IoLocation + contextsize +
             (RTL_MACHINE_WORD_SIZE - 1), // bytes
             'IoLo', // tag
             TRUE, // wait
@@ -163,7 +163,7 @@ EXPORT FN IouCreateLocation (
             RETURN NULLPTR
         END
 
-        location^.Flags = 0
+        location^.InternalFlags = 0
     END
 
     // Initialize the location.
@@ -177,7 +177,7 @@ EXPORT FN IouCreateLocation (
 
     location^.CompletionRoutine = NULLPTR
 
-    location^.Context = location + SIZEOF IouLocation
+    location^.Context = location + SIZEOF IoLocation
 
     RETURN location
 END
@@ -189,16 +189,16 @@ FN IouAllocatePacket (
     IN iopflags : UWORD,
     IN kernelflags : UWORD,
     IN event : ^KeEvent,
-    IN completionroutine : IouPacketCompletionF,
+    IN completionroutine : IoPacketCompletionF,
     IN timeout : ^RtlUquad,
-) : ^IouPacket
+) : ^IoPacket
 
     // Allocate a packet.
 
     // We acquire this lock APC-safe because it can also be taken by async IO
     // completion APCs when they finally free the packet.
 
-    packet : ^IouPacket = MmuAllocateFromPoolCache (
+    packet : ^IoPacket = MmuAllocateFromPoolCache (
         IopPacketCaches[ioptype], // cache
         TRUE, // wait
     )
@@ -210,7 +210,7 @@ FN IouAllocatePacket (
     // Initialize the packet.
 
     IF timeout THEN
-        iopflags |= IOU_PACKET_TIMEOUT
+        iopflags |= IO_PACKET_TIMEOUT
 
         RtlMoveUquad (
             &packet^.Timeout, // destquad
@@ -218,8 +218,8 @@ FN IouAllocatePacket (
         )
     END
 
-    packet^.Type = ioptype
-    packet^.IopFlags = iopflags
+    packet^.InternalType = ioptype
+    packet^.Flags = iopflags
     packet^.ParentPacket = NULLPTR
     packet^.CompletionRoutine = completionroutine
     packet^.CompletionEvent = event
@@ -227,7 +227,7 @@ FN IouAllocatePacket (
     packet^.OffsetInMdl = mdloffset
     packet^.StatusBlock.Status = OS_STATUS_SUCCESS
     packet^.KernelFlags = kernelflags
-    packet^.IouCount = 1
+    packet^.IoCount = 1
     packet^.EnqueueStatus = OS_STATUS_PENDING
     packet^.PriorityBoost = 0
 
@@ -237,21 +237,21 @@ FN IouAllocatePacket (
 END
 
 FN IouAllocateFragmentPacket (
-    IN parentpacket : ^IouPacket,
+    IN parentpacket : ^IoPacket,
     IN iopflags : UWORD,
     IN kernelflags : UWORD,
     IN event : ^KeEvent,
-    IN completionroutine : IouPacketCompletionF,
+    IN completionroutine : IoPacketCompletionF,
     IN timeout : ^RtlUquad,
-) : ^IouPacket
+) : ^IoPacket
 
     // Helper routine for allocating a fragment packet.
 
     RETURN IouAllocatePacket (
         parentpacket^.Mdl, // mdl
         parentpacket^.OffsetInMdl, // mdloffset
-        IOU_PACKET_TYPE_NORMAL, // ioptype
-        iopflags | (parentpacket^.IopFlags & IOU_PACKET_USERMODE), // iopflags
+        IOP_PACKET_TYPE_NORMAL, // ioptype
+        iopflags | (parentpacket^.Flags & IO_PACKET_USERMODE), // iopflags
         kernelflags, // kernelflags
         event, // event
         completionroutine, // completionroutine
@@ -260,19 +260,19 @@ FN IouAllocateFragmentPacket (
 END
 
 FN IouFreePacket (
-    IN packet : ^IouPacket,
+    IN packet : ^IoPacket,
 )
 
     // Free a packet back to the appropriate zone or pool.
 
     MmuFreeToPoolCache (
-        IopPacketCaches[packet^.Type], // cache
+        IopPacketCaches[packet^.InternalType], // cache
         packet, // ptr
     )
 END
 
 FN IopRundownPacket (
-    IN packet : ^IouPacket,
+    IN packet : ^IoPacket,
 )
 
     // Perform final rundown of the IOP upon completion.
@@ -293,19 +293,19 @@ FN IopRundownPacket (
             packet^.PriorityBoost, // priorityboost
         )
 
-        IF packet^.Type == IOU_PACKET_TYPE_USERASYNC THEN
+        IF packet^.InternalType == IOP_PACKET_TYPE_USERASYNC THEN
             ObuUnreferenceObject ( event )
         END
     END
 
-    IF packet^.IopFlags & IOU_PACKET_AUTO_FREE THEN
+    IF packet^.Flags & IO_PACKET_AUTO_FREE THEN
         IouFreePacket ( packet )
     END
 END
 
 FN IopBounceOnTrampoline (
-    IN trampoline : ^IouTrampoline,
-    IN packet : ^IouPacket,
+    IN trampoline : ^IoTrampoline,
+    IN packet : ^IoPacket,
 ) : OsStatus
 
     // Dispatch an I/O request through the trampoline.
@@ -319,7 +319,7 @@ FN IopBounceOnTrampoline (
             // The parent packet was already completed early, so don't start this
             // child one.
 
-            IouCompletePacket (
+            IoCompletePacket (
                 packet, // packet
                 status, // status
                 0, // priorityboost
@@ -352,7 +352,7 @@ FN IopBounceOnTrampoline (
 
             packet^.EnqueueStatus = status
 
-            IouCompletePacket (
+            IoCompletePacket (
                 packet, // packet
                 status, // status
                 0, // priorityboost
@@ -364,7 +364,7 @@ FN IopBounceOnTrampoline (
 
 @Exit
 
-    IF trampoline^.InternalFlags & IOP_TRAMPOLINE_DONT_FREE == 0 THEN
+    IF trampoline^.IopFlags & IOP_TRAMPOLINE_DONT_FREE == 0 THEN
         // Free the trampoline.
 
         MmuFreeToPoolCache (
@@ -376,15 +376,15 @@ FN IopBounceOnTrampoline (
     RETURN status
 END
 
-EXPORT FN IouCompletePacket (
-    IN packet : ^IouPacket,
+EXPORT FN IoCompletePacket (
+    IN packet : ^IoPacket,
     IN status : OsStatus,
     IN priorityboost : UWORD,
 )
 
     // Complete an IO packet along with any parents that may arise.
     // This MUST be called from thread context - if you want to complete a
-    // packet directly from a DPC, call IouCompletePacketFromDpc which will
+    // packet directly from a DPC, call IoCompletePacketFromDpc which will
     // helpfully enqueue a work item to do it for you.
 
 @NextPacket
@@ -443,13 +443,13 @@ EXPORT FN IouCompletePacket (
         LEAVE
     END
 
-    // Decrement the IouCount to reflect a dependent upon this packet being
+    // Decrement the IoCount to reflect a dependent upon this packet being
     // removed. If we drop it to zero, then we should perform full packet
     // completion and potentially complete the parent as well if this is
     // a child packet.
 
     oldcount := KeIncrementUlong (
-        &packet^.IouCount, // ptr
+        &packet^.IoCount, // ptr
         0xFFFFFFFF, // inc
     )
 
@@ -467,12 +467,12 @@ EXPORT FN IouCompletePacket (
         status = packet^.StatusBlock.Status
     END
 
-    // Reset the IouCount to 1 just in case we pass the packet on to someone who
+    // Reset the IoCount to 1 just in case we pass the packet on to someone who
     // wants to take custody of it and retry completion later. We can't do this
     // after we know that, because they'll have custody, and we can't touch this
     // field at that time.
 
-    packet^.IouCount = 1
+    packet^.IoCount = 1
 
     // Call the completion routines starting from the location at the tail of
     // the list.
@@ -481,7 +481,7 @@ EXPORT FN IouCompletePacket (
     listentry := listhead^.Prev
 
     WHILE listentry != listhead DO
-        location := CONTAINEROF listentry TO IouLocation.Entry
+        location := CONTAINEROF listentry TO IoLocation.Entry
 
         listentry = listentry^.Prev
 
@@ -508,7 +508,7 @@ EXPORT FN IouCompletePacket (
         IopFreeLocation ( location )
     END
 
-    IF packet^.IopFlags & IOU_PACKET_AUTO_COMPLETE_MDL THEN
+    IF packet^.Flags & IO_PACKET_AUTO_COMPLETE_MDL THEN
         // Unlock the pages ASAP. We could do this at packet rundown instead but
         // that might take however long it takes a user thread to get scheduled
         // in to run its completion APC, which is suboptimal.
@@ -516,7 +516,7 @@ EXPORT FN IouCompletePacket (
         MmuCompleteMdl ( packet^.Mdl )
     END
 
-    packet^.IopFlags |= IOU_PACKET_COMPLETED
+    packet^.Flags |= IO_PACKET_COMPLETED
 
     parentpacket := packet^.ParentPacket
 
@@ -544,11 +544,11 @@ EXPORT FN IouCompletePacket (
     END
 END
 
-EXPORT FN IouEnqueuePacket (
-    IN packet : ^IouPacket,
-    IN parentpacket : ^IouPacket,
-    IN target : ^IouTarget,
-    IN function : IouPacketBasedCallF,
+EXPORT FN IoEnqueuePacket (
+    IN packet : ^IoPacket,
+    IN parentpacket : ^IoPacket,
+    IN target : ^IoTarget,
+    IN function : IoPacketBasedCallF,
     IN parameters : ^IouParameters,
 ) : OsStatus
 
@@ -560,8 +560,8 @@ EXPORT FN IouEnqueuePacket (
 
     // Initialize a trampoline on the kernel stack, in case that's useful.
 
-    stacktrampoline : IouTrampoline
-    stacktrampoline.InternalFlags = IOP_TRAMPOLINE_DONT_FREE
+    stacktrampoline : IoTrampoline
+    stacktrampoline.IopFlags = IOP_TRAMPOLINE_DONT_FREE
 
     trampoline := &stacktrampoline
 
@@ -603,7 +603,7 @@ EXPORT FN IouEnqueuePacket (
         // Incrementing this count requires no synchronization because the
         // parent packet is in our sole custody right now.
 
-        parentpacket^.IouCount += 1
+        parentpacket^.IoCount += 1
 
         packet^.KernelFlags |= parentpacket^.KernelFlags
     END
@@ -635,7 +635,7 @@ EXPORT FN IouEnqueuePacket (
         // Pop another request off the list head and do it.
 
         trampoline = CONTAINEROF thread^.DeferredRequestListHead.Next
-            TO IouTrampoline.DeferredEntry
+            TO IoTrampoline.DeferredEntry
 
         RtlRemoveEntryList ( &trampoline^.DeferredEntry )
 

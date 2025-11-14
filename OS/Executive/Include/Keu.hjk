@@ -5,13 +5,6 @@
 
 #INCLUDE "<ll>/Executive/Ke.hjk"
 
-#DEFINE KEP_LOCK_WAITERS 0x1
-#DEFINE KEP_LOCK_WRITE_LOCKED 0x2
-#DEFINE KEP_LOCK_SHARE_INC 0x4
-#DEFINE KEP_LOCK_SHARE_SHIFT 2
-#DEFINE KEP_LOCK_BITS ( - 0 KEP_LOCK_SHARE_INC )
-#DEFINE KEP_LOCK_C_BITS ( ~ KEP_LOCK_BITS )
-
 #DEFINE KEU_STACK_PAGES 1
 
 FNPTR KeuDebuggerEntryF (
@@ -20,7 +13,7 @@ FNPTR KeuDebuggerEntryF (
 
 EXTERN KeuDebuggerEntry : KeuDebuggerEntryF
 
-STRUCT KeInterrupt
+STRUCT KeuInterrupt
     Entry : RtlListEntry,
 
     Routine : KeInterruptF,
@@ -42,7 +35,7 @@ END
 #DEFINE KEU_AUTOMATIC_INTERRUPT_PROCESSOR -1
 
 EXTERN FN KeuInitializeInterrupt (
-    IN interrupt : ^KeInterrupt,
+    IN interrupt : ^KeuInterrupt,
     IN routine : KeInterruptF,
     IN context : UWORD,
     IN vector : UWORD,
@@ -53,11 +46,11 @@ EXTERN FN KeuInitializeInterrupt (
 )
 
 EXTERN FN KeuConnectInterrupt (
-    IN interrupt : ^KeInterrupt,
+    IN interrupt : ^KeuInterrupt,
 ) : UWORD
 
 EXTERN FN KeuDisconnectInterrupt (
-    IN interrupt : ^KeInterrupt,
+    IN interrupt : ^KeuInterrupt,
 ) : UWORD
 
 STRUCT KepWaitBlock

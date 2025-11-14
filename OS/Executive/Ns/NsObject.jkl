@@ -5,7 +5,7 @@
 #INCLUDE "Nsp.hjk"
 #INCLUDE "<inc>/Iou.hjk"
 
-EXTERN IouFileType : ObuType
+EXTERN IoFileType : ObuType
 
 #SECTION "PAGEtext"
 FN NsuCaptureOpenParameters (
@@ -55,12 +55,12 @@ FN NsuCaptureOpenParameters (
 
     // Translate the initial handle.
 
-    file : ^IouFile
+    file : ^IoFile
     access : UWORD
 
     status = ObuReferenceByHandle (
         sysparams^.Captured.InitialHandle, // handle
-        &IouFileType, // type
+        &IoFileType, // type
         OUT file, // object
         OUT access, // access
     )
@@ -127,7 +127,7 @@ FN NsuCreateObject (
         params^.Captured.Flags |= OS_OPEN_CREATE
         params^.ResultFlags = 0
 
-        handle : NsuHandle
+        handle : NsHandle
 
         status := NsuLookupEntryByPath (
             params, // params
@@ -175,7 +175,7 @@ FN NsuLookupObject (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    handle : NsuHandle
+    handle : NsHandle
 
     status := NsuLookupEntryByPath (
         params, // params

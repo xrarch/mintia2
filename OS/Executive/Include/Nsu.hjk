@@ -47,16 +47,11 @@ STRUCT NsuContainerEntry
     Permissions : ObuPermissions,
 END
 
-STRUCT NsuHandle
-    Entry : ^NsuEntry,
-    Subspace : ^NsuSubspace,
-END
-
 STRUCT NsuSubspace
     MountListEntry : RtlListEntry,
 
     Root : ^NsuEntry,
-    MountedUpon : NsuHandle,
+    MountedUpon : NsHandle,
 
     References : ULONG,
 END
@@ -95,7 +90,7 @@ STRUCT NsuOpenParameters
     Captured : OsOpenParameters,
 
     Path : RtlString,
-    InitialHandle : NsuHandle,
+    InitialHandle : NsHandle,
 
     ResultFlags : ULONG,
 END
@@ -118,7 +113,7 @@ EXTERN FN NsuUnlinkObject (
 
 EXTERN FN NsuLookupEntryByPath (
     IN params : ^NsuOpenParameters,
-    IN handle : ^NsuHandle,
+    IN handle : ^NsHandle,
     IN cred : ^ObuCredentials,
     IN obparams : ^ObuParameters,
     IN type : ^ObuType,
