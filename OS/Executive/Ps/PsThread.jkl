@@ -1016,7 +1016,7 @@ PUBLIC PsuThreadType : ObuType = {
 
 #SECTION "PAGEtext"
 FN PsuCreateThreadObject (
-    IN params : ^NsuOpenParameters,
+    IN params : ^NsOpenParameters,
     IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
@@ -1039,7 +1039,7 @@ FN PsuCreateThreadObject (
 
     obparams : ObuParameters
 
-    NsuInitializeObjectParameters (
+    NsInitializeObjectParameters (
         &obparams, // obparams
         params, // params
         &PsuThreadType, // type
@@ -1070,12 +1070,12 @@ EXPORT FN PsuCreateExecutiveThread (
     // Helper function for creating a thread that only executes code in the
     // system executive.
 
-    params : NsuOpenParameters
+    params : NsOpenParameters
 
     params.Path.Data = NULLPTR
 
     params.Captured.Flags = 0
-    params.Captured.ObuFlags = 0
+    params.Captured.ObFlags = 0
     params.Captured.Permissions = OS_ACCESS_OWNER_ALL
 
     status := PsuCreateThreadObject (
@@ -1104,7 +1104,7 @@ END
 
 #SECTION "PAGEtext"
 FN PsuCreateThread (
-    IN params : ^NsuOpenParameters,
+    IN params : ^NsOpenParameters,
     IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
@@ -1163,7 +1163,7 @@ FN PsuCreateThread (
     )
 
     IF OsError ( status ) THEN
-        IF params^.ResultFlags & NSU_RESULT_CREATED THEN
+        IF params^.ResultFlags & NS_RESULT_CREATED THEN
             // We created the thread object successfully, but we failed to
             // insert it into the handle table (quota limit reached or some
             // such). Set the thread terminated and ready it so that it kills
@@ -1179,7 +1179,7 @@ FN PsuCreateThread (
 
         ObuUnreferenceObject ( thread )
 
-    ELSEIF params^.ResultFlags & NSU_RESULT_CREATED THEN
+    ELSEIF params^.ResultFlags & NS_RESULT_CREATED THEN
         // Ready the thread because PsuCreateThreadObject didn't do it yet.
         // We need to do this after a successful handle table insertion so that
         // the thread is only set loose when we know the caller will receive a
@@ -1222,7 +1222,7 @@ FN OsCreateThread (
         RETURN status
     END
 
-    sysparams : NsuOpenParameters
+    sysparams : NsOpenParameters
 
     status = NsuCaptureOpenParameters (
         params, // userparams

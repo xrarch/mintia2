@@ -2,7 +2,37 @@
 // Public header for namespace management for the MINTIA Executive.
 //
 
+#INCLUDE "<ll>/Rtl.hjk"
+
+#INCLUDE "<ll>/System/OsNamespace.hjk"
+
 STRUCT NsHandle
     Entry : ^NsuEntry,
     Subspace : ^NsuSubspace,
 END
+
+#DEFINE NS_RESULT_CREATED 1
+
+STRUCT NsOpenParameters
+    Captured : OsOpenParameters,
+
+    Path : RtlString,
+    InitialHandle : NsHandle,
+
+    ResultFlags : ULONG,
+END
+
+#MACRO NsInitializeObjectParameters ( obparams, params, type, context, bodysize, pagedbodysize, npquotabias, pgquotabias ) [
+    ObuInitializeParameters (
+        obparams, // obparams
+        type, // type
+        context, // context
+        PsuCurrentCredentials (), // cred
+        (params)^.Captured.Permissions, // access
+        (params)^.Captured.ObFlags, // flags
+        bodysize, // bodysize
+        pagedbodysize, // pagedbodysize
+        npquotabias, // npquotabias
+        pgquotabias, // pgquotabias
+    )
+]

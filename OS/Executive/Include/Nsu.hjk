@@ -6,8 +6,6 @@
 
 #INCLUDE "<inc>/Obu.hjk"
 
-#INCLUDE "<ll>/System/OsNamespace.hjk"
-
 #DEFINE NSU_ENTRY_CREATED 1
 #DEFINE NSU_ENTRY_VIRTUAL 2
 #DEFINE NSU_ENTRY_NEGATIVE 4
@@ -56,6 +54,11 @@ STRUCT NsuSubspace
     References : ULONG,
 END
 
+#MACRO NsuCopyHandle ( dest, src ) [
+    NOTHING (dest)^.Entry = (src)^.Entry
+    NOTHING (dest)^.Subspace = (src)^.Subspace
+]
+
 STRUCT NsuLookupContext
     // The parent object is passed in through here, and the new object is passed
     // out through the same field.
@@ -79,30 +82,14 @@ STRUCT NsuLookupContext
     EntryFlags : ULONG,
 END
 
-FNPTR NsuObjectInitializationF (
-    IN object : ^VOID,
-    IN context : ^VOID,
-) : OsStatus
-
-#DEFINE NSU_RESULT_CREATED 1
-
-STRUCT NsuOpenParameters
-    Captured : OsOpenParameters,
-
-    Path : RtlString,
-    InitialHandle : NsHandle,
-
-    ResultFlags : ULONG,
-END
-
 EXTERN FN NsuCreateObject (
-    IN params : ^NsuOpenParameters,
+    IN params : ^NsOpenParameters,
     IN obparams : ^ObuParameters,
     OUT object : ^VOID,
 ) : OsStatus
 
 EXTERN FN NsuLookupObject (
-    IN params : ^NsuOpenParameters,
+    IN params : ^NsOpenParameters,
     IN type : ^ObuType,
     OUT object : ^VOID,
 ) : OsStatus
@@ -112,7 +99,7 @@ EXTERN FN NsuUnlinkObject (
 )
 
 EXTERN FN NsuLookupEntryByPath (
-    IN params : ^NsuOpenParameters,
+    IN params : ^NsOpenParameters,
     IN handle : ^NsHandle,
     IN cred : ^ObuCredentials,
     IN obparams : ^ObuParameters,
@@ -121,11 +108,11 @@ EXTERN FN NsuLookupEntryByPath (
 
 EXTERN FN NsuCaptureOpenParameters (
     IN userparams : ^OsOpenParameters,
-    IN sysparams : ^NsuOpenParameters,
+    IN sysparams : ^NsOpenParameters,
 ) : OsStatus
 
 EXTERN FN NsuFreeOpenParameters (
-    IN params : ^NsuOpenParameters,
+    IN params : ^NsOpenParameters,
 )
 
 EXTERN FN NsuInitializeProcess (
@@ -147,11 +134,6 @@ EXTERN FN NspUnreferenceEntry (
 
 EXTERN FN NsuInitialize ()
 
-#MACRO NsuCopyHandle ( dest, src ) [
-    NOTHING (dest)^.Entry = (src)^.Entry
-    NOTHING (dest)^.Subspace = (src)^.Subspace
-]
-
 #MACRO NspReferenceSubspace ( subspace ) [
     KeIncrementUlong ( &(subspace)^.References, 1 )
 ]
@@ -168,19 +150,4 @@ EXTERN FN NsuInitialize ()
 #MACRO NsuReferenceHandle ( handle ) [
     NspReferenceEntry ( (handle)^.Entry )
     NspReferenceSubspace ( (handle)^.Subspace )
-]
-
-#MACRO NsuInitializeObjectParameters ( obparams, params, type, context, bodysize, pagedbodysize, npquotabias, pgquotabias ) [
-    ObuInitializeParameters (
-        obparams, // obparams
-        type, // type
-        context, // context
-        PsuCurrentCredentials (), // cred
-        (params)^.Captured.Permissions, // access
-        (params)^.Captured.ObuFlags, // flags
-        bodysize, // bodysize
-        pagedbodysize, // pagedbodysize
-        npquotabias, // npquotabias
-        pgquotabias, // pgquotabias
-    )
 ]

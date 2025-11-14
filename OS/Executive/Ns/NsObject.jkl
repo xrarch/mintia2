@@ -10,7 +10,7 @@ EXTERN IoFileType : ObuType
 #SECTION "PAGEtext"
 FN NsuCaptureOpenParameters (
     IN userparams : ^OsOpenParameters,
-    IN sysparams : ^NsuOpenParameters,
+    IN sysparams : ^NsOpenParameters,
 ) : OsStatus
 
     // Copy open parameters into system space.
@@ -87,7 +87,7 @@ END
 
 #SECTION "PAGEtext"
 FN NsuFreeOpenParameters (
-    IN params : ^NsuOpenParameters,
+    IN params : ^NsOpenParameters,
 )
 
     // Free open parameters that were previously copied in from userspace.
@@ -105,7 +105,7 @@ END
 
 #SECTION "PAGEtext"
 FN NsuCreateObject (
-    IN params : ^NsuOpenParameters,
+    IN params : ^NsOpenParameters,
     IN obparams : ^ObuParameters,
     OUT object : ^VOID,
 ) : OsStatus
@@ -114,7 +114,7 @@ FN NsuCreateObject (
     // Most instances of file object creation are not a simple case, so that
     // does not call this, but most other things do.
 
-    // 'params' should be a fully initialized NsuOpenParameters structure, which
+    // 'params' should be a fully initialized NsOpenParameters structure, which
     // means it should have been in-copied from userspace and the initial handle
     // should have been resolved. Caller takes care of undoing these things.
 
@@ -150,7 +150,7 @@ FN NsuCreateObject (
         RETURN OS_STATUS_SUCCESS
     END
 
-    params^.ResultFlags = NSU_RESULT_CREATED
+    params^.ResultFlags = NS_RESULT_CREATED
 
     RETURN ObuAllocateObject (
         obparams, // obparams
@@ -160,7 +160,7 @@ END
 
 #SECTION "PAGEtext"
 FN NsuLookupObject (
-    IN params : ^NsuOpenParameters,
+    IN params : ^NsOpenParameters,
     IN type : ^ObuType,
     OUT object : ^VOID,
 ) : OsStatus
