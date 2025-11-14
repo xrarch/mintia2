@@ -7,8 +7,8 @@
 #INCLUDE "<inc>/Nsu.hjk"
 #INCLUDE "<ll>/System/OsFile.hjk"
 
-#IF ( NOT ( DEFINED IO_INTERNAL ) )
-    #DEFINE IO_INTERNAL 0
+#IF ( NOT ( DEFINED IOU_INTERNAL ) )
+    #DEFINE IOU_INTERNAL 0
 #END
 
 EXTERN FN IouInitialize ()
@@ -108,7 +108,7 @@ EXTERN FN IouRundownThread (
 // Assume the average context size for an IouLocation is 4 UWORDs, which is
 // 16 bytes on 32-bit and 32 bytes on 64-bit.
 
-#DEFINE IO_LOCATION_AVERAGE_CONTEXT [(SIZEOF UWORD * 4)]
+#DEFINE IOU_LOCATION_AVERAGE_CONTEXT [(SIZEOF UWORD * 4)]
 
 FNPTR IouLocationCompletionF (
     IN iol : ^IouLocation,
@@ -143,7 +143,7 @@ STRUCT IouLocation // IOL
 
     CompletionRoutine : IouLocationCompletionF,
 
-#IF IO_INTERNAL
+#IF IOU_INTERNAL
     // Flags related to things like whether the location was allocated from a
     // zone.
 
@@ -155,39 +155,39 @@ END
 STRUCT IopInlinedLocation
     Location : IouLocation,
 
-    Context : UBYTE[IO_LOCATION_AVERAGE_CONTEXT],
+    Context : UBYTE[IOU_LOCATION_AVERAGE_CONTEXT],
 END
 
 ENUM IouPacketType : UBYTE
-    IO_PACKET_TYPE_NORMAL,
-    IO_PACKET_TYPE_USERASYNC,
+    IOU_PACKET_TYPE_NORMAL,
+    IOU_PACKET_TYPE_USERASYNC,
 
-    IO_PACKET_TYPE_MAX,
+    IOU_PACKET_TYPE_MAX,
 END
 
 // The IOP should be freed upon completion.
 
-#DEFINE IO_PACKET_AUTO_FREE 2
+#DEFINE IOU_PACKET_AUTO_FREE 2
 
 // The associated MDL should be completed (unpinned etc) with the IOP.
 
-#DEFINE IO_PACKET_AUTO_COMPLETE_MDL 4
+#DEFINE IOU_PACKET_AUTO_COMPLETE_MDL 4
 
 // The inline location has been used.
 
-#DEFINE IO_PACKET_INLINE_LOC_USED 8
+#DEFINE IOU_PACKET_INLINE_LOC_USED 8
 
 // The request is on behalf of usermode.
 
-#DEFINE IO_PACKET_USERMODE 16
+#DEFINE IOU_PACKET_USERMODE 16
 
 // The packet has been completed.
 
-#DEFINE IO_PACKET_COMPLETED 32
+#DEFINE IOU_PACKET_COMPLETED 32
 
 // The packet has a timeout.
 
-#DEFINE IO_PACKET_TIMEOUT 64
+#DEFINE IOU_PACKET_TIMEOUT 64
 
 // N.B. Changing the offsets of the fields within the following structs will
 //      break practically every driver. Extending the overall size of the
@@ -214,7 +214,7 @@ STRUCT IouPacket // aka "IOP"
 
     // Pointer to an MDL that describes the buffer this operation is
     // transferring to/from, if relevant. If the flag
-    // IO_PACKET_AUTO_COMPLETE_MDL is set, the MDL will be unmapped, unpinned,
+    // IOU_PACKET_AUTO_COMPLETE_MDL is set, the MDL will be unmapped, unpinned,
     // and freed when the IOP completes.
 
     Mdl : ^MmuMdlHeader,
@@ -272,7 +272,7 @@ STRUCT IouPacket // aka "IOP"
     IopFlags : UBYTE,
 END
 
-#IF IO_INTERNAL
+#IF IOU_INTERNAL
 
 STRUCT IouUserAsyncPacket
     Header : IouPacket,
@@ -318,7 +318,7 @@ END
 ]
 
 #MACRO IouPacketWasEnqueued ( iop ) [
-    NOTHING (iop)^.IopFlags |= IO_PACKET_ENQUEUED_BY_DEVICE
+    NOTHING (iop)^.IopFlags |= IOU_PACKET_ENQUEUED_BY_DEVICE
 ]
 
 STRUCT IouReadWriteParameters
@@ -365,7 +365,7 @@ STRUCT IouTrampoline
 
     P : IouParameters,
 
-#IF IO_INTERNAL
+#IF IOU_INTERNAL
     // Pointer to the packet related to the IO operation.
 
     Packet : ^IouPacket,
@@ -390,8 +390,8 @@ EXTERN FN IouCompletePacket (
 EXTERN IouServicePlane : ^IouPlane
 
 ENUM IouNodeRelation : UBYTE
-    IO_RELATION_CHILDREN,
-    IO_RELATION_PARENTS,
+    IOU_RELATION_CHILDREN,
+    IOU_RELATION_PARENTS,
 
-    IO_RELATION_MAX,
+    IOU_RELATION_MAX,
 END

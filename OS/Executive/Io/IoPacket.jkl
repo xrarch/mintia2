@@ -4,15 +4,15 @@
 
 #INCLUDE "Iop.hjk"
 
-IopPacketCaches : ^MmpPoolCache[IO_PACKET_TYPE_MAX]
+IopPacketCaches : ^MmpPoolCache[IOU_PACKET_TYPE_MAX]
 
 IopLocationCache : ^MmpPoolCache
 
 IopTrampolineCache : ^MmpPoolCache
 
-IopPacketSize : UBYTE[IO_PACKET_TYPE_MAX] = {
-    [IO_PACKET_TYPE_NORMAL] = SIZEOF IouPacket,
-    [IO_PACKET_TYPE_USERASYNC] = SIZEOF IouUserAsyncPacket,
+IopPacketSize : UBYTE[IOU_PACKET_TYPE_MAX] = {
+    [IOU_PACKET_TYPE_NORMAL] = SIZEOF IouPacket,
+    [IOU_PACKET_TYPE_USERASYNC] = SIZEOF IouUserAsyncPacket,
 }
 
 #SECTION "INITtext"
@@ -48,7 +48,7 @@ FN IopInitPacketZones ()
     // Create normal cache.
 
     IopInitPacketCache (
-        &IopPacketCaches[IO_PACKET_TYPE_NORMAL], // cache
+        &IopPacketCaches[IOU_PACKET_TYPE_NORMAL], // cache
         SIZEOF IouPacket, // headersize
         "Packet Headers", // name
     )
@@ -56,7 +56,7 @@ FN IopInitPacketZones ()
     // Create user async cache.
 
     IopInitPacketCache (
-        &IopPacketCaches[IO_PACKET_TYPE_USERASYNC], // cache
+        &IopPacketCaches[IOU_PACKET_TYPE_USERASYNC], // cache
         SIZEOF IouUserAsyncPacket, // headersize
         "Async Packet Headers", // name
     )
@@ -119,14 +119,14 @@ EXPORT FN IouCreateLocation (
 
     location : ^IouLocation = NULLPTR
 
-    IF contextsize <= IO_LOCATION_AVERAGE_CONTEXT THEN
+    IF contextsize <= IOU_LOCATION_AVERAGE_CONTEXT THEN
         // The context size is less or equal to the expected average so we can
         // allocate the location from the inlined one or the zone.
 
-        IF packet^.IopFlags & IO_PACKET_INLINE_LOC_USED == 0 THEN
+        IF packet^.IopFlags & IOU_PACKET_INLINE_LOC_USED == 0 THEN
             // The inline location is still available, so allocate it.
 
-            packet^.IopFlags |= IO_PACKET_INLINE_LOC_USED
+            packet^.IopFlags |= IOU_PACKET_INLINE_LOC_USED
 
             location = &packet^.Inlined.Location
 
@@ -210,7 +210,7 @@ FN IouAllocatePacket (
     // Initialize the packet.
 
     IF timeout THEN
-        iopflags |= IO_PACKET_TIMEOUT
+        iopflags |= IOU_PACKET_TIMEOUT
 
         RtlMoveUquad (
             &packet^.Timeout, // destquad
@@ -250,8 +250,8 @@ FN IouAllocateFragmentPacket (
     RETURN IouAllocatePacket (
         parentpacket^.Mdl, // mdl
         parentpacket^.OffsetInMdl, // mdloffset
-        IO_PACKET_TYPE_NORMAL, // ioptype
-        iopflags | (parentpacket^.IopFlags & IO_PACKET_USERMODE), // iopflags
+        IOU_PACKET_TYPE_NORMAL, // ioptype
+        iopflags | (parentpacket^.IopFlags & IOU_PACKET_USERMODE), // iopflags
         kernelflags, // kernelflags
         event, // event
         completionroutine, // completionroutine
@@ -293,12 +293,12 @@ FN IopRundownPacket (
             packet^.PriorityBoost, // priorityboost
         )
 
-        IF packet^.Type == IO_PACKET_TYPE_USERASYNC THEN
+        IF packet^.Type == IOU_PACKET_TYPE_USERASYNC THEN
             ObuUnreferenceObject ( event )
         END
     END
 
-    IF packet^.IopFlags & IO_PACKET_AUTO_FREE THEN
+    IF packet^.IopFlags & IOU_PACKET_AUTO_FREE THEN
         IouFreePacket ( packet )
     END
 END
@@ -508,7 +508,7 @@ EXPORT FN IouCompletePacket (
         IopFreeLocation ( location )
     END
 
-    IF packet^.IopFlags & IO_PACKET_AUTO_COMPLETE_MDL THEN
+    IF packet^.IopFlags & IOU_PACKET_AUTO_COMPLETE_MDL THEN
         // Unlock the pages ASAP. We could do this at packet rundown instead but
         // that might take however long it takes a user thread to get scheduled
         // in to run its completion APC, which is suboptimal.
@@ -516,7 +516,7 @@ EXPORT FN IouCompletePacket (
         MmuCompleteMdl ( packet^.Mdl )
     END
 
-    packet^.IopFlags |= IO_PACKET_COMPLETED
+    packet^.IopFlags |= IOU_PACKET_COMPLETED
 
     parentpacket := packet^.ParentPacket
 
