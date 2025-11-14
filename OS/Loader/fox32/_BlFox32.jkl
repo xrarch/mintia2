@@ -40,6 +40,10 @@ BxFox32In:
 BxFox32Font:
     .incbin "../../PC.8x8.hcf"
 
+BxHaltFox32:
+    halt
+    ret
+
 ]
 
 EXTERN FN BxFox32Out (
@@ -50,6 +54,8 @@ EXTERN FN BxFox32Out (
 EXTERN FN BxFox32In (
     IN port : UWORD,
 ) : UWORD
+
+EXTERN FN BxHaltFox32 ()
 
 EXTERN FN BxEnableVirtualAddressing ()
 
@@ -885,5 +891,7 @@ END
 FN BxExit ()
     RtlPrint ( "BxExit called\n" )
 
-    WHILE TRUE DO END
+    WHILE TRUE DO
+        BxHaltFox32 ()
+    END
 END
