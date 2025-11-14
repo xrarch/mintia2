@@ -328,7 +328,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
     // Initialize the process object.
 
-    currentprocess := PsuCurrentProcess ()
+    currentprocess := PsCurrentProcess ()
 
     flags := ctx^.Flags
 
@@ -757,7 +757,7 @@ FN PsuGrantPrivilegeProcessObject (
 
     // Grant a privilege to the specified process.
 
-    currentprocess := PsuCurrentProcess ()
+    currentprocess := PsCurrentProcess ()
 
     // We can only grant this privilege if we either already have it or are an
     // admin.
@@ -944,7 +944,7 @@ FN OsSignalActivationProcess (
     // Signal activation for the current process, system service.
 
     PspSignalActivation (
-        PsuCurrentProcess (), // process
+        PsCurrentProcess (), // process
         status, // status
     )
 END
@@ -1119,7 +1119,7 @@ FN PsuCreateProcess (
     END
 
     status = ObuInsertObject (
-        PsuCurrentProcess (), // process
+        PsCurrentProcess (), // process
         process, // object
         params^.Captured.Access, // access
         OUT handle, // handle
@@ -1229,7 +1229,7 @@ FN OsOpenProcessByPid (
     // Insert the process object into the handle table.
 
     status = ObuInsertObject (
-        PsuCurrentProcess (), // process
+        PsCurrentProcess (), // process
         process, // process
         access, // access
         OUT handle, // handle
@@ -1537,7 +1537,7 @@ FN OsSetBasePriorityProcess (
     IF priority >= process^.Pcb.BasePriority THEN
         // Raising base priority requires special privileges.
 
-        currentprocess := PsuCurrentProcess ()
+        currentprocess := PsCurrentProcess ()
 
         IF priority >= OS_PRIORITY_LOW_REALTIME THEN
             IF NOT PsuCheckPrivilege ( currentprocess,
@@ -1782,7 +1782,7 @@ FN OsSetQuotaProcess (
 
     // Set the quota for a process, system service.
 
-    IF NOT PsuCheckPrivilege ( PsuCurrentProcess (), OS_PRIVILEGE_SET_QUOTA ) THEN
+    IF NOT PsuCheckPrivilege ( PsCurrentProcess (), OS_PRIVILEGE_SET_QUOTA ) THEN
         RETURN OS_STATUS_PRIVILEGE_NOT_HELD
     END
 

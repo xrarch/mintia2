@@ -144,7 +144,7 @@ FN (KeAbortableF) MmpSafeCaptureString (
     quota := MmGetOverheadOfBytes ( len + 1 )
 
     status := MmuChargePoolQuota (
-        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
+        PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
         quota, // charge
         MM_PAGED_POOL, // poolindex
     )
@@ -235,7 +235,7 @@ EXPORT FN MmCaptureString (
             // Uncharge pool quota.
 
             MmuUnchargePoolQuota (
-                PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
+                PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
                 ctx.Charged, // charge
                 MM_PAGED_POOL, // poolindex
             )
@@ -266,7 +266,7 @@ EXPORT FN MmFreeCapturedString (
     // Uncharge pool quota.
 
     MmuUnchargePoolQuota (
-        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
+        PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
         charge, // charge
         MM_PAGED_POOL, // poolindex
     )
@@ -286,7 +286,7 @@ FN MmAllocateAndChargeSysBuffer (
     quota := MmGetOverheadOfBytes ( bytes )
 
     status := MmuChargePoolQuota (
-        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
+        PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
         quota, // charge
         poolindex, // poolindex
     )
@@ -309,7 +309,7 @@ FN MmAllocateAndChargeSysBuffer (
     // Failed.
 
     MmuUnchargePoolQuota (
-        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
+        PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
         quota, // charge
         poolindex, // poolindex
     )
@@ -333,7 +333,7 @@ FN MmDeallocateAndUnchargeSysBuffer (
     )
 
     MmuUnchargePoolQuota (
-        PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
+        PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
         MmGetOverheadOfBytes ( bytes ), // charge
         poolindex, // poolindex
     )

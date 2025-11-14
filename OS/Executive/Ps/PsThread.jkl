@@ -100,14 +100,14 @@ FN (ObuTypeDeleteF) PspDeleteThreadObject (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN PsuExitThread ()
+EXPORT FN PsExitThread ()
 
     // This thread has reached the end of its life. Usermode will never regain
     // control.
 
-    thread := PsuCurrentThread ()
+    thread := PsCurrentThread ()
 
-    process := PsuCurrentProcess ()
+    process := PsCurrentProcess ()
 
     // Make our priority the lowest real-time priority to expedite the releasing
     // of this thread's resources.
@@ -172,7 +172,7 @@ FN (KeStartThreadF) PspUserThreadEntry (
 
     // Entry point for all usermode threads.
 
-    thread := PsuCurrentThread ()
+    thread := PsCurrentThread ()
 
     // Build the TEB.
 
@@ -331,7 +331,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     // Inherit the signal mask from the current thread.
 
-    current := PsuCurrentThread ()
+    current := PsCurrentThread ()
 
     thread^.Tcb.SignalAcceptMask[0] |= current^.Tcb.SignalAcceptMask[0]
     thread^.Tcb.SignalAcceptMask[1] |= current^.Tcb.SignalAcceptMask[1]
@@ -1156,7 +1156,7 @@ FN PsuCreateThread (
     END
 
     status = ObuInsertObject (
-        PsuCurrentProcess (), // process
+        PsCurrentProcess (), // process
         thread, // object
         params^.Captured.Access, // access
         OUT handle, // handle

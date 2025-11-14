@@ -155,7 +155,7 @@ FN ObuAllocateObject (
     npquota := MmGetOverheadOfBytes ( npsize ) + obparams^.NpQuotaBias
     pquota := MmGetOverheadOfBytes ( psize ) + obparams^.PgQuotaBias
 
-    process := PsuCurrentProcess ()
+    process := PsCurrentProcess ()
 
     quotablock := PsuQuotaBlock ( process )
 
@@ -515,7 +515,7 @@ FN (ExWorkItemF) ObuDeferredDeletionWorker (
     // An object deletion was deferred to worker thread context and WE are that
     // worker thread.
 
-    paged := PsuCurrentThread ()^.Paged
+    paged := PsCurrentThread ()^.Paged
 
     paged^.DeletingObject = TRUE
 
@@ -590,7 +590,7 @@ EXPORT FN ObUnreferenceObject (
     IF oldcount == 1 THEN
         // Delete it.
 
-        thread := PsuCurrentThread ()
+        thread := PsCurrentThread ()
 
         IF NOT KeAreApcsDeliverable () OR
             thread^.VmPrivileged THEN
@@ -756,7 +756,7 @@ FN ObCheckAccess (
     // As an admin, we can access all objects except those owned by the system
     // user.
 
-    RETURN PsuCheckPrivilege ( PsuCurrentProcess (), OS_PRIVILEGE_ADMIN )
+    RETURN PsuCheckPrivilege ( PsCurrentProcess (), OS_PRIVILEGE_ADMIN )
 END
 
 #SECTION "PAGEtext"

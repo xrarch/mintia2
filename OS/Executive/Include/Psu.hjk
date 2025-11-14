@@ -76,6 +76,7 @@ END
 ]
 
 STRUCT PsuProcess
+    // Pcb is assumed to be at offset 0 by PsCurrentProcess.
     Pcb : KeuProcess,
 
     Paged : ^PsuPagedProcess,
@@ -106,6 +107,7 @@ STRUCT PsuPagedThread
 END
 
 STRUCT PsuThread
+    // Tcb is assumed to be at offset 0 by PsCurrentThread.
     Tcb : KeuThread,
 
     Paged : ^PsuPagedThread,
@@ -161,8 +163,6 @@ EXTERN PsuSystemProcess : ^PsuProcess
 
 EXTERN PsuActiveProcessCount : UWORD
 
-EXTERN FN PsuExitThread ()
-
 EXTERN FN PsuInitializeIdleProcess ()
 
 EXTERN FN PsuInitializeStage1 ()
@@ -189,15 +189,6 @@ EXTERN FN PsuCreateThreadObject (
     OUT thread : ^PsuThread,
 ) : OsStatus
 
-EXTERN FN PsuCreateExecutiveThread (
-    IN name : ^RtlString,
-    IN startfunc : KeStartThreadF,
-    IN context1 : UWORD,
-    IN context2 : UWORD,
-    IN flags : UWORD,
-    OUT thread : ^PsuThread,
-) : OsStatus
-
 EXTERN FN PsuSetGroupProcess (
     IN process : ^PsuProcess,
     IN group : ^PsuProcessGroup,
@@ -211,16 +202,8 @@ EXTERN FN (ExWorkItemF) PsuReaperWorker (
 
 EXTERN KeuIdleProcess : PsuProcess
 
-#MACRO PsuCurrentProcess () [
-    (CONTAINEROF KeCurrentProcess () TO PsuProcess.Pcb)
-]
-
-#MACRO PsuCurrentThread () [
-    (CONTAINEROF KeCurrentThread () TO PsuThread.Tcb)
-]
-
 #MACRO PsuCurrentCredentials () [
-    (&PsuCurrentProcess()^.Paged^.Cred)
+    (&PsCurrentProcess()^.Paged^.Cred)
 ]
 
 #MACRO PsuSystemCredentials () [
@@ -232,11 +215,11 @@ EXTERN KeuIdleProcess : PsuProcess
 ]
 
 #MACRO PsuCurrentPartition () [
-    (PsuCurrentProcess()^.Partition)
+    (PsCurrentProcess()^.Partition)
 ]
 
 #MACRO PsuCurrentNode () [
-    (PsuCurrentProcess()^.Node)
+    (PsCurrentProcess()^.Node)
 ]
 
 EXTERN FN PsuBlockRundownProcess (

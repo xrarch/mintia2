@@ -4,3 +4,27 @@
 //
 
 #INCLUDE "<ll>/Rtl.hjk"
+
+#INCLUDE "<ll>/Executive/Ke.hjk"
+
+EXTERN FN PsExitThread ()
+
+EXTERN FN PsuCreateExecutiveThread (
+    IN name : ^RtlString,
+    IN startfunc : KeStartThreadF,
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+    IN flags : UWORD,
+    OUT thread : ^PsuThread,
+) : OsStatus
+
+// The following macros assume the KeuProcess and KeuThread are at the beginning
+// of the PsuProcess and PsuThread, which happens to be the case.
+
+#MACRO PsCurrentProcess () [
+    (CAST KeCurrentProcess () TO ^PsuProcess)
+]
+
+#MACRO PsCurrentThread () [
+    (CAST KeCurrentThread () TO ^PsuThread)
+]

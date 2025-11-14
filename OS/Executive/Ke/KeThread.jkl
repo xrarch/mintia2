@@ -6,7 +6,7 @@
 #INCLUDE "<ll>/System/OsStatus.hjk"
 #INCLUDE "<ll>/System/OsSignal.hjk"
 
-EXTERN FN PsuExitThread ()
+EXTERN FN PsExitThread ()
 
 PUBLIC KeuUexecApcDispatcher : ^VOID
 PUBLIC KeuUexecSignalDispatcher : ^VOID
@@ -743,7 +743,7 @@ FN KeuExitThread (
     IN thread : ^KeuThread,
 )
 
-    // Called by PsuExitThread as the final stage of thread termination.
+    // Called by PsExitThread as the final stage of thread termination.
     // We have to rundown the thread, add it to the reaper list, and signal the
     // reaper event. This function does not return.
 
@@ -917,10 +917,10 @@ FN KepDispatchUserInterrupts ()
             // and then we will add this thread to the reaper list and yield the
             // processor for the last time.
 
-            PsuExitThread ()
+            PsExitThread ()
 
 #IF BLD_CHK
-            KeCrash ( "PsuExitThread returned\n" )
+            KeCrash ( "PsExitThread returned\n" )
 #END
         END
 

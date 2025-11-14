@@ -1029,7 +1029,7 @@ EXPORT FN MmAllocatePoolEx (
     savewait := wait
 
     IF poolindex == MM_NONPAGED_POOL THEN
-        thread = PsuCurrentThread ()
+        thread = PsCurrentThread ()
 
         // If this is a VM-privileged thread allocating nonpaged pool, override
         // the wait parameter to FALSE, so that we don't deadlock waiting for
@@ -1196,6 +1196,6 @@ FN MmWaitForPoolMemory ()
 
     MmpWaitForPages (
         &PsuCurrentNode()^.Partition, // partition
-        PsuCurrentThread()^.VmPrivileged, // low
+        PsCurrentThread()^.VmPrivileged, // low
     )
 END
