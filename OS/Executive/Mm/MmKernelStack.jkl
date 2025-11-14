@@ -5,7 +5,7 @@
 #INCLUDE "Mmp.hjk"
 
 #SECTION "PAGEtext"
-FN (MmuPoolCacheAllocateF) MmpAllocateKernelStack (
+FN (MmPoolCacheAllocateF) MmpAllocateKernelStack (
     IN context : ^VOID,
     IN wait : UWORD,
 ) : ^VOID
@@ -102,7 +102,7 @@ FN (MmuPoolCacheAllocateF) MmpAllocateKernelStack (
 END
 
 #SECTION "PAGEtext"
-FN (MmuPoolCacheFreeF) MmpFreeKernelStack (
+FN (MmPoolCacheFreeF) MmpFreeKernelStack (
     IN context : ^VOID,
     IN ptr : ^VOID,
 )
@@ -162,7 +162,7 @@ FN MmpInitializeKernelStackCache (
 
     // Initialize the zones we use for quickly allocating kernel stacks.
 
-    node^.KernelStackCache = MmuCreatePoolCacheEx (
+    node^.KernelStackCache = MmCreatePoolCacheEx (
         node, // node
         "Kstacks", // name
         KEU_STACK_PAGES * RTL_PAGE_SIZE, // size
@@ -210,7 +210,7 @@ FN MmuCreateKernelStack (
 
     // Allocate it.
 
-    kstack = MmuAllocateFromPoolCache (
+    kstack = MmAllocateFromPoolCache (
         process^.Node^.KernelStackCache, // cache
         TRUE, // wait
     )
@@ -238,7 +238,7 @@ FN MmuFreeKernelStack (
 
     // Free a kernel stack. It must be in an inswapped state.
 
-    MmuFreeToPoolCache (
+    MmFreeToPoolCache (
         process^.Node^.KernelStackCache, // cache
         kstack, // ptr
     )

@@ -24,11 +24,11 @@ FN IopInitPacketCache (
 
     // Initialize a packet cache.
 
-    cache^ = MmuCreatePoolCache (
+    cache^ = MmCreatePoolCache (
         PsuCurrentNode (), // node
         name, // name
         packetsize, // size
-        MMU_NONPAGED_POOL, // poolindex
+        MM_NONPAGED_POOL, // poolindex
         'IOPz', // tag
     )
 
@@ -93,7 +93,7 @@ FN IopFreeLocation (
     IF location^.InternalFlags & IOP_LOCATION_FROM_ZONE THEN
         // Return to cache.
 
-        MmuFreeToPoolCache (
+        MmFreeToPoolCache (
             IopLocationCache, // cache
             location, // ptr
         )
@@ -103,7 +103,7 @@ FN IopFreeLocation (
 
     // Free to pool.
 
-    MmuFreePool (
+    MmFreePool (
         location, // ptr
         'IoLo', // tag
     )
@@ -135,7 +135,7 @@ EXPORT FN IouCreateLocation (
         ELSE
             // Try to allocate from the location zone.
 
-            location = MmuAllocateFromPoolCache (
+            location = MmAllocateFromPoolCache (
                 IopLocationCache, // cache
                 TRUE, // wait
             )
@@ -151,8 +151,8 @@ EXPORT FN IouCreateLocation (
     IF NOT location THEN
         // Still don't have a location so try to pool-allocate one.
 
-        location = MmuAllocatePool (
-            MMU_NONPAGED_POOL, // poolindex
+        location = MmAllocatePool (
+            MM_NONPAGED_POOL, // poolindex
             SIZEOF IoLocation + contextsize +
             (RTL_MACHINE_WORD_SIZE - 1), // bytes
             'IoLo', // tag
@@ -198,7 +198,7 @@ FN IouAllocatePacket (
     // We acquire this lock APC-safe because it can also be taken by async IO
     // completion APCs when they finally free the packet.
 
-    packet : ^IoPacket = MmuAllocateFromPoolCache (
+    packet : ^IoPacket = MmAllocateFromPoolCache (
         IopPacketCaches[ioptype], // cache
         TRUE, // wait
     )
@@ -265,7 +265,7 @@ FN IouFreePacket (
 
     // Free a packet back to the appropriate zone or pool.
 
-    MmuFreeToPoolCache (
+    MmFreeToPoolCache (
         IopPacketCaches[packet^.InternalType], // cache
         packet, // ptr
     )
@@ -367,7 +367,7 @@ FN IopBounceOnTrampoline (
     IF trampoline^.IopFlags & IOP_TRAMPOLINE_DONT_FREE == 0 THEN
         // Free the trampoline.
 
-        MmuFreeToPoolCache (
+        MmFreeToPoolCache (
             IopTrampolineCache, // cache
             trampoline, // ptr
         )
@@ -571,7 +571,7 @@ EXPORT FN IoEnqueuePacket (
         // Nested I/O request.
         // Have to allocate a trampoline out of line.
 
-        trampoline = MmuAllocateFromPoolCache (
+        trampoline = MmAllocateFromPoolCache (
             IopTrampolineCache, // cache
             TRUE, // wait
         )

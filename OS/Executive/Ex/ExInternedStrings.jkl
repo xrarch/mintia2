@@ -125,8 +125,8 @@ FN ExFindName (
         END
     END
 
-    node : ^ExuName = MmuAllocatePool (
-        MMU_PAGED_POOL, // poolindex
+    node : ^ExuName = MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
         SIZEOF ExuName + SIZEOF RtlString + len + 1, // bytes
         'Name', // tag
         FALSE, // wait
@@ -135,7 +135,7 @@ FN ExFindName (
     IF NOT node THEN
         KeReleaseLock ( &bucket^.Lock )
 
-        MmuWaitForPoolMemory ()
+        MmWaitForPoolMemory ()
 
         GOTO Retry
     END
@@ -201,7 +201,7 @@ FN ExUnreferenceName (
 
         // Free outside the bucket lock.
 
-        MmuFreePool (
+        MmFreePool (
             name, // ptr
             'Name', // tag
         )
@@ -252,7 +252,7 @@ FN ExDuplicateString (
 
     // Create a new string buffer (this is the important work).
 
-    outputstring^.Data = MmuAllocatePool (
+    outputstring^.Data = MmAllocatePool (
         poolindex, // poolindex
         inputstring^.Length + 1, // bytes
         tag, // tag

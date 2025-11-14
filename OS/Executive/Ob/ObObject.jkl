@@ -48,8 +48,8 @@ FN ObuInitializeType (
     name : ^UBYTE
 
     IF npsize THEN
-        name = MmuAllocatePool (
-            MMU_NONPAGED_POOL, // poolindex
+        name = MmAllocatePool (
+            MM_NONPAGED_POOL, // poolindex
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
             TRUE, // wait
@@ -69,11 +69,11 @@ FN ObuInitializeType (
         name[typenamelen + 1] = 'p'
         name[typenamelen + 2] = 0
 
-        type^.NpPartCache = MmuCreatePoolCache (
+        type^.NpPartCache = MmCreatePoolCache (
             PsuCurrentNode (), // node
             name, // name
             npsize, // size
-            MMU_NONPAGED_POOL, // poolindex
+            MM_NONPAGED_POOL, // poolindex
             type^.Tag, // tag
         )
 
@@ -83,8 +83,8 @@ FN ObuInitializeType (
     END
 
     IF psize THEN
-        name = MmuAllocatePool (
-            MMU_NONPAGED_POOL, // poolindex
+        name = MmAllocatePool (
+            MM_NONPAGED_POOL, // poolindex
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
             TRUE, // wait
@@ -104,11 +104,11 @@ FN ObuInitializeType (
         name[typenamelen + 1] = 'g'
         name[typenamelen + 2] = 0
 
-        type^.PgPartCache = MmuCreatePoolCache (
+        type^.PgPartCache = MmCreatePoolCache (
             PsuCurrentNode (), // node
             name, // name
             psize, // size
-            MMU_PAGED_POOL, // poolindex
+            MM_PAGED_POOL, // poolindex
             type^.Tag, // tag
         )
 
@@ -152,8 +152,8 @@ FN ObuAllocateObject (
 
     // Charge pool quota.
 
-    npquota := MmuGetOverheadOfBytes ( npsize ) + obparams^.NpQuotaBias
-    pquota := MmuGetOverheadOfBytes ( psize ) + obparams^.PgQuotaBias
+    npquota := MmGetOverheadOfBytes ( npsize ) + obparams^.NpQuotaBias
+    pquota := MmGetOverheadOfBytes ( psize ) + obparams^.PgQuotaBias
 
     process := PsuCurrentProcess ()
 
@@ -162,7 +162,7 @@ FN ObuAllocateObject (
     status := MmuChargePoolQuota (
         quotablock, // quotablock
         npquota, // charge
-        MMU_NONPAGED_POOL, // poolindex
+        MM_NONPAGED_POOL, // poolindex
     )
 
     IF OsError ( status ) THEN
@@ -172,7 +172,7 @@ FN ObuAllocateObject (
     status = MmuChargePoolQuota (
         quotablock, // quotablock
         pquota, // charge
-        MMU_PAGED_POOL, // poolindex
+        MM_PAGED_POOL, // poolindex
     )
 
     IF OsError ( status ) THEN
@@ -187,14 +187,14 @@ FN ObuAllocateObject (
 
             internalflags |= OBP_NP_FROM_CACHE
 
-            nppart = MmuAllocateFromPoolCache (
+            nppart = MmAllocateFromPoolCache (
                 type^.NpPartCache, // cache
                 TRUE, // wait
             )
         
         ELSE
-            nppart = MmuAllocatePool (
-                MMU_NONPAGED_POOL, // poolindex
+            nppart = MmAllocatePool (
+                MM_NONPAGED_POOL, // poolindex
                 npsize, // bytes
                 type^.Tag, // tag
                 TRUE, // wait
@@ -216,14 +216,14 @@ FN ObuAllocateObject (
 
             internalflags |= OBP_PG_FROM_CACHE
 
-            pgpart = MmuAllocateFromPoolCache (
+            pgpart = MmAllocateFromPoolCache (
                 type^.PgPartCache, // cache
                 TRUE, // wait
             )
         
         ELSE
-            pgpart = MmuAllocatePool (
-                MMU_PAGED_POOL, // poolindex
+            pgpart = MmAllocatePool (
+                MM_PAGED_POOL, // poolindex
                 psize, // bytes
                 type^.Tag, // tag
                 TRUE, // wait
@@ -302,13 +302,13 @@ FN ObuAllocateObject (
 
     IF nppart THEN
         IF internalflags & OBP_NP_FROM_CACHE THEN
-            MmuFreeToPoolCache (
+            MmFreeToPoolCache (
                 type^.NpPartCache, // cache
                 nppart, // ptr
             )
 
         ELSE
-            MmuFreePool (
+            MmFreePool (
                 nppart, // ptr
                 type^.Tag, // tag
             )
@@ -320,7 +320,7 @@ FN ObuAllocateObject (
     MmuUnchargePoolQuota (
         quotablock, // quotablock
         pquota, // charge
-        MMU_PAGED_POOL, // poolindex
+        MM_PAGED_POOL, // poolindex
     )
 
 @Error1
@@ -328,7 +328,7 @@ FN ObuAllocateObject (
     MmuUnchargePoolQuota (
         quotablock, // quotablock
         npquota, // charge
-        MMU_NONPAGED_POOL, // poolindex
+        MM_NONPAGED_POOL, // poolindex
     )
 
     RETURN status
@@ -363,13 +363,13 @@ FN ObuFreeObject (
         // Only a single part.
 
         IF flags & OBP_PG_FROM_CACHE THEN
-            MmuFreeToPoolCache (
+            MmFreeToPoolCache (
                 type^.PgPartCache, // cache
                 header, // ptr
             )
 
         ELSE
-            MmuFreePool (
+            MmFreePool (
                 header, // ptr
                 type^.Tag, // tag
             )
@@ -379,26 +379,26 @@ FN ObuFreeObject (
         // Two parts.
 
         IF flags & OBP_PG_FROM_CACHE THEN
-            MmuFreeToPoolCache (
+            MmFreeToPoolCache (
                 type^.PgPartCache, // cache
                 header, // ptr
             )
 
         ELSE
-            MmuFreePool (
+            MmFreePool (
                 header, // ptr
                 type^.Tag, // tag
             )
         END
 
         IF flags & OBP_NP_FROM_CACHE THEN
-            MmuFreeToPoolCache (
+            MmFreeToPoolCache (
                 type^.NpPartCache, // cache
                 object - SIZEOF ObpCommonHeader, // ptr
             )
 
         ELSE
-            MmuFreePool (
+            MmFreePool (
                 object - SIZEOF ObpCommonHeader, // ptr
                 type^.Tag, // tag
             )
@@ -411,7 +411,7 @@ FN ObuFreeObject (
         MmuUnchargePoolQuota (
             quotablock, // quotablock
             pquota, // charge
-            MMU_PAGED_POOL, // poolindex
+            MM_PAGED_POOL, // poolindex
         )
     END
 
@@ -419,7 +419,7 @@ FN ObuFreeObject (
         MmuUnchargePoolQuota (
             quotablock, // quotablock
             npquota, // charge
-            MMU_NONPAGED_POOL, // poolindex
+            MM_NONPAGED_POOL, // poolindex
         )
     END
 

@@ -48,7 +48,7 @@ FN ExAppendSet (
 
     newcapacity := set^.Capacity + EXP_ARRAY_EXTENSION
 
-    newbuffer := MmuAllocatePool (
+    newbuffer := MmAllocatePool (
         set^.PoolIndex, // poolindex
         newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
         set^.Tag, // tag
@@ -72,7 +72,7 @@ FN ExAppendSet (
     // Free the old buffer.
 
     IF set^.Buffer != &set^.InitialBuffer[0] THEN
-        MmuFreePool (
+        MmFreePool (
             set^.Buffer, // ptr
             set^.Tag, // tag
         )
@@ -162,7 +162,7 @@ FN ExRemoveObjectFromSetByIndex (
     ELSE
         // Allocate a smaller buffer.
 
-        newbuffer = MmuAllocatePool (
+        newbuffer = MmAllocatePool (
             set^.PoolIndex, // poolindex
             newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
             set^.Tag, // tag
@@ -188,7 +188,7 @@ FN ExRemoveObjectFromSetByIndex (
     // Note we ruled out the case where this is still the initial buffer above,
     // so we can just free to pool unconditionally.
 
-    MmuFreePool (
+    MmFreePool (
         buf, // ptr
         set^.Tag, // tag
     )
@@ -270,7 +270,7 @@ FN ExEmptySet (
     END
 
     IF set^.Buffer != &set^.InitialBuffer[0] THEN
-        MmuFreePool (
+        MmFreePool (
             set^.Buffer, // ptr
             set^.Tag, // tag
         )

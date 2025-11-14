@@ -88,8 +88,8 @@ FN ExuLookupKnownModule (
         GOTO Exit
     END
 
-    knownmodule = MmuAllocatePool (
-        MMU_PAGED_POOL, // poolindex
+    knownmodule = MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
         SIZEOF ExuKnownModule, // bytes
         'KnMo', // tag
         TRUE, // wait
@@ -104,14 +104,14 @@ FN ExuLookupKnownModule (
     status := ExDuplicateString (
         &knownmodule^.Name, // outputstring
         name, // inputstring
-        MMU_PAGED_POOL, // poolindex
+        MM_PAGED_POOL, // poolindex
         'KnMs', // tag
     )
 
     IF OsError ( status ) THEN
         // Failed to duplicate the name string.
 
-        MmuFreePool (
+        MmFreePool (
             knownmodule, // ptr
             'KnMo', // tag
         )

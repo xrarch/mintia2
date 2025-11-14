@@ -12,11 +12,11 @@ FN ExpInitializeEventCounters ()
 
     // Initialize the event counter list.
 
-    ExpEventCounterCache = MmuCreatePoolCache (
+    ExpEventCounterCache = MmCreatePoolCache (
         PsuCurrentNode (), // node
         "Event Counters", // name
         SIZEOF ExuEventCounter, // size
-        MMU_NONPAGED_POOL, // poolindex
+        MM_NONPAGED_POOL, // poolindex
         'EvCn', // tag
     )
 
@@ -34,7 +34,7 @@ FN ExAllocateEventCounter (
 
     // Allocate an event counter.
 
-    counter : ^ExuEventCounter = MmuAllocateFromPoolCache (
+    counter : ^ExuEventCounter = MmAllocateFromPoolCache (
         ExpEventCounterCache, // cache
         wait, // wait
     )
@@ -85,7 +85,7 @@ FN ExUnreferenceEventCounter (
     IF oldcount == 1 THEN
         // This was the last user of this event counter. Put it on the list.
 
-        MmuFreeToPoolCache (
+        MmFreeToPoolCache (
             ExpEventCounterCache, // cache
             counter, // ptr
         )

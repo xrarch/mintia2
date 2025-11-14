@@ -166,19 +166,19 @@ FN ExpInitializeWorkQueues ()
 
     workthreads : UBYTE[EX_MAX_WORK_PRIORITY]
     
-    systemsize := MmuGetSystemSize ()
+    systemsize := MmGetSystemSize ()
 
-    IF systemsize <= MMU_TINY_SYSTEM THEN
+    IF systemsize <= MM_TINY_SYSTEM THEN
         workthreads[EX_NONPAGED_WORK_PRIORITY] = 1
         workthreads[EX_HIGH_WORK_PRIORITY] = 1
         workthreads[EX_LOW_WORK_PRIORITY] = 1
 
-    ELSEIF systemsize <= MMU_SMALL_SYSTEM THEN
+    ELSEIF systemsize <= MM_SMALL_SYSTEM THEN
         workthreads[EX_NONPAGED_WORK_PRIORITY] = 1
         workthreads[EX_HIGH_WORK_PRIORITY] = 2
         workthreads[EX_LOW_WORK_PRIORITY] = 3
 
-    ELSEIF systemsize <= MMU_MEDIUM_SYSTEM THEN
+    ELSEIF systemsize <= MM_MEDIUM_SYSTEM THEN
         workthreads[EX_NONPAGED_WORK_PRIORITY] = 2
         workthreads[EX_HIGH_WORK_PRIORITY] = 3
         workthreads[EX_LOW_WORK_PRIORITY] = 5

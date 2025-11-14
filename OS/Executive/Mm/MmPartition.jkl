@@ -110,7 +110,7 @@ FN MmpInitializePartitionStage1 (
     partition^.ModifiedPageMaximum = 0
     partition^.ZeroingThreshold = 0
 
-    partition^.SizeLevel = MMU_UNINITIALIZED_SYSTEM
+    partition^.SizeLevel = MM_UNINITIALIZED_SYSTEM
 END
 
 FN MmpSetPartitionSize (
@@ -125,37 +125,37 @@ FN MmpSetPartitionSize (
     IF membytes <= 3 * 1024 * 1024 THEN
         // Tiny, 0-3MB.
 
-        size = MMU_TINY_SYSTEM
+        size = MM_TINY_SYSTEM
 
     ELSEIF membytes <= 5 * 1024 * 1024 THEN
         // Small, 3-5MB.
 
-        size = MMU_SMALL_SYSTEM
+        size = MM_SMALL_SYSTEM
 
     ELSEIF membytes <= 9 * 1024 * 1024 THEN
         // Medium, 5-9MB.
 
-        size = MMU_MEDIUM_SYSTEM
+        size = MM_MEDIUM_SYSTEM
 
     ELSEIF membytes <= 33 * 1024 * 1024 THEN
         // Large, 9-33MB.
 
-        size = MMU_LARGE_SYSTEM
+        size = MM_LARGE_SYSTEM
 
     ELSE
         // Massive, >33MB.
 
-        size = MMU_MASSIVE_SYSTEM
+        size = MM_MASSIVE_SYSTEM
     END
 
     partition^.SizeLevel = size
 
     // Set the modified page maximum.
 
-    IF size <= MMU_TINY_SYSTEM THEN
+    IF size <= MM_TINY_SYSTEM THEN
         partition^.ModifiedPageMaximum = 50
 
-    ELSEIF size <= MMU_LARGE_SYSTEM THEN
+    ELSEIF size <= MM_LARGE_SYSTEM THEN
         partition^.ModifiedPageMaximum = 100
 
     ELSE
@@ -164,10 +164,10 @@ FN MmpSetPartitionSize (
 
     // Set the page zeroing threshold.
 
-    IF size <= MMU_TINY_SYSTEM THEN
+    IF size <= MM_TINY_SYSTEM THEN
         partition^.ZeroingThreshold = 75
 
-    ELSEIF size <= MMU_MEDIUM_SYSTEM THEN
+    ELSEIF size <= MM_MEDIUM_SYSTEM THEN
         partition^.ZeroingThreshold = 150
 
     ELSE
@@ -176,11 +176,11 @@ FN MmpSetPartitionSize (
 
     // Set the paging thresholds.
 
-    IF size <= MMU_TINY_SYSTEM THEN
+    IF size <= MM_TINY_SYSTEM THEN
         partition^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 8
         partition^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 50
 
-    ELSEIF size <= MMU_LARGE_SYSTEM THEN
+    ELSEIF size <= MM_LARGE_SYSTEM THEN
         partition^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 20
         partition^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 100
 
@@ -449,7 +449,7 @@ FN MmpAllocatePage (
     IF mustzero THEN
         KeAssert ( pfe != NULLPTR )
 
-        MmuZeroPage ( MmpPfeToPfn ( pfe ) )
+        MmZeroPage ( MmpPfeToPfn ( pfe ) )
     END
 
     RETURN pfe
@@ -756,7 +756,7 @@ FN MmuUnchargeCommit (
     KeAssert ( pages <= old )
 END
 
-FN MmuGetSystemSize () : UWORD
+FN MmGetSystemSize () : UWORD
 
     // Get the size of the current node.
 

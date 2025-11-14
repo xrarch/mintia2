@@ -16,14 +16,14 @@ END
 PUBLIC PspTurnstileCache : ^MmpPoolCache
 
 #MACRO PspAllocateTurnstile () [
-    MmuAllocateFromPoolCache (
+    MmAllocateFromPoolCache (
         PspTurnstileCache, // cache
         TRUE, // wait
     )
 ]
 
 #MACRO PspFreeTurnstile ( turnstile ) [
-    MmuFreeToPoolCache (
+    MmFreeToPoolCache (
         PspTurnstileCache, // cache
         turnstile, // ptr
     )
@@ -60,7 +60,7 @@ FN PspPerformEagerThreadCleanup (
     IF paged^.IpcBlock THEN
         // Free the IPC block.
 
-        MmuFreePool (
+        MmFreePool (
             paged^.IpcBlock, // ptr
             'Ipcb', // tag
         )
@@ -773,7 +773,7 @@ FN OsQueryThread (
 
     // Copy the information to userspace.
 
-    RETURN MmuSafeCopyOut (
+    RETURN MmSafeCopyOut (
         query, // dest
         &sysquery, // src
         SIZEOF OsThreadQuery, // size
@@ -980,7 +980,7 @@ FN OsSleepThread (
 
     sysinterval : RtlUquad
 
-    status := MmuSafeCopyIn (
+    status := MmSafeCopyIn (
         &sysinterval, // dest
         interval, // src
         SIZEOF RtlUquad, // size
@@ -1212,7 +1212,7 @@ FN OsCreateThread (
 
     sysname : RtlString
 
-    status := MmuCaptureString (
+    status := MmCaptureString (
         name, // string
         &sysname, // output
         OS_NAME_MAX, // maxlen
@@ -1248,7 +1248,7 @@ FN OsCreateThread (
 
 @Exit
 
-    MmuFreeCapturedString ( &sysname )
+    MmFreeCapturedString ( &sysname )
 
     RETURN status
 END

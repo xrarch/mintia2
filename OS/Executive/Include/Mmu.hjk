@@ -7,29 +7,10 @@
 
 #INCLUDE "<ll>/Rtl.hjk"
 
-FNPTR MmuUseQuickPteF (
-    IN vaddr : ^VOID,
-    IN context : ^VOID,
-) : OsStatus
-
-EXTERN FN MmuUseQuickPte (
-    IN func : MmuUseQuickPteF,
-    IN pfn : UWORD,
-    IN context : ^VOID,
-) : OsStatus
-
-EXTERN FN MmuZeroPage (
-    IN pfn : UWORD,
-)
-
 EXTERN FN MmuShouldAccessCrash (
     IN abortblock : ^KeAbortBlock,
     IN badaddr : ^VOID,
     IN status : OsStatus,
-) : UWORD
-
-EXTERN FN MmuIsVirtualValid (
-    IN vaddr : ^VOID,
 ) : UWORD
 
 EXTERN FN MmuCreateKernelStack (
@@ -41,37 +22,6 @@ EXTERN FN MmuFreeKernelStack (
     IN process : ^PsuProcess,
     IN kstack : ^VOID,
 )
-
-#MACRO MmuAllocatePool ( poolindex, bytes, tag, wait ) [
-    MmuAllocatePoolEx (
-        NULLPTR, // node
-        poolindex, // poolindex
-        bytes, // bytes
-        tag, // tag
-        wait, // wait
-    )
-]
-
-EXTERN FN MmuAllocatePoolEx (
-    IN node : ^MmpNode,
-    IN poolindex : UWORD,
-    IN bytes : UWORD,
-    IN tag : ULONG,
-    IN wait : UWORD,
-) : ^VOID
-
-EXTERN FN MmuFreePool (
-    IN ptr : ^VOID,
-    IN tag : ULONG,
-)
-
-EXTERN FN MmuGetOverheadOfBlock (
-    IN ptr : ^VOID,
-) : UWORD
-
-EXTERN FN MmuGetOverheadOfBytes (
-    IN bytes : UWORD,
-) : UWORD
 
 EXTERN FN MmuChargeCommit (
     IN partition : ^MmpPartition,
@@ -165,15 +115,6 @@ EXTERN FN MmuInitializeStage1 ()
 
 EXTERN FN MmuJettisonUnusedResources ()
 
-ENUM MmuPoolIndices : UBYTE
-    MMU_NONPAGED_POOL,
-    MMU_PRIVILEGED_POOL,
-    MMU_PAGED_POOL,
-    MMU_PAGE_TRACKING_POOL,
-
-    MMU_MAXIMUM_POOL,
-END
-
 STRUCT MmuObject
     // The object lock is superior to the page list lock.
 
@@ -191,15 +132,6 @@ STRUCT MmuBackedObject
 
     PageTreeRoot : RtlAvlNode,
 END
-
-#DEFINE MMU_UNINITIALIZED_SYSTEM 0
-#DEFINE MMU_TINY_SYSTEM 1
-#DEFINE MMU_SMALL_SYSTEM 2
-#DEFINE MMU_MEDIUM_SYSTEM 3
-#DEFINE MMU_LARGE_SYSTEM 4
-#DEFINE MMU_MASSIVE_SYSTEM 5
-
-EXTERN FN MmuGetSystemSize () : UWORD
 
 // With three levels this can describe 4,311,810,312 pages, or about 18TB.
 
@@ -220,6 +152,14 @@ STRUCT MmuExtensibleObject
     TriplyIndirectArray : ^^^^UWORD,
 END
 
+EXTERN FN MmuPageFault (
+    IN address : ^VOID,
+    IN writing : UWORD,
+    IN usermode : UWORD,
+) : OsStatus
+
+EXTERN FN MmuBalanceManager ()
+
 #DEFINE MMU_MDL_FREE 1
 #DEFINE MMU_MDL_UNPIN 2
 #DEFINE MMU_MDL_UNMAP 4
@@ -238,96 +178,3 @@ END
 EXTERN FN MmuCompleteMdl (
     IN mdl : ^MmuMdlHeader,
 )
-
-EXTERN FN MmuSafeCopyIn (
-    IN dest : ^VOID,
-    IN src : ^VOID,
-    IN sz : UWORD,
-) : OsStatus
-
-EXTERN FN MmuSafeCopyOut (
-    IN dest : ^VOID,
-    IN src : ^VOID,
-    IN sz : UWORD,
-) : OsStatus
-
-EXTERN FN MmuCaptureString (
-    IN string : ^RtlString,
-    IN output : ^RtlString,
-    IN maxlen : UWORD,
-) : OsStatus
-
-EXTERN FN MmuFreeCapturedString (
-    IN string : ^RtlString,
-)
-
-EXTERN FN MmuAllocateAndChargeSysBuffer (
-    IN bytes : UWORD,
-    IN poolindex : UWORD,
-    IN tag : UWORD,
-    OUT ptr : ^VOID,
-) : OsStatus
-
-EXTERN FN MmuDeallocateAndUnchargeSysBuffer (
-    IN ptr : ^VOID,
-    IN tag : UWORD,
-    IN bytes : UWORD,
-    IN poolindex : UWORD,
-)
-
-EXTERN FN MmuPageFault (
-    IN address : ^VOID,
-    IN writing : UWORD,
-    IN usermode : UWORD,
-) : OsStatus
-
-EXTERN FN MmuWaitForPoolMemory ()
-
-EXTERN FN MmuAllocateFromPoolCache (
-    IN cache : ^MmpPoolCache,
-    IN wait : UWORD,
-) : ^VOID
-
-EXTERN FN MmuFreeToPoolCache (
-    IN cache : ^MmpPoolCache,
-    IN ptr : ^VOID,
-)
-
-FNPTR MmuPoolCacheAllocateF (
-    IN context : ^VOID,
-    IN wait : UWORD,
-) : ^VOID
-
-FNPTR MmuPoolCacheFreeF (
-    IN context : ^VOID,
-    IN ptr : ^VOID,
-)
-
-FNPTR MmuPoolCacheDeleteF (
-    IN context : ^VOID,
-)
-
-EXTERN FN MmuCreatePoolCacheEx (
-    IN node : ^MmpNode,
-    IN name : ^UBYTE,
-    IN size : UWORD,
-    IN pageable : UWORD,
-    IN allocfunc : MmuPoolCacheAllocateF,
-    IN freefunc : MmuPoolCacheFreeF,
-    IN deletefunc : MmuPoolCacheDeleteF,
-    IN context : ^VOID,
-) : ^MmpPoolCache
-
-EXTERN FN MmuCreatePoolCache (
-    IN node : ^MmpNode,
-    IN name : ^UBYTE,
-    IN size : UWORD,
-    IN poolindex : UWORD,
-    IN tag : UWORD,
-) : ^MmpPoolCache
-
-EXTERN FN MmuDeletePoolCache (
-    IN cache : ^MmpPoolCache,
-)
-
-EXTERN FN MmuBalanceManager ()

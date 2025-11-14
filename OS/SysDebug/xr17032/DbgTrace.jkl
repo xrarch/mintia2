@@ -116,13 +116,13 @@ FN DbgTrace (
 
             ctx := CAST sp TO ^OsContext
 
-            IF NOT MmuIsVirtualValid ( ctx ) THEN
+            IF NOT MmIsVirtualValid ( ctx ) THEN
                 RtlPrint ( "#\n" )
 
                 LEAVE
             END
 
-            IF NOT MmuIsVirtualValid ( ctx + SIZEOF OsContext ) THEN
+            IF NOT MmIsVirtualValid ( ctx + SIZEOF OsContext ) THEN
                 RtlPrint ( "#\n" )
 
                 LEAVE
@@ -145,7 +145,7 @@ FN DbgTrace (
             ulong : ^ULONG
 
             WHILE pc >= symvalue DO
-                IF NOT MmuIsVirtualValid ( pc ) THEN
+                IF NOT MmIsVirtualValid ( pc ) THEN
                     RtlPrint ( "#\n" )
 
                     LEAVE
@@ -188,7 +188,7 @@ FN DbgTrace (
 
                 ulong = CAST sp + offset - 4 TO ^ULONG
 
-                IF NOT MmuIsVirtualValid ( ulong ) THEN
+                IF NOT MmIsVirtualValid ( ulong ) THEN
                     RtlPrint ( "#\n" )
 
                     LEAVE

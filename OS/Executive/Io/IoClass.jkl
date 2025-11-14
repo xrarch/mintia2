@@ -103,8 +103,8 @@ FN IouCreateClass (
     // Register a new IO class.
     // Returns NULLPTR upon failure.
 
-    class = MmuAllocatePool (
-        MMU_NONPAGED_POOL, // poolindex
+    class = MmAllocatePool (
+        MM_NONPAGED_POOL, // poolindex
         SIZEOF IouClass + dispatchtablesize, // bytes
         'Clas', // tag
         TRUE, // wait
@@ -176,7 +176,7 @@ FN IouCreateClass (
 
         KeReleaseLock ( &IopClassLock )
 
-        MmuFreePool (
+        MmFreePool (
             class, // ptr
             'Clas', // tag
         )

@@ -68,9 +68,9 @@ STRUCT MmpPoolCache
 
     MagazineType : ^MmpMagazineType,
 
-    Allocate : MmuPoolCacheAllocateF,
-    Free : MmuPoolCacheFreeF,
-    Delete : MmuPoolCacheDeleteF,
+    Allocate : MmPoolCacheAllocateF,
+    Free : MmPoolCacheFreeF,
+    Delete : MmPoolCacheDeleteF,
 
     Context : ^VOID,
 
@@ -246,7 +246,7 @@ FN MmpExtendSlabCache (
 
 @Retry
 
-    slab := MmuAllocatePoolEx (
+    slab := MmAllocatePoolEx (
         scache^.Node, // node
         scache^.PoolIndex, // poolindex
         scache^.SlabSize, // bytes
@@ -352,13 +352,13 @@ FN MmpFreeSlab (
 
     // Now free the actual pool allocation.
 
-    MmuFreePool (
+    MmFreePool (
         slab, // ptr
         scache^.Tag, // tag
     )
 END
 
-FN (MmuPoolCacheAllocateF) MmpAllocateFromSlabCache (
+FN (MmPoolCacheAllocateF) MmpAllocateFromSlabCache (
     IN context : ^VOID,
     IN wait : UWORD,
 ) : ^VOID
@@ -401,7 +401,7 @@ FN (MmuPoolCacheAllocateF) MmpAllocateFromSlabCache (
     RETURN block
 END
 
-FN (MmuPoolCacheFreeF) MmpFreeToSlabCache (
+FN (MmPoolCacheFreeF) MmpFreeToSlabCache (
     IN context : ^VOID,
     IN ptr : ^VOID,
 )
@@ -438,14 +438,14 @@ FN (MmuPoolCacheFreeF) MmpFreeToSlabCache (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmuCreatePoolCacheEx (
+EXPORT FN MmCreatePoolCacheEx (
     IN node : ^MmpNode,
     IN name : ^UBYTE,
     IN size : UWORD,
     IN pageable : UWORD,
-    IN allocfunc : MmuPoolCacheAllocateF,
-    IN freefunc : MmuPoolCacheFreeF,
-    IN deletefunc : MmuPoolCacheDeleteF,
+    IN allocfunc : MmPoolCacheAllocateF,
+    IN freefunc : MmPoolCacheFreeF,
+    IN deletefunc : MmPoolCacheDeleteF,
     IN context : ^VOID,
 ) : ^MmpPoolCache
 
@@ -535,7 +535,7 @@ EXPORT FN MmuCreatePoolCacheEx (
     RETURN cache
 END
 
-FN (MmuPoolCacheDeleteF) MmpDeleteSlabBackedCache (
+FN (MmPoolCacheDeleteF) MmpDeleteSlabBackedCache (
     IN context : ^VOID,
 )
 
@@ -554,7 +554,7 @@ FN (MmuPoolCacheDeleteF) MmpDeleteSlabBackedCache (
     )
 END
 
-EXPORT FN MmuCreatePoolCache (
+EXPORT FN MmCreatePoolCache (
     IN node : ^MmpNode,
     IN name : ^UBYTE,
     IN size : UWORD,
@@ -585,11 +585,11 @@ EXPORT FN MmuCreatePoolCache (
 
     // Create the pool cache with the appropriate slab callbacks.
 
-    cache := MmuCreatePoolCacheEx (
+    cache := MmCreatePoolCacheEx (
         node, // node
         name, // name
         size, // size
-        poolindex != MMU_NONPAGED_POOL, // pageable
+        poolindex != MM_NONPAGED_POOL, // pageable
         &MmpAllocateFromSlabCache, // allocfunc
         &MmpFreeToSlabCache, // freefunc
         &MmpDeleteSlabBackedCache, // deletefunc
@@ -635,7 +635,7 @@ FN MmpDestroyAndFreeMagazine (
 
     // Un-skip depot list link and free magazine.
 
-    MmuFreeToPoolCache (
+    MmFreeToPoolCache (
         cache^.MagazineType^.PoolCache, // cache
         magazine - SIZEOF ^VOID, // ptr
     )
@@ -842,7 +842,7 @@ FN MmpPurgeMagazinesPoolCache (
 
     // Purge the magazines of the given pool cache.
     // If this is a result of a resize operation then the global cache list
-    // lock is held. If it's the result of an MmuDeletePoolCache then no lock is
+    // lock is held. If it's the result of an MmDeletePoolCache then no lock is
     // needed.
 
     MmpPurgeCpuMagazinesPoolCache ( cache )
@@ -857,7 +857,7 @@ FN MmpPurgeMagazinesPoolCache (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmuDeletePoolCache (
+EXPORT FN MmDeletePoolCache (
     IN cache : ^MmpPoolCache,
 )
 
@@ -915,7 +915,7 @@ FN MmpReloadMagazines (
     percpu^.Rounds = rounds
 END
 
-EXPORT FN MmuAllocateFromPoolCache (
+EXPORT FN MmAllocateFromPoolCache (
     IN cache : ^MmpPoolCache,
     IN wait : UWORD,
 ) : ^VOID
@@ -1009,7 +1009,7 @@ EXPORT FN MmuAllocateFromPoolCache (
     )
 END
 
-EXPORT FN MmuFreeToPoolCache (
+EXPORT FN MmFreeToPoolCache (
     IN cache : ^MmpPoolCache,
     IN ptr : ^VOID,
 )
@@ -1104,7 +1104,7 @@ EXPORT FN MmuFreeToPoolCache (
 
     MmpUnlockMagazineCache ( percpu, ipl )
 
-    magazine = MmuAllocateFromPoolCache (
+    magazine = MmAllocateFromPoolCache (
         magtype^.PoolCache, // cache
         FALSE, // wait
     )
@@ -1120,7 +1120,7 @@ EXPORT FN MmuFreeToPoolCache (
 
             MmpUnlockMagazineCache ( percpu, ipl )
 
-            MmuFreeToPoolCache (
+            MmFreeToPoolCache (
                 magtype^.PoolCache, // cache
                 magazine, // ptr
             )
@@ -1166,11 +1166,11 @@ FN MmpInitializeMagazineType (
 
     magtype^.Size = size
 
-    magtype^.PoolCache = MmuCreatePoolCache (
+    magtype^.PoolCache = MmCreatePoolCache (
         node, // node
         name, // name
         (size + 1) * SIZEOF ^VOID, // size
-        MMU_NONPAGED_POOL, // poolindex
+        MM_NONPAGED_POOL, // poolindex
         'Magz', // tag
     )
 
@@ -1248,7 +1248,7 @@ FN MmpInitializePoolCache (
         node, // node
         &node^.PoolCacheSlabs, // scache
         MMP_PC_SIZE + KeQueryProcessorCount () * MMP_PCPCPU_SIZE, // size
-        MMU_NONPAGED_POOL, // poolindex
+        MM_NONPAGED_POOL, // poolindex
         'PoCa', // tag
     )
 
@@ -1258,7 +1258,7 @@ FN MmpInitializePoolCache (
         node, // node
         &node^.SlabCacheSlabs, // scache
         SIZEOF MmpSlabCache, // size
-        MMU_NONPAGED_POOL, // poolindex
+        MM_NONPAGED_POOL, // poolindex
         'PoSl', // tag
     )
 

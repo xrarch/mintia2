@@ -127,7 +127,7 @@ FN ExpRemoveEntryFromDictionary (
 
     ExUnreferenceName ( entry^.Key )
 
-    MmuFreePool (
+    MmFreePool (
         entry, // entry
         'DcEn', // tag
     )
@@ -201,8 +201,8 @@ FN ExInsertInDictionary (
 
     // The entry doesn't exist, so create it.
 
-    entry = MmuAllocatePool (
-        MMU_PAGED_POOL, // poolindex
+    entry = MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
         SIZEOF ExpDictionaryEntry, // bytes
         'DcEn', // tag
         TRUE, // wait
@@ -215,7 +215,7 @@ FN ExInsertInDictionary (
     entry^.Key = ExFindName ( key )
 
     IF NOT entry^.Key THEN
-        MmuFreePool (
+        MmFreePool (
             entry, // entry
             'DcEn', // tag
         )

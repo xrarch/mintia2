@@ -31,11 +31,11 @@ FN MmpInitializeQuotaBlock (
     quotablock^.Uid = uid
     quotablock^.References = 1
 
-    quotablock^.Pool[MMU_NONPAGED_POOL].Used = 0
-    quotablock^.Pool[MMU_NONPAGED_POOL].Limit = nplimit
+    quotablock^.Pool[MM_NONPAGED_POOL].Used = 0
+    quotablock^.Pool[MM_NONPAGED_POOL].Limit = nplimit
 
-    quotablock^.Pool[MMU_PAGED_POOL].Used = 0
-    quotablock^.Pool[MMU_PAGED_POOL].Limit = pglimit
+    quotablock^.Pool[MM_PAGED_POOL].Used = 0
+    quotablock^.Pool[MM_PAGED_POOL].Limit = pglimit
 
     quotablock^.VmPages.Used = 0
     quotablock^.VmPages.Limit = vmlimit
@@ -94,7 +94,7 @@ FN MmuUnreferenceQuotaBlock (
     IF oldcount == 1 THEN
         // Free.
 
-        MmuFreePool (
+        MmFreePool (
             quotablock, // ptr
             'Quot', // tag
         )
@@ -142,8 +142,8 @@ FN MmuLookupQuotaBlock (
 
     // Allocate a quota block from paged pool.
 
-    quotablock = CAST MmuAllocatePool (
-        MMU_PAGED_POOL, // poolindex
+    quotablock = CAST MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
         SIZEOF MmpQuotaBlock, // bytes
         'Quot', // tag
         TRUE, // wait
@@ -159,8 +159,8 @@ FN MmuLookupQuotaBlock (
 
     MmpInitializeQuotaBlock (
         quotablock, // quotablock
-        copyquotablock^.Pool[MMU_NONPAGED_POOL].Limit, // nplimit
-        copyquotablock^.Pool[MMU_PAGED_POOL].Limit, // pglimit
+        copyquotablock^.Pool[MM_NONPAGED_POOL].Limit, // nplimit
+        copyquotablock^.Pool[MM_PAGED_POOL].Limit, // pglimit
         copyquotablock^.VmPages.Limit, // vmlimit
         uid, // uid
     )
@@ -307,8 +307,8 @@ FN MmuSetQuotaLimits (
 
     // Set new limits on the quota block.
 
-    quotablock^.Pool[MMU_NONPAGED_POOL].Limit = query^.NpPoolLimit
-    quotablock^.Pool[MMU_PAGED_POOL].Limit = query^.PgPoolLimit
+    quotablock^.Pool[MM_NONPAGED_POOL].Limit = query^.NpPoolLimit
+    quotablock^.Pool[MM_PAGED_POOL].Limit = query^.PgPoolLimit
     quotablock^.VmPages.Limit = query^.VmLimit
 END
 
@@ -320,11 +320,11 @@ FN MmuQueryQuota (
 
     // Query the quota block.
 
-    query^.NpPoolUsed = quotablock^.Pool[MMU_NONPAGED_POOL].Used
-    query^.NpPoolLimit = quotablock^.Pool[MMU_NONPAGED_POOL].Limit
+    query^.NpPoolUsed = quotablock^.Pool[MM_NONPAGED_POOL].Used
+    query^.NpPoolLimit = quotablock^.Pool[MM_NONPAGED_POOL].Limit
 
-    query^.PgPoolUsed = quotablock^.Pool[MMU_PAGED_POOL].Used
-    query^.PgPoolLimit = quotablock^.Pool[MMU_PAGED_POOL].Limit
+    query^.PgPoolUsed = quotablock^.Pool[MM_PAGED_POOL].Used
+    query^.PgPoolLimit = quotablock^.Pool[MM_PAGED_POOL].Limit
 
     query^.VmUsed = quotablock^.VmPages.Used
     query^.VmLimit = quotablock^.VmPages.Limit

@@ -2,3 +2,158 @@
 // Public header file for the Memory Management (Mm) component of the
 // MINTIA Executive.
 //
+
+FNPTR MmUseQuickPteF (
+    IN vaddr : ^VOID,
+    IN context : ^VOID,
+) : OsStatus
+
+EXTERN FN MmUseQuickPte (
+    IN func : MmUseQuickPteF,
+    IN pfn : UWORD,
+    IN context : ^VOID,
+) : OsStatus
+
+EXTERN FN MmZeroPage (
+    IN pfn : UWORD,
+)
+
+EXTERN FN MmIsVirtualValid (
+    IN vaddr : ^VOID,
+) : UWORD
+
+#MACRO MmAllocatePool ( poolindex, bytes, tag, wait ) [
+    MmAllocatePoolEx (
+        NULLPTR, // node
+        poolindex, // poolindex
+        bytes, // bytes
+        tag, // tag
+        wait, // wait
+    )
+]
+
+EXTERN FN MmAllocatePoolEx (
+    IN node : ^MmpNode,
+    IN poolindex : UWORD,
+    IN bytes : UWORD,
+    IN tag : ULONG,
+    IN wait : UWORD,
+) : ^VOID
+
+EXTERN FN MmFreePool (
+    IN ptr : ^VOID,
+    IN tag : ULONG,
+)
+
+EXTERN FN MmGetOverheadOfBlock (
+    IN ptr : ^VOID,
+) : UWORD
+
+EXTERN FN MmGetOverheadOfBytes (
+    IN bytes : UWORD,
+) : UWORD
+
+ENUM MmPoolIndex : UBYTE
+    MM_NONPAGED_POOL,
+    MM_PRIVILEGED_POOL,
+    MM_PAGED_POOL,
+    MM_PAGE_TRACKING_POOL,
+
+    MM_MAXIMUM_POOL,
+END
+
+ENUM MmSystemSize : UBYTE
+    MM_UNINITIALIZED_SYSTEM,
+    MM_TINY_SYSTEM,
+    MM_SMALL_SYSTEM,
+    MM_MEDIUM_SYSTEM,
+    MM_LARGE_SYSTEM,
+    MM_MASSIVE_SYSTEM,
+END
+
+EXTERN FN MmGetSystemSize () : UWORD
+
+EXTERN FN MmSafeCopyIn (
+    IN dest : ^VOID,
+    IN src : ^VOID,
+    IN sz : UWORD,
+) : OsStatus
+
+EXTERN FN MmSafeCopyOut (
+    IN dest : ^VOID,
+    IN src : ^VOID,
+    IN sz : UWORD,
+) : OsStatus
+
+EXTERN FN MmCaptureString (
+    IN string : ^RtlString,
+    IN output : ^RtlString,
+    IN maxlen : UWORD,
+) : OsStatus
+
+EXTERN FN MmFreeCapturedString (
+    IN string : ^RtlString,
+)
+
+EXTERN FN MmAllocateAndChargeSysBuffer (
+    IN bytes : UWORD,
+    IN poolindex : UWORD,
+    IN tag : UWORD,
+    OUT ptr : ^VOID,
+) : OsStatus
+
+EXTERN FN MmDeallocateAndUnchargeSysBuffer (
+    IN ptr : ^VOID,
+    IN tag : UWORD,
+    IN bytes : UWORD,
+    IN poolindex : UWORD,
+)
+
+EXTERN FN MmWaitForPoolMemory ()
+
+EXTERN FN MmAllocateFromPoolCache (
+    IN cache : ^MmpPoolCache,
+    IN wait : UWORD,
+) : ^VOID
+
+EXTERN FN MmFreeToPoolCache (
+    IN cache : ^MmpPoolCache,
+    IN ptr : ^VOID,
+)
+
+FNPTR MmPoolCacheAllocateF (
+    IN context : ^VOID,
+    IN wait : UWORD,
+) : ^VOID
+
+FNPTR MmPoolCacheFreeF (
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+)
+
+FNPTR MmPoolCacheDeleteF (
+    IN context : ^VOID,
+)
+
+EXTERN FN MmCreatePoolCacheEx (
+    IN node : ^MmpNode,
+    IN name : ^UBYTE,
+    IN size : UWORD,
+    IN pageable : UWORD,
+    IN allocfunc : MmPoolCacheAllocateF,
+    IN freefunc : MmPoolCacheFreeF,
+    IN deletefunc : MmPoolCacheDeleteF,
+    IN context : ^VOID,
+) : ^MmpPoolCache
+
+EXTERN FN MmCreatePoolCache (
+    IN node : ^MmpNode,
+    IN name : ^UBYTE,
+    IN size : UWORD,
+    IN poolindex : UWORD,
+    IN tag : UWORD,
+) : ^MmpPoolCache
+
+EXTERN FN MmDeletePoolCache (
+    IN cache : ^MmpPoolCache,
+)

@@ -47,11 +47,11 @@ FN FwtMain ()
     
     thread : ^PsuThread
     
-    FwtDataCache = MmuCreatePoolCache (
+    FwtDataCache = MmCreatePoolCache (
         PsuCurrentNode (), // node
         "Fireworks Data", // name
         SIZEOF FwtData, // size
-        MMU_NONPAGED_POOL, // poolindex
+        MM_NONPAGED_POOL, // poolindex
         'FwtD', // tag
     )
 
@@ -74,7 +74,7 @@ FN FwtMain ()
     IF OsError ( status ) THEN
         RtlPrint ( "FwtMain: Could not create main thread\n" )
 
-        MmuDeletePoolCache ( FwtDataCache )
+        MmDeletePoolCache ( FwtDataCache )
 
         LEAVE
     END

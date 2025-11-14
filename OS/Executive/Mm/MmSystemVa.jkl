@@ -235,10 +235,10 @@ FN MmpInitializeSystemVa (
 
     entryshift : UWORD
 
-    IF size <= MMU_TINY_SYSTEM THEN
+    IF size <= MM_TINY_SYSTEM THEN
         entryshift = 15 // 1 << 15 = 32KB
 
-    ELSEIF size < MMU_LARGE_SYSTEM THEN
+    ELSEIF size < MM_LARGE_SYSTEM THEN
         entryshift = 16 // 1 << 16 = 64KB
 
     ELSE
@@ -316,11 +316,11 @@ FN MmpInitializeSpaceNodeAllocation (
     //     MmpDynamicSpaceNode being small enough to not trigger page-aligned
     //     pool allocation when slabs are created for it.
 
-    node^.SpaceNodeCache = MmuCreatePoolCache (
+    node^.SpaceNodeCache = MmCreatePoolCache (
         node, // node
         "Space Nodes", // name
         SIZEOF MmpDynamicSpaceNode, // size
-        MMU_NONPAGED_POOL, // poolindex
+        MM_NONPAGED_POOL, // poolindex
         'Dyna', // tag
     )
 
@@ -410,14 +410,14 @@ FN MmpFindDynamicSpaceNode (
 END
 
 #MACRO MmpAllocateDynamicSpaceNode ( node ) [
-    CAST MmuAllocateFromPoolCache (
+    CAST MmAllocateFromPoolCache (
         (node)^.SpaceNodeCache, // cache
         FALSE, // wait
     ) TO ^MmpDynamicSpaceNode
 ]
 
 #MACRO MmpFreeDynamicSpaceNode ( node, spacenode ) [
-    MmuFreeToPoolCache (
+    MmFreeToPoolCache (
         (node)^.SpaceNodeCache, // cache
         spacenode, // ptr
     )

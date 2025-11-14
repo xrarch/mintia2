@@ -15,7 +15,7 @@ FN NsuCaptureOpenParameters (
 
     // Copy open parameters into system space.
 
-    status := MmuSafeCopyIn (
+    status := MmSafeCopyIn (
         &sysparams^.Captured, // dest
         userparams, // src
         SIZEOF OsOpenParameters, // sz
@@ -33,7 +33,7 @@ FN NsuCaptureOpenParameters (
 
     // Copy in the path.
 
-    status = MmuCaptureString (
+    status = MmCaptureString (
         &sysparams^.Captured.Path, // string
         &sysparams^.Path, // output
         OS_PATH_MAX, // maxlen
@@ -66,7 +66,7 @@ FN NsuCaptureOpenParameters (
     )
 
     IF OsError ( status ) THEN
-        MmuFreeCapturedString ( &sysparams^.Path )
+        MmFreeCapturedString ( &sysparams^.Path )
 
         RETURN status
     END
@@ -93,7 +93,7 @@ FN NsuFreeOpenParameters (
     // Free open parameters that were previously copied in from userspace.
 
     IF params^.Path.Data THEN
-        MmuFreeCapturedString ( &params^.Path )
+        MmFreeCapturedString ( &params^.Path )
 
         IF params^.InitialHandle.Entry THEN
             // Unreference the initial handle.

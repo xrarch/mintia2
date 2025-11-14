@@ -112,7 +112,7 @@ FN NspDeleteEntry (
 
     // Now delete the entry itself.
 
-    MmuFreePool (
+    MmFreePool (
         entry, // ptr
         'NsEn', // tag
     )
@@ -224,8 +224,8 @@ FN NspCreateEntry (
     // Create a new namespace entry and link it as a child of the parent.
     // Tree lock must be held exclusive.
 
-    entry := CAST MmuAllocatePool (
-        MMU_PAGED_POOL, // poolindex
+    entry := CAST MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
         SIZEOF NsuEntry, // bytes
         'NsEn', // tag
         TRUE, // wait
@@ -245,7 +245,7 @@ FN NspCreateEntry (
 
         // Failed to initialize the entry.
 
-        MmuFreePool (
+        MmFreePool (
             entry, // ptr
             'NsEn', // tag
         )
@@ -332,17 +332,17 @@ FN NspInitializeTree ()
     // entries. Therefore the FCB cache is also trimmed when these entries are
     // trimmed, so these values can have a large impact on system performance.
 
-    size := MmuGetSystemSize ()
+    size := MmGetSystemSize ()
 
-    IF size <= MMU_TINY_SYSTEM THEN
+    IF size <= MM_TINY_SYSTEM THEN
         NspMaximumReclaimableEntries = 200
         NspMaximumNegativeEntries = 100
 
-    ELSEIF size <= MMU_SMALL_SYSTEM THEN
+    ELSEIF size <= MM_SMALL_SYSTEM THEN
         NspMaximumReclaimableEntries = 1000
         NspMaximumNegativeEntries = 200
 
-    ELSEIF size <= MMU_LARGE_SYSTEM THEN
+    ELSEIF size <= MM_LARGE_SYSTEM THEN
         NspMaximumReclaimableEntries = 6000
         NspMaximumNegativeEntries = 500
 

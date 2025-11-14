@@ -41,7 +41,7 @@ FN (KeAbortableF) MmpSafeCopy (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmuSafeCopyIn (
+EXPORT FN MmSafeCopyIn (
     IN dest : ^VOID,
     IN src : ^VOID,
     IN sz : UWORD,
@@ -73,7 +73,7 @@ EXPORT FN MmuSafeCopyIn (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmuSafeCopyOut (
+EXPORT FN MmSafeCopyOut (
     IN dest : ^VOID,
     IN src : ^VOID,
     IN sz : UWORD,
@@ -141,12 +141,12 @@ FN (KeAbortableF) MmpSafeCaptureString (
 
     // Charge quota.
 
-    quota := MmuGetOverheadOfBytes ( len + 1 )
+    quota := MmGetOverheadOfBytes ( len + 1 )
 
     status := MmuChargePoolQuota (
         PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
         quota, // charge
-        MMU_PAGED_POOL, // poolindex
+        MM_PAGED_POOL, // poolindex
     )
 
     IF OsError ( status ) THEN
@@ -159,8 +159,8 @@ FN (KeAbortableF) MmpSafeCaptureString (
 
     // Allocate a buffer.
 
-    buf := CAST MmuAllocatePool (
-        MMU_PAGED_POOL, // poolindex
+    buf := CAST MmAllocatePool (
+        MM_PAGED_POOL, // poolindex
         len + 1, // bytes
         'CpSt', // tag
         TRUE, // wait
@@ -192,7 +192,7 @@ FN (KeAbortableF) MmpSafeCaptureString (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmuCaptureString (
+EXPORT FN MmCaptureString (
     IN string : ^RtlString,
     IN output : ^RtlString,
     IN maxlen : UWORD,
@@ -225,7 +225,7 @@ EXPORT FN MmuCaptureString (
         IF output^.Data THEN
             // It allocated a buffer before it aborted, so free the buffer.
 
-            MmuFreePool (
+            MmFreePool (
                 output^.Data, // ptr
                 'CpSt', // tag
             )
@@ -237,7 +237,7 @@ EXPORT FN MmuCaptureString (
             MmuUnchargePoolQuota (
                 PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
                 ctx.Charged, // charge
-                MMU_PAGED_POOL, // poolindex
+                MM_PAGED_POOL, // poolindex
             )
         END
     END
@@ -246,15 +246,15 @@ EXPORT FN MmuCaptureString (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN MmuFreeCapturedString (
+EXPORT FN MmFreeCapturedString (
     IN string : ^RtlString,
 )
 
     // Free a previously captured string.
 
-    charge := MmuGetOverheadOfBlock ( string^.Data )
+    charge := MmGetOverheadOfBlock ( string^.Data )
 
-    MmuFreePool (
+    MmFreePool (
         string^.Data, // ptr
         'CpSt', // tag
     )
@@ -268,12 +268,12 @@ EXPORT FN MmuFreeCapturedString (
     MmuUnchargePoolQuota (
         PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
         charge, // charge
-        MMU_PAGED_POOL, // poolindex
+        MM_PAGED_POOL, // poolindex
     )
 END
 
 #SECTION "PAGEtext"
-FN MmuAllocateAndChargeSysBuffer (
+FN MmAllocateAndChargeSysBuffer (
     IN bytes : UWORD,
     IN poolindex : UWORD,
     IN tag : UWORD,
@@ -283,7 +283,7 @@ FN MmuAllocateAndChargeSysBuffer (
     // Charge the size of a buffer and allocate it from kernel pool.
     // Intended as a utility function for system services.
 
-    quota := MmuGetOverheadOfBytes ( bytes )
+    quota := MmGetOverheadOfBytes ( bytes )
 
     status := MmuChargePoolQuota (
         PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
@@ -295,7 +295,7 @@ FN MmuAllocateAndChargeSysBuffer (
         RETURN status
     END
 
-    ptr = MmuAllocatePool (
+    ptr = MmAllocatePool (
         poolindex, // poolindex
         bytes, // bytes
         tag, // tag
@@ -318,7 +318,7 @@ FN MmuAllocateAndChargeSysBuffer (
 END
 
 #SECTION "PAGEtext"
-FN MmuDeallocateAndUnchargeSysBuffer (
+FN MmDeallocateAndUnchargeSysBuffer (
     IN ptr : ^VOID,
     IN tag : UWORD,
     IN bytes : UWORD,
@@ -327,14 +327,14 @@ FN MmuDeallocateAndUnchargeSysBuffer (
 
     // Uncharge the size of a buffer and free it to kernel pool.
 
-    MmuFreePool (
+    MmFreePool (
         ptr, // ptr
         tag, // tag
     )
 
     MmuUnchargePoolQuota (
         PsuQuotaBlock ( PsuCurrentProcess () ), // quotablock
-        MmuGetOverheadOfBytes ( bytes ), // charge
+        MmGetOverheadOfBytes ( bytes ), // charge
         poolindex, // poolindex
     )
 END

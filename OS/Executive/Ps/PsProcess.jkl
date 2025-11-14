@@ -965,7 +965,7 @@ FN OsAwaitActivationProcess (
 
     sysinterval : RtlUquad
 
-    status := MmuSafeCopyIn (
+    status := MmSafeCopyIn (
         &sysinterval, // dest
         timeout, // src
         SIZEOF RtlUquad, // size
@@ -1152,7 +1152,7 @@ FN OsCreateProcess (
 
     sysname : RtlString
 
-    status := MmuCaptureString (
+    status := MmCaptureString (
         name, // string
         &sysname, // output
         OS_NAME_MAX, // maxlen
@@ -1186,7 +1186,7 @@ FN OsCreateProcess (
 
 @Exit
 
-    MmuFreeCapturedString ( &sysname )
+    MmFreeCapturedString ( &sysname )
 
     RETURN status
 END
@@ -1419,7 +1419,7 @@ FN OsQueryProcess (
 
     // Copy the information to userspace.
 
-    RETURN MmuSafeCopyOut (
+    RETURN MmSafeCopyOut (
         query, // dest
         &sysquery, // src
         SIZEOF OsProcessQuery, // size
@@ -1495,7 +1495,7 @@ FN OsQueryProcessByPid (
 
     // Copy the information to userspace.
 
-    RETURN MmuSafeCopyOut (
+    RETURN MmSafeCopyOut (
         query, // dest
         &sysquery, // src
         SIZEOF OsProcessQuery, // size
@@ -1667,9 +1667,9 @@ FN OsQueryProcesses (
 
     buf : ^VOID
 
-    status := MmuAllocateAndChargeSysBuffer (
+    status := MmAllocateAndChargeSysBuffer (
         bufsize, // bytes
-        MMU_PAGED_POOL, // poolindex
+        MM_PAGED_POOL, // poolindex
         'PsQu', // tag
         OUT buf, // ptr
     )
@@ -1715,7 +1715,7 @@ FN OsQueryProcesses (
     IF NOT OsError ( status ) THEN
         // Copy out to the user buffer outside of the process list lock.
 
-        status = MmuSafeCopyOut (
+        status = MmSafeCopyOut (
             query, // dest
             buf, // src
             bufsize, // sz
@@ -1724,11 +1724,11 @@ FN OsQueryProcesses (
 
     // Deallocate the system buffer.
 
-    MmuDeallocateAndUnchargeSysBuffer (
+    MmDeallocateAndUnchargeSysBuffer (
         buf, // ptr
         'PsQu', // tag
         bufsize, // bytes
-        MMU_PAGED_POOL, // poolindex
+        MM_PAGED_POOL, // poolindex
     )
 
     RETURN status
@@ -1790,7 +1790,7 @@ FN OsSetQuotaProcess (
 
     // Copy the userspace quota buffer into system space.
 
-    status := MmuSafeCopyIn (
+    status := MmSafeCopyIn (
         &sysquota, // dest
         quota, // src
         SIZEOF OsQuotaQuery, // sz
@@ -1867,7 +1867,7 @@ FN OsQueryQuotaProcess (
         RETURN status
     END
 
-    RETURN MmuSafeCopyOut (
+    RETURN MmSafeCopyOut (
         quota, // dest
         &sysquota, // src
         SIZEOF OsQuotaQuery, // sz

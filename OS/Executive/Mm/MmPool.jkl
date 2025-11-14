@@ -342,26 +342,26 @@ FN MmpInitializePools (
     // Initialize the system pools as part of stage 1 Mm init.
 
     MmpInitializeNonpagedPool (
-        &node^.PoolRecords[MMU_NONPAGED_POOL], // pool
+        &node^.PoolRecords[MM_NONPAGED_POOL], // pool
         node, // node
     )
 
     MmpInitializeNonpagedPool (
-        &node^.PoolRecords[MMU_PRIVILEGED_POOL], // pool
+        &node^.PoolRecords[MM_PRIVILEGED_POOL], // pool
         node, // node
     )
 
     // Allow privileged pool to use privileged memory.
 
-    node^.PoolRecords[MMU_PRIVILEGED_POOL].Flags |=
+    node^.PoolRecords[MM_PRIVILEGED_POOL].Flags |=
         MMP_POOL_FLAG_USE_PRIVILEGED_MEM
 
     // Set paged pool to point to nonpaged pool for now, since we don't have
     // enough initialized to deal with faults on paged pool yet.
 
-    node^.PoolTable[MMU_NONPAGED_POOL] = &node^.PoolRecords[MMU_NONPAGED_POOL]
-    node^.PoolTable[MMU_PAGED_POOL] = &node^.PoolRecords[MMU_NONPAGED_POOL]
-    node^.PoolTable[MMU_PRIVILEGED_POOL] = &node^.PoolRecords[MMU_PRIVILEGED_POOL]
+    node^.PoolTable[MM_NONPAGED_POOL] = &node^.PoolRecords[MM_NONPAGED_POOL]
+    node^.PoolTable[MM_PAGED_POOL] = &node^.PoolRecords[MM_NONPAGED_POOL]
+    node^.PoolTable[MM_PRIVILEGED_POOL] = &node^.PoolRecords[MM_PRIVILEGED_POOL]
 
     // Initialize pool cache.
 
@@ -380,19 +380,19 @@ FN MmpInitializePagedPools (
     // Initialize the paged pools as part of stage 2 Mm init.
 
     MmpInitializePagedPool (
-        &node^.PoolRecords[MMU_PAGED_POOL], // pool
+        &node^.PoolRecords[MM_PAGED_POOL], // pool
         node, // node
     )
 
     MmpInitializePagedPool (
-        &node^.PoolRecords[MMU_PAGE_TRACKING_POOL], // pool
+        &node^.PoolRecords[MM_PAGE_TRACKING_POOL], // pool
         node, // node
     )
 
-    node^.PoolTable[MMU_PAGED_POOL] = &node^.PoolRecords[MMU_PAGED_POOL]
+    node^.PoolTable[MM_PAGED_POOL] = &node^.PoolRecords[MM_PAGED_POOL]
 
-    node^.PoolTable[MMU_PAGE_TRACKING_POOL] =
-        &node^.PoolRecords[MMU_PAGE_TRACKING_POOL]
+    node^.PoolTable[MM_PAGE_TRACKING_POOL] =
+        &node^.PoolRecords[MM_PAGE_TRACKING_POOL]
 END
 
 MmpEightBitLog : UBYTE[256] = {
@@ -1009,7 +1009,7 @@ FN MmpFreePageAligned (
     )
 END
 
-EXPORT FN MmuAllocatePoolEx (
+EXPORT FN MmAllocatePoolEx (
     IN node : ^MmpNode,
     IN poolindex : UWORD,
     IN bytes : UWORD,
@@ -1028,7 +1028,7 @@ EXPORT FN MmuAllocatePoolEx (
     thread : ^PsuThread = NULLPTR
     savewait := wait
 
-    IF poolindex == MMU_NONPAGED_POOL THEN
+    IF poolindex == MM_NONPAGED_POOL THEN
         thread = PsuCurrentThread ()
 
         // If this is a VM-privileged thread allocating nonpaged pool, override
@@ -1075,7 +1075,7 @@ EXPORT FN MmuAllocatePoolEx (
         // privileged pool (which will take from the reserved final page
         // frames if necessary).
 
-        poolindex = MMU_PRIVILEGED_POOL
+        poolindex = MM_PRIVILEGED_POOL
         thread = NULLPTR
         wait = savewait
 
@@ -1100,7 +1100,7 @@ EXPORT FN MmuAllocatePoolEx (
     RETURN ptr
 END
 
-EXPORT FN MmuFreePool (
+EXPORT FN MmFreePool (
     IN ptr : ^VOID,
     IN tag : ULONG,
 )
@@ -1127,7 +1127,7 @@ EXPORT FN MmuFreePool (
 END
 
 #SECTION "PAGEtext"
-FN MmuGetOverheadOfBlock (
+FN MmGetOverheadOfBlock (
     IN ptr : ^VOID,
 ) : UWORD
 
@@ -1152,7 +1152,7 @@ FN MmuGetOverheadOfBlock (
 END
 
 #SECTION "PAGEtext"
-FN MmuGetOverheadOfBytes (
+FN MmGetOverheadOfBytes (
     IN bytes : UWORD,
 ) : UWORD
 
@@ -1176,7 +1176,7 @@ FN MmuGetOverheadOfBytes (
     RETURN (bytes + SIZEOF MmpBlock + MMP_BLOCK_SIZE_MASK) & ~MMP_BLOCK_SIZE_MASK
 END
 
-FN MmuWaitForPoolMemory ()
+FN MmWaitForPoolMemory ()
 
     // Exported function to wait for free memory on the local node.
     // Sometimes one wishes to allocate pool while holding a lock that is also
@@ -1185,12 +1185,12 @@ FN MmuWaitForPoolMemory ()
     // useful:
     //
     // WHILE TRUE DO
-    //     IF MmuAllocatePool ( wait=FALSE ) != NULLPTR THEN
+    //     IF MmAllocatePool ( wait=FALSE ) != NULLPTR THEN
     //         BREAK
     //     END
     //
     //     KeReleaseLock ( &MyImportantLock )
-    //     MmuWaitForPoolMemory ()
+    //     MmWaitForPoolMemory ()
     //     KeAcquireLockExclusive ( &MyImportantLock )
     // END
 
