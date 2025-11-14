@@ -153,7 +153,9 @@ AisixFSBoot:
 ReadBlock:
 	add a0, 4
 	mov t0, 0x80002000
-	mov t1, 0x80003000 //  hardcoded as disk 0
+	or  t0, [BootDiskId]
+	mov t1, 0x80003000
+	or  t1, [BootDiskId]
 	out t0, a1
 	out t1, a0
 	ret

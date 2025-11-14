@@ -319,6 +319,35 @@ EXTERN FN IoEnqueuePacket (
     IN parameters : ^IouParameters,
 ) : OsStatus
 
+EXTERN FN IoAllocatePacket (
+    IN mdl : ^MmuMdlHeader,
+    IN mdloffset : UWORD,
+    IN ioptype : UWORD,
+    IN iopflags : UWORD,
+    IN kernelflags : UWORD,
+    IN event : ^KeEvent,
+    IN completionroutine : IoPacketCompletionF,
+    IN timeout : ^RtlUquad,
+) : ^IoPacket
+
+EXTERN FN IoAllocateFragmentPacket (
+    IN parentpacket : ^IoPacket,
+    IN iopflags : UWORD,
+    IN kernelflags : UWORD,
+    IN event : ^KeEvent,
+    IN completionroutine : IoPacketCompletionF,
+    IN timeout : ^RtlUquad,
+) : ^IoPacket
+
+EXTERN FN IoFreePacket (
+    IN packet : ^IoPacket,
+)
+
+EXTERN FN IoCreateLocation (
+    IN packet : ^IoPacket,
+    IN contextsize : UWORD,
+) : ^IoLocation
+
 EXTERN IoServicePlane : ^IouPlane
 
 ENUM IoNodeRelation : UBYTE

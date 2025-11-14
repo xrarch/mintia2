@@ -361,15 +361,6 @@ EXTERN FN KeSetBasePriorityProcess (
     IN priority : UWORD,
 )
 
-EXTERN FN KeAttachProcess (
-    IN process : ^KeuProcess,
-    IN try : UWORD,
-) : UWORD
-
-EXTERN FN KeDetachProcess (
-    IN process : ^KeuProcess,
-)
-
 FNPTR KeStartThreadF (
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -497,7 +488,7 @@ EXTERN FN KeSleep (
     IN alertable : UWORD,
 ) : OsStatus
 
-EXTERN FN KeuWaitForSingleObject (
+EXTERN FN KeWaitForSingleObject (
     IN waitmode : UWORD,
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
@@ -621,6 +612,11 @@ EXTERN FN KeCancelRequestQueue (
 ) : UWORD
 
 EXTERN FN KeFinishCancelRequestQueue (
+    IN queue : ^KeRequestQueue,
+    IN request : ^KeRequestEntry,
+)
+
+EXTERN FN KeInsertRequestQueue (
     IN queue : ^KeRequestQueue,
     IN request : ^KeRequestEntry,
 )

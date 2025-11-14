@@ -42,7 +42,7 @@ FN (KeStartThreadF) ExpWorkQueueLoop (
     END
 END
 
-FN ExEnqueueWorkItem (
+EXPORT FN ExEnqueueWorkItem (
     IN item : ^ExWorkItem,
     IN priority : ExWorkQueuePriority,
     IN context1 : UWORD,
@@ -66,7 +66,7 @@ FN ExEnqueueWorkItem (
     )
 END
 
-FN ExEnqueueTimedWorkItem (
+EXPORT FN ExEnqueueTimedWorkItem (
     IN item : ^ExTimedWorkItem,
     IN priority : ExWorkQueuePriority,
     IN interval : ^RtlUquad,
@@ -105,7 +105,7 @@ FN (KeDpcF) ExpTimedWorkItemDpc (
     )
 END
 
-FN ExInitializeTimedWorkItem (
+EXPORT FN ExInitializeTimedWorkItem (
     IN item : ^ExTimedWorkItem,
     IN routine : ExWorkItemF,
 )
@@ -206,7 +206,7 @@ FN ExpInitializeWorkQueues ()
         WHILE i < threads DO
             thread : ^PsuThread
 
-            status := PsuCreateExecutiveThread (
+            status := PsCreateExecutiveThread (
                 &name, // name
                 &ExpWorkQueueLoop, // startfunc
                 &ExpWorkQueues[j], // context1

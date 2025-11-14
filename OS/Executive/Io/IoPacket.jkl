@@ -109,7 +109,7 @@ FN IopFreeLocation (
     )
 END
 
-EXPORT FN IouCreateLocation (
+EXPORT FN IoCreateLocation (
     IN packet : ^IoPacket,
     IN contextsize : UWORD,
 ) : ^IoLocation
@@ -182,7 +182,7 @@ EXPORT FN IouCreateLocation (
     RETURN location
 END
 
-FN IouAllocatePacket (
+EXPORT FN IoAllocatePacket (
     IN mdl : ^MmuMdlHeader,
     IN mdloffset : UWORD,
     IN ioptype : UWORD,
@@ -236,7 +236,7 @@ FN IouAllocatePacket (
     RETURN packet
 END
 
-FN IouAllocateFragmentPacket (
+EXPORT FN IoAllocateFragmentPacket (
     IN parentpacket : ^IoPacket,
     IN iopflags : UWORD,
     IN kernelflags : UWORD,
@@ -247,7 +247,7 @@ FN IouAllocateFragmentPacket (
 
     // Helper routine for allocating a fragment packet.
 
-    RETURN IouAllocatePacket (
+    RETURN IoAllocatePacket (
         parentpacket^.Mdl, // mdl
         parentpacket^.OffsetInMdl, // mdloffset
         IOP_PACKET_TYPE_NORMAL, // ioptype
@@ -259,7 +259,7 @@ FN IouAllocateFragmentPacket (
     )
 END
 
-FN IouFreePacket (
+EXPORT FN IoFreePacket (
     IN packet : ^IoPacket,
 )
 
@@ -299,7 +299,7 @@ FN IopRundownPacket (
     END
 
     IF packet^.Flags & IO_PACKET_AUTO_FREE THEN
-        IouFreePacket ( packet )
+        IoFreePacket ( packet )
     END
 END
 

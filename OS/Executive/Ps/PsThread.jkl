@@ -303,7 +303,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     // Attach to the process to ensure it is resident.
 
-    KeAttachProcess (
+    KeuAttachProcess (
         &process^.Pcb, // process
         FALSE, // try
     )
@@ -321,14 +321,14 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     ) THEN
         // The process was terminated already.
 
-        KeDetachProcess ( &process^.Pcb )
+        KeuDetachProcess ( &process^.Pcb )
 
         status = OS_STATUS_WAS_TERMINATED
 
         GOTO Error6
     END
 
-    KeDetachProcess ( &process^.Pcb )
+    KeuDetachProcess ( &process^.Pcb )
 
     // Inherit the signal mask from the current thread.
 
@@ -1059,7 +1059,7 @@ FN PsuCreateThreadObject (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN PsuCreateExecutiveThread (
+EXPORT FN PsCreateExecutiveThread (
     IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,

@@ -26,7 +26,7 @@ FN (KeApcF) KepSuspendThreadApc (
 
     thread := KeCurrentThread ()
 
-    KeuWaitForSingleObject (
+    KeWaitForSingleObject (
         KE_KERNEL_MODE, // waitmode
         KE_UNALERTABLE, // alertable
         NULLPTR, // timeout
@@ -316,10 +316,10 @@ FN KeuUninitializeThread (
 
     // Remove the thread's resident stack from the process's counter.
     // Note that we have to do this *after* decrementing the thread count, or
-    // a race condition with KeDetachProcess is possible in which it will see a
+    // a race condition with KeuDetachProcess is possible in which it will see a
     // nonzero thread count while decrementing the resident count, and enqueue
     // the process to be outswapped. By decrementing the resident count
-    // afterward, we guarantee that KeDetachProcess won't see it transition to
+    // afterward, we guarantee that KeuDetachProcess won't see it transition to
     // zero after the process's threads have all died.
 
     ipl := KepAcquireSwapState ( process )
@@ -624,7 +624,7 @@ FN KeuMaskSignalThread (
     RETURN enabled
 END
 
-FN KeSignalThread (
+EXPORT FN KeSignalThread (
     IN thread : ^KeuThread,
     IN signal : UWORD,
 )
@@ -674,7 +674,7 @@ FN KeSignalThread (
     KepReleaseThread ( thread, ipl )
 END
 
-EXPORT FN KeuIgnoreEvents ()
+FN KeuIgnoreEvents ()
 
     // Increment the IgnoreEvent count of the current thread.
 
@@ -685,7 +685,7 @@ EXPORT FN KeuIgnoreEvents ()
     thread^.IgnoreEventCount += 1
 END
 
-EXPORT FN KeuAcceptEvents ()
+FN KeuAcceptEvents ()
 
     // Decrement the IgnoreEvent count of the current thread.
 

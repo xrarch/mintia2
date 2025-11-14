@@ -6,7 +6,7 @@
 .section text
 
 start:
-	jmp  PastThePartitionTable
+	jmp  start
 
 here:
 .bytes (164 - here), 0
@@ -18,7 +18,9 @@ here:
 
 PastThePartitionTable:
 	mov r3, 0x80002000       // command to set the location of the buffer
-	mov r4, 0x80003000       // command to read a sector from a disk into the buffer
+	or  r3, r0               // merge in the boot disk ID
+	mov r4, 0x80003000       // command to read a sector from a disk
+	or  r4, r0               // merge in the boot disk ID
 	out r3, 0xA00            // set the memory buffer location
 	out r4, 7                // read the sector into memory
 
