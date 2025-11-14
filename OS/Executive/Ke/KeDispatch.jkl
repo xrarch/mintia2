@@ -1669,9 +1669,9 @@ FN KepYield (
     //       and so the following block of code was conditionalized out for
     //       uniprocessor builds. This assumption was broken by KeuExitThread
     //       which can cause the high priority reaper thread to be awoken, which
-    //       would be selected as the NextThread, and then it would call KepYield
-    //       and would fail a KeAssert ( prb^.NextThread == NULLPTR ) below.
-    //       So now we do this on both UP and MP builds.
+    //       would be selected as the NextThread, and then it would call
+    //       KepYield and would fail a KeAssert ( prb^.NextThread == NULLPTR )
+    //       below. So now we do this on both UP and MP builds.
 
     next := prb^.NextThread
 
@@ -1697,7 +1697,8 @@ FN KepYield (
 
         KepWaitForSwitch ( next )
 
-        // Switch into it. KepSwitchThread returns with the thread lock released.
+        // Switch into it. KepSwitchThread returns with the thread lock
+        // released.
 
         KepSwitchThread (
             current, // current

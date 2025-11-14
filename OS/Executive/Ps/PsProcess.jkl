@@ -493,8 +493,9 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
     IF flags & OS_PROCESS_DETACH_JOB == 0 THEN
         // Inherit the parent process's job object.
-        // This is also the point where we'll notice that a job has been terminated
-        // and that this process creation should not be allowed to proceed.
+        // This is also the point where we'll notice that a job has been
+        // terminated and that this process creation should not be allowed to
+        // proceed.
 
         status = PspInheritJob (
             process, // child
@@ -1782,7 +1783,10 @@ FN OsSetQuotaProcess (
 
     // Set the quota for a process, system service.
 
-    IF NOT PsuCheckPrivilege ( PsCurrentProcess (), OS_PRIVILEGE_SET_QUOTA ) THEN
+    IF NOT PsuCheckPrivilege (
+        PsCurrentProcess (), // process
+        OS_PRIVILEGE_SET_QUOTA, // privilege
+    ) THEN
         RETURN OS_STATUS_PRIVILEGE_NOT_HELD
     END
 

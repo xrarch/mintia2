@@ -840,8 +840,8 @@ FN NsuLookupEntryByPath (
                     IF roothandle.Entry == NULLPTR THEN
                         // Capture the root handle here.
                         //
-                        // NOTE: This places the process's root directory lock as
-                        //       inferior to the tree lock.
+                        // NOTE: This places the process's root directory lock
+                        //       as inferior to the tree lock.
 
                         NspCaptureRootHandle (
                             PsCurrentProcess (), // process
@@ -1163,7 +1163,8 @@ FN NsuLookupEntryByPath (
         // Set the permissions of the namespace entry to track those of the
         // object.
 
-        child^.Permissions = &ObuFindHeader ( lookupcontext.Object )^.Permissions
+        child^.Permissions =
+            &ObuFindHeader ( lookupcontext.Object )^.Permissions
 
         IF lookupcontext.EntryFlags & NSU_ENTRY_VIRTUAL THEN
             // Insert into the virtual child list of the parent.
@@ -1196,7 +1197,8 @@ FN NsuLookupEntryByPath (
 
     IF state & NSP_LOOKUP_CREATED == 0 THEN
         IF flags & OS_OPEN_MUST_CREATE THEN
-            // Caller wanted to create, but we found that the object already exists.
+            // Caller wanted to create, but we found that the object already
+            // exists.
 
             NspUnlockTree ()
 

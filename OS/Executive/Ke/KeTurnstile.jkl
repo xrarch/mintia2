@@ -251,10 +251,10 @@ FN KepBoostPriority (
 
         IF turnstile^.Event.Header.SignalCount THEN
             // The turnstile was already awoken and this thread just hasn't made
-            // its way out of KepBlockOnLock yet. Note that we aren't holding any
-            // lock that guards this field so this is just a hint; it
-            // could change from FALSE to TRUE at any moment after this (the
-            // reverse, however, could not happen).
+            // its way out of KepBlockOnLock yet. Note that we aren't holding
+            // any lock that guards this field so this is just a hint; it could
+            // change from FALSE to TRUE at any moment after this (the reverse,
+            // however, could not happen).
 
             BREAK
         END
@@ -694,7 +694,8 @@ FN KepComputeFloor (
 
         IF turnstile^.WaiterHeapRoot THEN
             booster :=
-                CONTAINEROF turnstile^.WaiterHeapRoot TO KeuThread.TurnstileEntry
+                CONTAINEROF turnstile^.WaiterHeapRoot
+                TO KeuThread.TurnstileEntry
 
             IF booster^.BestowedPriority > floor THEN
                 floor = booster^.BestowedPriority

@@ -229,7 +229,12 @@ FN MmpInitializeSlabCache (
             & ~(RTL_ALIGN_BYTES - 1)
     END
 
-    // RtlPrint ( "real slabsize %d blocksperslab %d blocksize %d\n", slabsize, blocksperslab, size )
+    // RtlPrint (
+    //    "real slabsize %d blocksperslab %d blocksize %d\n", // fmt
+    //    slabsize,
+    //    blocksperslab,
+    //    size,
+    // )
 
     scache^.BlocksPerSlab = blocksperslab
     scache^.SlabSize = slabsize
@@ -266,8 +271,8 @@ FN MmpExtendSlabCache (
         END
 
         // We can't wait for pages with a slab cache lock held or we'll deadlock
-        // memory management so instead we first try with wait=FALSE, and failing
-        // that we wait for free pages outside of the lock.
+        // memory management so instead we first try with wait=FALSE, and
+        // failing that, we wait for free pages outside of the lock.
 
         MmpUnlockSlabCache ( scache, ipl )
 
@@ -290,8 +295,9 @@ FN MmpExtendSlabCache (
 
     // Initialize each block in the slab.
 
-    block := (slab + SIZEOF MmpSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1))
-        & ~(RTL_ALIGN_BYTES - 1)
+    block := (
+        slab + SIZEOF MmpSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1)
+    ) & ~(RTL_ALIGN_BYTES - 1)
 
     firstblock := block
 
@@ -336,8 +342,9 @@ FN MmpFreeSlab (
 
     // First unlink all of the free blocks.
 
-    block := (slab + SIZEOF MmpSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1))
-        & ~(RTL_ALIGN_BYTES - 1)
+    block := (
+        slab + SIZEOF MmpSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1)
+    ) & ~(RTL_ALIGN_BYTES - 1)
 
     i := 0
     count := scache^.BlocksPerSlab

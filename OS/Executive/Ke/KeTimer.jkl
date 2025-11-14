@@ -35,7 +35,11 @@
 ]
 
 #MACRO KepReleaseTimerAndTree ( timer, prb, ipl ) [
-    KepReleaseTwoSpinlocksLower ( &(timer)^.Header.Spinlock, &(prb)^.TimerTreeLock, ipl )
+    KepReleaseTwoSpinlocksLower (
+        &(timer)^.Header.Spinlock, // lock1
+        &(prb)^.TimerTreeLock, // lock2
+        ipl, // ipl
+    )
 ]
 
 #ELSE

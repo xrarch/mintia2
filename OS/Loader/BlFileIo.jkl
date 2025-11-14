@@ -139,8 +139,10 @@ FN BlInitializeIo ()
     )
 
     IF NOT BlMountDevice ( &BlBootDevice ) THEN
-        BlCrash ( "Inaccessible boot device %s\n",
-            &BlInfoBlock.BootDeviceName[0] )
+        BlCrash (
+            "Inaccessible boot device %s\n", // fmt
+            &BlInfoBlock.BootDeviceName[0],
+        )
     END
 
     // Open the system directory.
@@ -158,10 +160,18 @@ FN BlInitializeIo ()
     )
 
     IF NOT BlSystemDirectory THEN
-        BlCrash ( "Nonexistent system directory %s:%s\n", &BlInfoBlock.BootDeviceName[0], BlSystemPath )
+        BlCrash (
+            "Nonexistent system directory %s:%s\n", // fmt
+            &BlInfoBlock.BootDeviceName[0],
+            BlSystemPath,
+        )
     END
 
-    RtlPrint ( "Selected boot directory is %s:%s.\n", &BlInfoBlock.BootDeviceName[0], BlSystemPath )
+    RtlPrint (
+        "Selected boot directory is %s:%s.\n", // fmt
+        &BlInfoBlock.BootDeviceName[0],
+        BlSystemPath,
+    )
 
     // Open the drivers directory.
 
@@ -172,6 +182,10 @@ FN BlInitializeIo ()
     )
 
     IF NOT BlDriverDirectory THEN
-        BlCrash ( "Nonexistent driver directory %s:%s/Drivers\n", &BlInfoBlock.BootDeviceName[0], BlSystemPath )
+        BlCrash (
+            "Nonexistent driver directory %s:%s/Drivers\n", // fmt
+            &BlInfoBlock.BootDeviceName[0],
+            BlSystemPath,
+        )
     END
 END

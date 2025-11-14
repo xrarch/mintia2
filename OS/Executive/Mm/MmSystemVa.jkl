@@ -178,7 +178,7 @@ FN MmpInitializeSystemVa (
 
     // There are three regions of dynamically managed system space:
     //
-    // MMP_POOL_SPACE:     Sized at boot time with enough page tables for a
+    // MMP_POOL_SPACE:    Sized at boot time with enough page tables for a
     //                    quantity of virtual space equivalent to the total
     //                    physical memory in the system.
     //
@@ -188,7 +188,7 @@ FN MmpInitializeSystemVa (
     //                    Maximum size on 32-bit is capped at 256MB.
     //
     //
-    // MMP_CACHE_SPACE:    Occupies 4x phys mem of virtual space. Page tables are
+    // MMP_CACHE_SPACE:   Occupies 4x phys mem of virtual space. Page tables are
     //                    allocated at boot time. Used to map demand-paged views
     //                    of cached files. Allocated in fixed size chunks,
     //                    varying in size depending on the system size:
@@ -203,7 +203,7 @@ FN MmpInitializeSystemVa (
     //                    Maximum size on 32-bit is capped at 256MB.
     //
     //
-    // MMP_DYNAMIC_SPACE:  Page tables are allocated at boot time. Allocations
+    // MMP_DYNAMIC_SPACE: Page tables are allocated at boot time. Allocations
     //                    can be any count of pages. Used to map kernel stacks,
     //                    MDLs, etc.
     //
@@ -221,8 +221,9 @@ FN MmpInitializeSystemVa (
 
     // Initialize nonpaged space.
 
-    base := CAST MMP_POOL_SPACE +
-        ((node^.Id * KeuLoaderBlock.PoolSpaceSize) << RTL_PAGE_SHIFT) TO ^VOID
+    base := CAST MMP_POOL_SPACE + (
+        (node^.Id * KeuLoaderBlock.PoolSpaceSize) << RTL_PAGE_SHIFT
+    ) TO ^VOID
 
     MmpInitializeChunkSpace (
         &node^.PoolSpace, // chunkspace
@@ -265,8 +266,9 @@ FN MmpInitializeSystemVa (
 
     KeInitializeLock ( &node^.DynamicSpaceTreeLock )
 
-    base = CAST MMP_DYNAMIC_SPACE +
-        ((node^.Id * KeuLoaderBlock.DynamicSpaceSize) << RTL_PAGE_SHIFT) TO ^VOID
+    base = CAST MMP_DYNAMIC_SPACE + (
+        (node^.Id * KeuLoaderBlock.DynamicSpaceSize) << RTL_PAGE_SHIFT
+    ) TO ^VOID
 
     node^.DynamicSpaceBase = base
 

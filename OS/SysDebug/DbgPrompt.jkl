@@ -398,19 +398,28 @@ FN (DbgCommandF) DbgCommandCpu ()
     // Check for validity.
 
     IF NOT context THEN
-        RtlPrint ( "Processor failed to freeze%s", " - not switched\n" )
+        RtlPrint (
+            "Processor failed to freeze%s", // fmt
+            " - not switched\n",
+        )
 
         LEAVE
     END
 
     IF NOT MmIsVirtualValid ( context ) THEN
-        RtlPrint ( "Context lies in invalid virtual space%s", " - not switched\n" )
+        RtlPrint (
+            "Context lies in invalid virtual space%s", // fmt
+            " - not switched\n",
+        )
 
         LEAVE
     END
 
     IF NOT MmIsVirtualValid ( context + SIZEOF OsContext ) THEN
-        RtlPrint ( "Context ends in invalid virtual space%s", " - not switched\n" )
+        RtlPrint (
+            "Context ends in invalid virtual space%s", // fmt
+            " - not switched\n",
+        )
 
         LEAVE
     END

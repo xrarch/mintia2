@@ -613,7 +613,8 @@ FN KeuMaskSignalThread (
     ELSEIF thread^.SignalMask[index $ 1] &
         thread^.SignalAcceptMask[index $ 1] == 0 THEN
 
-        // There are no pending signals in this bit set or the other one, so clear the bit.
+        // There are no pending signals in this bit set or the other one, so
+        // clear the bit.
 
         thread^.PendingEventsSet &= ~KEP_THREAD_PENDING_SIGNAL
     END
@@ -913,9 +914,9 @@ FN KepDispatchUserInterrupts ()
 
         IF thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
             // The current thread has been terminated.
-            // Upcall into Ps to go die. It'll call KeuExitThread when it's ready
-            // and then we will add this thread to the reaper list and yield the
-            // processor for the last time.
+            // Upcall into Ps to go die. It'll call KeuExitThread when it's
+            // ready and then we will add this thread to the reaper list and
+            // yield the processor for the last time.
 
             PsExitThread ()
 
