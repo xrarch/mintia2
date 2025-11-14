@@ -126,7 +126,7 @@ END
 
 #SECTION "PAGEtext"
 FN ObuAllocateObject (
-    IN obparams : ^ObuParameters,
+    IN obparams : ^ObParameters,
     OUT object : ^VOID,
 ) : OsStatus
 
@@ -261,7 +261,7 @@ FN ObuAllocateObject (
     header^.Flags = obparams^.Flags
     header^.InternalFlags = internalflags
 
-    ObuMoveCredentials (
+    ObMoveCredentials (
         &header^.Permissions.Cred, // dest
         &obparams^.Permissions.Cred, // src
     )
@@ -446,7 +446,7 @@ FN ObuDeleteObject (
     ObuFreeObject ( object )
 END
 
-EXPORT FN ObuReferenceObject (
+EXPORT FN ObReferenceObject (
     IN object : ^VOID,
 )
 
@@ -572,7 +572,7 @@ FN ObpDeferDeletion (
     )
 END
 
-EXPORT FN ObuUnreferenceObject (
+EXPORT FN ObUnreferenceObject (
     IN object : ^VOID,
 )
 
@@ -650,7 +650,7 @@ EXPORT FN ObuUnreferenceObject (
     END
 END
 
-EXPORT FN ObuUnreferenceObjectDeferDelete (
+EXPORT FN ObUnreferenceObjectDeferDelete (
     IN object : ^VOID,
 )
 
@@ -676,7 +676,7 @@ EXPORT FN ObuUnreferenceObjectDeferDelete (
     END
 END
 
-EXPORT FN ObuConditionallyReferenceObject (
+EXPORT FN ObConditionallyReferenceObject (
     IN object : ^VOID,
 ) : UWORD
 
@@ -716,9 +716,9 @@ EXPORT FN ObuConditionallyReferenceObject (
 END
 
 #SECTION "PAGEtext"
-FN ObuCheckAccess (
-    IN permissions : ^ObuPermissions,
-    IN cred : ^ObuCredentials,
+FN ObCheckAccess (
+    IN permissions : ^ObPermissions,
+    IN cred : ^ObCredentials,
     IN access : UWORD,
 ) : UWORD
 
@@ -760,7 +760,7 @@ FN ObuCheckAccess (
 END
 
 #SECTION "PAGEtext"
-FN ObuCheckAccessForCurrent (
+FN ObCheckAccessForCurrent (
     IN object : ^VOID,
     IN access : UWORD,
 ) : UWORD
@@ -768,7 +768,7 @@ FN ObuCheckAccessForCurrent (
     // Check the requested access against the object's permissions, with respect
     // to the current process's credentials.
 
-    RETURN ObuCheckAccess (
+    RETURN ObCheckAccess (
         &ObuFindHeader ( object )^.Permissions, // permissions
         PsuCurrentCredentials (), // cred
         access, // access

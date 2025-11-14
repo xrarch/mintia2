@@ -3,3 +3,75 @@
 //
 
 #INCLUDE "<ll>/Rtl.hjk"
+
+STRUCT ObCredentials
+    Uid : ULONG,
+    Gid : ULONG,
+END
+
+STRUCT ObPermissions
+    Cred : ObCredentials,
+    Access : ULONG,
+END
+
+STRUCT ObParameters
+    Type : ^ObuType,
+
+    Context : ^VOID,
+
+    Permissions : ObPermissions,
+    Flags : ULONG,
+    BodySize : ULONG,
+    PagedBodySize : ULONG,
+    NpQuotaBias : ULONG,
+    PgQuotaBias : ULONG,
+END
+
+#MACRO ObMoveCredentials ( dest, src ) [
+    srcsrc := (src)
+
+    NOTHING (dest)^.Uid = srcsrc^.Uid
+    NOTHING (dest)^.Gid = srcsrc^.Gid
+]
+
+#MACRO ObInitializeParameters ( obparams, type, context, cred, access, flags, bodysize, pagedbodysize, npquotabias, pgquotabias ) [
+    NOTHING (obparams)^.Type = (type)
+    NOTHING (obparams)^.Context = (context)
+    ObMoveCredentials (
+        &(obparams)^.Permissions.Cred, // dest
+        (cred), // src
+    )
+    NOTHING (obparams)^.Permissions.Access = (access)
+    NOTHING (obparams)^.Flags = (flags)
+    NOTHING (obparams)^.BodySize = (bodysize)
+    NOTHING (obparams)^.PagedBodySize = (pagedbodysize)
+    NOTHING (obparams)^.NpQuotaBias = (npquotabias)
+    NOTHING (obparams)^.PgQuotaBias = (pgquotabias)
+]
+
+EXTERN FN ObCheckAccess (
+    IN permissions : ^ObPermissions,
+    IN cred : ^ObCredentials,
+    IN access : UWORD,
+) : UWORD
+
+EXTERN FN ObCheckAccessForCurrent (
+    IN object : ^VOID,
+    IN access : UWORD,
+) : UWORD
+
+EXTERN FN ObConditionallyReferenceObject (
+    IN object : ^VOID,
+) : UWORD
+
+EXTERN FN ObUnreferenceObjectDeferDelete (
+    IN object : ^VOID,
+)
+
+EXTERN FN ObUnreferenceObject (
+    IN object : ^VOID,
+)
+
+EXTERN FN ObReferenceObject (
+    IN object : ^VOID,
+)

@@ -101,7 +101,7 @@ FN NspDeleteEntry (
     // Unreference the object.
 
     IF entry^.Object THEN
-        ObuUnreferenceObject ( entry^.Object )
+        ObUnreferenceObject ( entry^.Object )
     END
 
     // Delete the bounce path if this is a symlink.
@@ -526,8 +526,8 @@ END
 FN NsuLookupEntryByPath (
     IN params : ^NsOpenParameters,
     IN handle : ^NsHandle,
-    IN cred : ^ObuCredentials,
-    IN obparams : ^ObuParameters,
+    IN cred : ^ObCredentials,
+    IN obparams : ^ObParameters,
     IN type : ^ObuType,
 ) : OsStatus
 
@@ -673,7 +673,7 @@ FN NsuLookupEntryByPath (
 
         // Check for traversal access.
 
-        IF NOT ObuCheckAccess (
+        IF NOT ObCheckAccess (
             currententry^.Permissions, // permissions
             cred, // cred
             OS_ACCESS_EXEC, // access
@@ -1056,7 +1056,7 @@ FN NsuLookupEntryByPath (
 
             // Check for write access to the parent.
 
-            IF NOT ObuCheckAccess (
+            IF NOT ObCheckAccess (
                 currententry^.Permissions, // permissions
                 cred, // cred
                 OS_ACCESS_WRITE, // access
@@ -1205,7 +1205,7 @@ FN NsuLookupEntryByPath (
             GOTO Exit
         END
 
-        IF NOT ObuCheckAccess (
+        IF NOT ObCheckAccess (
             currententry^.Permissions, // permissions
             cred, // cred
             params^.Captured.Access, // access

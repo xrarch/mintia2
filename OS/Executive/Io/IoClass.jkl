@@ -198,7 +198,7 @@ FN IouCreateClass (
 
     // Increment the reference count of the superclass's module.
 
-    ObuReferenceObject ( superclass^.Module )
+    ObReferenceObject ( superclass^.Module )
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -231,7 +231,7 @@ FN IouDeleteClass (
 
     // Unreference the superclass's module.
 
-    ObuUnreferenceObject ( class^.Superclass^.Module )
+    ObUnreferenceObject ( class^.Superclass^.Module )
 END
 
 #SECTION "PAGEtext"
@@ -249,7 +249,7 @@ FN IouLoadClassByName (
     class := IopLookupClass ( name )
 
     IF NOT class OR
-        NOT ObuConditionallyReferenceObject ( class^.Module ) THEN
+        NOT ObConditionallyReferenceObject ( class^.Module ) THEN
 
         // Didn't find the class or failed to reference it. If we failed to
         // reference it, then it is actively being deleted (that is, the module

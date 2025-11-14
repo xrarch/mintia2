@@ -94,7 +94,7 @@ FN (ObuTypeDeleteF) PspDeleteThreadObject (
 
     // Unreference the process.
 
-    ObuUnreferenceObject ( process )
+    ObUnreferenceObject ( process )
 
     RETURN TRUE
 END
@@ -341,13 +341,13 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     // kernel stack and other resources should remain in existence. This bias is
     // removed by the reaper thread after the thread terminates.
 
-    ObuReferenceObject ( thread )
+    ObReferenceObject ( thread )
 
     // Bias the reference count of the process object.
     // This reflects an active thread existing within it. This bias is removed
     // when the thread object is deleted.
 
-    ObuReferenceObject ( process )
+    ObReferenceObject ( process )
 
     IF flags & OS_THREAD_SUSPENDED THEN
         // Suspend the thread. It will block on the suspension event upon return
@@ -465,7 +465,7 @@ FN (ExWorkItemF) PsuReaperWorker (
         // is (and its last act was to place itself on our reaper list), so
         // unreference it.
 
-        ObuUnreferenceObject ( psthrd )
+        ObUnreferenceObject ( psthrd )
 
         thread = next
     END
@@ -545,7 +545,7 @@ FN OsTerminateThread (
 
 @Exit
 
-    ObuUnreferenceObject ( thread )
+    ObUnreferenceObject ( thread )
 
     RETURN retstatus
 END
@@ -581,7 +581,7 @@ FN OsSuspendThread (
 
 @Exit
 
-    ObuUnreferenceObject ( thread )
+    ObUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -621,7 +621,7 @@ FN OsUnsuspendThread (
 
 @Exit
 
-    ObuUnreferenceObject ( thread )
+    ObUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -671,7 +671,7 @@ FN OsReadStatusThread (
 
 @Exit
 
-    ObuUnreferenceObject ( thread )
+    ObUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -747,7 +747,7 @@ FN PsuQueryThread (
 
 @Exit
 
-    ObuUnreferenceObject ( thread )
+    ObUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -833,7 +833,7 @@ FN OsSignalThread (
 
 @Exit
 
-    ObuUnreferenceObject ( thread )
+    ObUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -879,7 +879,7 @@ FN OsMaskSignalThread (
 
 @Exit
 
-    ObuUnreferenceObject ( thread )
+    ObUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -925,7 +925,7 @@ FN OsDeliverOnWaitSignalThread (
 
 @Exit
 
-    ObuUnreferenceObject ( thread )
+    ObUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -961,7 +961,7 @@ FN OsGetFaultStatusThread (
 
 @Exit
 
-    ObuUnreferenceObject ( thread )
+    ObUnreferenceObject ( thread )
 
     RETURN status
 END
@@ -1037,7 +1037,7 @@ FN PsuCreateThreadObject (
     ctx.Process = process
     ctx.Flags = flags
 
-    obparams : ObuParameters
+    obparams : ObParameters
 
     NsInitializeObjectParameters (
         &obparams, // obparams
@@ -1177,7 +1177,7 @@ FN PsuCreateThread (
             KeuReadyThread ( &thread^.Tcb )
         END
 
-        ObuUnreferenceObject ( thread )
+        ObUnreferenceObject ( thread )
 
     ELSEIF params^.ResultFlags & NS_RESULT_CREATED THEN
         // Ready the thread because PsuCreateThreadObject didn't do it yet.
@@ -1192,7 +1192,7 @@ FN PsuCreateThread (
 
 @Exit
 
-    ObuUnreferenceObject ( process )
+    ObUnreferenceObject ( process )
 
     RETURN status
 END

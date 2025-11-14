@@ -234,7 +234,7 @@ FN (ObuTypeDeleteF) PspDeleteJobObject (
 
     PspUnlockHierarchy ()
 
-    ObuUnreferenceObject ( parent )
+    ObUnreferenceObject ( parent )
 
     RETURN TRUE
 END
@@ -328,7 +328,7 @@ FN (ObuTypeInitializeF) PspInitializeJobObject (
 
     // Reference parent job to reflect the new child job.
 
-    ObuReferenceObject ( parentjob )
+    ObReferenceObject ( parentjob )
 
 @Out
 
@@ -397,7 +397,7 @@ FN PspAddProcessJob (
 
     job^.ActiveCount += 1
 
-    ObuReferenceObject ( job )
+    ObReferenceObject ( job )
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -446,7 +446,7 @@ FN PspRemoveProcessJob (
     // Defer deletion if we dropped the refcount to 0 because we are holding the
     // hierarchy lock, which is taken by the deletion routine as well.
 
-    ObuUnreferenceObjectDeferDelete ( job )
+    ObUnreferenceObjectDeferDelete ( job )
 
     RETURN status
 END
@@ -532,7 +532,7 @@ FN PsuCreateJobObject (
     ctx.SignalOnClose = signalonclose
     ctx.ParentJob = parentjob
 
-    obparams : ObuParameters
+    obparams : ObParameters
 
     NsInitializeObjectParameters (
         &obparams, // obparams
@@ -625,11 +625,11 @@ FN OsAddProcessJob (
 
 @Exit2
 
-    ObuUnreferenceObject ( job )
+    ObUnreferenceObject ( job )
 
 @Exit
 
-    ObuUnreferenceObject ( process )
+    ObUnreferenceObject ( process )
 
     RETURN status
 END
@@ -675,7 +675,7 @@ FN OsRemoveProcessJob (
 
 @Exit
 
-    ObuUnreferenceObject ( process )
+    ObUnreferenceObject ( process )
 
     RETURN status
 END
@@ -727,7 +727,7 @@ FN OsSignalJob (
 
 @Exit
 
-    ObuUnreferenceObject ( job )
+    ObUnreferenceObject ( job )
 
     RETURN status
 END
@@ -794,13 +794,13 @@ FN PsuCreateJob (
     )
 
     IF OsError ( status ) THEN
-        ObuUnreferenceObject ( object )
+        ObUnreferenceObject ( object )
     END
 
 @Exit
 
     IF parentjob THEN
-        ObuUnreferenceObject ( parentjob )
+        ObUnreferenceObject ( parentjob )
     END
 
     RETURN status

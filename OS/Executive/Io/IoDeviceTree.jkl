@@ -228,7 +228,7 @@ FN IouAttachNodes (
 
     // The link has been made, so reference the parent to reflect the new child.
 
-    ObuReferenceObject ( parent )
+    ObReferenceObject ( parent )
 
 @Exit
 
@@ -284,7 +284,7 @@ FN IouDetachNodes (
     // Unreference the parent to reflect the loss of a child.
     // This may cause the parent to go away as well.
 
-    ObuUnreferenceObject ( parent )
+    ObUnreferenceObject ( parent )
 END
 
 #SECTION "PAGEtext"
@@ -296,7 +296,7 @@ FN (ExEnumerateSetF) IopEnumerateRelationsFunc (
 
     // Add an object to the relation set.
 
-    IF NOT ObuConditionallyReferenceObject ( object ) THEN
+    IF NOT ObConditionallyReferenceObject ( object ) THEN
         // It's being deleted and just hasn't been removed from the relation set
         // yet. Pretend it's not here.
 
@@ -313,7 +313,7 @@ FN (ExEnumerateSetF) IopEnumerateRelationsFunc (
         // Use DeferDelete so that we don't call the deletion routine while
         // holding a node lock.
 
-        ObuUnreferenceObjectDeferDelete ( object )
+        ObUnreferenceObjectDeferDelete ( object )
     END
 
     RETURN status
@@ -329,7 +329,7 @@ FN (ExEnumerateSetF) IopEnumerateDestroyRelationsFunc (
     // Remove a reference from an object that was previously in a relation
     // enumeration set.
 
-    ObuUnreferenceObject ( object )
+    ObUnreferenceObject ( object )
 
     RETURN OS_STATUS_SUCCESS
 END

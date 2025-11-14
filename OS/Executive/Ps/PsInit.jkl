@@ -195,7 +195,7 @@ FN PspReferenceById (
 
                 object = paged^.ProcessGroup
 
-                ObuReferenceObject ( object )
+                ObReferenceObject ( object )
 
                 KeReleaseLock ( &paged^.GroupLock )
 
@@ -210,7 +210,7 @@ FN PspReferenceById (
         GOTO Exit
     END
 
-    IF NOT ObuConditionallyReferenceObject ( object ) THEN
+    IF NOT ObConditionallyReferenceObject ( object ) THEN
         // Object is being deleted.
 
         status = OS_STATUS_INVALID_HANDLE
@@ -366,7 +366,7 @@ FN PsuInitializeStage1 ()
             status )
     END
 
-    ObuUnreferenceObject ( PsuInitialThread )
+    ObUnreferenceObject ( PsuInitialThread )
 END
 
 FN PsuInitializeStage2 ()

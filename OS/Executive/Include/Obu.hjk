@@ -28,7 +28,7 @@ FNPTR ObuTypeDeleteF (
 
 FNPTR ObuTypeSetSecurityF (
     IN object : ^VOID,
-    IN permissions : ^ObuPermissions,
+    IN permissions : ^ObPermissions,
 ) : OsStatus
 
 FNPTR ObuTypeNamespaceLookupF (
@@ -73,16 +73,6 @@ STRUCT ObuType
     IsPaged : UBYTE,
 END
 
-STRUCT ObuCredentials
-    Uid : ULONG,
-    Gid : ULONG,
-END
-
-STRUCT ObuPermissions
-    Cred : ObuCredentials,
-    Access : ULONG,
-END
-
 STRUCT ObuHeader
     Type : ^ObuType,
 
@@ -92,7 +82,7 @@ STRUCT ObuHeader
 
     NamespaceEntry : ^NsuEntry,
 
-    Permissions : ObuPermissions,
+    Permissions : ObPermissions,
 
     HandleCount : ULONG,
 
@@ -108,34 +98,6 @@ STRUCT ObpCommonHeader
     PointerCount : UWORD,
     NextToReap : ^VOID,
 END
-
-STRUCT ObuParameters
-    Type : ^ObuType,
-
-    Context : ^VOID,
-
-    Permissions : ObuPermissions,
-    Flags : ULONG,
-    BodySize : ULONG,
-    PagedBodySize : ULONG,
-    NpQuotaBias : ULONG,
-    PgQuotaBias : ULONG,
-END
-
-#MACRO ObuInitializeParameters ( obparams, type, context, cred, access, flags, bodysize, pagedbodysize, npquotabias, pgquotabias ) [
-    NOTHING (obparams)^.Type = (type)
-    NOTHING (obparams)^.Context = (context)
-    ObuMoveCredentials (
-        &(obparams)^.Permissions.Cred, // dest
-        (cred), // src
-    )
-    NOTHING (obparams)^.Permissions.Access = (access)
-    NOTHING (obparams)^.Flags = (flags)
-    NOTHING (obparams)^.BodySize = (bodysize)
-    NOTHING (obparams)^.PagedBodySize = (pagedbodysize)
-    NOTHING (obparams)^.NpQuotaBias = (npquotabias)
-    NOTHING (obparams)^.PgQuotaBias = (pgquotabias)
-]
 
 #MACRO ObuFindObjectFromCommonHeader ( commonheader ) [
     (CAST (commonheader + SIZEOF ObpCommonHeader) TO ^VOID)
@@ -153,28 +115,10 @@ END
     (ObuFindHeader ( object ) + SIZEOF ObuHeader)
 ]
 
-#MACRO ObuMoveCredentials ( dest, src ) [
-    srcsrc := (src)
-
-    NOTHING (dest)^.Uid = srcsrc^.Uid
-    NOTHING (dest)^.Gid = srcsrc^.Gid
-]
-
 EXTERN FN ObuInitialize ()
 
-EXTERN FN ObuCheckAccess (
-    IN permissions : ^ObuPermissions,
-    IN cred : ^ObuCredentials,
-    IN access : UWORD,
-) : UWORD
-
-EXTERN FN ObuCheckAccessForCurrent (
-    IN object : ^VOID,
-    IN access : UWORD,
-) : UWORD
-
 EXTERN FN ObuAllocateObject (
-    IN obparams : ^ObuParameters,
+    IN obparams : ^ObParameters,
     OUT object : ^VOID,
 ) : OsStatus
 
@@ -183,22 +127,6 @@ EXTERN FN ObuFreeObject (
 )
 
 EXTERN FN ObuDeleteObject (
-    IN object : ^VOID,
-)
-
-EXTERN FN ObuConditionallyReferenceObject (
-    IN object : ^VOID,
-) : UWORD
-
-EXTERN FN ObuUnreferenceObjectDeferDelete (
-    IN object : ^VOID,
-)
-
-EXTERN FN ObuUnreferenceObject (
-    IN object : ^VOID,
-)
-
-EXTERN FN ObuReferenceObject (
     IN object : ^VOID,
 )
 

@@ -50,7 +50,7 @@ FN ObuInitializeProcess (
     parentcred := &parentprocess^.Paged^.Cred
     mycred := &process^.Paged^.Cred
 
-    ObuMoveCredentials (
+    ObMoveCredentials (
         mycred, // dest
         parentcred, // src
     )
@@ -227,7 +227,7 @@ FN ObuCloseObject (
 
     // Unreference the object.
 
-    ObuUnreferenceObject ( object )
+    ObUnreferenceObject ( object )
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -282,7 +282,7 @@ FN ObuReferenceByHandleObject (
 
     // Reference the object.
 
-    ObuReferenceObject ( object )
+    ObReferenceObject ( object )
 
     // Release the lock and return the object.
 
@@ -311,7 +311,7 @@ FN ObuReferenceByHandle (
 
         access = OS_ACCESS_ALL
 
-        ObuReferenceObject ( object )
+        ObReferenceObject ( object )
 
         RETURN OS_STATUS_SUCCESS
 
@@ -324,7 +324,7 @@ FN ObuReferenceByHandle (
 
         access = OS_ACCESS_ALL
 
-        ObuReferenceObject ( object )
+        ObReferenceObject ( object )
 
         RETURN OS_STATUS_SUCCESS
     END
@@ -401,7 +401,7 @@ FN ObuOpenObject (
     )
 
     IF OsError ( status ) THEN
-        ObuUnreferenceObject ( object )
+        ObUnreferenceObject ( object )
     END
 
     RETURN status
