@@ -18,6 +18,10 @@ EXTERN FN PsuCreateExecutiveThread (
     OUT thread : ^PsuThread,
 ) : OsStatus
 
+EXTERN FN PsCurrentPartition () : ^MmpPartition
+
+EXTERN FN PsCurrentNode () : ^MmpNode
+
 // The following macros assume the KeuProcess and KeuThread are at the beginning
 // of the PsuProcess and PsuThread, which happens to be the case.
 
@@ -27,4 +31,12 @@ EXTERN FN PsuCreateExecutiveThread (
 
 #MACRO PsCurrentThread () [
     (CAST KeCurrentThread () TO ^PsuThread)
+]
+
+#MACRO PsThreadToKeThread ( thread ) [
+    (CAST (thread) TO ^KeuThread)
+]
+
+#MACRO PsProcessToKeProcess ( process ) [
+    (CAST (process) TO ^KeuProcess)
 ]

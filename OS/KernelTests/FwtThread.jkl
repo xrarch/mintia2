@@ -35,7 +35,7 @@ FN FwtCreateThread (
     // locks.
 
     KeSetBasePriorityThread (
-        &thread^.Tcb, // thread
+        PsThreadToKeThread ( thread ), // thread
         OS_PRIORITY_DEFAULT + ((KeSharedUserPage^.Uptime.Low / 10) & 3), // pri
         TRUE, // setcurrentpriority
     )

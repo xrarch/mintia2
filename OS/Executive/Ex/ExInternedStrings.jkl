@@ -37,8 +37,8 @@ FN (RtlAvlLessThanF) ExpCompareNameNodes (
     // Return whether A < B, lexicographically.
 
     RETURN CAST RtlCompareRtlString (
-        ExuNameToString ( CONTAINEROF a TO ExuName.Entry ), // str1
-        ExuNameToString ( CONTAINEROF b TO ExuName.Entry ), // str2
+        ExNameToString ( CONTAINEROF a TO ExuName.Entry ), // str1
+        ExNameToString ( CONTAINEROF b TO ExuName.Entry ), // str2
     ) TO WORD < 0
 END
 
@@ -105,7 +105,7 @@ FN ExFindName (
 
         res := CAST RtlCompareRtlString (
             str, // str1
-            ExuNameToString ( checknode ), // str2
+            ExNameToString ( checknode ), // str2
         ) TO WORD
 
         IF res == 0 THEN
@@ -145,7 +145,7 @@ FN ExFindName (
     node^.References = 1
     node^.BucketIndex = hash & (EXP_NAME_BUCKETS - 1)
 
-    newstr := ExuNameToString ( node )
+    newstr := ExNameToString ( node )
 
     newstr^.Length = len
     newstr^.Data = CAST newstr + SIZEOF RtlString TO ^UBYTE
@@ -272,4 +272,17 @@ FN ExDuplicateString (
     )
 
     RETURN OS_STATUS_SUCCESS
+END
+
+// The following functions are defined as macros for speed purposes within the
+// Executive but are exported as real functions for the benefit of kernel
+// modules, so we don't need to export these structures.
+
+#UNDEFINE ExNameToString
+
+EXPORT FN ExNameToString (
+    IN name : ^ExuName,
+) : ^RtlString
+
+    RETURN CAST ((name) + SIZEOF ExuName) TO ^RtlString
 END

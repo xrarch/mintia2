@@ -73,8 +73,8 @@ FN (RtlAvlLessThanF) NspCompareEntries (
 
     // Return whether A < B, lexicographically.
 
-    str1 := ExuNameToString ( (CONTAINEROF a TO NsuEntry.LookupEntry)^.Name )
-    str2 := ExuNameToString ( (CONTAINEROF b TO NsuEntry.LookupEntry)^.Name )
+    str1 := ExNameToString ( (CONTAINEROF a TO NsuEntry.LookupEntry)^.Name )
+    str2 := ExNameToString ( (CONTAINEROF b TO NsuEntry.LookupEntry)^.Name )
 
     RETURN CAST RtlCompareRtlString (
         str1, // str1
@@ -475,7 +475,7 @@ FN NspLookupChild (
 
         res := CAST RtlCompareRtlString (
             name, // str1
-            ExuNameToString ( child^.Name ), // str2
+            ExNameToString ( child^.Name ), // str2
         ) TO WORD
 
         IF res == 0 THEN
@@ -827,7 +827,7 @@ FN NsuLookupEntryByPath (
 
                 // Set the lookup path to the symlink path.
 
-                path = ExuNameToString ( symstate.SymlinkCookie )^.Data
+                path = ExNameToString ( symstate.SymlinkCookie )^.Data
 
                 // We're changing the initial handle, so unreference the current
                 // one.

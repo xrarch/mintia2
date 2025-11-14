@@ -38,8 +38,8 @@ FN (RtlAvlLessThanF) ExpCompareDictionaryEntries (
     // Return whether A < B, lexicographically.
 
     RETURN CAST RtlCompareRtlString (
-        ExuNameToString((CONTAINEROF a TO ExpDictionaryEntry.Entry)^.Key), // str1
-        ExuNameToString((CONTAINEROF b TO ExpDictionaryEntry.Entry)^.Key), // str2
+        ExNameToString((CONTAINEROF a TO ExpDictionaryEntry.Entry)^.Key), // str1
+        ExNameToString((CONTAINEROF b TO ExpDictionaryEntry.Entry)^.Key), // str2
     ) TO WORD < 0
 END
 
@@ -72,7 +72,7 @@ FN ExpLookupDictionaryEntry (
 
         res := CAST RtlCompareRtlString (
             key, // str1
-            ExuNameToString ( checknode^.Key ), // str2
+            ExNameToString ( checknode^.Key ), // str2
         ) TO WORD
 
         IF res == 0 THEN
@@ -257,7 +257,7 @@ FN ExEnumerateDictionary (
         IF func THEN
             func (
                 dict, // dict
-                ExuNameToString ( entry^.Key ), // key
+                ExNameToString ( entry^.Key ), // key
                 entry^.Value, // value
                 context, // context
             )
@@ -267,7 +267,7 @@ FN ExEnumerateDictionary (
             ExpRemoveEntryFromDictionary (
                 dict, // dict
                 entry, // entry
-                ExpHash ( ExuNameToString ( entry^.Key )^.Data ), // hash
+                ExpHash ( ExNameToString ( entry^.Key )^.Data ), // hash
             )
         END
 

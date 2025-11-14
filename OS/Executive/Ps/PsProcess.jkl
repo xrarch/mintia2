@@ -1351,7 +1351,7 @@ FN PsuQueryProcessObject (
 
     RtlCopyString (
         &query^.Name[0], // dest
-        ExuNameToString ( paged^.Name )^.Data, // src
+        ExNameToString ( paged^.Name )^.Data, // src
         OS_NAME_MAX + 1, // bufsize
     )
 
@@ -1872,4 +1872,25 @@ FN OsQueryQuotaProcess (
         &sysquota, // src
         SIZEOF OsQuotaQuery, // sz
     )
+END
+
+// The following functions are defined as macros for speed purposes within the
+// Executive but are exported as real functions for the benefit of kernel
+// modules, so we don't need to export these structures.
+
+#UNDEFINE PsCurrentNode
+#UNDEFINE PsCurrentPartition
+
+EXPORT FN PsCurrentNode () : ^MmpNode
+
+    // Return the current node.
+
+    RETURN PsCurrentProcess()^.Node
+END
+
+EXPORT FN PsCurrentPartition () : ^MmpPartition
+
+    // Return the current partition.
+
+    RETURN PsCurrentProcess()^.Partition
 END
