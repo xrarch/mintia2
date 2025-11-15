@@ -39,14 +39,21 @@ FN (KeuDebuggerEntryF) DbgEntrypoint (
 #END
 
     DbgCurrentPrb = KEP_CURRENT_PRB
+    resetctx := FALSE
 
     IF DbgCurrentPrb^.FrozenContext THEN
         DbgCurrentContext = DbgCurrentPrb^.FrozenContext
     ELSE
+        resetctx = TRUE
         DbgCurrentContext = context
+        DbgCurrentPrb^.FrozenContext = context
     END
 
     DbgPrompt ()
+
+    IF resetctx THEN
+        DbgCurrentPrb^.FrozenContext = NULLPTR
+    END
 
 #IF BLD_MP
     KepUnfreezeOtherProcessors ()
