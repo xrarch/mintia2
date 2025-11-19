@@ -497,7 +497,7 @@ FN MmpFreePage (
     MmpNewAvailablePage ( partition, avail )
 END
 
-#DEFINE MMP_MIN_LOOPSU_FOR_BACKOFF 2
+#DEFINE MMP_MIN_LOOPS_FOR_BACKOFF 2
 #DEFINE MMP_INITIAL_BACKOFF_MS 5
 #DEFINE MMP_MAX_BACKOFF_MS 1000
 
@@ -547,12 +547,12 @@ FN MmpWaitForPages (
 
         MmpReleaseList ( partition, ipl )
 
-        IF loops >= MMP_MIN_LOOPSU_FOR_BACKOFF THEN
+        IF loops >= MMP_MIN_LOOPS_FOR_BACKOFF THEN
             // Perform exponential backoff.
 
             seed : UWORD
 
-            IF loops == MMP_MIN_LOOPSU_FOR_BACKOFF THEN
+            IF loops == MMP_MIN_LOOPS_FOR_BACKOFF THEN
                 // Initialize the xorshift seed which is the low bits of the
                 // current thread pointer shifted right by the natural
                 // alignment and XORed with the VPN and the current uptime.
