@@ -573,7 +573,12 @@ FN MmpWaitForPages (
             backoffms += seed & 7
 
             IF backoffms >= MMP_MAX_BACKOFF_MS THEN
+                // This thread has been waiting a long time for pages and may
+                // be starved by newcoming threads. Reset the backoff interval
+                // to a small random value in order to compete with them.
+
                 backoffms = 1 + (seed & 31)
+                loops = 0
             END
 
             RtlSetUquadToUlong ( &backoff, backoffms )
