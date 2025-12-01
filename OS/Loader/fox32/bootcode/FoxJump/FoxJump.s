@@ -6,7 +6,7 @@
 .section text
 
 start:
-	jmp  start
+	jmp  PastThePartitionTable
 
 here:
 .bytes (164 - here), 0
