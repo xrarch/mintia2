@@ -5,8 +5,6 @@
 #INCLUDE "Exp.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
-ExpWorkQueues : KeBalancedQueue[EX_MAX_WORK_PRIORITY]
-
 FN (KeStartThreadF) ExpWorkQueueLoop (
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -59,7 +57,7 @@ EXPORT FN ExEnqueueWorkItem (
     item^.Context2 = context2
 
     KeInsertIntoBalancedQueue (
-        &ExpWorkQueues[priority], // queue
+        &PsCurrentNode()^.Exp^.WorkQueues[priority], // queue
         &item^.QueueEntry, // item
         FALSE, // head
         0, // priorityboost
@@ -141,9 +139,20 @@ ExpWorkVmPrivileged : UBYTE[EX_MAX_WORK_PRIORITY] = {
     [EX_NONPAGED_WORK_PRIORITY] = TRUE,
 }
 
-FN ExpInitializeWorkQueues ()
+FN ExpInitializeWorkQueuesForNode (
+    IN kenode : ^KeuNode,
+)
 
     // Initialize the system work queues.
+
+    expnode : ^ExpNode = KeuAllocateNodeSpace (
+        kenode, // kenode
+        SIZEOF ExpNode, // bytes
+    )
+
+    KeAssert ( expnode != NULLPTR )
+
+    kenode^.Exp = expnode
 
     i := 0
 
@@ -153,7 +162,7 @@ FN ExpInitializeWorkQueues ()
         // the system.
 
         KeInitializeBalancedQueue (
-            &ExpWorkQueues[i], // queue
+            &expnode^.WorkQueues[i], // queue
             "SysQ", // name
             0, // maxthreads
         )
@@ -166,7 +175,7 @@ FN ExpInitializeWorkQueues ()
 
     workthreads : UBYTE[EX_MAX_WORK_PRIORITY]
     
-    systemsize := MmGetSystemSize ()
+    systemsize := MmGetNodeSize ( kenode )
 
     IF systemsize <= MM_TINY_SYSTEM THEN
         workthreads[EX_NONPAGED_WORK_PRIORITY] = 1
@@ -209,7 +218,7 @@ FN ExpInitializeWorkQueues ()
             status := PsCreateExecutiveThread (
                 &name, // name
                 &ExpWorkQueueLoop, // startfunc
-                &ExpWorkQueues[j], // context1
+                &expnode^.WorkQueues[j], // context1
                 0, // context2
                 0, // flags
                 OUT thread, // thread
@@ -242,6 +251,22 @@ FN ExpInitializeWorkQueues ()
         END
 
         j += 1
+    END
+END
+
+FN ExpInitializeWorkQueues ()
+
+    // Initialize all system work queues.
+
+    i := 0
+    max := KeQueryNodeCount ()
+
+    WHILE i < max DO
+        kenode := KeNumaNodeById ( i )
+
+        ExpInitializeWorkQueuesForNode ( kenode )
+
+        i += 1
     END
 END
 

@@ -1070,6 +1070,9 @@ EXPORT FN MmFreeToPoolCache (
 
 #IF BLD_NUMA
     IF id >= cache^.ProcessorCount THEN
+        // The current thread at some point migrated to another NUMA node with
+        // fewer processors. 
+        //
         // This is a CPU foreign to the preferred NUMA node of the pool cache.
         // Bypass the magazine layer since it won't do any good to have some
         // foreign CPU take up magazines in another NUMA node's pool cache.
@@ -1252,6 +1255,16 @@ FN MmpInitializePoolCache (
 )
 
     // Initialize the pool cache.
+    //
+    // NOTE: We always create as many per-cpu caches in each pool cache as there
+    //       are the total number of CPUs in the entire system, not just in the
+    //       node. This is to avoid having to guard against race conditions
+    //       where the current thread migrates to another node with fewer
+    //       processors and could crash the system if it tries to access the
+    //       per-cpu cache with its index.
+    //
+    //       This could be replaced with just doing the maximum number of
+    //       processors seen in any node.
 
     node := kenode^.Mmp
 

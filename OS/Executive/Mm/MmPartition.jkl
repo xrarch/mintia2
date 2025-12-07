@@ -763,11 +763,22 @@ FN MmuUnchargeCommit (
     KeAssert ( pages <= old )
 END
 
-EXPORT FN MmGetSystemSize () : UWORD
+EXPORT FN MmGetNodeSize (
+    IN node : ^KeuNode,
+) : UWORD
 
-    // Get the size of the current node.
+    // Get the size of the given node.
 
-    RETURN MmCurrentPartition()^.SizeLevel
+    RETURN node^.Mmp^.Partition.SizeLevel
+END
+
+EXPORT FN MmGetPartitionSize (
+    IN partition : ^MmpPartition,
+) : UWORD
+
+    // Get the size of the given partition.
+
+    RETURN partition^.SizeLevel
 END
 
 #SECTION "PAGEtext"
