@@ -880,7 +880,7 @@ FN KepSwitchAddressSpace (
     // Switch address space to the given process. Interrupts are enabled, thread
     // lock is held. IPL is KEP_IPL_DPC, so we are pinned to this processor.
 
-    IF process^.PageDirectoryPfn == KeuSystemPageDirectoryPfn THEN
+    IF process^.PageDirectoryPfn == process^.Node^.SystemPageDirectoryPfn THEN
         // Just switch, don't bother dealing with ASIDs since ASID 0 is reserved
         // for the system address space.
 
@@ -894,7 +894,7 @@ FN KepSwitchAddressSpace (
 
     prb := KEP_CURRENT_PRB_LOCAL
 
-    asidentry := &process^.AsidTable[prb^.Id]
+    asidentry := &process^.AsidTable[prb^.ConsecutiveId]
 
     cpuseq := &prb^.AsidSequenceNumber
 

@@ -67,8 +67,6 @@ EXPORT FN KepFreezeOtherProcessors ()
     j := 0
 
     WHILE j < KEP_FREEZE_RETRY DO
-        prb := CAST KeuLoaderBlock.VirtualPrbBase TO ^KepPrb
-
         HaluBroadcastIpi (
             myprb, // target
             KEP_IPI_SYNCHRONOUS, // type
@@ -310,84 +308,97 @@ FN KepExecuteOnEveryoneElse (
 
     KepSendTable[index] = prb
 
-    i := 0
+    j := 0
+    nodecount := KeuLoaderBlock.NodeCount
 
-    targetprb := CAST KeuLoaderBlock.VirtualPrbBase TO ^KepPrb
+    WHILE j < nodecount DO
+        i := 0
+        kenode := KeNumaNodeById ( j )
+        targetprb := KepPrbFromNodeAndNumber ( kenode, 0 )
 
-    // Now set pending to all of the processors in the system (other than me).
+        // Now set pending to all of the processors in the system (other than
+        // me).
 
-    WHILE i < count DO
-        IF targetprb != prb THEN
-            IF deferred AND targetprb^.InIdleLoop THEN
-                // This is an idle-deferrable IPI and the target is in his idle
-                // loop. Just set the idle deferred event flag. This lets us
-                // avoid spin-waiting for idle processors to come out of their
-                // low-power state (which can take a long while) and makes idle
-                // processors less of a burden to their active brethren.
+        WHILE i < count DO
+            IF targetprb != prb THEN
+                IF deferred AND targetprb^.InIdleLoop THEN
+                    // This is an idle-deferrable IPI and the target is in his
+                    // idle loop. Just set the idle deferred event flag. This
+                    // lets us avoid spin-waiting for idle processors to come
+                    // out of their low-power state (which can take a long
+                    // while) and makes idle processors less of a burden to
+                    // their active brethren.
 
-                // NOTE: KeOrUlong does the necessary read-side barriers, so we
-                //       don't need to repeat them before re-examining
-                //       InIdleLoop; it has an effective SeqCst ordering effect.
+                    // NOTE: KeOrUlong does the necessary read-side barriers, so
+                    //       we don't need to repeat them before re-examining
+                    //       InIdleLoop; it has an effective SeqCst ordering
+                    //       effect.
 
-                KeOrUlong (
-                    &targetprb^.IdleDeferredIpiEvents, // ptr
-                    deferred, // set
-                )
-
-                // Language-level BARRIER to stop the read from InIdleLoop being
-                // smushed together.
-
-                BARRIER
-
-                IF targetprb^.InIdleLoop THEN
-                    // It's still in the idle loop, which means we can avoid
-                    // waiting for this guy. It doesn't really matter if it left
-                    // the idle loop and returned, all that matters is that it's
-                    // in this quiescent state at some point after we set the
-                    // event bit, and before we returned from this routine. This
-                    // is because return from this routine indicates delivery of
-                    // the notification, leading to assumptions that must be
-                    // respected such as "from this point on, other processors
-                    // will not access a stale TB entry" and so on. So, we need
-                    // a guarantee that the target processor either has seen or
-                    // will see this notification before it has a chance to do
-                    // an illegal thing like that. The idle loop is therefore a
-                    // good quiescent state to choose for this. Note the caveat
-                    // that even interrupt handlers that execute while we were
-                    // in the idle loop cannot be considered quiescent, because
-                    // they may access stale system space mappings (mapped MDLs
-                    // and so on). So the architectural interrupt handler should
-                    // be written to disable the InIdleLoop bit and process the
-                    // pending events; actually, that is the only place that
-                    // needs to do that, since any event that causes a processor
-                    // to stop being idle was ultimately caused by an interrupt.
-
-                    KeIncrementUlong (
-                        &prb^.IpiSpin, // ptr
-                        0xFFFFFFFF, // inc
+                    KeOrUlong (
+                        &targetprb^.IdleDeferredIpiEvents, // ptr
+                        deferred, // set
                     )
 
-                    GOTO Next
+                    // Language-level BARRIER to stop the read from InIdleLoop
+                    // being smushed together by the compiler.
+
+                    BARRIER
+
+                    IF targetprb^.InIdleLoop THEN
+                        // It's still in the idle loop, which means we can avoid
+                        // waiting for this guy. It doesn't really matter if it
+                        // left the idle loop and returned, all that matters is
+                        // that it's in this quiescent state at some point after
+                        // we set the event bit, and before we returned from
+                        // this routine. This is because return from this
+                        // routine indicates delivery of the notification,
+                        // leading to assumptions that must be respected such as
+                        // "from this point on, other processors will not access
+                        // a stale TB entry" and so on. So, we need a guarantee
+                        // that the target processor either has seen or will see
+                        // this notification before it has a chance to do an
+                        // illegal thing like that. The idle loop is therefore a
+                        // good quiescent state to choose for this. Note the
+                        // caveat that even interrupt handlers that execute
+                        // while we were in the idle loop cannot be considered
+                        // quiescent, because they may access stale system space
+                        // mappings (mapped MDLs and so on). So the
+                        // architectural interrupt handler should be written to
+                        // disable the InIdleLoop bit and process the pending
+                        // events; actually, that is the only place that needs
+                        // to do that, since any event that causes a processor
+                        // to stop being idle was ultimately caused by an
+                        // interrupt.
+
+                        KeIncrementUlong (
+                            &prb^.IpiSpin, // ptr
+                            0xFFFFFFFF, // inc
+                        )
+
+                        GOTO Next
+                    END
                 END
+
+                // Mark pending.
+
+                KeOrUlong (
+                    &targetprb^.IpiPendingSet, // ptr
+                    1 << index, // bitset
+                )
+
+                HaluTriggerIpi (
+                    targetprb, // target
+                    KEP_IPI_SYNCHRONOUS, // type
+                )
             END
-
-            // Mark pending.
-
-            KeOrUlong (
-                &targetprb^.IpiPendingSet, // ptr
-                1 << index, // bitset
-            )
-
-            HaluTriggerIpi (
-                targetprb, // target
-                KEP_IPI_SYNCHRONOUS, // type
-            )
-        END
 
 @Next
 
-        i += 1
-        targetprb += BL_PRB_SIZE
+            i += 1
+            targetprb += BL_PRB_SIZE
+        END
+
+        j += 1
     END
 
     // Spin-wait for execution of our callback.

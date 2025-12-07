@@ -562,9 +562,9 @@ FN MmpWaitForPages (
                 thrd := KeCurrentThread ()
                 seed = (thrd >> RTL_ALIGN_SHIFT) $ (thrd >> RTL_PAGE_SHIFT)
 #IF ( == BLD_BITS 32 )
-                seed $= KeSharedUserPage^.Uptime.Low
+                seed $= thrd^.Process^.Node^.SharedUserPage^.Uptime.Low
 #ELSE
-                seed $= KeSharedUserPage^.Uptime.Quad
+                seed $= thrd^.Process^.Node^.SharedUserPage^.Uptime.Quad
 #END
             END
 
@@ -767,7 +767,7 @@ EXPORT FN MmGetSystemSize () : UWORD
 
     // Get the size of the current node.
 
-    RETURN PsCurrentPartition ()^.SizeLevel
+    RETURN MmCurrentPartition()^.SizeLevel
 END
 
 #SECTION "PAGEtext"
@@ -806,3 +806,10 @@ PUBLIC MmuPartitionType : ObuType = {
 
     [IsPaged] = FALSE,
 }
+
+FN MmuPartitionToKeNode (
+    IN partition : ^MmpPartition,
+) : ^KeuNode
+
+    RETURN partition^.Node^.KeNode
+END

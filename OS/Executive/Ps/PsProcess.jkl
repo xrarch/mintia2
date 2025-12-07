@@ -385,9 +385,18 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
         CAST (process + SIZEOF PsuProcess) TO ^KepAsidInfoEntry
 #END
 
+    kenode : ^KeuNode
+
+    IF ctx^.Partition THEN
+        kenode = MmuPartitionToKeNode ( ctx^.Partition )
+    ELSE
+        kenode = PsCurrentNode ()
+    END
+
     KeuInitializeProcess (
         &process^.Pcb, // process
         ctx^.Name^.Data, // name
+        kenode, // kenode
     )
 
     // Initialize the process for usage by Ob.
@@ -1883,18 +1892,10 @@ END
 // modules, so we don't need to export these structures.
 
 #UNDEFINE PsCurrentNode
-#UNDEFINE PsCurrentPartition
 
-EXPORT FN PsCurrentNode () : ^MmpNode
+EXPORT FN PsCurrentNode () : ^KeuNode
 
     // Return the current node.
 
-    RETURN PsCurrentProcess()^.Node
-END
-
-EXPORT FN PsCurrentPartition () : ^MmpPartition
-
-    // Return the current partition.
-
-    RETURN PsCurrentProcess()^.Partition
+    RETURN PsCurrentProcess()^.Pcb.Node
 END

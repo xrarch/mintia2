@@ -171,7 +171,7 @@ END
 
 #SECTION "INITtext"
 FN MmpInitializeSystemVa (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
     // Initialize the system space allocation.
@@ -215,21 +215,21 @@ FN MmpInitializeSystemVa (
     //
     //                    Maximum size on 32-bit is capped at 256MB.
 
-    size := node^.Partition.SizeLevel
+    mmpnode := kenode^.Mmp
+
+    size := mmpnode^.Partition.SizeLevel
 
     KeAssert ( SIZEOF MmpChunkEntry <= SIZEOF MmpPte )
 
     // Initialize nonpaged space.
 
-    base := CAST MMP_POOL_SPACE + (
-        (node^.Id * KeuLoaderBlock.PoolSpaceSize) << RTL_PAGE_SHIFT
-    ) TO ^VOID
+    base : ^VOID = kenode + KE_POOL_SPACE_OFFSET
 
     MmpInitializeChunkSpace (
-        &node^.PoolSpace, // chunkspace
+        &mmpnode^.PoolSpace, // chunkspace
         base, // base
         RTL_PAGE_SHIFT, // entryshift
-        KeuLoaderBlock.PoolSpaceSize, // pages
+        kenode^.PoolSpaceSize, // pages
     )
 
     // Initialize cache space.
@@ -248,42 +248,33 @@ FN MmpInitializeSystemVa (
 
     MmpCacheSpaceChunkPages = (1 << entryshift) >> RTL_PAGE_SHIFT
 
-    base = CAST MMP_CACHE_SPACE +
-        ((node^.Id * KeuLoaderBlock.CacheSpaceSize) << RTL_PAGE_SHIFT) TO ^VOID
+    base = kenode + KE_CACHE_SPACE_OFFSET
 
     MmpInitializeChunkSpace (
-        &node^.CacheSpace, // chunkspace
+        &mmpnode^.CacheSpace, // chunkspace
         base, // base
         entryshift, // entryshift
-        KeuLoaderBlock.CacheSpaceSize, // pages
+        kenode^.CacheSpaceSize, // pages
     )
 
     // Initialize dynamic space.
 
-    RtlInitializeAvl ( &node^.DynamicSpaceRoot )
+    RtlInitializeAvl ( &mmpnode^.DynamicSpaceRoot )
 
-    KeInitializeLock ( &node^.DynamicSpaceLock )
+    KeInitializeLock ( &mmpnode^.DynamicSpaceLock )
 
-    KeInitializeLock ( &node^.DynamicSpaceTreeLock )
+    KeInitializeLock ( &mmpnode^.DynamicSpaceTreeLock )
 
-    base = CAST MMP_DYNAMIC_SPACE + (
-        (node^.Id * KeuLoaderBlock.DynamicSpaceSize) << RTL_PAGE_SHIFT
-    ) TO ^VOID
+    base = kenode + KE_DYNAMIC_SPACE_OFFSET
 
-    node^.DynamicSpaceBase = base
+    mmpnode^.DynamicSpaceBase = base
 
     // Trim four pages off the end of dynamic space per CPU, to be used as
     // 'quick' mappings.
-    //
-    // XXX Currently this uses the count of *all* CPUs, not just ones in this
-    //     NUMA node. This could be inefficient because it will cause extra
-    //     virtual pages to be allocated for each node, but it avoids having to
-    //     maintain and calculate CPU ID ranges for each NUMA node so it's fine
-    //     for now.
 
-    quickpages := KeQueryProcessorCount () * MMP_QUICK_PER_CPU
+    quickpages := kenode^.ProcessorCount * MMP_QUICK_PER_CPU
 
-    dsize := KeuLoaderBlock.DynamicSpaceSize
+    dsize := kenode^.DynamicSpaceSize
 
     IF dsize < quickpages THEN
         KeCrash ( "Dynamic space too small\n" )
@@ -292,14 +283,14 @@ FN MmpInitializeSystemVa (
     dsize -= quickpages
 
     RtlInitializeBitmap (
-        &node^.DynamicSpaceBitmap, // header
+        &mmpnode^.DynamicSpaceBitmap, // header
         dsize, // sizeinbits
-        KeuLoaderBlock.DynamicSpaceBitmaps[node^.Id], // data
+        kenode^.DynamicSpaceBitmap, // data
     )
 
     // Remember the base of the quick pages.
 
-    node^.QuickPteBase =
+    mmpnode^.QuickPteBase =
         MmpPteAddress ( base + (dsize << RTL_PAGE_SHIFT) )
 END
 
@@ -307,7 +298,7 @@ END
 
 #SECTION "INITtext"
 FN MmpInitializeSpaceNodeAllocation (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
     // Initialize the cache for dynamic space nodes.
@@ -318,8 +309,10 @@ FN MmpInitializeSpaceNodeAllocation (
     //     MmpDynamicSpaceNode being small enough to not trigger page-aligned
     //     pool allocation when slabs are created for it.
 
-    node^.SpaceNodeCache = MmCreatePoolCache (
-        node, // node
+    mmpnode := kenode^.Mmp
+
+    mmpnode^.SpaceNodeCache = MmCreatePoolCache (
+        mmpnode, // node
         "Space Nodes", // name
         SIZEOF MmpDynamicSpaceNode, // size
         MM_NONPAGED_POOL, // poolindex
@@ -327,7 +320,7 @@ FN MmpInitializeSpaceNodeAllocation (
     )
 
 #ENTERSECTION "INITtext"
-    IF NOT node^.SpaceNodeCache THEN
+    IF NOT mmpnode^.SpaceNodeCache THEN
         KeCrash ( "Failed to create space node cache\n" )
     END
 #LEAVESECTION "INITtext"
@@ -374,7 +367,7 @@ FN MmpFindDynamicSpaceNode (
     // Find the dynamic space node in which the pointer resides.
     // Returns NULLPTR if no such node exists.
 
-    node := MmpNumaNodeFromDynamicSpacePointer ( ptr )
+    node := KeNumaNodeFromSpacePointer ( ptr ) ^.Mmp
 
     spacenode : ^MmpDynamicSpaceNode
 

@@ -124,10 +124,6 @@ FN (KeStartThreadF) ExpInitializeExecutive (
 
     ExpInitializeBootFlags ()
 
-    // Initialize the idle process enough to continue.
-
-    PsuInitializeIdleProcess ()
-
     // Initialize physical memory allocation.
 
     MmuInitializeStage1 ()
@@ -245,12 +241,12 @@ FN ExuStartExecutive ()
     // Now initialize the thread object.
 
     KeuInitializeThread (
-        &KeuIdleProcess.Pcb, // process
+        &KeBootNode^.IdleProcess^.Pcb, // process
         &ExuZeroPageWorker, // thread
         "Zpw", // name
         kstack, // kstack
         KEU_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
-        KeuAllocateInitialTurnstile (), // turnstile
+        KeuAllocateInitialTurnstile ( KeBootNode ), // turnstile
         &ExpInitializeExecutive, // startfunc
         0, // context1
         0, // context2

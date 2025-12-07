@@ -11,8 +11,6 @@ EXTERN FN PsExitThread ()
 PUBLIC KeuUexecApcDispatcher : ^VOID
 PUBLIC KeuUexecSignalDispatcher : ^VOID
 
-PUBLIC KeuReaperCustodyList : KeuCustodyList
-
 #SECTION "PAGEtext"
 FN (KeApcF) KepSuspendThreadApc (
     IN apc : ^KeApc,
@@ -797,7 +795,7 @@ FN KeuExitThread (
     // Atomically enqueue to reaper list.
 
     KeuInsertCustodyList (
-        &KeuReaperCustodyList, // list
+        thread^.Process^.Node^.ReaperCustodyList, // list
         &thread^.ReadyEntry.Next, // link
     )
 

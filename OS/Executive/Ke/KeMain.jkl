@@ -5,15 +5,11 @@
 #INCLUDE "Kep.hjk"
 #INCLUDE "<inc>/Psu.hjk"
 
-PUBLIC KeuIdleProcess : PsuProcess
-
 EXPORT KeuLoaderBlock : BlInfoRecord
 
-PUBLIC KeuSystemPageDirectoryPfn : UWORD
+EXPORT KeBootNode : ^KeuNode
 
 FNPTR DbgMainF ()
-
-EXPORT KeSharedUserPage : ^OsSharedUserPage
 
 #IF BLD_CHK
 
@@ -26,10 +22,6 @@ EXPORT KepAssertionMessage : UBYTE[40]
 KepInitializeCount : ULONG
 
 KepAnnounceSpinlock : KepSpinlock = KEP_INITIAL_SPINLOCK
-
-PUBLIC KepWorkBalanceDpc : KeDpc
-
-PUBLIC KepMaximumBalanceIterations : ULONG
 
 #MACRO KepAcquireAnnounce () [
     KepAcquireSpinlockRaise ( &KepAnnounceSpinlock )
@@ -99,6 +91,7 @@ END
 #SECTION "INITtext"
 FN KepInitializePrb (
     IN prb : ^KepPrb,
+    IN kenode : ^KeuNode,
     IN bootprocessor : UWORD,
 )
 
@@ -108,12 +101,14 @@ FN KepInitializePrb (
     // 0 - Processor ID
     // 1 - Software IDT pointer
     // 2 - Idle stack pointer
+    // 3 - Consecutive ID
 
     idword := CAST prb TO ^UWORD
 
     id := idword[0]
     irqdt := idword[1]
     stackbase := idword[2]
+    consecid := idword[3]
 
     // Clear the Prb.
 
@@ -128,6 +123,7 @@ FN KepInitializePrb (
     prb^.Id = id
     prb^.IrqDispatchTable = CAST irqdt TO ^VOID
     prb^.IdleStackBase = CAST stackbase TO ^VOID
+    prb^.ConsecutiveId = consecid
 
     // On some architectures, the thing we get from KEP_CURRENT_PRB_LOCAL is not
     // a globally visible address for this Prb.
@@ -212,12 +208,12 @@ FN KepInitializePrb (
     END
 
     KeuInitializeThread (
-        &KeuIdleProcess.Pcb, // process
+        &kenode^.IdleProcess^.Pcb, // process
         &prb^.IdleThread, // thread
         "IdleThread", // name
         prb^.IdleStackBase, // kstack
         BL_IDLE_STACK_SIZE, // kstacksize
-        KeuAllocateInitialTurnstile (), // turnstile
+        KeuAllocateInitialTurnstile ( kenode ), // turnstile
         startfunc, // startfunc
         0, // context1
         0, // context2
@@ -230,6 +226,8 @@ FN KepInitializePrb (
     prb^.IdleThread.CurrentPrb = prb
 #END
 
+    prb^.Node = kenode
+
     // Initialize frozen context to zero so that the debugger doesn't try to
     // read it if we failed to freeze.
 
@@ -238,6 +236,173 @@ FN KepInitializePrb (
     // Stash the Prb ID.
 
     KepStashPrbId ( prb, id )
+END
+
+#SECTION "INITtext"
+FN KeuAllocateNodeSpace (
+    IN kenode : ^KeuNode,
+    IN bytes : UWORD,
+) : ^VOID
+
+    // Allocate some space from the specified node.
+
+    bytes = (bytes + RTL_ALIGN_BYTES - 1) & ~(RTL_ALIGN_BYTES - 1)
+
+    IF kenode^.BumpOffset + bytes > BL_NODE_SIZE THEN
+        RETURN NULLPTR
+    END
+
+    ptr := kenode + kenode^.BumpOffset
+    kenode^.BumpOffset += bytes
+
+    RETURN ptr
+END
+
+#SECTION "INITtext"
+FN KeuInitializeNode (
+    IN kenode : ^KeuNode,
+    IN node : ^BlNodeInfo,
+)
+
+    // Initialize the given NUMA node.
+
+    // Initialize the bump allocator used for component-private per-node
+    // structures.
+
+    kenode^.BumpOffset = SIZEOF KeuNode
+
+    // Initialize various node stuff.
+
+    nodeid := node^.Id
+
+    kenode^.SystemPageDirectoryPfn = node^.SystemPageDirectoryPfn
+    kenode^.ProcessorCount = node^.ProcessorCount
+    kenode^.Id = nodeid
+
+    kenode^.PoolSpaceSize = node^.PoolSpaceSize
+    kenode^.CacheSpaceSize = node^.CacheSpaceSize
+    kenode^.DynamicSpaceSize = node^.DynamicSpaceSize
+
+    kenode^.DynamicSpaceBitmap = node^.DynamicSpaceBitmap
+
+    // Allocate a Ke-private part of the node.
+
+    kenode^.Kep = KeuAllocateNodeSpace (
+        kenode, // kenode
+        SIZEOF KepNode, // bytes
+    )
+
+    KeAssert ( kenode^.Kep != NULLPTR )
+
+    kepnode := kenode^.Kep
+
+    // Initialize a per-node idle process.
+
+    PsuInitializeIdleProcess ( kenode )
+
+    // Initialize turnstiles.
+
+    KepInitializeTurnstiles ( kepnode )
+
+    // Initialize the Prbs.
+
+    prb := KepPrbFromNodeAndNumber ( kenode, 0 )
+
+    initprb := prb
+    i := 0
+
+    WHILE i < kenode^.ProcessorCount DO
+        KepInitializePrb (
+            initprb, // prb
+            kenode, // kenode
+            (i == 0) AND (nodeid == 0), // bootprocessor
+        )
+
+        i += 1
+        initprb += BL_PRB_SIZE
+    END
+
+    // Perform early initialization of the HAL. This will perform baseline
+    // initialization of integral platform components such as the interval
+    // timer. Also, we get a boot console which is guaranteed to stay sane
+    // throughout the lifetime of the system and at any IPL.
+
+    HaluEarlyInitialize ( kenode )
+
+    // Initialize the shared user page.
+
+    kenode^.SharedUserPage = node^.VirtualSharedUserPage
+
+    KepUpdateTime ( kenode, prb )
+
+    // Move the loader's descriptor list head into our node.
+
+    kenode^.DescriptorListHead.Next = node^.DescriptorListHead.Next
+    kenode^.DescriptorListHead.Prev = node^.DescriptorListHead.Prev
+
+    // Fix up the circular list head.
+
+    kenode^.DescriptorListHead.Next^.Prev = &kenode^.DescriptorListHead
+    kenode^.DescriptorListHead.Prev^.Next = &kenode^.DescriptorListHead
+
+#IF BLD_MP
+    // Initialize the work balancing DPC.
+
+    KeInitializeDpc (
+        &kepnode^.WorkBalanceDpc, // dpc
+        &KepBalanceWork, // func
+    )
+
+    // Compute the maximum number of balance iterations as the number of
+    // possible pairs between processors plus one. This is the same as the
+    // number of possible imbalances plus one for good measure.
+    //
+    // This is calculated as n choose 2 which simplifies to n(n-1)/2 + 1.
+
+    kepnode^.MaximumBalanceIterations = (kenode^.ProcessorCount *
+        (kenode^.ProcessorCount - 1)) / 2 + 1
+
+    IF kepnode^.MaximumBalanceIterations > 64 THEN
+        kepnode^.MaximumBalanceIterations = 64
+    END
+
+    kepnode^.NextWorkBalanceMs = KEP_WORK_BALANCE_INTERVAL
+#END
+
+END
+
+#SECTION "INITtext"
+FN KeuInitializeNodes () : ^KepPrb
+
+    // Initialize all the NUMA nodes indicated by the loader.
+    // Return a pointer to the boot PRB.
+
+    bootprb : ^KepPrb
+
+    listhead := &KeuLoaderBlock.NodeListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        node := CONTAINEROF listentry TO BlNodeInfo.Entry
+
+        id := node^.Id
+
+        kenode := KeNumaNodeById ( id )
+
+        IF id == 0 THEN
+            KeBootNode = kenode
+            bootprb = KepPrbFromNodeAndNumber ( kenode, 0 )
+        END
+
+        KeuInitializeNode (
+            kenode, // kenode
+            node, // node
+        )
+
+        listentry = listentry^.Next
+    END
+
+    RETURN bootprb
 END
 
 #IF BLD_MP
@@ -289,28 +454,6 @@ FN (KeStartThreadF) KepThreadedMain (
 END
 
 #SECTION "INITtext"
-FN KepFixupLoaderBlockLists ()
-
-    // Fix up the circular lists in the loader block so that they still point to
-    // the newly relocated list heads.
-
-    listhead := &KeuLoaderBlock.ResourceListHead
-
-    listhead^.Next^.Prev = listhead
-    listhead^.Prev^.Next = listhead
-
-    listhead = &KeuLoaderBlock.DllListHead
-
-    listhead^.Next^.Prev = listhead
-    listhead^.Prev^.Next = listhead
-
-    listhead = &KeuLoaderBlock.DescriptorListHead
-
-    listhead^.Next^.Prev = listhead
-    listhead^.Prev^.Next = listhead
-END
-
-#SECTION "INITtext"
 EXPORT FN KeMain (
     IN loaderblock : ^BlInfoRecord,
 )
@@ -327,6 +470,9 @@ EXPORT FN KeMain (
     //    rule, even if we could theoretically use it on some platform. Only
     //    exception are firmware services that *must* be called at certain
     //    points in HAL initialization, and only then.
+    // o  The boot processor and boot node (the NUMA node within which the boot
+    //    processor resides) have been initialized with software ID zero. The
+    //    boot node is the first one on the list.
     //
     // Any pointers from the Loader may or may not be in a spot where they are
     // permanently accessible, since this may or may not be a platform where the
@@ -359,50 +505,31 @@ EXPORT FN KeMain (
         SIZEOF BlInfoRecord, // sz
     )
 
-    // Fix up loader block lists.
+    // Fix up the circular lists in the loader block so that they still point to
+    // the newly relocated list heads.
 
-    KepFixupLoaderBlockLists ()
+    listhead := &KeuLoaderBlock.ResourceListHead
 
-    // Initialize the idle process.
+    listhead^.Next^.Prev = listhead
+    listhead^.Prev^.Next = listhead
 
-    KeuInitializeProcess (
-        &KeuIdleProcess.Pcb, // process
-        "Idle", // name
-    )
+    listhead = &KeuLoaderBlock.DllListHead
 
-    KeuIdleProcess.Pcb.PageDirectoryPfn = KeuLoaderBlock.SystemPageDirectoryPfn
+    listhead^.Next^.Prev = listhead
+    listhead^.Prev^.Next = listhead
 
-    // Initialize turnstiles.
+    listhead = &KeuLoaderBlock.NodeListHead
 
-    KepInitializeTurnstiles ()
+    listhead^.Next^.Prev = listhead
+    listhead^.Prev^.Next = listhead
 
-    // Initialize the Prbs.
+    // Initialize the NUMA nodes.
 
-    prb := KepPrbFromNumber ( 0 )
-
-    initprb := prb
-    i := 0
-
-    WHILE i < KeuLoaderBlock.ProcessorCount DO
-        KepInitializePrb (
-            initprb, // prb
-            i == 0, // bootprocessor
-        )
-
-        i += 1
-        initprb += BL_PRB_SIZE
-    END
+    prb := KeuInitializeNodes ()
 
     // Initialize architectural support.
 
     KepInitializeArchitecture ( prb )
-
-    // Perform early initialization of the HAL. This will perform baseline
-    // initialization of integral platform components such as the interval
-    // timer. Also, we get a boot console which is guaranteed to stay sane
-    // throughout the lifetime of the system and at any IPL.
-
-    HaluEarlyInitialize ()
 
     // Now that we have a console, announce ourselves.
 
@@ -411,18 +538,9 @@ EXPORT FN KeMain (
     // Perform platform-specific initialization for the boot processor.
 
     KeAssert ( SIZEOF KepPrb <= BL_PRB_SIZE )
+    KeAssert ( SIZEOF KeuNode <= BL_NODE_SIZE )
 
     HaluProcessorInitialize ( prb )
-
-    // Initialize the shared user page.
-
-    KeSharedUserPage = KeuLoaderBlock.VirtualSharedUserPage
-
-    KepUpdateTime ( prb )
-
-    // Export the page directory PFN.
-
-    KeuSystemPageDirectoryPfn = KeuLoaderBlock.SystemPageDirectoryPfn
 
     // Perform early initialization of the debugger.
 
@@ -443,26 +561,6 @@ EXPORT FN KeMain (
     )
 
 #IF BLD_MP
-    // Initialize the work balancing DPC.
-
-    KeInitializeDpc (
-        &KepWorkBalanceDpc, // dpc
-        &KepBalanceWork, // func
-    )
-
-    // Compute the maximum number of balance iterations as the number of
-    // possible pairs between processors plus one. This is the same as the
-    // number of possible imbalances plus one for good measure.
-    //
-    // This is calculated as n choose 2 which simplifies to n(n-1)/2 + 1.
-
-    KepMaximumBalanceIterations = (KeuLoaderBlock.ProcessorCount *
-        (KeuLoaderBlock.ProcessorCount - 1)) / 2 + 1
-
-    IF KepMaximumBalanceIterations > 64 THEN
-        KepMaximumBalanceIterations = 64
-    END
-
     // We're ready to pull the other processors into the system.
 
     KepInitializeCount = KeuLoaderBlock.ProcessorCount - 1
@@ -497,3 +595,10 @@ EXPORT FN KeQueryProcessorCount () : UWORD
 END
 
 #END
+
+EXPORT FN KeQueryNodeCount () : UWORD
+
+    // Query the number of NUMA nodes in the system.
+
+    RETURN KeuLoaderBlock.NodeCount
+END

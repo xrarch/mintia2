@@ -601,13 +601,25 @@ FN KepFindProcessor (
     // At the same time, scan for the processor with the lowest load in
     // general.
 
-    procs := KeuLoaderBlock.ProcessorCount
+    kenode := thread^.Process^.Node
+    procs := kenode^.ProcessorCount
 
     preemptprb : ^KepPrb = NULLPTR
     unloadedprb : ^KepPrb = NULLPTR
 
+    IF prb^.Node != kenode THEN
+        // The given preferred processor is not part of the thread's process's
+        // preferred node.
+
+        IF thread^.AffinityPrb THEN
+            prb = thread^.AffinityPrb
+        ELSE
+            prb = KepPrbFromNodeAndNumber ( kenode, 0 )
+        END
+    END
+
     i := 0
-    id := prb^.Id
+    id := KeNumberPartOfProcessorId ( prb^.Id )
 
     WHILE TRUE DO
         preempt := KepWouldPreempt (
@@ -643,7 +655,7 @@ FN KepFindProcessor (
             id = 0
         END
 
-        prb = KepPrbFromNumber ( id )
+        prb = KepPrbFromNodeAndNumber ( kenode, id )
     END
 
     IF preemptprb THEN
@@ -658,15 +670,16 @@ FN KepFindProcessor (
 END
 
 FN KepFindMostAndLeastLoadedProcessor (
+    IN kenode : ^KeuNode,
     OUT mostloaded : ^KepPrb,
     OUT leastloaded : ^KepPrb,
 )
 
     // Find and return the most and least loaded processors.
 
-    procs := KeuLoaderBlock.ProcessorCount
+    procs := kenode^.ProcessorCount
 
-    mostloaded = KepPrbFromNumber ( 0 )
+    mostloaded = KepPrbFromNodeAndNumber ( kenode, 0 )
     leastloaded = mostloaded
 
     i := 1
@@ -2062,6 +2075,7 @@ FN KepStealWork ()
     garbagecan : ^VOID
 
     KepFindMostAndLeastLoadedProcessor (
+        myprb^.Node, // kenode
         OUT loadedprb, // mostloaded
         OUT garbagecan, // leastloaded
     )
@@ -2105,8 +2119,10 @@ FN (KeDpcF) KepBalanceWork (
     // Called once per second on processor 0. Moves work from the most loaded
     // processor to the least loaded processor until balance is achieved.
 
-    max := KepMaximumBalanceIterations
     myprb := KEP_CURRENT_PRB
+    kenode := myprb^.Node
+
+    max := kenode^.Kep^.MaximumBalanceIterations
     j := 0
 
     WHILE j < max DO
@@ -2114,6 +2130,7 @@ FN (KeDpcF) KepBalanceWork (
         leastloaded : ^KepPrb
 
         KepFindMostAndLeastLoadedProcessor (
+            kenode, // node
             OUT mostloaded, // mostloaded
             OUT leastloaded, // leastloaded
         )

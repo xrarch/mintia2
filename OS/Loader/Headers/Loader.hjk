@@ -18,6 +18,9 @@
 #DEFINE BL_PRB_SHIFT 12
 #DEFINE BL_PRB_SIZE ( << 1 BL_PRB_SHIFT )
 
+#DEFINE BL_NODE_SHIFT 13
+#DEFINE BL_NODE_SIZE ( << 1 BL_NODE_SHIFT )
+
 #DEFINE BL_IDT_STACK_SHIFT 12
 #DEFINE BL_IDT_STACK_SIZE ( << 1 BL_IDT_STACK_SHIFT )
 #DEFINE BL_IDLE_STACK_SHIFT ( - BL_IDT_STACK_SHIFT 1 )
@@ -60,24 +63,13 @@ END
 STRUCT BlInfoRecord
     ResourceListHead : RtlListEntry,
     DllListHead : RtlListEntry,
-    DescriptorListHead : RtlListEntry,
+    NodeListHead : RtlListEntry,
 
     PfnDatabase : ^VOID,
     BootDeviceName : UBYTE[BL_BOOT_NAME_MAX],
-    ProcessorCount : UWORD,
-    VirtualPrbBase : ^VOID,
-    PhysicalPrbBase : ^VOID,
-    VirtualSharedUserPage : ^OsSharedUserPage,
-    PhysicalSharedUserPage : ^VOID,
     DbgMain : ^VOID,
     KtMain : ^VOID,
-
-    SystemPageDirectoryPfn : UWORD,
-
-    PoolSpaceSize : UWORD,
-    CacheSpaceSize : UWORD,
-    DynamicSpaceSize : UWORD,
-    DynamicSpaceBitmaps : ^^UBYTE,
+    BootNode : ^BlNodeInfo,
 
     ArgTable : ^^UBYTE,
     ArgCount : UWORD,
@@ -88,9 +80,44 @@ STRUCT BlInfoRecord
 
     ResourceCount : UINT,
     DllCount : UINT,
+    NodeCount : UINT,
+    ProcessorCount : UINT,
 
     BootFbWidth : UINT,
     BootFbHeight : UINT,
+END
+
+STRUCT BlNodeInfo
+    Entry : RtlListEntry,
+
+    DescriptorListHead : RtlListEntry,
+
+    StartPhysicalAddress : UWORD,
+    EndPhysicalAddress : UWORD,
+
+    SystemPageDirectoryPfn : UWORD,
+
+    VirtualSharedUserPage : ^OsSharedUserPage,
+    PhysicalSharedUserPage : ^VOID,
+
+    NodeSpaceBase : ^VOID,
+
+    PoolSpaceSize : UWORD,
+    CacheSpaceSize : UWORD,
+    DynamicSpaceSize : UWORD,
+
+    DynamicSpaceBitmap : ^UBYTE,
+
+    PhysicalPrbBase : ^VOID,
+
+    KernelStructureBump : ^VOID,
+
+    TotalPages : UWORD,
+
+    ProcessorIdBase : UWORD,
+    ProcessorCount : UWORD,
+
+    Id : UINT,
 END
 
 ENUM BlMemoryDescriptorType : UBYTE

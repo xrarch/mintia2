@@ -384,12 +384,21 @@ FN NspInitializeTree ()
 
     NspRootEntry.Entry.Permissions = rootperms
 
-    // Set the root directory of the idle process.
+    // Set the root directory of the idle processes.
 
-    idleproc := KeuIdleProcess.Paged
+    i := 0
+    count := KeQueryNodeCount ()
 
-    idleproc^.RootHandle.Entry = &NspRootEntry.Entry
-    idleproc^.RootHandle.Subspace = &NspRootSubspace
+    WHILE i < count DO
+        kenode := KeNumaNodeById ( i )
+
+        idleproc := kenode^.IdleProcess^.Paged
+
+        idleproc^.RootHandle.Entry = &NspRootEntry.Entry
+        idleproc^.RootHandle.Subspace = &NspRootSubspace
+
+        i += 1
+    END
 END
 
 #SECTION "PAGEtext"

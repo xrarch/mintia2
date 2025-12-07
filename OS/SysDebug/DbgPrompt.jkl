@@ -385,13 +385,24 @@ FN (DbgCommandF) DbgCommandCpu ()
         LEAVE
     END
 
-    IF numval >= KeQueryProcessorCount () THEN
-        RtlPrint ( "No such CPU\n" )
+    numpart := KeNumberPartOfProcessorId ( numval )
+    nodepart := KeNodePartOfProcessorId ( numval )
+
+    IF nodepart >= KeuLoaderBlock.NodeCount THEN
+        RtlPrint ( "No such node\n" )
 
         LEAVE
     END
 
-    prb := KepPrbFromNumber ( numval )
+    node := KeNumaNodeById ( nodepart )
+
+    IF numpart >= node^.ProcessorCount THEN
+        RtlPrint ( "No such processor\n" )
+
+        LEAVE
+    END
+
+    prb := KepPrbFromFullNumber ( numval )
 
     context := prb^.FrozenContext
 

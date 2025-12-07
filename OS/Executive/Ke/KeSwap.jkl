@@ -189,6 +189,7 @@ FN KeuFlushProcessOutSwapQueue () : ^KeuProcess
 END
 
 FN KeuHarvestSwapCandidates (
+    IN kenode : ^KeuNode,
     IN procid : UWORD,
 ) : ^KeuThread
 
@@ -199,7 +200,7 @@ FN KeuHarvestSwapCandidates (
 
     head : ^KeuThread = NULLPTR
 
-    prb := KepPrbFromNumber ( procid )
+    prb := KepPrbFromNodeAndNumber ( kenode, procid )
 
     listhead := &prb^.StackSwapCandidateListHead
 

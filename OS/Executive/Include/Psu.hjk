@@ -82,7 +82,6 @@ STRUCT PsuProcess
     Paged : ^PsuPagedProcess,
 
     Partition : ^MmpPartition,
-    Node : ^MmpNode,
 
     TerminationEvent : KeEvent,
 
@@ -163,7 +162,9 @@ EXTERN PsuSystemProcess : ^PsuProcess
 
 EXTERN PsuActiveProcessCount : UWORD
 
-EXTERN FN PsuInitializeIdleProcess ()
+EXTERN FN PsuInitializeIdleProcess (
+    IN kenode : ^KeuNode,
+)
 
 EXTERN FN PsuInitializeStage1 ()
 
@@ -200,8 +201,6 @@ EXTERN FN (ExWorkItemF) PsuReaperWorker (
     IN context2 : UWORD,
 )
 
-EXTERN KeuIdleProcess : PsuProcess
-
 #MACRO PsuCurrentCredentials () [
     (&PsCurrentProcess()^.Paged^.Cred)
 ]
@@ -214,12 +213,8 @@ EXTERN KeuIdleProcess : PsuProcess
     ((process)^.Paged^.HandleTable.QuotaBlock)
 ]
 
-#MACRO PsCurrentPartition () [
-    (PsCurrentProcess()^.Partition)
-]
-
 #MACRO PsCurrentNode () [
-    (PsCurrentProcess()^.Node)
+    (PsCurrentProcess()^.Pcb.Node)
 ]
 
 EXTERN FN PsuBlockRundownProcess (

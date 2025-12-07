@@ -34,17 +34,15 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
     )
 
     IF empty THEN
-        // Also aggressively reap threads and objects.
-        // TODO: Make the reaper lists for these things per-node.
-        //       The worker thread pool should also be made per-node.
+        kenode := node^.KeNode
 
         PsuReaperWorker (
-            0, // context1
+            kenode, // context1
             0, // context2
         )
 
         ObuDeferredDeletionWorker (
-            0, // context1
+            kenode, // context1
             0, // context2
         )
     END
@@ -100,8 +98,8 @@ FN MmuBalanceManager ()
         TRUE, // setcurrentpriority
     )
 
-    partition := PsCurrentPartition ()
-    node := PsCurrentNode ()
+    partition := MmCurrentPartition ()
+    node := MmCurrentNode ()
 
     IF MmpIsPartitionPhysical ( partition ) THEN
         node^.PgPoolCacheAdjustActive = FALSE

@@ -8,18 +8,9 @@
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 #INCLUDE "<ll>/Xlo.hjk"
 
-// TMP
-MmpBootNodeStatic : MmpNode
-
-PUBLIC MmpBootNode : ^MmpNode
-
 PUBLIC MmpPfnDatabase : ^MmpPfe
 
 PUBLIC MmpTotalPages := 0
-
-PUBLIC MmpSystemSize := 0
-
-PUBLIC MmpConstantZeroPfe : ^MmpPfe
 
 MmpWiredPages := 0
 MmpFreedPages := 0
@@ -55,7 +46,7 @@ FN MmuJettisonUnusedResources ()
     listhead := &KeuLoaderBlock.ResourceListHead
     listentry := listhead^.Next
 
-    partition := &MmpBootNode^.Partition
+    partition := &KeBootNode^.Mmp^.Partition
 
     WHILE listentry != listhead DO
         rsrc := CONTAINEROF listentry TO BlResource.Entry
@@ -195,6 +186,56 @@ FN MmpIdentifyUnwireableSections (
     END
 END
 
+FN MmpReclaimMemoryFromNode (
+    IN kenode : ^KeuNode,
+)
+
+    // Reclaim physical memory regions.
+
+    sys := &kenode^.Mmp^.Partition
+
+    listhead := &kenode^.DescriptorListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        desc := CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+        // Physical memory is reclaimable if it's either explicitly
+        // reclaimable, or is debug memory and no debugger is installed.
+
+        IF desc^.Type == BL_MEMORY_RECLAIMABLE OR
+            (desc^.Type == BL_MEMORY_DEBUG AND NOT KeuLoaderBlock.DbgMain) THEN
+
+            pages := desc^.PageCount
+
+            MmpWiredPages -= pages
+            MmpFreedPages += pages
+
+            sys^.FreeList.Count += pages
+            sys^.AvailablePageCount += pages
+            sys^.FluidPageCount += pages
+
+            pfn := desc^.StartPfn
+            pfe := MmpPfnToPfe ( pfn )
+
+            WHILE pages DO
+                pfe^.Type = MMP_FREE_PFE_TYPE
+
+                RtlInsertAtTailList (
+                    &sys^.FreeList.Heads[MmpPfnColor(pfn)], // head
+                    &pfe^.Entry, // entry
+                )
+
+                pfe += MMP_PFE_SIZE
+                pfn += 1
+                pages -= 1
+            END
+        END
+
+        listentry = listentry^.Next
+    END
+END
+
 FN MmpReclaimMemory ()
 
     // We have to lift any lists the loader gave us onto our own pool. Then we
@@ -289,66 +330,35 @@ FN MmpReclaimMemory ()
     tmplisthead.Next^.Prev = listhead
     tmplisthead.Prev^.Next = listhead
 
-    // Reclaim physical memory regions.
+    i := 0
 
-    sys := &MmpBootNode^.Partition
+    WHILE i < KeuLoaderBlock.NodeCount DO
+        kenode := KeNumaNodeById ( i )
 
-    listhead = &KeuLoaderBlock.DescriptorListHead
-    listentry = listhead^.Next
+        MmpReclaimMemoryFromNode ( kenode )
 
-    WHILE listentry != listhead DO
-        desc := CONTAINEROF listentry TO BlMemoryDescriptor.Entry
-
-        // Physical memory is reclaimable if it's either explicitly
-        // reclaimable, or is debug memory and no debugger is installed.
-
-        IF desc^.Type == BL_MEMORY_RECLAIMABLE OR
-            (desc^.Type == BL_MEMORY_DEBUG AND NOT KeuLoaderBlock.DbgMain) THEN
-
-            pages := desc^.PageCount
-
-            MmpWiredPages -= pages
-            MmpFreedPages += pages
-
-            sys^.FreeList.Count += pages
-            sys^.AvailablePageCount += pages
-            sys^.FluidPageCount += pages
-
-            pfn := desc^.StartPfn
-            pfe := MmpPfnToPfe ( pfn )
-
-            WHILE pages DO
-                pfe^.Type = MMP_FREE_PFE_TYPE
-
-                RtlInsertAtTailList (
-                    &sys^.FreeList.Heads[MmpPfnColor(pfn)], // head
-                    &pfe^.Entry, // entry
-                )
-
-                pfe += MMP_PFE_SIZE
-                pfn += 1
-                pages -= 1
-            END
-        END
-
-        listentry = listentry^.Next
+        i += 1
     END
 END
 
-FN MmpInitializeZeroedPage ()
+FN MmpInitializeZeroedPage (
+    IN kenode : ^KeuNode,
+)
 
     // Allocate the constantly zeroed page frame.
 
-    MmpConstantZeroPfe = MmpAllocatePage (
-        &MmpBootNode^.Partition, // partition
+    pfe := MmpAllocatePage (
+        &kenode^.Mmp^.Partition, // partition
         TRUE, // zeroed
         TRUE, // low
         0, // color
     )
 
-    IF NOT MmpConstantZeroPfe THEN
+    IF NOT pfe THEN
         KeCrash ( "Failed to allocate zero page\n" )
     END
+
+    kenode^.ConstantZeroPfn = MmpPfeToPfn ( pfe )
 END
 
 FN MmuInitializeStage1 ()
@@ -357,99 +367,13 @@ FN MmuInitializeStage1 ()
     // the system memory partition enough to get physical memory allocation
     // working.
 
-    KeAssert ( SIZEOF MmpPfe <= MMP_PFE_SIZE )
+    KeAssert ( SIZEOF MmpPfe == MMP_PFE_SIZE )
 
-    // TMP
-    MmpBootNode = &MmpBootNodeStatic
-
-    sys := &MmpBootNodeStatic.Partition
+    membytes := 0
 
     // Copy the address of the PFN database.
 
     MmpPfnDatabase = KeuLoaderBlock.PfnDatabase
-
-    // Initialize the integral data structures of the system partition.
-
-    MmpInitializePartitionStage1 (
-        sys, // partition
-        MmpBootNode, // node
-    )
-
-    // Walk the memory descriptor list.
-
-    head := &KeuLoaderBlock.DescriptorListHead
-    listentry := head^.Next
-
-    WHILE listentry != head DO
-        desc := CONTAINEROF listentry TO BlMemoryDescriptor.Entry
-
-        pages := desc^.PageCount
-
-        // Include as part of the total memory of the system.
-
-        sys^.TotalPages += pages
-
-        IF desc^.Type == BL_MEMORY_FREE THEN
-            // Place all page frames within this descriptor's bounds on the free
-            // list of the system partition.
-
-            sys^.FluidPageCount += pages
-            sys^.AvailablePageCount += pages
-            sys^.FreeList.Count += pages
-
-            pfn := desc^.StartPfn
-            pfe := MmpPfnToPfe ( pfn )
-
-            WHILE pages DO
-                pfe^.Type = MMP_FREE_PFE_TYPE
-
-                RtlInsertAtTailList (
-                    &sys^.FreeList.Heads[MmpPfnColor(pfn)], // head
-                    &pfe^.Entry, // entry
-                )
-
-                pfe += MMP_PFE_SIZE
-                pfn += 1
-                pages -= 1
-            END
-
-        ELSE
-            MmpWiredPages += pages
-        END
-
-        listentry = listentry^.Next
-    END
-
-    membytes := sys^.TotalPages << RTL_PAGE_SHIFT
-
-    RtlPrint ( "MmuInitialize: %u KB\n", membytes / 1024 )
-
-    // Set the idle process's partition to the system partition.
-
-    KeuIdleProcess.Partition = sys
-    KeuIdleProcess.Node = MmpBootNode
-
-    // Determine system size.
-
-    MmpSetPartitionSize ( sys )
-
-    // Initialize the system virtual address allocator.
-
-    MmpInitializeSystemVa ( MmpBootNode )
-
-    // Initialize the system pools.
-
-    MmpInitializePools ( MmpBootNode )
-
-    // Initialize the quick map pages.
-
-    MmpInitializeQuickPages ( MmpBootNode )
-
-    // Initialize commit to something acceptable before creation of the
-    // pagefiles.
-
-    sys^.CommitLimit = sys^.AvailablePageCount + 300
-    sys^.TheoreticalCommitLimit = sys^.CommitLimit
 
     // Initialize quota management.
 
@@ -463,10 +387,127 @@ FN MmuInitializeStage1 ()
         0, // uid
     )
 
-    // Give the idle process a quota block. We stash this in the handle table.
-    // Idle process has no real handle table.
+    // Initialize all of the nodes.
 
-    KeuIdleProcess.Paged^.HandleTable.QuotaBlock = &MmpSystemQuota
+    i := 0
+
+    WHILE i < KeuLoaderBlock.NodeCount DO
+        kenode := KeNumaNodeById ( i )
+
+        // Allocate an Mm-private part.
+
+        kenode^.Mmp = KeuAllocateNodeSpace (
+            kenode, // kenode
+            SIZEOF MmpNode, // bytes
+        )
+
+        KeAssert ( kenode^.Mmp != NULLPTR )
+
+        mmpnode := kenode^.Mmp
+        sys := &mmpnode^.Partition
+
+        mmpnode^.KeNode = kenode
+
+        // Initialize the integral data structures of the system partition.
+
+        MmpInitializePartitionStage1 (
+            sys, // partition
+            mmpnode, // node
+        )
+
+        // Walk the memory descriptor list.
+
+        head := &kenode^.DescriptorListHead
+        listentry := head^.Next
+
+        WHILE listentry != head DO
+            desc := CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+            pages := desc^.PageCount
+
+            // Include as part of the total memory of the system.
+
+            sys^.TotalPages += pages
+
+            IF desc^.Type == BL_MEMORY_FREE THEN
+                // Place all page frames within this descriptor's bounds on the
+                // free list of the system partition.
+
+                sys^.FluidPageCount += pages
+                sys^.AvailablePageCount += pages
+                sys^.FreeList.Count += pages
+
+                pfn := desc^.StartPfn
+                pfe := MmpPfnToPfe ( pfn )
+
+                WHILE pages DO
+                    pfe^.Type = MMP_FREE_PFE_TYPE
+
+                    RtlInsertAtTailList (
+                        &sys^.FreeList.Heads[MmpPfnColor(pfn)], // head
+                        &pfe^.Entry, // entry
+                    )
+
+                    pfe += MMP_PFE_SIZE
+                    pfn += 1
+                    pages -= 1
+                END
+
+            ELSE
+                MmpWiredPages += pages
+            END
+
+            listentry = listentry^.Next
+        END
+
+        membytes += sys^.TotalPages << RTL_PAGE_SHIFT
+
+        // Set the idle process's partition to the system partition.
+
+        kenode^.IdleProcess^.Partition = sys
+
+        // Determine system size.
+
+        MmpSetPartitionSize ( sys )
+
+        // Initialize the system virtual address allocator.
+
+        MmpInitializeSystemVa ( kenode )
+
+        // Initialize the system pools.
+
+        MmpInitializePools ( kenode )
+
+        // Initialize the quick map pages.
+
+        MmpInitializeQuickPages ( kenode )
+
+        // Initialize commit to something acceptable before creation of the
+        // pagefiles.
+
+        sys^.CommitLimit = sys^.AvailablePageCount + 300
+        sys^.TheoreticalCommitLimit = sys^.CommitLimit
+
+        // Give the idle process a quota block. We stash this in the handle table.
+        // Idle process has no real handle table.
+
+        kenode^.IdleProcess^.Paged^.HandleTable.QuotaBlock = &MmpSystemQuota
+
+        // Initialize the zones for quick MDL allocation.
+
+        MmpInitializeMdlCache ( kenode )
+
+        // Initialize the zones for quick kernel stack allocation.
+
+        MmpInitializeKernelStackCache ( kenode )
+
+        // Allocate one page which just remains constantly zeroed for the lifetime
+        // of the system.
+
+        MmpInitializeZeroedPage ( kenode )
+
+        i += 1
+    END
 
     // Reclaim boot time memory. Nothing in "loader space" is safe to access
     // after this point.
@@ -477,22 +518,11 @@ FN MmuInitializeStage1 ()
 
     MmpInitializeArchitecture ()
 
-    // Initialize the zones for quick MDL allocation.
-
-    MmpInitializeMdlCache ( MmpBootNode )
-
-    // Initialize the zones for quick kernel stack allocation.
-
-    MmpInitializeKernelStackCache ( MmpBootNode )
-
-    // Allocate one page which just remains constantly zeroed for the lifetime
-    // of the system.
-
-    MmpInitializeZeroedPage ()
-
     // Initialize the MmpPartition object type.
 
     ObuInitializeType ( &MmuPartitionType )
+
+    RtlPrint ( "MmuInitialize: %u KB\n", membytes / 1024 )
 END
 
 #LEAVESECTION

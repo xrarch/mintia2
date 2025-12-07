@@ -61,7 +61,9 @@ STRUCT KepWaitBlock
     Flags : ULONG,
 END
 
-EXTERN FN KeuAllocateInitialTurnstile () : ^KepTurnstile
+EXTERN FN KeuAllocateInitialTurnstile (
+    IN kenode : ^KeuNode,
+) : ^KepTurnstile
 
 STRUCT KepTurnstile
     ChainEntry : RtlListEntry,
@@ -120,7 +122,7 @@ STRUCT KeuProcess
     SwapNext : ^KeuProcess,
     SwapListHead : ^KeuThread,
 
-    Lock : KeLock,
+    Node : ^KeuNode,
 
     PageDirectoryPfn : UWORD,
 
@@ -131,6 +133,8 @@ STRUCT KeuProcess
 #IF BLD_MP
     SwapStateSpinlock : KepSpinlock,
 #END
+
+    Lock : KeLock,
 
     ResidentThreadCount : ULONG,
     ThreadCount : ULONG,
@@ -143,6 +147,7 @@ END
 EXTERN FN KeuInitializeProcess (
     IN process : ^KeuProcess,
     IN name : ^UBYTE,
+    IN kenode : ^KeuNode,
 )
 
 EXTERN FN KeuAttachProcess (
@@ -315,6 +320,7 @@ EXTERN FN KeuSetProcessOutswapped (
 ) : UWORD
 
 EXTERN FN KeuHarvestSwapCandidates (
+    IN kenode : ^KeuNode,
     IN procid : UWORD,
 ) : ^KeuThread
 
@@ -365,8 +371,6 @@ EXTERN FN KeuFlushIcachePages (
     IN pagecount : UWORD,
 )
 
-EXTERN KeuSystemPageDirectoryPfn : UWORD
-
 EXTERN KeuUexecApcDispatcher : ^VOID
 EXTERN KeuUexecSignalDispatcher : ^VOID
 
@@ -403,6 +407,11 @@ EXTERN FN KeuProcessCustodyList (
     NOTHING (list)^.Context = (context)
 ]
 
+EXTERN FN KeuAllocateNodeSpace (
+    IN kenode : ^KeuNode,
+    IN bytes : UWORD,
+) : ^VOID
+
 #IF BLD_MP
 
 EXTERN FN KeuReaperBarrier (
@@ -421,9 +430,13 @@ EXTERN FN KeuReaperBarrier (
 
     NOTHING (thread)^.Pinned
 
+    BARRIER
+
     KeAssert ( (thread) == KeCurrentThread () )
 
     NOTHING (thread)^.Pinned = pinned
+
+    BARRIER
 ]
 
 #ELSE

@@ -35,12 +35,12 @@ FN MmuInitializeProcess (
     // Set the partition object.
 
     process^.Partition = partition
-    process^.Node = partition^.Node
 
     IF NOT PsuSystemProcess THEN
         // This is the system process, so give it the system page directory.
 
-        process^.Pcb.PageDirectoryPfn = KeuSystemPageDirectoryPfn
+        process^.Pcb.PageDirectoryPfn =
+            partition^.Node^.KeNode^.SystemPageDirectoryPfn
 
     ELSE
         KeCrash ( "NYI create address space\n" )
@@ -131,4 +131,25 @@ FN MmuQueryProcess (
 
     query^.WorkingSetSize = process^.WorkingSetSize
     query^.PageFaultCount = process^.PageFaultCount
+END
+
+// The following functions are defined as macros for speed purposes within the
+// Executive but are exported as real functions for the benefit of kernel
+// modules, so we don't need to export these structures.
+
+#UNDEFINE MmCurrentNode
+#UNDEFINE MmCurrentPartition
+
+EXPORT FN MmCurrentNode () : ^MmpNode
+
+    // Return the current node.
+
+    RETURN PsCurrentNode()^.Mmp
+END
+
+EXPORT FN MmCurrentPartition () : ^MmpPartition
+
+    // Return the current partition.
+
+    RETURN PsCurrentProcess()^.Partition
 END

@@ -336,10 +336,12 @@ END
 
 #SECTION "INITtext"
 FN MmpInitializePools (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
     // Initialize the system pools as part of stage 1 Mm init.
+
+    node := kenode^.Mmp
 
     MmpInitializeNonpagedPool (
         &node^.PoolRecords[MM_NONPAGED_POOL], // pool
@@ -365,11 +367,11 @@ FN MmpInitializePools (
 
     // Initialize pool cache.
 
-    MmpInitializePoolCache ( node )
+    MmpInitializePoolCache ( kenode )
 
     // Initialize system space node allocation.
 
-    MmpInitializeSpaceNodeAllocation ( node )
+    MmpInitializeSpaceNodeAllocation ( kenode )
 END
 
 #SECTION "INITtext"
@@ -1022,7 +1024,7 @@ EXPORT FN MmAllocatePoolEx (
     KeAssert ( bytes != 0 )
 
     IF NOT node THEN
-        node = PsCurrentNode ()
+        node = MmCurrentNode ()
     END
 
     thread : ^PsuThread = NULLPTR
@@ -1107,7 +1109,11 @@ EXPORT FN MmFreePool (
 
     // Free the block of pool.
 
-    IF ptr >= MMP_POOL_SPACE AND ptr < MMP_POOL_SPACE_END THEN
+    kenode := KeNumaNodeFromSpacePointer ( ptr )
+
+    IF ptr >= (kenode + KE_POOL_SPACE_OFFSET) AND
+        ptr < (kenode + (KE_POOL_SPACE_OFFSET + KE_POOL_SPACE_SIZE)) THEN
+
         // This block resides in small pool.
 
         MmpFreeToPool (
@@ -1133,7 +1139,11 @@ FN MmGetOverheadOfBlock (
 
     // Return the total bytes overhead consumed by a pool allocation.
 
-    IF ptr >= MMP_POOL_SPACE AND ptr < MMP_POOL_SPACE_END THEN
+    kenode := KeNumaNodeFromSpacePointer ( ptr )
+
+    IF ptr >= (kenode + KE_POOL_SPACE_OFFSET) AND
+        ptr < (kenode + (KE_POOL_SPACE_OFFSET + KE_POOL_SPACE_SIZE)) THEN
+
         // This block is in small pool.
 
         block := CAST ptr - SIZEOF MmpBlock TO ^MmpBlock
@@ -1196,7 +1206,7 @@ FN MmWaitForPoolMemory ()
     // END
 
     MmpWaitForPages (
-        &PsCurrentNode()^.Partition, // partition
+        &MmCurrentNode()^.Partition, // partition
         PsCurrentThread()^.VmPrivileged, // low
     )
 END

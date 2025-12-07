@@ -9,14 +9,32 @@ FN ObuInitialize ()
 
     // Initialize the object manager.
 
-    ExInitializeTimedWorkItem (
-        &ObpDeferredDeletionTimedWorkItem, // item
-        &ObuDeferredDeletionWorker, // routine
-    )
+    i := 0
+    max := KeQueryNodeCount ()
 
-    KeuInitializeCustodyList (
-        &ObpDeferredDeletionList, // list
-        &ObpActivateDeletionWorker, // activateroutine
-        0, // context
-    )
+    WHILE i < max DO
+        kenode := KeNumaNodeById ( i )
+
+        obpnode : ^ObpNode = KeuAllocateNodeSpace (
+            kenode, // kenode
+            SIZEOF ObpNode, // bytes
+        )
+
+        KeAssert ( obpnode != NULLPTR )
+
+        kenode^.Obp = obpnode
+
+        ExInitializeTimedWorkItem (
+            &obpnode^.DeferredDeletionTimedWorkItem, // item
+            &ObuDeferredDeletionWorker, // routine
+        )
+
+        KeuInitializeCustodyList (
+            &obpnode^.DeferredDeletionList, // list
+            &ObpActivateDeletionWorker, // activateroutine
+            kenode, // context
+        )
+
+        i += 1
+    END
 END

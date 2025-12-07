@@ -157,10 +157,12 @@ END
 
 #SECTION "INITtext"
 FN MmpInitializeKernelStackCache (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
     // Initialize the zones we use for quickly allocating kernel stacks.
+
+    node := kenode^.Mmp
 
     node^.KernelStackCache = MmCreatePoolCacheEx (
         node, // node
@@ -192,7 +194,8 @@ FN MmuCreateKernelStack (
     // We cache kernel stacks per-node rather than per-partition, so make sure
     // to do VM accounting relative to the node's integral partition.
 
-    partition := &process^.Node^.Partition
+    mmpnode := process^.Pcb.Node^.Mmp
+    partition := &mmpnode^.Partition
 
     quotablock := PsuQuotaBlock ( process )
 
@@ -211,7 +214,7 @@ FN MmuCreateKernelStack (
     // Allocate it.
 
     kstack = MmAllocateFromPoolCache (
-        process^.Node^.KernelStackCache, // cache
+        mmpnode^.KernelStackCache, // cache
         TRUE, // wait
     )
 
@@ -238,15 +241,17 @@ FN MmuFreeKernelStack (
 
     // Free a kernel stack. It must be in an inswapped state.
 
+    mmpnode := process^.Pcb.Node^.Mmp
+
     MmFreeToPoolCache (
-        process^.Node^.KernelStackCache, // cache
+        mmpnode^.KernelStackCache, // cache
         kstack, // ptr
     )
 
     // Uncharge the virtual memory quota consumed by the kernel stack.
 
     MmuUnchargeVmQuota (
-        &process^.Node^.Partition, // partition
+        &mmpnode^.Partition, // partition
         PsuQuotaBlock ( process ), // quotablock
         KEU_STACK_PAGES, // pages
     )

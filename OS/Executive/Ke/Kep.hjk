@@ -262,7 +262,8 @@ STRUCT KepPrb
     StashedCurrentThreadInfo : ULONG,
 #END
 
-    Id : UINT,
+    Id : ULONG,
+    ConsecutiveId : ULONG,
 
     Ipl : UBYTE, // ASM routines assume this is a byte size.
     QuantumEnd : UBYTE,
@@ -279,6 +280,8 @@ STRUCT KepPrb
 
     // Put big stuff at the end to make sure the common fields are readily in
     // reach of immediate offset ranges on various architectures.
+
+    Node : ^KeuNode,
 
     IdleThread : KeuThread,
 
@@ -380,6 +383,37 @@ END
     (signal == OS_SIGNAL_KILL)
 ]
 
+#DEFINE KEP_QUEUE_REMOVAL_LOCKS 32
+
+#DEFINE KEP_TURNSTILE_CHAINS 128
+#DEFINE KEP_INITIAL_TURNSTILES [(KEP_MAXIMUM_PROCESSORS + 1)]
+
+STRUCT KepTurnstileChain
+    Head : RtlListEntry,
+#IF BLD_MP
+    Spinlock : KepSpinlock,
+#END
+END
+
+STRUCT KepNode
+    TurnstileIndex : UBYTE,
+
+    InitialTurnstiles : KepTurnstile[KEP_INITIAL_TURNSTILES],
+
+    TurnstileChains : KepTurnstileChain[KEP_TURNSTILE_CHAINS],
+
+#IF BLD_MP
+    QueueRemovalLocks : KepSpinlock[KEP_QUEUE_REMOVAL_LOCKS],
+
+    WorkBalanceDpc : KeDpc,
+
+    MaximumBalanceIterations : ULONG,
+
+    NextWorkBalanceMs : LONG,
+#END
+
+END
+
 EXTERN FN KepLowerIpl (
     IN newipl : UWORD,
 )
@@ -426,7 +460,9 @@ EXTERN FN KepInterruptUsermode (
     IN thread : ^KeuThread,
 )
 
-EXTERN FN KepInitializeTurnstiles ()
+EXTERN FN KepInitializeTurnstiles (
+    IN kepnode : ^KepNode,
+)
 
 EXTERN FN KepAcquireLockShared (
     IN lock : ^KeLock,
@@ -660,8 +696,6 @@ EXTERN FN KepAcquireSpinlockInPrb (
     KepReleaseSpinlock ( &(object)^.Spinlock )
 ]
 
-#DEFINE KEP_QUEUE_REMOVAL_LOCKS 32
-
 #IF ( == BLD_BITS 64 )
 
 #DEFINE KEP_QUEUE_SHIFT 6
@@ -672,14 +706,15 @@ EXTERN FN KepAcquireSpinlockInPrb (
 
 #END
 
-EXTERN KepQueueRemovalLocks : KepSpinlock[KEP_QUEUE_REMOVAL_LOCKS]
-
 #MACRO KepQueueLockIndex ( queue ) [
     (((queue) >> KEP_QUEUE_SHIFT) & (KEP_QUEUE_REMOVAL_LOCKS - 1))
 ]
 
 #MACRO KepComputeQueueRemovalLockAddress ( lock, queue ) [
-    lock := &KepQueueRemovalLocks[KepQueueLockIndex(queue)]
+    kenode : ^KeuNode
+    KeNumaNodeFromArbitraryPointer ( kenode, queue )
+
+    lock := &kenode^.Kep^.QueueRemovalLocks[KepQueueLockIndex(queue)]
 ]
 
 #MACRO KepAcquireQueueRemoval ( lock ) [
@@ -739,10 +774,17 @@ EXTERN KepQueueRemovalLocks : KepSpinlock[KEP_QUEUE_REMOVAL_LOCKS]
 
 EXTERN FN KepStealWork ()
 
-EXTERN KepWorkBalanceDpc : KeDpc
+#MACRO KepPrbFromFullNumber ( procid ) [
+    (CAST
+        (KeNumaNodeById(KeNodePartOfProcessorId(procid)) + KE_NODE_PRB_OFFSET +
+        (KeNumberPartOfProcessorId(procid) * BL_PRB_SIZE))
+    TO ^KepPrb)
+]
 
-#MACRO KepPrbFromNumber ( procid ) [
-    (CAST KeuLoaderBlock.VirtualPrbBase + (procid) * BL_PRB_SIZE TO ^KepPrb)
+#MACRO KepPrbFromNodeAndNumber ( node, procid ) [
+    // The NUMA ID field of the processor ID (upper 16 bits) should be zero.
+
+    (CAST ((node) + KE_NODE_PRB_OFFSET) + ((procid) * BL_PRB_SIZE) TO ^KepPrb)
 ]
 
 #ELSE
@@ -797,7 +839,16 @@ EXTERN KepWorkBalanceDpc : KeDpc
 
 #MACRO KepReleaseSwapStateElevated ( process ) []
 
-#MACRO KepPrbFromNumber ( procid ) [
+#MACRO KepPrbFromFullNumber ( procid ) [
+    // Processor IDs are encoded with the upper 16 bits as the NUMA node ID and
+    // the lower 16 bits as the processor ID within the node.
+
+    (KEP_CURRENT_PRB)
+]
+
+#MACRO KepPrbFromNodeAndNumber ( node, procid ) [
+    // The NUMA ID field of the processor ID (upper 16 bits) should be zero.
+
     (KEP_CURRENT_PRB)
 ]
 
@@ -807,7 +858,7 @@ EXTERN KepWorkBalanceDpc : KeDpc
 
 #MACRO KepCaptureCurrentTicks ( uquad ) [
     WHILE TRUE DO
-        sup := KeSharedUserPage
+        sup := (KEP_CURRENT_PRB_LOCAL)^.Node^.SharedUserPage
 
         NOTHING (uquad)^.High = (sup)^.Uptime.High
         KeMemoryBarrier ()
@@ -823,11 +874,11 @@ EXTERN KepWorkBalanceDpc : KeDpc
 ]
 
 #MACRO KepLowTick () [
-    (KeSharedUserPage^.Uptime.Low)
+    ((KEP_CURRENT_PRB_LOCAL)^.Node^.SharedUserPage^.Uptime.Low)
 ]
 
-#MACRO KepUpdateTime ( prb ) [
-    sup := KeSharedUserPage
+#MACRO KepUpdateTime ( kenode, prb ) [
+    sup := (kenode)^.SharedUserPage
 
     realtime : RtlUquad
 
@@ -836,7 +887,7 @@ EXTERN KepWorkBalanceDpc : KeDpc
 #IF HALU_RTC_IS_LOCAL
     // Convert to real time by subtracting the time zone offset.
 
-    offset := KeSharedUserPage^.TimeZoneOffset
+    offset := sup^.TimeZoneOffset
 
     RtlSubUlongFromUquad (
         &realtime, // destquad
@@ -860,15 +911,16 @@ EXTERN KepWorkBalanceDpc : KeDpc
 #ELSE
 
 #MACRO KepCaptureCurrentTicks ( uquad ) [
-    NOTHING (uquad)^.Quad = KeSharedUserPage^.Uptime.Quad
+    NOTHING (uquad)^.Quad =
+        (KEP_CURRENT_PRB_LOCAL)^.Node^.SharedUserPage^.Uptime.Quad
 ]
 
 #MACRO KepLowTick ( prb ) [
-    (KeSharedUserPage^.Uptime.Quad)
+    ((KEP_CURRENT_PRB_LOCAL)^.Node^.SharedUserPage^.Uptime.Quad)
 ]
 
-#MACRO KepUpdateTime ( prb ) [
-    sup := KeSharedUserPage
+#MACRO KepUpdateTime ( kenode, prb ) [
+    sup := (kenode)^.SharedUserPage
 
     realtime : RtlUquad
 
@@ -877,7 +929,7 @@ EXTERN KepWorkBalanceDpc : KeDpc
 #IF HALU_RTC_IS_LOCAL
     // Convert to real time by subtracting the time zone offset.
 
-    realtime.Quad -= KeSharedUserPage^.TimeZoneOffset
+    realtime.Quad -= sup^.TimeZoneOffset
 #END
 
     sup^.RealTime.Quad = realtime.Quad

@@ -70,8 +70,6 @@
 
 #END
 
-#DEFINE KEP_TURNSTILE_CHAINS 128
-
 #IF ( == BLD_BITS 32 )
 
 #DEFINE KEP_TURNSTILE_HASH_SHIFT 2
@@ -86,40 +84,31 @@
     ((address >> KEP_TURNSTILE_HASH_SHIFT) & (KEP_TURNSTILE_CHAINS - 1))
 ]
 
-STRUCT KepTurnstileChain
-    Head : RtlListEntry,
-#IF BLD_MP
-    Spinlock : KepSpinlock,
-#END
-END
-
-KepTurnstileChains : KepTurnstileChain[KEP_TURNSTILE_CHAINS]
-
-#DEFINE KEP_INITIAL_TURNSTILES [(KEP_MAXIMUM_PROCESSORS + 1)]
-
 #DEFINE KEP_SPIN_CYCLES 400
 
-KepInitialTurnstiles : KepTurnstile[KEP_INITIAL_TURNSTILES]
-
-KepTurnstileIndex : ULONG = 0
-
 #SECTION "INITtext"
-FN KeuAllocateInitialTurnstile () : ^KepTurnstile
+FN KeuAllocateInitialTurnstile (
+    IN kenode : ^KeuNode,
+) : ^KepTurnstile
 
     // Allocate an initial turnstile.
 
+    kepnode := kenode^.Kep
+
     index := KeIncrementUlong (
-        &KepTurnstileIndex, // ptr
+        &kepnode^.TurnstileIndex, // ptr
         1, // inc
     )
 
     KeAssert ( index < KEP_INITIAL_TURNSTILES )
 
-    RETURN &KepInitialTurnstiles[index]
+    RETURN &kepnode^.InitialTurnstiles[index]
 END
 
 #SECTION "INITtext"
-FN KepInitializeTurnstiles ()
+FN KepInitializeTurnstiles (
+    IN kepnode : ^KepNode,
+)
 
     // Initialize the turnstile package.
 
@@ -128,7 +117,7 @@ FN KepInitializeTurnstiles ()
     i := 0
 
     WHILE i < KEP_TURNSTILE_CHAINS DO
-        RtlInitializeList ( &KepTurnstileChains[i].Head )
+        RtlInitializeList ( &kepnode^.TurnstileChains[i].Head )
 
         i += 1
     END
@@ -260,7 +249,10 @@ FN KepBoostPriority (
         END
 
 #IF BLD_MP
-        chain := &KepTurnstileChains[KepTurnstileHash(turnstile^.Key)]
+        kenode : ^KeuNode
+        KeNumaNodeFromArbitraryPointer ( kenode, turnstile^.Key )
+
+        chain := &kenode^.Kep^.TurnstileChains[KepTurnstileHash(turnstile^.Key)]
 
         // Try to acquire the chain spinlock. Note that this is out of order
         // with respect to the thread lock, so we only try-acquire it and retry
@@ -330,7 +322,10 @@ FN KepBlockOnLock (
 
     // Lock the turnstile chain.
 
-    chain := &KepTurnstileChains[KepTurnstileHash(lock)]
+    kenode : ^KeuNode
+    KeNumaNodeFromArbitraryPointer ( kenode, lock )
+
+    chain := &kenode^.Kep^.TurnstileChains[KepTurnstileHash(lock)]
 
     turnstile : ^KepTurnstile
     otherturnstile : ^KepTurnstile
@@ -729,7 +724,10 @@ FN KepWakeLock (
 
     // Lock the turnstile chain.
 
-    chain := &KepTurnstileChains[KepTurnstileHash(lock)]
+    kenode : ^KeuNode
+    KeNumaNodeFromArbitraryPointer ( kenode, lock )
+
+    chain := &kenode^.Kep^.TurnstileChains[KepTurnstileHash(lock)]
 
     turnstile : ^KepTurnstile
     otherturnstile : ^KepTurnstile

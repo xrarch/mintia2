@@ -103,12 +103,6 @@ FN KeuDesynchronizeFromInterrupt (
     HaluLowerHardwareIpl ( oldipl )
 END
 
-#IF BLD_MP
-
-KepNextWorkBalanceMs : WORD = KEP_WORK_BALANCE_INTERVAL
-
-#END
-
 FN (KeInterruptF) KepClockTick (
     IN interrupt : ^KeuInterrupt,
     IN context : ^OsContext,
@@ -178,12 +172,12 @@ FN (KeInterruptF) KepClockTick (
     currentticks : RtlUquad
 
 #IF BLD_MP
-    IF prb^.Id == 0 THEN
+    IF KeNumberPartOfProcessorId ( prb^.Id ) == 0 THEN
 #END
 
         // If we're processor zero, then update the time.
 
-        KepUpdateTime ( prb )
+        KepUpdateTime ( prb^.Node, prb )
 
         RtlMoveUquad (
             &currentticks, // dest
@@ -191,15 +185,17 @@ FN (KeInterruptF) KepClockTick (
         )
 
 #IF BLD_MP
-        KepNextWorkBalanceMs -= HALU_TIMER_INTERVAL
+        kepnode := prb^.Node^.Kep
 
-        IF KepNextWorkBalanceMs <= 0 THEN
+        kepnode^.NextWorkBalanceMs -= HALU_TIMER_INTERVAL
+
+        IF kepnode^.NextWorkBalanceMs <= 0 THEN
             // Enqueue the work balance DPC.
 
-            KepNextWorkBalanceMs = KEP_WORK_BALANCE_INTERVAL
+            kepnode^.NextWorkBalanceMs = KEP_WORK_BALANCE_INTERVAL
 
             KeEnqueueDpc (
-                &KepWorkBalanceDpc, // dpc
+                &kepnode^.WorkBalanceDpc, // dpc
                 0, // context1
                 0, // context2
             )

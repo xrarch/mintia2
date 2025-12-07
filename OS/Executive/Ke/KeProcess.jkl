@@ -10,6 +10,7 @@
 FN KeuInitializeProcess (
     IN process : ^KeuProcess,
     IN name : ^UBYTE,
+    IN kenode : ^KeuNode,
 )
 
     // Initialize a KeuProcess object.
@@ -30,6 +31,7 @@ FN KeuInitializeProcess (
     process^.ResidentThreadCount = 0
     process^.SwapListHead = NULLPTR
     process^.BasePriority = OS_PRIORITY_DEFAULT
+    process^.Node = kenode
 
     KeInitializeLock ( &process^.Lock )
 

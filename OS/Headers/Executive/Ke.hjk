@@ -38,8 +38,6 @@ END
     NOTHING (lock)^.Ptr = 0
 ]
 
-EXTERN KeSharedUserPage : ^OsSharedUserPage
-
 EXTERN FN KeFindResource (
     IN name : ^UBYTE,
     OUT data : ^VOID,
@@ -641,6 +639,67 @@ EXTERN FN KeExceptionJacket (
     IN context : ^VOID,
     IN flags : UWORD,
 ) : OsStatus
+
+#IF BLD_NUMA
+
+// Processor IDs are encoded with the upper 16 bits as the NUMA node ID and
+// the lower 16 bits as the processor ID within the node.
+
+#MACRO KeNumberPartOfProcessorId ( procid ) [ ((procid) & 0xFFFF) ]
+#MACRO KeNodePartOfProcessorId ( procid ) [ ((procid) >> 16) ]
+
+#ELSE
+
+#IF BLD_MP
+#MACRO KeNumberPartOfProcessorId ( procid ) [(procid)]
+#ELSE
+#MACRO KeNumberPartOfProcessorId ( procid ) [0]
+#END
+
+#MACRO KeNodePartOfProcessorId ( procid ) [0]
+
+#END
+
+STRUCT KeuNode
+// The following fields should never be rearranged.
+
+    Kep : ^KepNode,
+    Mmp : ^MmpNode,
+    Psp : ^PspNode,
+    Obp : ^ObpNode,
+
+// Remaining fields may be rearranged but should never be accessed by modules or
+// moved prior to the end.
+
+    ReaperCustodyList : ^KeuCustodyList,
+
+    BumpOffset : UWORD,
+
+    IdleProcess : ^PsuProcess,
+
+    SharedUserPage : ^OsSharedUserPage,
+
+    SystemPageDirectoryPfn : UWORD,
+    ProcessorCount : UWORD,
+
+    ConstantZeroPfn : UWORD,
+
+    DescriptorListHead : RtlListEntry,
+
+    StackSwapperEvent : KeEvent,
+
+    PoolSpaceSize : UWORD,
+    CacheSpaceSize : UWORD,
+    DynamicSpaceSize : UWORD,
+
+    DynamicSpaceBitmap : ^UBYTE,
+
+    Id : UBYTE,
+END
+
+EXTERN KeBootNode : ^KeuNode
+
+EXTERN FN KeQueryNodeCount () : UWORD
 
 #IF BLD_MP
 

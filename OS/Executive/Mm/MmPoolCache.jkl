@@ -76,6 +76,8 @@ STRUCT MmpPoolCache
 
     Node : ^MmpNode,
 
+    ProcessorCount : ULONG,
+
     Pageable : UBYTE,
 END
 
@@ -487,6 +489,7 @@ EXPORT FN MmCreatePoolCacheEx (
     cache^.Context = context
 
     cache^.Node = node
+    cache^.ProcessorCount = node^.KeNode^.ProcessorCount
 
     KeInitializeLock ( &cache^.DepotLock )
 
@@ -936,7 +939,7 @@ EXPORT FN MmAllocateFromPoolCache (
 
     percpu := MmpPoolCachePerCpuById (
         cache, // cache
-        KeCurrentProcessorId (), // id
+        KeNumberPartOfProcessorId ( KeCurrentProcessorId () ), // id
     )
 
     ipl := MmpLockMagazineCache ( percpu )
@@ -1027,9 +1030,11 @@ EXPORT FN MmFreeToPoolCache (
 
     // Acquire a pointer to the pool cache's per-cpu magazine cache.
 
+    id := KeNumberPartOfProcessorId ( KeCurrentProcessorId () )
+
     percpu := MmpPoolCachePerCpuById (
         cache, // cache
-        KeCurrentProcessorId (), // id
+        id, // id
     )
 
     ipl := MmpLockMagazineCache ( percpu )
@@ -1063,13 +1068,15 @@ EXPORT FN MmFreeToPoolCache (
         GOTO Retry
     END
 
-    IF PsCurrentNode () != cache^.Node THEN
+#IF BLD_NUMA
+    IF id >= cache^.ProcessorCount THEN
         // This is a CPU foreign to the preferred NUMA node of the pool cache.
         // Bypass the magazine layer since it won't do any good to have some
         // foreign CPU take up magazines in another NUMA node's pool cache.
 
         GOTO BypassMagazines
     END
+#END
 
     // Allocate a new magazine into the CPU layer.
 
@@ -1241,10 +1248,12 @@ END
 
 #SECTION "INITtext"
 FN MmpInitializePoolCache (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
     // Initialize the pool cache.
+
+    node := kenode^.Mmp
 
     MmpInitializePoolCacheList ( &node^.PgPoolCacheList )
     MmpInitializePoolCacheList ( &node^.NpPoolCacheList )

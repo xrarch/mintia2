@@ -126,8 +126,6 @@ END
 
 EXTERN MmuPartitionType : ObuType
 
-EXTERN MmpBootNode : ^MmpNode
-
 EXTERN MmpPfnDatabase : ^MmpPfe
 
 EXTERN MmpSystemSize : UWORD
@@ -185,21 +183,21 @@ EXTERN MmpCacheSpace : MmpChunkSpace
 EXTERN MmpCacheSpaceChunkPages : UWORD
 
 EXTERN FN MmpInitializeSystemVa (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
 EXTERN FN MmpInitializeSpaceNodeAllocation (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
 EXTERN FN MmpInitializePools (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
 #DEFINE MMP_QUICK_PER_CPU 4
 
 EXTERN FN MmpInitializeQuickPages (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
 #DEFINE MMP_BLOCK_FOR_PAGES_THRESHOLD 4
@@ -349,11 +347,11 @@ EXTERN FN MmpExpandPageFiles (
 EXTERN FN MmpInitializeArchitecture ()
 
 EXTERN FN MmpInitializeMdlCache (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
 EXTERN FN MmpInitializeKernelStackCache (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
 #MACRO MmpPfnColor ( pfn ) [
@@ -365,7 +363,7 @@ EXTERN FN MmpInitializeKernelStackCache (
 ]
 
 EXTERN FN MmpInitializePoolCache (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
 // Internal pool constants
@@ -506,6 +504,8 @@ STRUCT MmpNode
 
     Id : UBYTE,
     PgPoolCacheAdjustActive : UBYTE,
+
+    KeNode : ^KeuNode,
 
     PoolSpace : MmpChunkSpace,
     CacheSpace : MmpChunkSpace,

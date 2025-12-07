@@ -439,11 +439,13 @@ FN (ExWorkItemF) PsuReaperWorker (
 
     // Implements the thread reaper.
 
+    kenode := CAST context1 TO ^KeuNode
+
     threadlisthead : ^KeuThread[1]
     threadlisthead[0] = NULLPTR
 
     KeuProcessCustodyList (
-        &KeuReaperCustodyList, // list
+        kenode^.ReaperCustodyList, // list
         &PspReapThread, // callback
         &threadlisthead[0], // context
     )
@@ -480,15 +482,17 @@ FN (KeuCustodyListActivateF) PspActivateReaper (
     // Enqueue the reaper timer. Fires in 100ms to trigger thread reaping.
     // PspActivateReaperDpc will be invoked, which will enqueue the work item.
 
+    kenode := CAST list^.Context TO ^KeuNode
+
     interval : RtlUquad
 
     RtlSetUquadToUlong ( &interval, 100 )
 
     ExEnqueueTimedWorkItem (
-        &PspReaperTimedWorkItem, // item
+        &kenode^.Psp^.ReaperTimedWorkItem, // item
         EX_HIGH_WORK_PRIORITY, // priority
         &interval, // interval
-        0, // context1
+        kenode, // context1
         0, // context2
     )
 END

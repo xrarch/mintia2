@@ -18,32 +18,35 @@ END
 
 #SECTION "INITtext"
 FN MmpInitializeQuickPages (
-    IN node : ^MmpNode,
+    IN kenode : ^KeuNode,
 )
 
     // Initialize the quick page mappings.
 
-    procs := KeQueryProcessorCount ()
+    procs := kenode^.ProcessorCount
 
-    node^.QuickPteBlocks = MmAllocatePool (
+    mmpnode := kenode^.Mmp
+
+    mmpnode^.QuickPteBlocks = MmAllocatePoolEx (
+        kenode^.Mmp, // node
         MM_NONPAGED_POOL, // poolindex
         MMP_QUICK_PTE_BLOCK_SIZE * procs, // bytes
         'Quic', // tag
         FALSE, // wait
     )
 
-    IF NOT node^.QuickPteBlocks THEN
+    IF NOT mmpnode^.QuickPteBlocks THEN
         KeCrash ( "Failed to allocate quick PTE blocks\n" )
     END
 
     i := 0
 
     WHILE i < procs DO
-        block := node^.QuickPteBlocks + (i * MMP_QUICK_PTE_BLOCK_SIZE)
+        block := mmpnode^.QuickPteBlocks + (i * MMP_QUICK_PTE_BLOCK_SIZE)
 
         block^.NextIndex = 0
 
-        block^.BasePte = node^.QuickPteBase +
+        block^.BasePte = mmpnode^.QuickPteBase +
             ((i * MMP_QUICK_PER_CPU) * SIZEOF MmpPte)
 
         j := 0
@@ -55,7 +58,6 @@ FN MmpInitializeQuickPages (
         END
 
         i += 1
-
     END
 END
 
@@ -72,8 +74,6 @@ EXPORT FN MmUseQuickPte (
 
     thread := KeCurrentThread ()
 
-    node := PsCurrentNode ()
-
     // Mask KAPCs. Otherwise one could be dispatched while we've claimed a quick
     // PTE, and then a complicated self-deadlock could occur below.
 
@@ -87,7 +87,13 @@ EXPORT FN MmUseQuickPte (
         TRUE, // pinned
     )
 
-    id := KeCurrentProcessorId ()
+    // Grab the current node and processor ID *after* disabling migration, lest
+    // we migrate to a node with fewer processors and overflow the quick PTE
+    // blocks (there are only as many per node as the node has processors).
+
+    node := MmCurrentNode ()
+
+    id := KeNumberPartOfProcessorId ( KeCurrentProcessorId () )
 
     // Trylock all of this processor's quick PTEs.
 

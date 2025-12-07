@@ -14,8 +14,6 @@ PUBLIC PsuActiveProcessCount : UWORD = 0
 PUBLIC PsuSystemProcess : ^PsuProcess
 PUBLIC PsuInitialThread : ^PsuThread
 
-PUBLIC PspReaperTimedWorkItem : ExTimedWorkItem
-
 PspIdleProcessPaged : PsuPagedProcess
 
 PspIdTable : ExuHandleTable
@@ -225,13 +223,35 @@ END
 
 #ENTERSECTION "INITtext"
 
-FN PsuInitializeIdleProcess ()
+FN PsuInitializeIdleProcess (
+    IN kenode : ^KeuNode,
+)
 
     // Initialize the idle process enough to bootstrap other stuff.
 
-    idleproc := &KeuIdleProcess
+    idleproc : ^PsuProcess = KeuAllocateNodeSpace (
+        kenode, // kenode
+        SIZEOF PsuProcess, // bytes
+    )
 
-    idleproc^.Paged = &PspIdleProcessPaged
+    KeAssert ( idleproc != NULLPTR )
+
+    kenode^.IdleProcess = idleproc
+
+    KeuInitializeProcess (
+        &idleproc^.Pcb, // process
+        "Idle", // name
+        kenode, // kenode
+    )
+
+    idleproc^.Pcb.PageDirectoryPfn = kenode^.SystemPageDirectoryPfn
+
+    idleproc^.Paged = KeuAllocateNodeSpace (
+        kenode, // kenode
+        SIZEOF PsuPagedProcess, // bytes
+    )
+
+    KeAssert ( idleproc^.Paged != NULLPTR )
 
     idleproc^.Paged^.Cred.Uid = OS_SYSTEM_UID
     idleproc^.Paged^.Cred.Gid = OS_SYSTEM_GID
@@ -262,7 +282,7 @@ FN PsuInitializeStage1 ()
 #LEAVESECTION
 
     PspTurnstileCache = MmCreatePoolCache (
-        PsCurrentNode (), // node
+        MmCurrentNode (), // node
         "Turnstiles", // name
         SIZEOF KepTurnstile, // size
         MM_NONPAGED_POOL, // poolindex
@@ -336,16 +356,35 @@ FN PsuInitializeStage1 ()
     // Initialize the reaper custody list. Threads are placed on this list when
     // they terminate, to transfer custody to the reaper thread.
 
-    KeuInitializeCustodyList (
-        &KeuReaperCustodyList, // list
-        &PspActivateReaper, // activateroutine
-        0, // context
-    )
+    i := 0
+    max := KeQueryNodeCount ()
 
-    ExInitializeTimedWorkItem (
-        &PspReaperTimedWorkItem, // item
-        &PsuReaperWorker, // routine
-    )
+    WHILE i < max DO
+        kenode := KeNumaNodeById ( i )
+
+        pspnode : ^PspNode = KeuAllocateNodeSpace (
+            kenode, // kenode
+            SIZEOF PspNode, // bytes
+        )
+
+        KeAssert ( pspnode != NULLPTR )
+
+        kenode^.Psp = pspnode
+        kenode^.ReaperCustodyList = &pspnode^.ReaperCustodyList
+
+        KeuInitializeCustodyList (
+            &pspnode^.ReaperCustodyList, // list
+            &PspActivateReaper, // activateroutine
+            kenode, // context
+        )
+
+        ExInitializeTimedWorkItem (
+            &pspnode^.ReaperTimedWorkItem, // item
+            &PsuReaperWorker, // routine
+        )
+
+        i += 1
+    END
 
     // Create the balance manager thread, which will perform stage 2
     // initialization of the system.

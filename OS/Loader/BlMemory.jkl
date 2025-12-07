@@ -7,14 +7,12 @@
 PUBLIC BlHeapTop : ^VOID
 PUBLIC BlHeapPointer : ^VOID
 
-PUBLIC BlTotalPages : UWORD
-
 BlKernelSpaceBitmap : RtlBitmapHeader
 BlKernelSpaceBitmapData : UBYTE[(BL_MANAGED_KERNEL_SPACE >> RTL_PAGE_SHIFT) / 8]
 
-BlKernelStructureBump : ^VOID = BL_KERNEL_STRUCTURES
-
 BlKernelSpaceHint := 0
+
+BlConsecutiveProcessorId := 0
 
 #IF BLD_CHK
 
@@ -40,19 +38,33 @@ PUBLIC BlDescriptorIndex := 0
 
 FN BlDumpDescriptors ()
 
-    listhead := &BlInfoBlock.DescriptorListHead
+    listhead := &BlInfoBlock.NodeListHead
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
-        desc := CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+        node := CONTAINEROF listentry TO BlNodeInfo.Entry
+
+        desclisthead := &node^.DescriptorListHead
+        desclistentry := desclisthead^.Next
 
         RtlPrint (
-            "%p: start=%p end=%p type=%d\n", // fmt
-            desc,
-            desc^.StartPfn << RTL_PAGE_SHIFT,
-            ((desc^.StartPfn + desc^.PageCount) << RTL_PAGE_SHIFT) - 1,
-            desc^.Type,
+            "NODE%d:\n", // fmt
+            node^.Id,
         )
+
+        WHILE desclistentry != desclisthead DO
+            desc := CONTAINEROF desclistentry TO BlMemoryDescriptor.Entry
+
+            RtlPrint (
+                "  %p: start=%p end=%p type=%d\n", // fmt
+                desc,
+                desc^.StartPfn << RTL_PAGE_SHIFT,
+                ((desc^.StartPfn + desc^.PageCount) << RTL_PAGE_SHIFT) - 1,
+                desc^.Type,
+            )
+
+            desclistentry = desclistentry^.Next
+        END
 
         listentry = listentry^.Next
     END
@@ -85,6 +97,7 @@ FN BlAllocateMemory (
         // Allocate a mapped range.
 
         RETURN BlAllocateMappedRange (
+            BlInfoBlock.BootNode, // node
             (bytes + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT, // bytes
             BL_KERNEL_STRUCTURES, // preferredva
             FALSE, // fixed
@@ -108,6 +121,7 @@ FN BlAllocateMemory (
     pages := (BL_BUMP_EXTEND + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
 
     newptr := BlAllocateMappedRange (
+        BlInfoBlock.BootNode, // node
         pages, // pages
         BL_KERNEL_STRUCTURES, // preferredva
         FALSE, // fixed
@@ -140,11 +154,12 @@ FN BlAllocateMemory (
 END
 
 FN BlAllocatePhysicalRange (
+    IN node : ^BlNodeInfo,
     IN pages : UWORD,
     IN type : BlMemoryDescriptorType,
 ) : ^BlMemoryDescriptor
 
-    listhead := &BlInfoBlock.DescriptorListHead
+    listhead := &node^.DescriptorListHead
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
@@ -204,34 +219,39 @@ FN BlFreePhysicalRange (
 END
 
 FN BlAllocateKernelSpace (
+    IN node : ^BlNodeInfo,
     IN pages : UWORD,
     IN preferredva : ^VOID,
     IN fixed : UWORD,
 ) : ^VOID
 
-    IF preferredva < BL_KERNEL_SPACE THEN
+    IF preferredva == BL_KERNEL_STRUCTURES THEN
+        IF fixed THEN
+            RETURN NULLPTR
+        END
+
+        va := node^.KernelStructureBump
+
+        // Add a guard page to the bump just to be safe.
+
+        node^.KernelStructureBump += (pages + 1) << RTL_PAGE_SHIFT
+
+        RETURN va
+
+    ELSEIF preferredva < BL_KERNEL_SPACE THEN
         IF fixed THEN
             RETURN NULLPTR
         END
 
         preferredva = BL_KERNEL_SPACE
-    
-    ELSEIF preferredva == BL_KERNEL_STRUCTURES THEN
-        IF fixed THEN
-            RETURN NULLPTR
-        END
-
-        va := BlKernelStructureBump
-
-        // Add a guard page to the bump just to be safe.
-
-        BlKernelStructureBump += (pages + 1) << RTL_PAGE_SHIFT
-
-        RETURN va
 
     ELSEIF preferredva >= BL_KERNEL_SPACE + BL_MANAGED_KERNEL_SPACE THEN
         IF fixed THEN
-            RETURN NULLPTR
+            // Assume the caller knows what he's doing and give this virtual
+            // address without any additional tracking. Useful for initializing
+            // NUMA structures for example.
+
+            RETURN preferredva
         END
 
         preferredva = BL_KERNEL_SPACE
@@ -320,6 +340,7 @@ FN BlMapIoRegion (
 ) : ^VOID
 
     vaddr := BlAllocateKernelSpace (
+        BlInfoBlock.BootNode, // node
         pages, // pages
         BL_KERNEL_STRUCTURES, // preferredva
         FALSE, // fixed
@@ -330,6 +351,7 @@ FN BlMapIoRegion (
     END
 
     BxMapRange (
+        BlInfoBlock.BootNode, // node
         vaddr, // vaddr
         phyaddr, // phyaddr
         pages, // pages
@@ -341,6 +363,7 @@ FN BlMapIoRegion (
 END
 
 FN BlAllocateMappedRange (
+    IN node : ^BlNodeInfo,
     IN pages : UWORD,
     IN preferredva : ^VOID,
     IN fixed : UWORD,
@@ -349,6 +372,7 @@ FN BlAllocateMappedRange (
 ) : ^VOID
 
     vaddr := BlAllocateKernelSpace (
+        node, // node
         pages, // pages
         preferredva, // preferredva
         fixed, // fixed
@@ -359,6 +383,7 @@ FN BlAllocateMappedRange (
     END
 
     desc = BlAllocatePhysicalRange (
+        node, // node
         pages, // pages
         type, // type
     )
@@ -373,6 +398,7 @@ FN BlAllocateMappedRange (
     END
 
     BxMapRange (
+        node, // node
         vaddr, // vaddr
         CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID, // phyaddr
         pages, // pages
@@ -384,11 +410,13 @@ FN BlAllocateMappedRange (
 END
 
 FN BlMapRangeOfPfnDatabase (
+    IN node : ^BlNodeInfo,
     IN startaddr : ^VOID,
     IN pages : UWORD,
 )
 
     pfdesc := BlAllocatePhysicalRange (
+        node, // node
         pages, // pages
         BL_MEMORY_USED, // type
     )
@@ -398,6 +426,7 @@ FN BlMapRangeOfPfnDatabase (
     END
 
     BxMapRange (
+        node, // node
         startaddr, // vaddr
         CAST pfdesc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID, // phyaddr
         pages, // pages
@@ -413,6 +442,7 @@ FN BlMapRangeOfPfnDatabase (
 END
 
 FN BlCreatePfnDatabase (
+    IN node : ^BlNodeInfo,
     IN desc : ^BlMemoryDescriptor,
 )
 
@@ -456,6 +486,7 @@ FN BlCreatePfnDatabase (
             // Valid, do stuff for the last range.
 
             BlMapRangeOfPfnDatabase (
+                node, // node
                 startaddr, // startaddr
                 pages, // pages
             )
@@ -468,6 +499,7 @@ FN BlCreatePfnDatabase (
 
     IF pages THEN
         BlMapRangeOfPfnDatabase (
+            node, // node
             startaddr, // startaddr
             pages, // pages
         )
@@ -490,27 +522,41 @@ FN BlInitializePfnDatabase ()
     maxpfn := 0
 
     desc : ^BlMemoryDescriptor
+    node : ^BlNodeInfo
 
-    listhead := &BlInfoBlock.DescriptorListHead
-    listentry := listhead^.Next
+    listhead : ^RtlListEntry
+    listentry : ^RtlListEntry
 
-    WHILE listentry != listhead DO
-        desc = CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+    nodelisthead := &BlInfoBlock.NodeListHead
+    nodelistentry := nodelisthead^.Next
 
-        IF desc^.Type == BL_MEMORY_FREE OR
-            desc^.Type == BL_MEMORY_RECLAIMABLE THEN
+    WHILE nodelistentry != nodelisthead DO
+        node = CONTAINEROF nodelistentry TO BlNodeInfo.Entry
 
-            IF desc^.PageCount THEN
-                maxpfn = desc^.StartPfn + desc^.PageCount
+        listhead = &node^.DescriptorListHead
+        listentry = listhead^.Next
+
+        WHILE listentry != listhead DO
+            desc = CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+            IF desc^.Type == BL_MEMORY_FREE OR
+                desc^.Type == BL_MEMORY_RECLAIMABLE THEN
+
+                IF desc^.PageCount THEN
+                    maxpfn = desc^.StartPfn + desc^.PageCount
+                END
             END
+
+            listentry = listentry^.Next
         END
 
-        listentry = listentry^.Next
+        nodelistentry = nodelistentry^.Next
     END
 
     // Reserve the virtual PFN database region.
 
     vaddr := BlAllocateKernelSpace (
+        BlInfoBlock.BootNode, // node
         ((maxpfn * BL_PFE_SIZE) + (RTL_PAGE_SIZE - 1))
         >> RTL_PAGE_SHIFT, // pages
         BL_KERNEL_STRUCTURES, // preferredva
@@ -525,31 +571,252 @@ FN BlInitializePfnDatabase ()
 
     // Allocate and initialize PFN database pages for each region.
 
-    listhead = &BlInfoBlock.DescriptorListHead
-    listentry = listhead^.Next
+    nodelisthead = &BlInfoBlock.NodeListHead
+    nodelistentry = nodelisthead^.Next
 
-    WHILE listentry != listhead DO
-        desc = CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+    WHILE nodelistentry != nodelisthead DO
+        node = CONTAINEROF nodelistentry TO BlNodeInfo.Entry
 
-        IF desc^.Type == BL_MEMORY_FREE OR
-            desc^.Type == BL_MEMORY_RECLAIMABLE THEN
+        listhead = &node^.DescriptorListHead
+        listentry = listhead^.Next
 
-            IF desc^.PageCount THEN
-                BlCreatePfnDatabase ( desc )
+        WHILE listentry != listhead DO
+            desc = CONTAINEROF listentry TO BlMemoryDescriptor.Entry
+
+            IF desc^.Type == BL_MEMORY_FREE OR
+                desc^.Type == BL_MEMORY_RECLAIMABLE THEN
+
+                IF desc^.PageCount THEN
+                    BlCreatePfnDatabase (
+                        node, // node
+                        desc, // desc
+                    )
+                END
             END
+
+            listentry = listentry^.Next
         END
 
-        listentry = listentry^.Next
+        nodelistentry = nodelistentry^.Next
     END
 END
 
-BlTemporaryFakeNumaBitmapArray : ^UBYTE[1]
+FN BlInitializeNodeMemory (
+    IN node : ^BlNodeInfo,
+)
+
+    // Initialize the virtual spaces needed by this node.
+
+    desc : ^BlMemoryDescriptor
+
+    // Allocate the per-node structure.
+
+    totalsize := BL_NODE_SIZE
+    pages := (totalsize + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
+
+    nodestructure := BlAllocateMappedRange (
+        node, // node
+        pages, // pages
+        node^.NodeSpaceBase + KE_NODE_STRUCTURE_OFFSET, // preferredva
+        TRUE, // fixed
+        BL_MEMORY_USED, // type
+        OUT desc, // desc
+    )
+
+    IF NOT nodestructure THEN
+        BlCrash ( "Failed to allocate node structure\n" )
+    END
+
+    // Zero the per-node structure.
+
+    RtlFillMemoryWithUlong (
+        nodestructure, // ptr
+        totalsize, // sz
+        0, // ulong
+    )
+
+    // Allocate the software IDTs and idle stacks for each processor.
+    // We assume we can use a single 4KB chunk of memory, split in half.
+
+    totalsize = node^.ProcessorCount << BL_IDT_STACK_SHIFT
+    pages = (totalsize + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
+
+    idtstackbase := BlAllocateMappedRange (
+        node, // node
+        pages, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_USED, // type
+        OUT desc, // desc
+    )
+
+    IF NOT idtstackbase THEN
+        BlCrash ( "Failed to allocate IDTs and idle stacks\n" )
+    END
+
+    // Zero the IDTs and stacks.
+
+    RtlFillMemoryWithUlong (
+        idtstackbase, // ptr
+        totalsize, // sz
+        0, // ulong
+    )
+
+    // Allocate the Prbs.
+
+    totalsize = node^.ProcessorCount << BL_PRB_SHIFT
+    pages = (totalsize + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
+
+    prbva := BlAllocateMappedRange (
+        node, // node
+        pages, // pages
+        node^.NodeSpaceBase + KE_NODE_PRB_OFFSET, // preferredva
+        TRUE, // fixed
+        BL_MEMORY_USED, // type
+        OUT desc, // desc
+    )
+
+    IF NOT prbva THEN
+        BlCrash ( "Failed to allocate processor blocks\n" )
+    END
+
+    node^.PhysicalPrbBase =
+        CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID
+
+    // Zero the Prbs.
+
+    RtlFillMemoryWithUlong (
+        prbva, // ptr
+        totalsize, // sz
+        0, // ulong
+    )
+
+    // Stash words in the Prb at the following indices:
+    // 0 - Processor ID
+    // 1 - Software IDT pointer
+    // 2 - Idle stack pointer
+    // 3 - Consecutive ID
+
+    i := 0
+
+    WHILE i < node^.ProcessorCount DO
+        idword := CAST prbva TO ^UWORD
+
+        idword[0] = (node^.Id << 16) | i
+        idword[1] = idtstackbase
+        idword[2] = idtstackbase + BL_IDT_SIZE
+        idword[3] = BlConsecutiveProcessorId
+
+        idtstackbase += BL_IDT_STACK_SIZE
+        prbva += BL_PRB_SIZE
+        i += 1
+        BlConsecutiveProcessorId += 1
+    END
+
+    // Allocate the shared user page.
+
+    node^.VirtualSharedUserPage = BlAllocateMappedRange (
+        node, // node
+        1, // pages
+        BL_KERNEL_STRUCTURES, // preferredva
+        FALSE, // fixed
+        BL_MEMORY_USED, // type
+        OUT desc, // desc
+    )
+
+    IF NOT node^.VirtualSharedUserPage THEN
+        BlCrash ( "Failed to allocate shared user page\n" )
+    END
+
+    RtlFillMemoryWithUlong (
+        node^.VirtualSharedUserPage, // ptr
+        RTL_PAGE_SIZE, // sz
+        0, // ulong
+    )
+
+    node^.PhysicalSharedUserPage =
+        CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID
+
+    // Create the dynamic system virtual memory areas.
+
+    // MMP_POOL_SPACE is equal to 4x physical memory.
+
+    pages = node^.TotalPages * 4
+
+    IF pages > (KE_POOL_SPACE_SIZE / RTL_PAGE_SIZE) THEN
+        pages = KE_POOL_SPACE_SIZE / RTL_PAGE_SIZE
+    END
+
+    // The true page count is returned by BxCreateVirtualSpace since it will
+    // round up in some architecture-specific way, and we want to use all of the
+    // space available.
+
+    node^.PoolSpaceSize = BxCreateVirtualSpace (
+        node, // node
+        node^.NodeSpaceBase + KE_POOL_SPACE_OFFSET, // base
+        pages, // pages
+    )
+
+    // MMP_CACHE_SPACE is equal to 4x physical memory.
+
+    pages = node^.TotalPages * 4
+
+    IF pages > (KE_CACHE_SPACE_SIZE / RTL_PAGE_SIZE) THEN
+        pages = KE_CACHE_SPACE_SIZE / RTL_PAGE_SIZE
+    END
+
+    node^.CacheSpaceSize = BxCreateVirtualSpace (
+        node, // node
+        node^.NodeSpaceBase + KE_CACHE_SPACE_OFFSET, // base
+        pages, // pages
+    )
+
+    // MMP_DYNAMIC_SPACE is equal to 8x physical memory.
+
+    pages = node^.TotalPages * 8
+
+    IF pages > (KE_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE) THEN
+        pages = KE_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE
+    END
+
+    node^.DynamicSpaceSize = BxCreateVirtualSpace (
+        node, // node
+        node^.NodeSpaceBase + KE_DYNAMIC_SPACE_OFFSET, // base
+        pages, // pages
+    )
+
+    // Allocate a bitmap for dynamic space.
+
+    pages = ((node^.DynamicSpaceSize / 8) + RTL_PAGE_SIZE - 1) >>
+        RTL_PAGE_SHIFT
+
+    bmp := BlAllocateMappedRange (
+        node, // node
+        pages, // pages
+        BL_KERNEL_STRUCTURES, // prefva
+        FALSE, // fixed
+        BL_MEMORY_USED, // type
+        OUT desc, // desc
+    )
+
+    IF NOT bmp THEN
+        BlCrash ( "Failed to allocate dynamic space bitmap\n" )
+    END
+
+    RtlFillMemoryWithUlong (
+        bmp, // ptr
+        pages << RTL_PAGE_SHIFT, // sz
+        0, // ulong
+    )
+
+    node^.DynamicSpaceBitmap = bmp
+END
 
 FN BlInitializeMemory ()
 
-    // Initialize the descriptor list.
+    // Initialize the node list.
 
-    RtlInitializeList ( &BlInfoBlock.DescriptorListHead )
+    RtlInitializeList ( &BlInfoBlock.NodeListHead )
 
     // Initialize the kernel space bitmap.
 
@@ -572,177 +839,16 @@ FN BlInitializeMemory ()
 
     BlInitializePfnDatabase ()
 
-    desc : ^BlMemoryDescriptor
+    // Initialize the per-node virtual spaces.
 
-    // Allocate the software IDTs and idle stacks for each processor.
-    // We assume we can use a single 4KB chunk of memory, split in half.
+    listhead := &BlInfoBlock.NodeListHead
+    listentry := listhead^.Next
 
-    totalsize := BlInfoBlock.ProcessorCount << BL_IDT_STACK_SHIFT
-    pages := (totalsize + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
+    WHILE listentry != listhead DO
+        node := CONTAINEROF listentry TO BlNodeInfo.Entry
 
-    idtstackbase := BlAllocateMappedRange (
-        pages, // pages
-        BL_KERNEL_STRUCTURES, // preferredva
-        FALSE, // fixed
-        BL_MEMORY_USED, // type
-        OUT desc, // desc
-    )
+        BlInitializeNodeMemory ( node )
 
-    IF NOT idtstackbase THEN
-        BlCrash ( "Failed to allocate IDTs and idle stacks\n" )
+        listentry = listentry^.Next
     END
-
-    // Zero the IDTs and stacks.
-
-    RtlFillMemoryWithUlong (
-        idtstackbase, // ptr
-        totalsize, // sz
-        0, // ulong
-    )
-
-    // Allocate the Prbs.
-
-    totalsize = BlInfoBlock.ProcessorCount << BL_PRB_SHIFT
-    pages = (totalsize + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
-
-    BlInfoBlock.VirtualPrbBase = BlAllocateMappedRange (
-        pages, // pages
-        BL_KERNEL_STRUCTURES, // preferredva
-        FALSE, // fixed
-        BL_MEMORY_USED, // type
-        OUT desc, // desc
-    )
-
-    IF NOT BlInfoBlock.VirtualPrbBase THEN
-        BlCrash ( "Failed to allocate processor blocks\n" )
-    END
-
-    BlInfoBlock.PhysicalPrbBase =
-        CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID
-
-    // Zero the Prbs.
-
-    RtlFillMemoryWithUlong (
-        BlInfoBlock.VirtualPrbBase, // ptr
-        totalsize, // sz
-        0, // ulong
-    )
-
-    // Stash words in the Prb at the following indices:
-    // 0 - Processor ID
-    // 1 - Software IDT pointer
-    // 2 - Idle stack pointer
-
-    i := 0
-    prbva := BlInfoBlock.VirtualPrbBase
-
-    WHILE i < BlInfoBlock.ProcessorCount DO
-        idword := CAST prbva TO ^UWORD
-
-        idword[0] = i
-        idword[1] = idtstackbase
-        idword[2] = idtstackbase + BL_IDT_SIZE
-
-        idtstackbase += BL_IDT_STACK_SIZE
-        prbva += BL_PRB_SIZE
-        i += 1
-    END
-
-    // Allocate the shared user page.
-
-    BlInfoBlock.VirtualSharedUserPage = BlAllocateMappedRange (
-        1, // pages
-        BL_KERNEL_STRUCTURES, // preferredva
-        FALSE, // fixed
-        BL_MEMORY_USED, // type
-        OUT desc, // desc
-    )
-
-    IF NOT BlInfoBlock.VirtualSharedUserPage THEN
-        BlCrash ( "Failed to allocate shared user page\n" )
-    END
-
-    RtlFillMemoryWithUlong (
-        BlInfoBlock.VirtualSharedUserPage, // ptr
-        RTL_PAGE_SIZE, // sz
-        0, // ulong
-    )
-
-    BlInfoBlock.PhysicalSharedUserPage =
-        CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^VOID
-
-    // Create the dynamic system virtual memory areas.
-
-    // MMP_POOL_SPACE is equal to 4x physical memory.
-
-    pages = BlTotalPages * 4
-
-    IF pages > (MMP_POOL_SPACE_SIZE / RTL_PAGE_SIZE) THEN
-        pages = MMP_POOL_SPACE_SIZE / RTL_PAGE_SIZE
-    END
-
-    // The true page count is returned by BxCreateVirtualSpace since it will
-    // round up in some architecture-specific way, and we want to use all of the
-    // space available.
-
-    BlInfoBlock.PoolSpaceSize = BxCreateVirtualSpace (
-        MMP_POOL_SPACE, // base
-        pages, // pages
-    )
-
-    // MMP_CACHE_SPACE is equal to 4x physical memory.
-
-    pages = BlTotalPages * 4
-
-    IF pages > (MMP_CACHE_SPACE_SIZE / RTL_PAGE_SIZE) THEN
-        pages = MMP_CACHE_SPACE_SIZE / RTL_PAGE_SIZE
-    END
-
-    BlInfoBlock.CacheSpaceSize = BxCreateVirtualSpace (
-        MMP_CACHE_SPACE, // base
-        pages, // pages
-    )
-
-    // MMP_DYNAMIC_SPACE is equal to 8x physical memory.
-
-    pages = BlTotalPages * 8
-
-    IF pages > (MMP_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE) THEN
-        pages = MMP_DYNAMIC_SPACE_SIZE / RTL_PAGE_SIZE
-    END
-
-    BlInfoBlock.DynamicSpaceSize = BxCreateVirtualSpace (
-        MMP_DYNAMIC_SPACE, // base
-        pages, // pages
-    )
-
-    // Allocate a bitmap for dynamic space.
-
-    // XXX The Executive expects a pointer to an array of pointers to dynamic
-    //     space bitmaps, one for each NUMA node. System initialization does not
-    //     yet support NUMA so we sort of hack it.
-
-    pages = ((BlInfoBlock.DynamicSpaceSize / 8) + RTL_PAGE_SIZE - 1) >>
-        RTL_PAGE_SHIFT
-
-    bmp := BlAllocateMappedRange (
-        pages, // pages
-        BL_KERNEL_STRUCTURES, // prefva
-        FALSE, // fixed
-        BL_MEMORY_USED, // type
-        OUT desc, // desc
-    )
-
-    IF NOT bmp THEN
-        BlCrash ( "Failed to allocate dynamic space bitmap\n" )
-    END
-
-    RtlFillMemoryWithUlong (
-        bmp, // ptr
-        pages << RTL_PAGE_SHIFT, // sz
-        0, // ulong
-    )
-
-    BlTemporaryFakeNumaBitmapArray[0] = bmp
-    BlInfoBlock.DynamicSpaceBitmaps = &BlTemporaryFakeNumaBitmapArray[0]
 END

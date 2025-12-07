@@ -4,10 +4,6 @@
 
 #INCLUDE "Obp.hjk"
 
-PUBLIC ObpDeferredDeletionList : KeuCustodyList
-
-PUBLIC ObpDeferredDeletionTimedWorkItem : ExTimedWorkItem
-
 #MACRO ObpCalculatePagedBlockSize ( bodysize ) [
     (SIZEOF ObuHeader + SIZEOF ObpCommonHeader + (bodysize))
 ]
@@ -70,7 +66,7 @@ FN ObuInitializeType (
         name[typenamelen + 2] = 0
 
         type^.NpPartCache = MmCreatePoolCache (
-            PsCurrentNode (), // node
+            MmCurrentNode (), // node
             name, // name
             npsize, // size
             MM_NONPAGED_POOL, // poolindex
@@ -105,7 +101,7 @@ FN ObuInitializeType (
         name[typenamelen + 2] = 0
 
         type^.PgPartCache = MmCreatePoolCache (
-            PsCurrentNode (), // node
+            MmCurrentNode (), // node
             name, // name
             psize, // size
             MM_PAGED_POOL, // poolindex
@@ -515,14 +511,17 @@ FN (ExWorkItemF) ObuDeferredDeletionWorker (
     // An object deletion was deferred to worker thread context and WE are that
     // worker thread.
 
+    kenode := CAST context1 TO ^KeuNode
+    obpnode := kenode^.Obp
+
     paged := PsCurrentThread ()^.Paged
 
     paged^.DeletingObject = TRUE
 
     KeuProcessCustodyList (
-        &ObpDeferredDeletionList, // list
+        &obpnode^.DeferredDeletionList, // list
         &ObpDeferredDeleteObject, // callback
-        NULLPTR, // context
+        kenode, // context
     )
 
     IF paged^.DeferredObjectHead THEN
@@ -540,6 +539,9 @@ FN (KeuCustodyListActivateF) ObpActivateDeletionWorker (
     // Note that this guarantees that the work item is not actively in the
     // queue, because the list is only emptied by the worker itself.
 
+    kenode := CAST list^.Context TO ^KeuNode
+    obpnode := kenode^.Obp
+
     interval : RtlUquad
 
     RtlSetUquadToUlong (
@@ -548,10 +550,10 @@ FN (KeuCustodyListActivateF) ObpActivateDeletionWorker (
     )
 
     ExEnqueueTimedWorkItem (
-        &ObpDeferredDeletionTimedWorkItem, // item
+        &obpnode^.DeferredDeletionTimedWorkItem, // item
         EX_HIGH_WORK_PRIORITY, // priority
         &interval, // interval
-        0, // context1
+        kenode, // context1
         0, // context2
     )
 END
@@ -567,7 +569,7 @@ FN ObpDeferDeletion (
     // Atomically add it to the list.
 
     KeuInsertCustodyList (
-        &ObpDeferredDeletionList, // list
+        &PsCurrentNode()^.Obp^.DeferredDeletionList, // list
         &commonheader^.NextToReap, // link
     )
 END

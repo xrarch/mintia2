@@ -8,23 +8,17 @@
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     #INCLUDE "../Executive/Mm/xr17032/Mmp.hjk"
+    #INCLUDE "<ll>/Executive/KeXr17032.hjk"
 
 #ELSEIF ( STRCMP ARCHITECTURE "fox32" )
     #INCLUDE "../Executive/Mm/fox32/Mmp.hjk"
+    #INCLUDE "<ll>/Executive/KeFox32.hjk"
 
 #ELSE
     #ERROR ( STRCAT "Unknown architecture " ARCHITECTURE )
 #END
 
-#IF ( STRCMP PLATFORM "XRstation" )
-    #INCLUDE "XRstation/Bl.hjk"
-
-#ELSEIF ( STRCMP PLATFORM "fox32" )
-    #INCLUDE "fox32/Bl.hjk"
-
-#ELSE
-    #ERROR ( STRCAT "Unknown platform " PLATFORM )
-#END
+#DEFINE BL_KERNEL_SPACE MMP_SYSTEM_SPACE
 
 #DEFINE BL_BUMP_EXTEND 8192
 
@@ -36,8 +30,6 @@ EXTERN BlDoRelinkAll : UWORD
 
 EXTERN BlHeapTop : ^VOID
 EXTERN BlHeapPointer : ^VOID
-
-EXTERN BlTotalPages : UWORD
 
 // This value is selected because it is 2 * sector size (512).
 
@@ -84,6 +76,7 @@ EXTERN FN BlAllocateMemory (
 ) : ^VOID
 
 EXTERN FN BlAllocatePhysicalRange (
+    IN node : ^BlNodeInfo,
     IN pages : UWORD,
     IN type : BlMemoryDescriptorType,
 ) : ^BlMemoryDescriptor
@@ -97,6 +90,7 @@ EXTERN FN BlGetValueArg (
 ) : ^UBYTE
 
 EXTERN FN BxMapRange (
+    IN node : ^BlNodeInfo,
     IN vaddr : ^VOID,
     IN phyaddr : ^VOID,
     IN pages : UWORD,
@@ -110,6 +104,7 @@ EXTERN FN BxRemapCodeRange (
 )
 
 EXTERN FN BxMapPage (
+    IN node : ^BlNodeInfo,
     IN vaddr : ^VOID,
     IN phyaddr : ^VOID,
     IN pttype : BlMemoryDescriptorType,
@@ -117,11 +112,15 @@ EXTERN FN BxMapPage (
 )
 
 EXTERN FN BxCreateVirtualSpace (
+    IN node : ^BlNodeInfo,
     IN base : UWORD,
     IN pages : UWORD,
 ) : UWORD
 
+#DEFINE BL_KERNEL_STRUCTURES 1
+
 EXTERN FN BlAllocateKernelSpace (
+    IN node : ^BlNodeInfo,
     IN pages : UWORD,
     IN preferredva : ^VOID,
     IN fixed : UWORD,
@@ -133,6 +132,7 @@ EXTERN FN BlFreeKernelSpace (
 )
 
 EXTERN FN BlAllocateMappedRange (
+    IN node : ^BlNodeInfo,
     IN pages : UWORD,
     IN preferredva : ^VOID,
     IN fixed : UWORD,
@@ -151,7 +151,7 @@ EXTERN FN BlMapIoRegion (
 ) : ^VOID
 
 EXTERN FN BlFreePhysicalRange (
-    IN desc : ^BlMemoryDescriptor
+    IN desc : ^BlMemoryDescriptor,
 )
 
 FNPTR BlMountF (

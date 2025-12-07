@@ -394,7 +394,7 @@ EXPORT FN KeRealTimeToLocalTime (
         )
     END
 
-    offset := KeSharedUserPage^.TimeZoneOffset
+    offset := KEP_CURRENT_PRB_LOCAL^.Node^.SharedUserPage^.TimeZoneOffset
 
     RtlAddUlongToUquad (
         desttime, // destquad
@@ -415,7 +415,7 @@ EXPORT FN KeLocalTimeToRealTime (
         )
     END
 
-    offset := KeSharedUserPage^.TimeZoneOffset
+    offset := KEP_CURRENT_PRB_LOCAL^.Node^.SharedUserPage^.TimeZoneOffset
 
     RtlSubUlongFromUquad (
         desttime, // destquad
@@ -428,13 +428,21 @@ EXPORT FN KeSetTimeZoneOffset (
     IN offset : ULONG,
 )
 
-    KeSharedUserPage^.TimeZoneOffset = offset
+    i := 0
+
+    WHILE i < KeuLoaderBlock.NodeCount DO
+        kenode := KeNumaNodeById ( i )
+
+        kenode^.SharedUserPage^.TimeZoneOffset = offset
+
+        i += 1
+    END
 END
 
 #SECTION "PAGEtext"
 EXPORT FN KeGetTimeZoneOffset () : ULONG
 
-    RETURN KeSharedUserPage^.TimeZoneOffset
+    RETURN KEP_CURRENT_PRB_LOCAL^.Node^.SharedUserPage^.TimeZoneOffset
 END
 
 #SECTION "PAGEtext"
@@ -445,7 +453,7 @@ EXPORT FN KeQueryTime (
 
     // Query the time from the shared user page.
 
-    sup := KeSharedUserPage
+    sup := KEP_CURRENT_PRB_LOCAL^.Node^.SharedUserPage
 
 @Retry
 
