@@ -9,6 +9,8 @@ EXPORT KeuLoaderBlock : BlInfoRecord
 
 EXPORT KeBootNode : ^KeuNode
 
+EXPORT KeMostProcessorsInAnyNode : ULONG
+
 FNPTR DbgMainF ()
 
 #IF BLD_CHK
@@ -377,6 +379,8 @@ FN KeuInitializeNodes () : ^KepPrb
     // Initialize all the NUMA nodes indicated by the loader.
     // Return a pointer to the boot PRB.
 
+    KeMostProcessorsInAnyNode = 1
+
     bootprb : ^KepPrb
 
     listhead := &KeuLoaderBlock.NodeListHead
@@ -398,6 +402,10 @@ FN KeuInitializeNodes () : ^KepPrb
             kenode, // kenode
             node, // node
         )
+
+        IF kenode^.ProcessorCount > KeMostProcessorsInAnyNode THEN
+            KeMostProcessorsInAnyNode = kenode^.ProcessorCount
+        END
 
         listentry = listentry^.Next
     END

@@ -518,7 +518,7 @@ EXPORT FN MmCreatePoolCacheEx (
     // Initialize the per-CPU caches with the global list lock still held to
     // synchronize against changes to the magazine type size.
 
-    cpus := KeQueryProcessorCount ()
+    cpus := KeMostProcessorsInAnyNode
 
     i := 0
 
@@ -807,7 +807,7 @@ FN MmpPurgeCpuMagazinesPoolCache (
         0, // id
     )
 
-    cpus := KeQueryProcessorCount ()
+    cpus := KeMostProcessorsInAnyNode
     i := 0
 
     WHILE i < cpus DO
@@ -1257,14 +1257,11 @@ FN MmpInitializePoolCache (
     // Initialize the pool cache.
     //
     // NOTE: We always create as many per-cpu caches in each pool cache as there
-    //       are the total number of CPUs in the entire system, not just in the
-    //       node. This is to avoid having to guard against race conditions
-    //       where the current thread migrates to another node with fewer
-    //       processors and could crash the system if it tries to access the
-    //       per-cpu cache with its index.
-    //
-    //       This could be replaced with just doing the maximum number of
-    //       processors seen in any node.
+    //       are the maximum number of CPUs in the any node, not just in the
+    //       local node. This is to avoid having to guard against race
+    //       conditions where the current thread migrates to another node with
+    //       fewer processors and could perform an invalid memory access if it
+    //       tries to access the per-cpu cache with the old index.
 
     node := kenode^.Mmp
 
@@ -1276,7 +1273,7 @@ FN MmpInitializePoolCache (
     MmpInitializeSlabCache (
         node, // node
         &node^.PoolCacheSlabs, // scache
-        MMP_PC_SIZE + KeQueryProcessorCount () * MMP_PCPCPU_SIZE, // size
+        MMP_PC_SIZE + KeMostProcessorsInAnyNode * MMP_PCPCPU_SIZE, // size
         MM_NONPAGED_POOL, // poolindex
         'PoCa', // tag
     )
