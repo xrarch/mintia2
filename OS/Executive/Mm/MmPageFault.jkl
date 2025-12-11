@@ -56,18 +56,27 @@ FN MmuShouldAccessCrash (
 
     // Returns TRUE if the access should crash the system, FALSE if it should
     // cause an abort. Called by architecture specific code upon various types
-    // of address errors.
+    // of address errors, if an abort block was set up by KeExceptionJacket.
 
     // This was an address error, so check where the address was.
-    // The abort block will contains flags telling us whether to catch this
+    // The abort block will contain flags telling us whether to catch this
     // exception or not. If we shouldn't, we'll crash. This is a basic
     // security/debugging measure and not strictly necessary for
     // functionality.
 
     IF badaddr >= MMP_SYSTEM_SPACE THEN
         // Check if we should catch system space errors.
+        // If we shouldn't, or if the status was not an inpage IO error, crash
+        // the system.
 
-        IF abortblock^.Flags & KE_ABORT_CATCH_SYSTEM_SPACE == 0 THEN
+        // In system space we ONLY catch inpage IO errors because this is the
+        // only valid type of fallible memory access in the kernel. Kernel mode
+        // code should not be using pointers to bad addresses in kernel space
+        // and they should never be forgiven for doing so.
+
+        IF abortblock^.Flags & KE_ABORT_CATCH_SYSTEM_SPACE == 0
+            OR status != OS_STATUS_INPAGE_IO_ERROR THEN
+
             // Nope.
 
             RETURN TRUE

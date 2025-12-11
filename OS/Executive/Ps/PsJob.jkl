@@ -14,7 +14,7 @@ PUBLIC PspJobHierarchyLock : KeLock = KE_INITIAL_LOCK
     KeReleaseLock ( &PspJobHierarchyLock )
 ]
 
-#DEFINE PSP_MAX_JOBU_DEPTH 50
+#DEFINE PSP_MAX_JOB_DEPTH 50
 
 STRUCT PspJobContext
     Flags : UWORD,
@@ -300,15 +300,15 @@ FN (ObuTypeInitializeF) PspInitializeJobObject (
 
         PspUnlockHierarchy ()
 
-        RETURN OS_STATUS_JOBU_IS_TERMINATED
+        RETURN OS_STATUS_JOB_IS_TERMINATED
     END
 
-    IF parentjob^.Depth >= PSP_MAX_JOBU_DEPTH THEN
+    IF parentjob^.Depth >= PSP_MAX_JOB_DEPTH THEN
         // The maximum depth for the job tree is exceeded.
 
         PspUnlockHierarchy ()
 
-        RETURN OS_STATUS_JOBU_DEPTH
+        RETURN OS_STATUS_JOB_DEPTH
     END
 
     // Add to head of parent job list.
@@ -356,7 +356,7 @@ FN PspAddProcessJob (
     IF job^.Terminated THEN
         // Don't allow processes to be added to terminated jobs.
 
-        RETURN OS_STATUS_JOBU_IS_TERMINATED
+        RETURN OS_STATUS_JOB_IS_TERMINATED
     END
 
     paged := process^.Paged
@@ -507,7 +507,7 @@ PUBLIC PsuJobType : ObuType = {
     [Initialize] = &PspInitializeJobObject,
 
     [WaitOffset] = OFFSETOF PsuJob.TerminationEvent,
-    [TypeIdentifier] = OS_JOBU_TYPE,
+    [TypeIdentifier] = OS_JOB_TYPE,
     [Tag] = 'JobO',
 
     [TypicalBodySize] = SIZEOF PsuJob,
