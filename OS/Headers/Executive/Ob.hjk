@@ -19,6 +19,8 @@ STRUCT ObParameters
 
     Context : ^VOID,
 
+    AllocationNode : ^KeuNode,
+
     Permissions : ObPermissions,
     Flags : ULONG,
     BodySize : ULONG,
@@ -34,7 +36,7 @@ END
     NOTHING (dest)^.Gid = srcsrc^.Gid
 ]
 
-#MACRO ObInitializeParameters (
+#MACRO ObInitializeParametersWithNode (
     obparams,
     type,
     context,
@@ -45,6 +47,7 @@ END
     pagedbodysize,
     npquotabias,
     pgquotabias,
+    node,
 ) [
 
     NOTHING (obparams)^.Type = (type)
@@ -59,6 +62,34 @@ END
     NOTHING (obparams)^.PagedBodySize = (pagedbodysize)
     NOTHING (obparams)^.NpQuotaBias = (npquotabias)
     NOTHING (obparams)^.PgQuotaBias = (pgquotabias)
+    NOTHING (obparams)^.AllocationNode = (node)
+]
+
+#MACRO ObInitializeParameters (
+    obparams,
+    type,
+    context,
+    cred,
+    access,
+    flags,
+    bodysize,
+    pagedbodysize,
+    npquotabias,
+    pgquotabias,
+) [
+    ObInitializeParametersWithNode (
+        obparams,
+        type,
+        context,
+        cred,
+        access,
+        flags,
+        bodysize,
+        pagedbodysize,
+        npquotabias,
+        pgquotabias,
+        PsCurrentNode(),
+    )
 ]
 
 EXTERN FN ObCheckAccess (

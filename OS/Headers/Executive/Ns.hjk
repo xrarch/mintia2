@@ -22,6 +22,33 @@ STRUCT NsOpenParameters
     ResultFlags : ULONG,
 END
 
+#MACRO NsInitializeObjectParametersWithNode (
+    obparams,
+    params,
+    type,
+    context,
+    bodysize,
+    pagedbodysize,
+    npquotabias,
+    pgquotabias,
+    node,
+) [
+
+    ObInitializeParametersWithNode (
+        obparams, // obparams
+        type, // type
+        context, // context
+        PsuCurrentCredentials (), // cred
+        (params)^.Captured.Permissions, // access
+        (params)^.Captured.ObFlags, // flags
+        bodysize, // bodysize
+        pagedbodysize, // pagedbodysize
+        npquotabias, // npquotabias
+        pgquotabias, // pgquotabias
+        node, // node
+    )
+]
+
 #MACRO NsInitializeObjectParameters (
     obparams,
     params,
@@ -33,16 +60,15 @@ END
     pgquotabias,
 ) [
 
-    ObInitializeParameters (
+    NsInitializeObjectParametersWithNode (
         obparams, // obparams
+        params, // params
         type, // type
         context, // context
-        PsuCurrentCredentials (), // cred
-        (params)^.Captured.Permissions, // access
-        (params)^.Captured.ObFlags, // flags
         bodysize, // bodysize
         pagedbodysize, // pagedbodysize
         npquotabias, // npquotabias
         pgquotabias, // pgquotabias
+        PsCurrentNode(), // node
     )
 ]

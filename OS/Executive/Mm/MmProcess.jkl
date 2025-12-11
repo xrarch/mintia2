@@ -15,16 +15,10 @@ FN MmuInitializeProcess (
 
     // Initialize the process so it can be used by the memory manager.
 
-    IF NOT partition THEN
-        // No partition object supplied, use the parent process's partition.
-
-        partition = parentprocess^.Partition
-    END
-
     IF NOT MmpIsPartitionPhysical ( partition ) THEN
         // This is not a partition inherent to a NUMA node so we need to up the
         // refcount. NUMA node partitions are eternal and don't have refcounts,
-        // so we can't do this in that case.
+        // so we don't do this in that case.
 
         ObReferenceObject ( partition )
     END

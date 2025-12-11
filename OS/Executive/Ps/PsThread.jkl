@@ -1044,7 +1044,7 @@ FN PsuCreateThreadObject (
 
     obparams : ObParameters
 
-    NsInitializeObjectParameters (
+    NsInitializeObjectParametersWithNode (
         &obparams, // obparams
         params, // params
         &PsuThreadType, // type
@@ -1053,6 +1053,7 @@ FN PsuCreateThreadObject (
         SIZEOF PsuPagedThread, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
+        process^.Pcb.Node, // node
     )
 
     RETURN NsuCreateObject (

@@ -5,6 +5,8 @@
 #INCLUDE "Psp.hjk"
 #INCLUDE "<ll>/System/OsQuota.hjk"
 
+PsuRoundRobinNodeId : ULONG = 0
+
 STRUCT PspProcessContext
     Name : ^RtlString,
     Partition : ^MmpPartition,
@@ -385,13 +387,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
         CAST (process + SIZEOF PsuProcess) TO ^KepAsidInfoEntry
 #END
 
-    kenode : ^KeuNode
-
-    IF ctx^.Partition THEN
-        kenode = MmuPartitionToKeNode ( ctx^.Partition )
-    ELSE
-        kenode = PsCurrentNode ()
-    END
+    kenode := MmuPartitionToKeNode ( ctx^.Partition )
 
     KeuInitializeProcess (
         &process^.Pcb, // process
@@ -1049,7 +1045,10 @@ FN PsuCreateProcessObject (
 
     obparams : ObParameters
 
-    NsInitializeObjectParameters (
+    // Make sure to allocate the object in the node that the process is meant to
+    // be local to.
+
+    NsInitializeObjectParametersWithNode (
         &obparams, // obparams
         params, // params
         &PsuProcessType, // type
@@ -1058,6 +1057,7 @@ FN PsuCreateProcessObject (
         SIZEOF PsuPagedProcess, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
+        MmuPartitionToKeNode ( partition ), // node
     )
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
@@ -1080,6 +1080,7 @@ EXTERN MmuPartitionType : ObuType
 FN PsuCreateProcess (
     IN params : ^NsOpenParameters,
     IN partitionhandle : UWORD,
+    IN nodeid : UWORD,
     IN name : ^RtlString,
     IN quotauid : UWORD,
     IN flags : UWORD,
@@ -1088,11 +1089,18 @@ FN PsuCreateProcess (
 
     // Create a process object - handle interface.
 
-    partition : ^MmpPartition = NULLPTR
+    partition : ^MmpPartition
     access : UWORD
     status : OsStatus
 
     IF partitionhandle != OS_NULL_HANDLE THEN
+        IF nodeid != OS_NULL_NODE THEN
+            // A node ID was specified along with a partition handle. This is
+            // not valid.
+
+            RETURN OS_STATUS_INVALID_ARGUMENT
+        END
+
         status = ObuReferenceByHandle (
             partitionhandle, // handle
             &MmuPartitionType, // type
@@ -1111,6 +1119,37 @@ FN PsuCreateProcess (
 
             GOTO Exit
         END
+    
+    ELSEIF nodeid == OS_NULL_NODE THEN
+        // Use the current process's partition.
+
+        partition = MmCurrentPartition ()
+
+    ELSE
+        // Use the specified NUMA node's integral partition.
+
+        nodes := KeQueryNodeCount ()
+
+        IF nodeid == OS_NEXT_NODE THEN
+            // Use the next node in a round robin fashion.
+            // Used for trivial passive balancing of processes between nodes.
+
+            nodeid = KeIncrementUlong (
+                &PsuRoundRobinNodeId, // ptr
+                1, // inc
+            )
+
+            IF nodeid >= nodes THEN
+                nodeid %= nodes
+            END
+        
+        ELSEIF nodeid >= nodes THEN
+            // Not a valid node ID.
+
+            RETURN OS_STATUS_INVALID_ARGUMENT
+        END
+
+        partition = KeNumaNodeById ( nodeid )^.IntegralPartition
     END
 
     process : ^PsuProcess
@@ -1152,6 +1191,7 @@ END
 FN OsCreateProcess (
     IN params : ^OsOpenParameters,
     IN partitionhandle : UWORD,
+    IN nodeid : UWORD,
     IN name : ^RtlString,
     IN quotauid : UWORD,
     IN flags : UWORD,
@@ -1186,6 +1226,7 @@ FN OsCreateProcess (
     status = PsuCreateProcess (
         &sysparams, // params
         partitionhandle, // partitionhandle
+        nodeid, // nodeid
         &sysname, // name
         quotauid, // quotauid
         flags, // flags
