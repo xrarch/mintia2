@@ -26,6 +26,14 @@ EXTERN FN ExpHash (
     IN str : ^UBYTE,
 ) : UWORD
 
+#DEFINE EXP_NAME_BUCKETS 64
+
+STRUCT ExpNameBucket
+    TreeRoot : RtlAvlNode,
+    Lock : KeLock,
+END
+
 STRUCT ExpNode
     WorkQueues : KeBalancedQueue[EX_MAX_WORK_PRIORITY],
+    NameBuckets : ExpNameBucket[EXP_NAME_BUCKETS],
 END

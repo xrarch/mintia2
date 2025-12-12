@@ -4,14 +4,22 @@
 
 #INCLUDE "Exp.hjk"
 
-#DEFINE EXP_NAME_BUCKETS 64
+#SECTION "INITtext"
+FN ExpInitializeNamesForNode (
+    IN expnode : ^ExpNode,
+)
 
-STRUCT ExpNameBucket
-    TreeRoot : RtlAvlNode,
-    Lock : KeLock,
+    // Initialize the interned name buckets.
+
+    i := 0
+
+    WHILE i < EXP_NAME_BUCKETS DO
+        RtlInitializeAvl ( &expnode^.NameBuckets[i].TreeRoot )
+        KeInitializeLock ( &expnode^.NameBuckets[i].Lock )
+
+        i += 1
+    END
 END
-
-ExpNameBuckets : ExpNameBucket[EXP_NAME_BUCKETS]
 
 #SECTION "INITtext"
 FN ExpInitializeNames ()
@@ -19,10 +27,12 @@ FN ExpInitializeNames ()
     // Initialize the interned name buckets.
 
     i := 0
+    nodes := KeQueryNodeCount ()
 
-    WHILE i < EXP_NAME_BUCKETS DO
-        RtlInitializeAvl ( &ExpNameBuckets[i].TreeRoot )
-        KeInitializeLock ( &ExpNameBuckets[i].Lock )
+    WHILE i < nodes DO
+        expnode := KeNumaNodeById ( i )^.Exp
+
+        ExpInitializeNamesForNode ( expnode )
 
         i += 1
     END
@@ -79,9 +89,12 @@ EXPORT FN ExFindName (
 
     hash := ExpHash ( str^.Data )
 
+    kenode := PsCurrentNode ()
+    expnode := kenode^.Exp
+
     // Get the hash bucket.
 
-    bucket := &ExpNameBuckets[hash & (EXP_NAME_BUCKETS - 1)]
+    bucket := &expnode^.NameBuckets[hash & (EXP_NAME_BUCKETS - 1)]
 
 @Retry
 
@@ -125,7 +138,8 @@ EXPORT FN ExFindName (
         END
     END
 
-    node : ^ExuName = MmAllocatePool (
+    node : ^ExuName = MmAllocatePoolEx (
+        kenode^.Mmp, // node
         MM_PAGED_POOL, // poolindex
         SIZEOF ExuName + SIZEOF RtlString + len + 1, // bytes
         'Name', // tag
@@ -178,7 +192,9 @@ EXPORT FN ExUnreferenceName (
 
     // Unreference the name node.
 
-    bucket := &ExpNameBuckets[name^.BucketIndex]
+    expnode := KeNumaNodeFromSpacePointer ( name )^.Exp
+
+    bucket := &expnode^.NameBuckets[name^.BucketIndex]
 
     // Lock the bucket.
 
@@ -221,7 +237,9 @@ EXPORT FN ExReferenceName (
 
     // Reference the name node.
 
-    bucket := &ExpNameBuckets[name^.BucketIndex]
+    expnode := KeNumaNodeFromSpacePointer ( name )^.Exp
+
+    bucket := &expnode^.NameBuckets[name^.BucketIndex]
 
     // Lock the bucket.
 

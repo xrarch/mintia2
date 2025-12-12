@@ -120,6 +120,24 @@ FN (KeStartThreadF) ExpInitializeExecutive (
     // Initialize the Executive. Called in the context of the future Zero Page
     // Worker (ZPW) thread.
 
+    i := 0
+    nodes := KeQueryNodeCount ()
+
+    WHILE i < nodes DO
+        kenode := KeNumaNodeById ( i )
+
+        expnode : ^ExpNode = KeuAllocateNodeSpace (
+            kenode, // kenode
+            SIZEOF ExpNode, // bytes
+        )
+
+        KeAssert ( expnode != NULLPTR )
+
+        kenode^.Exp = expnode
+
+        i += 1
+    END
+
     // First check for and initialize the boot flags.
 
     ExpInitializeBootFlags ()
