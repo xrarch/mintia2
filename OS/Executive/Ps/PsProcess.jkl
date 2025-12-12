@@ -643,7 +643,7 @@ FN OsEnablePrivilegeProcess (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -728,7 +728,7 @@ FN OsDisablePrivilegeProcess (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -805,7 +805,7 @@ FN OsGrantPrivilegeProcess (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -871,7 +871,7 @@ FN OsRevokePrivilegeProcess (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -915,7 +915,7 @@ FN OsSignalProcess (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -986,7 +986,7 @@ FN OsAwaitActivationProcess (
 
     status = ObuReferenceByHandle (
         handle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -1007,7 +1007,8 @@ FN OsAwaitActivationProcess (
     RETURN status
 END
 
-PUBLIC PsuProcessType : ObuType = {
+#SECTION "INITtext"
+PUBLIC PspProcessType : ObuType = {
     [Name] = "Process",
 
     [Delete] = &PspDeleteProcessObject,
@@ -1051,7 +1052,7 @@ FN PsuCreateProcessObject (
     NsInitializeObjectParametersWithNode (
         &obparams, // obparams
         params, // params
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         &ctx, // context
         SIZEOF PsuProcess, // bodysize
         SIZEOF PsuPagedProcess, // pagedbodysize
@@ -1073,8 +1074,6 @@ FN PsuCreateProcessObject (
         OUT process, // object
     )
 END
-
-EXTERN MmuPartitionType : ObuType
 
 #SECTION "PAGEtext"
 FN PsuCreateProcess (
@@ -1103,7 +1102,7 @@ FN PsuCreateProcess (
 
         status = ObuReferenceByHandle (
             partitionhandle, // handle
-            &MmuPartitionType, // type
+            OS_PARTITION_TYPE, // typeid
             OUT partition, // object
             OUT access, // access
         )
@@ -1257,7 +1256,7 @@ FN OsOpenProcessByPid (
 
     status := PspReferenceById (
         pid, // pid
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
     )
 
@@ -1325,7 +1324,7 @@ FN OsReadStatusProcess (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -1422,7 +1421,7 @@ FN PsuQueryProcess (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -1491,7 +1490,7 @@ FN PsuQueryProcessByPid (
 
     status := PspReferenceById (
         pid, // pid
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
     )
 
@@ -1570,7 +1569,7 @@ FN OsSetBasePriorityProcess (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -1651,7 +1650,7 @@ FN OsTerminateProcess (
 
     retstatus := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -1798,7 +1797,7 @@ FN PsuSetQuotaProcess (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -1875,7 +1874,7 @@ FN PsuQueryQuotaProcess (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )

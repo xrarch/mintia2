@@ -36,7 +36,8 @@ FN (ObuTypeInitializeF) ExpInitializeEventObject (
     )
 END
 
-PUBLIC ExuEventType : ObuType = {
+#SECTION "INITtext"
+ExpEventType : ObuType = {
     [Name] = "Event", // name
 
     [Initialize] = &ExpInitializeEventObject,
@@ -70,7 +71,7 @@ FN ExuCreateEventObject (
     NsInitializeObjectParameters (
         &obparams, // obparams
         params, // params
-        &ExuEventType, // type
+        OS_EVENT_TYPE, // typeid
         &ctx, // context
         SIZEOF ExuEvent, // bodysize
         0, // pagedbodysize
@@ -166,7 +167,7 @@ FN OsResetEvent (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &ExuEventType, // type
+        OS_EVENT_TYPE, // typeid
         OUT event, // object
         OUT access, // access
     )
@@ -203,7 +204,7 @@ FN OsSignalEvent (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &ExuEventType, // type
+        OS_EVENT_TYPE, // typeid
         OUT event, // object
         OUT access, // access
     )
@@ -243,7 +244,7 @@ FN OsReadEvent (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &ExuEventType, // type
+        OS_EVENT_TYPE, // typeid
         OUT event, // object
         OUT access, // access
     )
@@ -274,5 +275,5 @@ FN ExpInitializeEvents ()
 
     // Initialize the event object type.
 
-    ObuInitializeType ( &ExuEventType )
+    ObuInitializeType ( &ExpEventType )
 END

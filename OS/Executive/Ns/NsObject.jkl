@@ -5,8 +5,6 @@
 #INCLUDE "Nsp.hjk"
 #INCLUDE "<inc>/Iou.hjk"
 
-EXTERN IouFileType : ObuType
-
 #SECTION "PAGEtext"
 FN NsuCaptureOpenParameters (
     IN userparams : ^OsOpenParameters,
@@ -60,7 +58,7 @@ FN NsuCaptureOpenParameters (
 
     status = ObuReferenceByHandle (
         sysparams^.Captured.InitialHandle, // handle
-        &IouFileType, // type
+        OS_FILE_TYPE, // typeid
         OUT file, // object
         OUT access, // access
     )
@@ -134,7 +132,7 @@ FN NsuCreateObject (
             &handle, // handle
             &obparams^.Permissions.Cred, // cred
             obparams, // obparams
-            obparams^.Type, // type
+            obparams^.TypeId, // typeid
         )
 
         IF OsError ( status ) THEN
@@ -161,7 +159,7 @@ END
 #SECTION "PAGEtext"
 FN NsuLookupObject (
     IN params : ^NsOpenParameters,
-    IN type : ^ObuType,
+    IN typeid : UWORD,
     OUT object : ^VOID,
 ) : OsStatus
 
@@ -182,7 +180,7 @@ FN NsuLookupObject (
         &handle, // handle
         PsuCurrentCredentials (), // cred
         NULLPTR, // obparams
-        type, // type
+        typeid, // typeid
     )
 
     IF OsError ( status ) THEN

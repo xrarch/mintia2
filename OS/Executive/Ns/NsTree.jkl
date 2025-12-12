@@ -537,7 +537,7 @@ FN NsuLookupEntryByPath (
     IN handle : ^NsHandle,
     IN cred : ^ObCredentials,
     IN obparams : ^ObParameters,
-    IN type : ^ObuType,
+    IN typeid : OsObjectType,
 ) : OsStatus
 
     // Parse the specified path and initialize the 'handle' with a referenced
@@ -1231,11 +1231,12 @@ FN NsuLookupEntryByPath (
             GOTO Exit
         END
 
-        IF type THEN
+        IF typeid != OS_ANY_TYPE THEN
             // Check the type of the object.
 
             IF NOT currententry^.Object OR
-                ObuFindHeader ( currententry^.Object )^.Type != type THEN
+                ObuFindHeader ( currententry^.Object )^.Type^.TypeIdentifier
+                != typeid THEN
 
                 NspUnlockTree ()
 

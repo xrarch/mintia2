@@ -236,7 +236,7 @@ END
 FN ObuReferenceByHandleObject (
     IN process : ^PsuProcess,
     IN handle : UWORD,
-    IN type : ^ObuType,
+    IN typeid : OsObjectType,
     OUT object : ^VOID,
     OUT access : UWORD,
 ) : OsStatus
@@ -272,7 +272,9 @@ FN ObuReferenceByHandleObject (
     object = entry^.Object
     access = entry^.Access
 
-    IF type AND ObuFindHeader ( object )^.Type != type THEN
+    IF typeid != OS_ANY_TYPE AND
+        ObuFindHeader ( object )^.Type^.TypeIdentifier != typeid THEN
+
         // Wrong type.
 
         KeReleaseLock ( &paged^.HandleTableLock )
@@ -294,7 +296,7 @@ END
 #SECTION "PAGEtext"
 FN ObuReferenceByHandle (
     IN handle : UWORD,
-    IN type : ^ObuType,
+    IN typeid : OsObjectType,
     OUT object : ^VOID,
     OUT access : UWORD,
 ) : OsStatus
@@ -303,7 +305,9 @@ FN ObuReferenceByHandle (
     // corresponding object.
 
     IF handle == OS_CURRENT_PROCESS THEN
-        IF type AND type != &PsuProcessType THEN
+        IF typeid != OS_ANY_TYPE AND
+            typeid != OS_PROCESS_TYPE THEN
+
             RETURN OS_STATUS_INVALID_OBJECT_TYPE
         END
 
@@ -316,7 +320,9 @@ FN ObuReferenceByHandle (
         RETURN OS_STATUS_SUCCESS
 
     ELSEIF handle == OS_CURRENT_THREAD THEN
-        IF type AND type != &PsuThreadType THEN
+        IF typeid != OS_ANY_TYPE AND
+            typeid != OS_THREAD_TYPE THEN
+
             RETURN OS_STATUS_INVALID_OBJECT_TYPE
         END
 
@@ -332,26 +338,11 @@ FN ObuReferenceByHandle (
     RETURN ObuReferenceByHandleObject (
         PsCurrentProcess (), // process
         handle, // handle
-        type, // type
+        typeid, // type
         OUT object, // object
         OUT access, // access
     )
 END
-
-EXTERN ExuEventType : ObuType
-EXTERN PsuJobType : ObuType
-EXTERN MmuPartitionType : ObuType
-
-// Any type without an entry in this table is not permitted to be inserted
-// directly into the namespace.
-
-ObpTypeTable : ^ObuType[OS_MAX_TYPE] = {
-    [OS_EVENT_TYPE] = &ExuEventType,
-    [OS_PROCESS_TYPE] = &PsuProcessType,
-    [OS_THREAD_TYPE] = &PsuThreadType,
-    [OS_JOB_TYPE] = &PsuJobType,
-    [OS_PARTITION_TYPE] = &MmuPartitionType,
-}
 
 #SECTION "PAGEtext"
 FN ObuOpenObject (
@@ -367,16 +358,14 @@ FN ObuOpenObject (
     //       and can't be directly opened). We need to make sure that using this
     //       to open a file object works right later.
 
-    obtype : ^ObuType = NULLPTR
-
     IF type != OS_ANY_TYPE THEN
         IF type >= OS_MAX_TYPE THEN
             RETURN OS_STATUS_INVALID_TYPE
         END
 
-        obtype = ObpTypeTable[type]
+        obtype := &PsCurrentNode()^.ObTypes[type]
 
-        IF NOT obtype THEN
+        IF obtype^.Flags & OBU_TYPE_FLAG_OPENABLE == 0 THEN
             RETURN OS_STATUS_INVALID_TYPE
         END
     END
@@ -385,7 +374,7 @@ FN ObuOpenObject (
 
     status := NsuLookupObject (
         params, // params
-        obtype, // type
+        type, // typeid
         OUT object, // event
     )
 

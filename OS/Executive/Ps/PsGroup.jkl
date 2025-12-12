@@ -115,7 +115,8 @@ FN (ObuTypeInitializeF) PspInitializeGroupObject (
     RETURN OS_STATUS_SUCCESS
 END
 
-PUBLIC PsuGroupType : ObuType = {
+#SECTION "INITtext"
+PUBLIC PspGroupType : ObuType = {
     [Name] = "Group",
 
     [Delete] = &PspDeleteGroupObject,
@@ -142,7 +143,7 @@ FN PspCreateGroup (
 
     ObInitializeParameters (
         &obparams, // obparams
-        &PsuGroupType, // type
+        OS_GROUP_TYPE, // typeid
         NULLPTR, // context
         PsuCurrentCredentials (), // cred
         OS_ACCESS_OWNER_ALL, // access
@@ -319,7 +320,7 @@ FN OsSetGroupProcess (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -339,7 +340,7 @@ FN OsSetGroupProcess (
     IF grouphandle != OS_NULL_HANDLE THEN
         status = ObuReferenceByHandle (
             grouphandle, // handle
-            &PsuGroupType, // type
+            OS_GROUP_TYPE, // typeid
             OUT group, // object
             OUT access, // access
         )
@@ -389,7 +390,7 @@ FN OsOpenGroupByPid (
 
     status := PspReferenceById (
         pid, // pid
-        &PsuGroupType, // type
+        OS_GROUP_TYPE, // type
         OUT group, // object
     )
 
@@ -540,7 +541,7 @@ FN OsSignalGroup (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuGroupType, // type
+        OS_GROUP_TYPE, // typeid
         OUT group, // object
         OUT access, // access
     )
@@ -579,7 +580,7 @@ FN OsNewSessionProcess (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )

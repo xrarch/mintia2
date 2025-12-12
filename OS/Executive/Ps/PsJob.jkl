@@ -498,7 +498,8 @@ FN PspInheritJob (
     RETURN status
 END
 
-PUBLIC PsuJobType : ObuType = {
+#SECTION "INITtext"
+PUBLIC PspJobType : ObuType = {
     [Name] = "Job",
 
     [Close] = &PspCloseJobObject,
@@ -537,7 +538,7 @@ FN PsuCreateJobObject (
     NsInitializeObjectParameters (
         &obparams, // obparams
         params, // params
-        &PsuJobType, // type
+        OS_JOB_TYPE, // typeid
         &ctx, // context
         SIZEOF PsuJob, // bodysize
         0, // pagedbodysize
@@ -566,7 +567,7 @@ FN OsAddProcessJob (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -587,7 +588,7 @@ FN OsAddProcessJob (
 
     status = ObuReferenceByHandle (
         jobhandle, // handle
-        &PsuJobType, // type
+        OS_JOB_TYPE, // typeid
         OUT job, // object
         OUT access, // access
     )
@@ -647,7 +648,7 @@ FN OsRemoveProcessJob (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )
@@ -698,7 +699,7 @@ FN OsSignalJob (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuJobType, // type
+        OS_JOB_TYPE, // typeid
         OUT job, // object
         OUT access, // access
     )
@@ -754,7 +755,7 @@ FN PsuCreateJob (
 
         status = ObuReferenceByHandle (
             parentjobhandle, // handle
-            &PsuJobType, // type
+            OS_JOB_TYPE, // typeid
             OUT parentjob, // object
             OUT access, // access
         )

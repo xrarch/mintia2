@@ -177,7 +177,8 @@ FN (ObuTypeInitializeF) ExpInitializeModuleObject (
     RETURN OS_STATUS_SUCCESS
 END
 
-PUBLIC ExuModuleType : ObuType = {
+#SECTION "INITtext"
+ExpModuleType : ObuType = {
     [Name] = "Module",
 
     [Delete] = &ExpDeleteModuleObject,
@@ -208,7 +209,7 @@ FN ExpCreateModule (
 
     ObInitializeParameters (
         &obparams, // obparams
-        &ExuModuleType, // type
+        OS_MODULE_TYPE, // typeid
         &ctx, // context
         PsuSystemCredentials (), // cred
         OS_ACCESS_OWNER_ALL, // access
@@ -233,7 +234,7 @@ FN ExpInitializeModules ()
 
     // Initialize the module type.
 
-    ObuInitializeType ( &ExuModuleType )
+    ObuInitializeType ( &ExpModuleType )
 
     // Create a "known module" for the kernel itself.
 

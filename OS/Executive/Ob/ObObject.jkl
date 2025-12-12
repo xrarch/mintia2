@@ -28,6 +28,8 @@ FN ObuInitializeType (
     npsize : UWORD
     psize : UWORD
 
+    id := type^.TypeIdentifier
+
     IF type^.IsPaged THEN
         npsize = 0
         psize = ObpCalculatePagedBlockSize ( type^.TypicalBodySize )
@@ -37,80 +39,104 @@ FN ObuInitializeType (
         psize = ObpCalculateNpHeaderSize ( type^.TypicalPgBodySize )
     END
 
-    type^.CachedPgBodySize = psize
-    type^.CachedNpBodySize = npsize
-
     typenamelen := RtlMeasureString ( type^.Name )
-    name : ^UBYTE
+    npname : ^UBYTE
+    pgname : ^UBYTE
 
     IF npsize THEN
-        name = MmAllocatePool (
+        npname = MmAllocatePool (
             MM_NONPAGED_POOL, // poolindex
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
             TRUE, // wait
         )
 
-        IF NOT name THEN
+        IF NOT npname THEN
             KeCrash ( error, type^.Name, "failed to allocate np name\n" )
         END
 
         RtlCopyString (
-            name, // dest
+            npname, // dest
             type^.Name, // src
             -1, // bufsize
         )
 
-        name[typenamelen] = 'N'
-        name[typenamelen + 1] = 'p'
-        name[typenamelen + 2] = 0
-
-        type^.NpPartCache = MmCreatePoolCache (
-            MmCurrentNode (), // node
-            name, // name
-            npsize, // size
-            MM_NONPAGED_POOL, // poolindex
-            type^.Tag, // tag
-        )
-
-        IF NOT type^.NpPartCache THEN
-            KeCrash ( error, type^.Name, "failed to allocate np cache\n" )
-        END
+        npname[typenamelen] = 'N'
+        npname[typenamelen + 1] = 'p'
+        npname[typenamelen + 2] = 0
     END
 
     IF psize THEN
-        name = MmAllocatePool (
+        pgname = MmAllocatePool (
             MM_NONPAGED_POOL, // poolindex
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
             TRUE, // wait
         )
 
-        IF NOT name THEN
+        IF NOT pgname THEN
             KeCrash ( error, type^.Name, "failed to allocate pg name\n" )
         END
 
         RtlCopyString (
-            name, // dest
+            pgname, // dest
             type^.Name, // src
             -1, // bufsize
         )
 
-        name[typenamelen] = 'P'
-        name[typenamelen + 1] = 'g'
-        name[typenamelen + 2] = 0
+        pgname[typenamelen] = 'P'
+        pgname[typenamelen + 1] = 'g'
+        pgname[typenamelen + 2] = 0
+    END
 
-        type^.PgPartCache = MmCreatePoolCache (
-            MmCurrentNode (), // node
-            name, // name
-            psize, // size
-            MM_PAGED_POOL, // poolindex
-            type^.Tag, // tag
+    // The object type structures are duplicated between NUMA nodes.
+
+    i := 0
+    nodes := KeQueryNodeCount ()
+
+    WHILE i < nodes DO
+        kenode := KeNumaNodeById ( i )
+
+        pernodetype := &kenode^.ObTypes[id]
+
+        pernodetype^.CachedPgBodySize = psize
+        pernodetype^.CachedNpBodySize = npsize
+
+        RtlCopyBytes (
+            pernodetype, // dest
+            type, // src
+            SIZEOF ObuType, // sz
         )
 
-        IF NOT type^.PgPartCache THEN
-            KeCrash ( error, type^.Name, "failed to allocate pg cache\n" )
+        IF npsize THEN
+            pernodetype^.NpPartCache = MmCreatePoolCache (
+                kenode^.Mmp, // node
+                npname, // name
+                npsize, // size
+                MM_NONPAGED_POOL, // poolindex
+                type^.Tag, // tag
+            )
+
+            IF NOT pernodetype^.NpPartCache THEN
+                KeCrash ( error, type^.Name, "failed to allocate np cache\n" )
+            END
         END
+
+        IF psize THEN
+            pernodetype^.PgPartCache = MmCreatePoolCache (
+                kenode^.Mmp, // node
+                pgname, // name
+                psize, // size
+                MM_PAGED_POOL, // poolindex
+                type^.Tag, // tag
+            )
+
+            IF NOT pernodetype^.PgPartCache THEN
+                KeCrash ( error, type^.Name, "failed to allocate pg cache\n" )
+            END
+        END
+
+        i += 1
     END
 
     RETURN OS_STATUS_SUCCESS
@@ -133,7 +159,7 @@ FN ObuAllocateObject (
     psize : UWORD
     npsize : UWORD
 
-    type := obparams^.Type
+    type := &obparams^.AllocationNode^.ObTypes[obparams^.TypeId]
 
     internalflags := 0
 
@@ -568,8 +594,10 @@ FN ObpDeferDeletion (
 
     // Atomically add it to the list.
 
+    kenode := KeNumaNodeFromSpacePointer ( object )
+
     KeuInsertCustodyList (
-        &PsCurrentNode()^.Obp^.DeferredDeletionList, // list
+        &kenode^.Obp^.DeferredDeletionList, // list
         &commonheader^.NextToReap, // link
     )
 END

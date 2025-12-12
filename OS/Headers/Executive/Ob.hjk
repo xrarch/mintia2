@@ -15,7 +15,7 @@ STRUCT ObPermissions
 END
 
 STRUCT ObParameters
-    Type : ^ObuType,
+    TypeId : UWORD,
 
     Context : ^VOID,
 
@@ -38,7 +38,7 @@ END
 
 #MACRO ObInitializeParametersWithNode (
     obparams,
-    type,
+    typeid,
     context,
     cred,
     access,
@@ -50,7 +50,7 @@ END
     node,
 ) [
 
-    NOTHING (obparams)^.Type = (type)
+    NOTHING (obparams)^.TypeId = (typeid)
     NOTHING (obparams)^.Context = (context)
     ObMoveCredentials (
         &(obparams)^.Permissions.Cred, // dest
@@ -67,7 +67,7 @@ END
 
 #MACRO ObInitializeParameters (
     obparams,
-    type,
+    typeid,
     context,
     cred,
     access,
@@ -79,7 +79,7 @@ END
 ) [
     ObInitializeParametersWithNode (
         obparams,
-        type,
+        typeid,
         context,
         cred,
         access,

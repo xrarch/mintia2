@@ -528,7 +528,7 @@ FN OsTerminateThread (
 
     retstatus := ObuReferenceByHandle (
         handle, // handle
-        &PsuThreadType, // type
+        OS_THREAD_TYPE, // typeid
         OUT thread, // object
         OUT access, // access
     )
@@ -567,7 +567,7 @@ FN OsSuspendThread (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuThreadType, // type
+        OS_THREAD_TYPE, // typeid
         OUT thread, // object
         OUT access, // access
     )
@@ -604,7 +604,7 @@ FN OsUnsuspendThread (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuThreadType, // type
+        OS_THREAD_TYPE, // typeid
         OUT thread, // object
         OUT access, // access
     )
@@ -657,7 +657,7 @@ FN OsReadStatusThread (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuThreadType, // type
+        OS_THREAD_TYPE, // typeid
         OUT thread, // object
         OUT access, // access
     )
@@ -730,7 +730,7 @@ FN PsuQueryThread (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuThreadType, // type
+        OS_THREAD_TYPE, // typeid
         OUT thread, // object
         OUT access, // access
     )
@@ -802,7 +802,7 @@ FN OsSignalThread (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuThreadType, // type
+        OS_THREAD_TYPE, // typeid
         OUT thread, // object
         OUT access, // access
     )
@@ -861,7 +861,7 @@ FN OsMaskSignalThread (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuThreadType, // type
+        OS_THREAD_TYPE, // typeid
         OUT thread, // object
         OUT access, // access
     )
@@ -907,7 +907,7 @@ FN OsDeliverOnWaitSignalThread (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuThreadType, // type
+        OS_THREAD_TYPE, // typeid
         OUT thread, // object
         OUT access, // access
     )
@@ -947,7 +947,7 @@ FN OsGetFaultStatusThread (
 
     status := ObuReferenceByHandle (
         handle, // handle
-        &PsuThreadType, // type
+        OS_THREAD_TYPE, // typeid
         OUT thread, // object
         OUT access, // access
     )
@@ -1002,7 +1002,8 @@ FN OsSleepThread (
     )
 END
 
-PUBLIC PsuThreadType : ObuType = {
+#SECTION "INITtext"
+PUBLIC PspThreadType : ObuType = {
     [Name] = "Thread",
 
     [Delete] = &PspDeleteThreadObject,
@@ -1047,7 +1048,7 @@ FN PsuCreateThreadObject (
     NsInitializeObjectParametersWithNode (
         &obparams, // obparams
         params, // params
-        &PsuThreadType, // type
+        OS_THREAD_TYPE, // typeid
         &ctx, // context
         SIZEOF PsuThread, // bodysize
         SIZEOF PsuPagedThread, // pagedbodysize
@@ -1128,7 +1129,7 @@ FN PsuCreateThread (
 
     status := ObuReferenceByHandle (
         processhandle, // handle
-        &PsuProcessType, // type
+        OS_PROCESS_TYPE, // typeid
         OUT process, // object
         OUT access, // access
     )

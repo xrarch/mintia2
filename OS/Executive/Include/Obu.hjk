@@ -46,6 +46,8 @@ FNPTR ObuTypeInitializeF (
 
 #DEFINE OBU_TYPE_NO_WAIT_OFFSET 0xFFFFFFFF
 
+#DEFINE OBU_TYPE_FLAG_OPENABLE 1
+
 STRUCT ObuType
     Name : ^UBYTE,
 
@@ -69,6 +71,8 @@ STRUCT ObuType
 
     CachedNpBodySize : ULONG,
     CachedPgBodySize : ULONG,
+
+    Flags : ULONG,
 
     IsPaged : UBYTE,
 END
@@ -155,14 +159,14 @@ EXTERN FN ObuCloseObject (
 EXTERN FN ObuReferenceByHandleObject (
     IN process : ^PsuProcess,
     IN handle : UWORD,
-    IN type : ^ObuType,
+    IN typeid : OsObjectType,
     OUT object : ^VOID,
     OUT access : UWORD,
 ) : OsStatus
 
 EXTERN FN ObuReferenceByHandle (
     IN handle : UWORD,
-    IN type : ^ObuType,
+    IN typeid : OsObjectType,
     OUT object : ^VOID,
     OUT access : UWORD,
 ) : OsStatus

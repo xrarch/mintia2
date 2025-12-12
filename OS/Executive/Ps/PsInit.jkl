@@ -133,7 +133,7 @@ END
 #SECTION "PAGEtext"
 FN PspReferenceById (
     IN pid : UWORD,
-    IN type : ^ObuType,
+    IN typeid : OsObjectType,
     OUT object : ^VOID,
 ) : OsStatus
 
@@ -168,11 +168,11 @@ FN PspReferenceById (
         GOTO Exit
     END
 
-    IF ObuFindHeader ( object )^.Type != type THEN
+    IF ObuFindHeader ( object )^.Type^.TypeIdentifier != typeid THEN
         // Not the correct object type.
 
-        IF ObuFindHeader ( object )^.Type == &PsuProcessType AND
-            type == &PsuGroupType THEN
+        IF ObuFindHeader ( object )^.Type^.TypeIdentifier == OS_PROCESS_TYPE AND
+            typeid == OS_GROUP_TYPE THEN
 
             // We're looking for a process group and this is a process.
             // If it's the group leader then we can find the process group
@@ -265,19 +265,19 @@ FN PsuInitializeStage1 ()
 
     // Initialize the process type.
 
-    ObuInitializeType ( &PsuProcessType )
+    ObuInitializeType ( &PspProcessType )
 
     // Initialize the thread type.
 
-    ObuInitializeType ( &PsuThreadType )
+    ObuInitializeType ( &PspThreadType )
 
     // Initialize the job type.
 
-    ObuInitializeType ( &PsuJobType )
+    ObuInitializeType ( &PspJobType )
 
     // Initialize the group type.
 
-    ObuInitializeType ( &PsuGroupType )
+    ObuInitializeType ( &PspGroupType )
 
     // Initialize the PID/TID table.
 
