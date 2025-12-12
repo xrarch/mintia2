@@ -56,6 +56,10 @@ FN KepDisassociateFromBalancedQueue (
 
     oldqueue := thread^.BalancedQueue
 
+    IF NOT oldqueue THEN
+        LEAVE
+    END
+
     KepComputeQueueRemovalLockAddress ( lock, oldqueue )
 
     ipl := KepAcquireQueueRemoval ( lock )

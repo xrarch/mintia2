@@ -394,7 +394,7 @@ EXPORT FN KeRealTimeToLocalTime (
         )
     END
 
-    offset := KEP_CURRENT_PRB_LOCAL^.Node^.SharedUserPage^.TimeZoneOffset
+    offset := KeCurrentVolatileNode ()^.SharedUserPage^.TimeZoneOffset
 
     RtlAddUlongToUquad (
         desttime, // destquad
@@ -415,7 +415,7 @@ EXPORT FN KeLocalTimeToRealTime (
         )
     END
 
-    offset := KEP_CURRENT_PRB_LOCAL^.Node^.SharedUserPage^.TimeZoneOffset
+    offset := KeCurrentVolatileNode ()^.SharedUserPage^.TimeZoneOffset
 
     RtlSubUlongFromUquad (
         desttime, // destquad
@@ -453,7 +453,7 @@ EXPORT FN KeQueryTime (
 
     // Query the time from the shared user page.
 
-    sup := KEP_CURRENT_PRB_LOCAL^.Node^.SharedUserPage
+    sup := KeCurrentVolatileNode ()^.SharedUserPage
 
 @Retry
 

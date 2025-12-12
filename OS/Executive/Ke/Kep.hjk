@@ -713,8 +713,9 @@ EXTERN FN KepAcquireSpinlockInPrb (
 ]
 
 #MACRO KepComputeQueueRemovalLockAddress ( lock, queue ) [
-    kenode : ^KeuNode
-    KeNumaNodeFromArbitraryPointer ( kenode, queue )
+    KeAssert ( KeIsPointerInNodeSpace ( queue ) )
+
+    kenode := KeNumaNodeFromSpacePointer ( queue )
 
     lock := &kenode^.Kep^.QueueRemovalLocks[KepQueueLockIndex(queue)]
 ]
@@ -860,7 +861,7 @@ EXTERN FN KepStealWork ()
 
 #MACRO KepCaptureCurrentTicks ( uquad ) [
     WHILE TRUE DO
-        sup := (KEP_CURRENT_PRB_LOCAL)^.Node^.SharedUserPage
+        sup := KeCurrentVolatileNode ()^.SharedUserPage
 
         NOTHING (uquad)^.High = (sup)^.Uptime.High
         KeMemoryBarrier ()
@@ -876,7 +877,7 @@ EXTERN FN KepStealWork ()
 ]
 
 #MACRO KepLowTick () [
-    ((KEP_CURRENT_PRB_LOCAL)^.Node^.SharedUserPage^.Uptime.Low)
+    (KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Low)
 ]
 
 #MACRO KepUpdateTime ( kenode, prb ) [
@@ -914,11 +915,11 @@ EXTERN FN KepStealWork ()
 
 #MACRO KepCaptureCurrentTicks ( uquad ) [
     NOTHING (uquad)^.Quad =
-        (KEP_CURRENT_PRB_LOCAL)^.Node^.SharedUserPage^.Uptime.Quad
+        KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Quad
 ]
 
 #MACRO KepLowTick ( prb ) [
-    ((KEP_CURRENT_PRB_LOCAL)^.Node^.SharedUserPage^.Uptime.Quad)
+    (KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Quad)
 ]
 
 #MACRO KepUpdateTime ( kenode, prb ) [

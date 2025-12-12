@@ -20,12 +20,18 @@
     ((CAST 0xFFFFCFF8 TO ^ULONG)^)
 ]
 
+#MACRO KeCurrentVolatileNodeId () [
+    ((CAST 0xFFFFCFF4 TO ^ULONG)^)
+]
+
 #ELSE
 
 #MACRO KeMemoryBarrier () [ BARRIER ]
 #MACRO KeWriteMemoryBarrier () [ BARRIER ]
 
 #MACRO KeCurrentProcessorId () [ 0 ]
+
+#MACRO KeCurrentVolatileNode () [(CAST KE_NODE_SPACE_START TO ^KeuNode)]
 
 #END
 
@@ -51,6 +57,10 @@
     NOTHING (CAST ((prb) + 0xFF8) TO ^ULONG)[0] = (id)
 ]
 
+#MACRO KepStashNodePtr ( prb, node ) [
+    NOTHING (CAST ((prb) + 0xFF4) TO ^^KeuNode)[0] = (node)
+]
+
 #DEFINE KE_CACHE_ALIGN 16
 
 // Describes the start of the per-node spaces.
@@ -60,16 +70,64 @@
 // use by kernel modules either.
 
 #DEFINE KE_NODE_SPACE_START 0xC0000000
-#DEFINE KE_NODE_SPACE_SIZE 0x40000000
-
-// Describes base and bounds of the three dynamic areas.
-
 #DEFINE KE_NODE_STRUCTURE_OFFSET 0x00000000
-
 #DEFINE KE_NODE_PRB_OFFSET 0x00004000
 
+#MACRO KeIsPointerInNodeSpace ( ptr ) [
+    ((ptr) >= KE_NODE_SPACE_START)
+]
+
+#IF BLD_NUMA
+
+#DEFINE KE_NODE_SPACE_SIZE 0x20000000
+
 #DEFINE KE_BL_BUMP_SPACE_OFFSET 0x00020000
-#DEFINE KE_BL_BUMP_SPACE_SIZE [(256 * 1024 * 1024)]
+
+#DEFINE KE_POOL_SPACE_OFFSET 0x08000000
+#DEFINE KE_POOL_SPACE_SIZE [(128 * 1024 * 1024)]
+
+#DEFINE KE_DYNAMIC_SPACE_OFFSET 0x10000000
+#DEFINE KE_DYNAMIC_SPACE_SIZE [(128 * 1024 * 1024)]
+
+#DEFINE KE_CACHE_SPACE_OFFSET 0x18000000
+#DEFINE KE_CACHE_SPACE_SIZE [(128 * 1024 * 1024)]
+
+#MACRO KeNumaNodeFromSpacePointer ( ptr ) [
+    // We map NUMA node spaces on XR/frame from 0xC0000000 to the top of the
+    // address space in 512MB increments. Two nodes exist, so bit 29 is the node
+    // ID. Masking off the low 29 bits is sufficient to calculate the pointer to
+    // a node structure given a pointer within the node space since it lies at
+    // the base of its node space.
+
+    (CAST (ptr & 0xE0000000) TO ^KeuNode)
+]
+
+#MACRO KeNumaNodeById ( id ) [
+    (CAST KE_NODE_SPACE_START + ((id) * KE_NODE_SPACE_SIZE) TO ^KeuNode)
+]
+
+#MACRO KeNumaNodeFromArbitraryPointer ( destnode, srcptr ) [
+    // On an architecture with real NUMA support, this macro should defer to
+    // KeNumaNodeFromSpacePointer in the event the srcptr is in dynamic
+    // space, and should default to the boot node otherwise.
+
+    IF (srcptr) >= KE_NODE_SPACE_START THEN
+        (destnode) = KeNumaNodeFromSpacePointer ( srcptr )
+    ELSE
+        // Boot node is node 0.
+        (destnode) = KeNumaNodeById ( 0 )
+    END
+]
+
+#MACRO KeCurrentVolatileNode () [
+    ((CAST 0xFFFFCFF4 TO ^^KeuNode)^)
+]
+
+#ELSE
+
+#DEFINE KE_NODE_SPACE_SIZE 0x40000000
+
+#DEFINE KE_BL_BUMP_SPACE_OFFSET 0x00020000
 
 #DEFINE KE_POOL_SPACE_OFFSET 0x10000000
 #DEFINE KE_POOL_SPACE_SIZE [(256 * 1024 * 1024)]
@@ -79,8 +137,6 @@
 
 #DEFINE KE_CACHE_SPACE_OFFSET 0x30000000
 #DEFINE KE_CACHE_SPACE_SIZE [(256 * 1024 * 1024)]
-
-// NUMA not supported on xr17032.
 
 #MACRO KeNumaNodeFromSpacePointer ( ptr ) [
     // On an architecture with real NUMA support, this macro may do something
@@ -101,3 +157,9 @@
 
     NOTHING (destnode) = (CAST KE_NODE_SPACE_START TO ^KeuNode)
 ]
+
+#MACRO KeCurrentVolatileNode () [
+    (CAST KE_NODE_SPACE_START TO ^KeuNode)
+]
+
+#END

@@ -21,6 +21,8 @@
 
 #MACRO KepStashPrbId ( prb, id ) []
 
+#MACRO KepStashNodePtr ( prb, node ) []
+
 #DEFINE KE_CACHE_ALIGN 4
 
 // Describes the start of the per-node spaces.
@@ -70,4 +72,12 @@
     // space, and should default to the boot node otherwise.
 
     NOTHING (destnode) = (CAST KE_NODE_SPACE_START TO ^KeuNode)
+]
+
+#MACRO KeIsPointerInNodeSpace ( ptr ) [
+    ((ptr) >= KE_NODE_SPACE_START)
+]
+
+#MACRO KeCurrentVolatileNode () [
+    (CAST KE_NODE_SPACE_START TO ^KeuNode)
 ]

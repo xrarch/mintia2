@@ -211,6 +211,7 @@ FN (KeStartThreadF) FwtExplodeableThread (
         data^.ExplosionRange = explosionrange
         
         IF NOT FwtCreateThread (
+            KeCurrentVolatileNode (), // kenode
             &FwtParticleThread, // startroutine
             data, // fwd
         ) THEN
@@ -227,8 +228,16 @@ FN (KeStartThreadF) FwtExplodeableThread (
     PsExitThread ()
 END
 
-FN FwtSpawnExplodeable ()
+FN FwtSpawnExplodeable (
+    IN nodeid : UWORD,
+)
+
+    nodes := KeQueryNodeCount ()
+    nodeid %= nodes
+    kenode := KeNumaNodeById ( nodeid )
+
     IF NOT FwtCreateThread (
+        kenode, // kenode
         &FwtExplodeableThread, // startroutine
         NULLPTR, // fwd
     ) THEN

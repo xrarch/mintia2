@@ -15,13 +15,15 @@ FN (KeStartThreadF) FwtMainThread (
 
     RtlPrint ( "FwtMainThread: Fireworks looping\n" )
     
+    nodeid := 0
+
     WHILE TRUE DO
         count := FwtRand () % 2 + 1
 
         i := 0
 
         WHILE i < count DO
-            FwtSpawnExplodeable ()
+            FwtSpawnExplodeable ( nodeid )
 
             i += 1
         END
@@ -38,6 +40,8 @@ FN (KeStartThreadF) FwtMainThread (
             KE_KERNEL_MODE, // waitmode
             FALSE, // alertable
         )
+
+        nodeid += 1
     END
 END
 

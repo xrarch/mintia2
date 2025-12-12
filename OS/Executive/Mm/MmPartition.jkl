@@ -562,9 +562,9 @@ FN MmpWaitForPages (
                 thrd := KeCurrentThread ()
                 seed = (thrd >> RTL_ALIGN_SHIFT) $ (thrd >> RTL_PAGE_SHIFT)
 #IF ( == BLD_BITS 32 )
-                seed $= thrd^.Process^.Node^.SharedUserPage^.Uptime.Low
+                seed $= KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Low
 #ELSE
-                seed $= thrd^.Process^.Node^.SharedUserPage^.Uptime.Quad
+                seed $= KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Quad
 #END
             END
 
