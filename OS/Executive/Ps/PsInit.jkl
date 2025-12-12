@@ -279,25 +279,6 @@ FN PsuInitializeStage1 ()
 
     ObuInitializeType ( &PsuGroupType )
 
-    // Initialize the turnstile cache.
-
-#LEAVESECTION
-
-    PspTurnstileCache = MmCreatePoolCache (
-        MmCurrentNode (), // node
-        "Turnstiles", // name
-        SIZEOF KepTurnstile, // size
-        MM_NONPAGED_POOL, // poolindex
-        'Turn', // tag
-    )
-
-#ENTERSECTION "INITtext"
-
-    IF NOT PspTurnstileCache THEN
-        KeCrash ( "%sfailed to create turnstile cache\n",
-            "PsuInitializeStage1: " )
-    END
-
     // Initialize the PID/TID table.
 
     // Note that entrysizelog = 0 means the size of a handle table entry will be
@@ -343,6 +324,25 @@ FN PsuInitializeStage1 ()
             &pspnode^.ReaperTimedWorkItem, // item
             &PsuReaperWorker, // routine
         )
+
+        // Initialize the turnstile cache.
+
+#LEAVESECTION
+
+        pspnode^.TurnstileCache = MmCreatePoolCache (
+            kenode^.Mmp, // node
+            "Turnstiles", // name
+            SIZEOF KepTurnstile, // size
+            MM_NONPAGED_POOL, // poolindex
+            'Turn', // tag
+        )
+
+#ENTERSECTION "INITtext"
+
+        IF NOT pspnode^.TurnstileCache THEN
+            KeCrash ( "%sfailed to create turnstile cache\n",
+                "PsuInitializeStage1: " )
+        END
 
         // Create the system process.
 

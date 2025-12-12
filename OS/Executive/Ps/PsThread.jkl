@@ -13,22 +13,6 @@ STRUCT PspThreadContext
     Flags : ULONG,
 END
 
-PUBLIC PspTurnstileCache : ^MmpPoolCache
-
-#MACRO PspAllocateTurnstile () [
-    MmAllocateFromPoolCache (
-        PspTurnstileCache, // cache
-        TRUE, // wait
-    )
-]
-
-#MACRO PspFreeTurnstile ( turnstile ) [
-    MmFreeToPoolCache (
-        PspTurnstileCache, // cache
-        turnstile, // ptr
-    )
-]
-
 #SECTION "PAGEtext"
 FN PspPerformEagerThreadCleanup (
     IN thread : ^PsuThread,
@@ -46,9 +30,12 @@ FN PspPerformEagerThreadCleanup (
 
     paged^.CleanedUp = TRUE
 
+    node := KeNumaNodeFromSpacePointer ( thread )
+
     // Free the kernel stack.
 
     MmuFreeKernelStack (
+        node, // node
         CONTAINEROF thread^.Tcb.Process TO PsuProcess.Pcb, // process
         thread^.Tcb.KernelStackTop -
         (KEU_STACK_PAGES << RTL_PAGE_SHIFT), // kstack
@@ -56,7 +43,10 @@ FN PspPerformEagerThreadCleanup (
 
     // Free the turnstile.
 
-    PspFreeTurnstile ( thread^.Tcb.Turnstile )
+    MmFreeToPoolCache (
+        node^.Psp^.TurnstileCache, // cache
+        thread^.Tcb.Turnstile, // ptr
+    )
 
     IF paged^.IpcBlock THEN
         // Free the IPC block.
@@ -199,6 +189,8 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     thread := CAST object TO ^PsuThread
     ctx := CAST context TO ^PspThreadContext
 
+    node := KeNumaNodeFromSpacePointer ( thread )
+
     status : OsStatus
 
     // Initialize the thread object.
@@ -223,6 +215,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     kstack : ^VOID
 
     status = MmuCreateKernelStack (
+        node, // node
         process, // process
         OUT kstack, // kstack
     )
@@ -248,7 +241,10 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     // Allocate a turnstile.
 
-    turnstile := PspAllocateTurnstile ()
+    turnstile := MmAllocateFromPoolCache (
+        node^.Psp^.TurnstileCache, // cache
+        TRUE, // wait
+    )
 
     IF NOT turnstile THEN
         status = OS_STATUS_NO_MEMORY
@@ -376,7 +372,10 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
 @Error5
 
-    PspFreeTurnstile ( turnstile )
+    MmFreeToPoolCache (
+        node^.Psp^.TurnstileCache, // cache
+        turnstile, // ptr
+    )
 
 @Error4
 
@@ -385,6 +384,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 @Error3
 
     MmuFreeKernelStack (
+        node, // node
         process, // process
         kstack, // kstack
     )

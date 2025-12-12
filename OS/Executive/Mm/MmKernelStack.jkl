@@ -185,6 +185,7 @@ END
 
 #SECTION "PAGEtext"
 FN MmuCreateKernelStack (
+    IN node : ^KeuNode,
     IN process : ^PsuProcess,
     OUT kstack : ^VOID,
 ) : OsStatus
@@ -194,7 +195,7 @@ FN MmuCreateKernelStack (
     // We cache kernel stacks per-node rather than per-partition, so make sure
     // to do VM accounting relative to the node's integral partition.
 
-    mmpnode := process^.Pcb.Node^.Mmp
+    mmpnode := node^.Mmp
     partition := &mmpnode^.Partition
 
     quotablock := PsuQuotaBlock ( process )
@@ -235,13 +236,14 @@ END
 
 #SECTION "PAGEtext"
 FN MmuFreeKernelStack (
+    IN node : ^KeuNode,
     IN process : ^PsuProcess,
     IN kstack : ^VOID,
 )
 
     // Free a kernel stack. It must be in an inswapped state.
 
-    mmpnode := process^.Pcb.Node^.Mmp
+    mmpnode := node^.Mmp
 
     MmFreeToPoolCache (
         mmpnode^.KernelStackCache, // cache
