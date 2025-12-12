@@ -1065,6 +1065,7 @@ END
 
 #SECTION "PAGEtext"
 EXPORT FN PsCreateExecutiveThread (
+    IN node : ^KeuNode,
     IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
@@ -1090,7 +1091,7 @@ EXPORT FN PsCreateExecutiveThread (
         startfunc, // startfunc
         context1, // context1
         context2, // context2
-        PsuSystemProcess, // process
+        node^.SystemProcess, // process
         0, // flags
         OUT thread, // thread
     )

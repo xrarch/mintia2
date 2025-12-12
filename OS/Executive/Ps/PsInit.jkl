@@ -11,7 +11,6 @@ PUBLIC PspProcessListHead : RtlListEntry
 
 PUBLIC PsuActiveProcessCount : UWORD = 0
 
-PUBLIC PsuSystemProcess : ^PsuProcess
 PUBLIC PsuInitialThread : ^PsuThread
 
 PspIdleProcessPaged : PsuPagedProcess
@@ -65,8 +64,6 @@ FN PspCreateId (
     END
 
     IF id == 0 THEN
-        KeAssert ( PsuSystemProcess == NULLPTR )
-
         // Fix the sequence number to be 1 for the system process so that we
         // never hand out a PID of 0. Why? Just seems nasty to, especially
         // because we use it as the PGID for the system session later.
@@ -255,11 +252,16 @@ FN PsuInitializeIdleProcess (
 
     idleproc^.Paged^.Cred.Uid = OS_SYSTEM_UID
     idleproc^.Paged^.Cred.Gid = OS_SYSTEM_GID
+
+    kenode^.SystemCred = &idleproc^.Paged^.Cred
 END
 
 FN PsuInitializeStage1 ()
 
     // Stage 1 initialization for Ps.
+
+    name : RtlString
+    status : OsStatus
 
     // Initialize the process type.
 
@@ -312,47 +314,6 @@ FN PsuInitializeStage1 ()
 
     RtlInitializeList ( &PspProcessListHead )
 
-    // Create the system process.
-
-    params : NsOpenParameters
-
-    params.Path.Data = NULLPTR
-
-    params.Captured.Flags = 0
-    params.Captured.ObFlags = 0
-    params.Captured.Permissions = OS_ACCESS_OWNER_ALL
-
-    name : RtlString
-
-    RtlInitializeString ( &name, "System" )
-
-    status := PsuCreateProcessObject (
-        &params, // params
-        MmCurrentPartition (), // partition
-        &name, // name
-        -1, // quotauid
-        0, // flags
-        OUT PsuSystemProcess, // process
-    )
-
-    IF OsError ( status ) THEN
-        KeCrash ( "%sfailed to create system process (%x)\n",
-            "PsuInitializeStage1: ", status )
-    END
-
-    // Set the system process's session.
-
-    status = PsuSetGroupProcess (
-        PsuSystemProcess, // process
-        NULLPTR, // group
-        TRUE, // newsession
-    )
-
-    IF OsError ( status ) THEN
-        KeCrash ( "%sfailed to set system session (%x)\n",
-            "PsuInitializeStage1: ", status )
-    END
-
     // Initialize the reaper custody list. Threads are placed on this list when
     // they terminate, to transfer custody to the reaper thread.
 
@@ -383,6 +344,54 @@ FN PsuInitializeStage1 ()
             &PsuReaperWorker, // routine
         )
 
+        // Create the system process.
+
+        params : NsOpenParameters
+
+        params.Path.Data = NULLPTR
+
+        params.Captured.Flags = 0
+        params.Captured.ObFlags = 0
+        params.Captured.Permissions = OS_ACCESS_OWNER_ALL
+
+        sysprocname : UBYTE[32]
+
+        RtlFormat (
+            &sysprocname[0], // dest
+            32, // bufsize
+            "SystemNode%u", // fmt
+            i,
+        )
+
+        RtlInitializeString ( &name, &sysprocname[0] )
+
+        status = PsuCreateProcessObject (
+            &params, // params
+            kenode^.IntegralPartition, // partition
+            &name, // name
+            -1, // quotauid
+            0, // flags
+            OUT kenode^.SystemProcess, // process
+        )
+
+        IF OsError ( status ) THEN
+            KeCrash ( "%sfailed to create system process (%x)\n",
+                "PsuInitializeStage1: ", status )
+        END
+
+        // Set the system process's session.
+
+        status = PsuSetGroupProcess (
+            kenode^.SystemProcess, // process
+            NULLPTR, // group
+            TRUE, // newsession
+        )
+
+        IF OsError ( status ) THEN
+            KeCrash ( "%sfailed to set system session (%x)\n",
+                "PsuInitializeStage1: ", status )
+        END
+
         i += 1
     END
 
@@ -392,6 +401,7 @@ FN PsuInitializeStage1 ()
     RtlInitializeString ( &name, "Balance Manager" )
 
     status = PsCreateExecutiveThread (
+        KeBootNode, // node
         &name, // name
         &ExuStartSystemProcess, // startfunc
         0, // context1

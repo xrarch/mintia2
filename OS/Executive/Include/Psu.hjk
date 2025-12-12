@@ -158,8 +158,6 @@ STRUCT PsuJob
     CleanedUp : UBYTE,
 END
 
-EXTERN PsuSystemProcess : ^PsuProcess
-
 EXTERN PsuActiveProcessCount : UWORD
 
 EXTERN FN PsuInitializeIdleProcess (
@@ -206,7 +204,7 @@ EXTERN FN (ExWorkItemF) PsuReaperWorker (
 ]
 
 #MACRO PsuSystemCredentials () [
-    (&PsuSystemProcess^.Paged^.Cred)
+    (PsCurrentNode()^.SystemCred)
 ]
 
 #MACRO PsuQuotaBlock ( process ) [

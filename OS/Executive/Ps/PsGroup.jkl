@@ -198,10 +198,11 @@ FN PsuSetGroupProcess (
 
     oldgroup := paged^.ProcessGroup
 
-    // We should only encounter a process without a group one time ever,
-    // which is when the system session is being created.
+    // We should only encounter a process without a group when a system session
+    // is being created.
 
-    KeAssert ( (oldgroup != NULLPTR) OR (process == PsuSystemProcess) )
+    KeAssert ( (oldgroup != NULLPTR) OR
+        (process == process^.Pcb.Node^.SystemProcess) )
 
     IF oldgroup THEN
         // We already belong to a group and session, so check that this is a

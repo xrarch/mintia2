@@ -30,8 +30,9 @@ FN MmuInitializeProcess (
 
     process^.Partition = partition
 
-    IF NOT PsuSystemProcess THEN
-        // This is the system process, so give it the system page directory.
+    IF NOT partition^.Node^.KeNode^.SystemProcess THEN
+        // There's no system process for this node yet, so we're creating it
+        // right now. Give it the system page directory.
 
         process^.Pcb.PageDirectoryPfn =
             partition^.Node^.KeNode^.SystemPageDirectoryPfn
