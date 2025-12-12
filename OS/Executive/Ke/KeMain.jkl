@@ -56,16 +56,15 @@ FN (KeStartThreadF) KepIdleLoop (
     IN context2 : UWORD,
 )
 
+    prb := KEP_CURRENT_PRB_LOCAL
 
     ipl := KepAcquireAnnounce ()
 
-    RtlPrint ( "KepIdleLoop: Processor %u idling\n", KepCurrentProcessor () )
+    RtlPrint ( "KepIdleLoop: Processor %u idling\n", prb^.ConsecutiveId )
 
     KepReleaseAnnounce ( ipl )
 
 #IF BLD_MP
-    prb := KEP_CURRENT_PRB_LOCAL
-
     // Atomically decrement the initialization count to indicate to the boot
     // processor that we made it into our idle thread.
 
