@@ -346,6 +346,16 @@ FN KeuInitializeNode (
     kenode^.DescriptorListHead.Next^.Prev = &kenode^.DescriptorListHead
     kenode^.DescriptorListHead.Prev^.Next = &kenode^.DescriptorListHead
 
+    // Initialize the stack swapper event. This is waited upon by a component
+    // of Mm which outswaps kernel stacks and processes.
+
+    KeInitializeEvent (
+        &kenode^.StackSwapperEvent, // event
+        "StackSwap", // name
+        FALSE, // notification
+        FALSE, // signalstate
+    )
+
 #IF BLD_MP
     // Initialize the work balancing DPC.
 
@@ -556,16 +566,6 @@ EXPORT FN KeMain (
 
         dbgmain ()
     END
-
-    // Initialize the stack swapper event. This is waited upon by a component
-    // of Mm which outswaps kernel stacks and processes.
-
-    KeInitializeEvent (
-        &KeuStackSwapperEvent, // event
-        "StackSwap", // name
-        FALSE, // notification
-        FALSE, // signalstate
-    )
 
 #IF BLD_MP
     // We're ready to pull the other processors into the system.

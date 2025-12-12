@@ -6,12 +6,6 @@
 
 #INCLUDE "Kep.hjk"
 
-KepStackSwapListHead : ^KeuThread = NULLPTR
-KepProcessSwapListHead : ^KeuProcess = NULLPTR
-KepProcessOutSwapListHead : ^KeuProcess = NULLPTR
-
-PUBLIC KeuStackSwapperEvent : KeEvent
-
 #IF BLD_MP
 
 #MACRO KepAcquireCandidateListElevated ( prb ) [
@@ -117,7 +111,9 @@ FN KeuReadyInswappedProcess (
     END
 END
 
-FN KeuFlushThreadInSwapQueue () : ^KeuThread
+FN KeuFlushThreadInSwapQueue (
+    IN kenode : ^KeuNode,
+) : ^KeuThread
 
     // Atomically detaches the current contents of the thread stack swap list
     // and returns the head item of a singly linked list. If it was empty,
@@ -125,19 +121,21 @@ FN KeuFlushThreadInSwapQueue () : ^KeuThread
     // Atomically fetch-and-set the head to NULLPTR.
 
     RETURN CAST KeFetchAndSetPtr (
-        &KepStackSwapListHead, // ptr
+        &kenode^.Kep^.StackSwapListHead, // ptr
         NULLPTR, // newvalue
     ) TO ^KeuThread
 END
 
-FN KeuFlushProcessInSwapQueue () : ^KeuProcess
+FN KeuFlushProcessInSwapQueue (
+    IN kenode : ^KeuNode,
+) : ^KeuProcess
 
     // Atomically detaches the current contents of the process swap list
     // and returns the head item of a singly linked list. If it was empty,
     // NULLPTR is returned.
 
     RETURN CAST KeFetchAndSetPtr (
-        &KepProcessSwapListHead, // ptr
+        &kenode^.Kep^.ProcessSwapListHead, // ptr
         NULLPTR, // newvalue
     ) TO ^KeuProcess
 END
@@ -173,7 +171,9 @@ FN KeuSetProcessOutswapped (
     RETURN TRUE
 END
 
-FN KeuFlushProcessOutSwapQueue () : ^KeuProcess
+FN KeuFlushProcessOutSwapQueue (
+    IN kenode : ^KeuNode,
+) : ^KeuProcess
 
     // Atomically detaches the current contents of the process outswap list
     // and returns the head item of a singly linked list. If it was empty,
@@ -183,7 +183,7 @@ FN KeuFlushProcessOutSwapQueue () : ^KeuProcess
     // KeuSetProcessOutSwapped before doing anything else with them.
 
     RETURN CAST KeFetchAndSetPtr (
-        &KepProcessOutSwapListHead, // ptr
+        &kenode^.Kep^.ProcessOutSwapListHead, // ptr
         NULLPTR, // newvalue
     ) TO ^KeuProcess
 END
@@ -201,6 +201,8 @@ FN KeuHarvestSwapCandidates (
     head : ^KeuThread = NULLPTR
 
     prb := KepPrbFromNodeAndNumber ( kenode, procid )
+
+    kepnode := kenode^.Kep
 
     listhead := &prb^.StackSwapCandidateListHead
 
@@ -284,7 +286,7 @@ FN KeuHarvestSwapCandidates (
                     process^.MemoryState = KEP_PROCESS_TRANSITION
 
                     KepInsertInSwapList (
-                        &KepProcessOutSwapListHead, // headptr
+                        &kepnode^.ProcessOutSwapListHead, // headptr
                         process, // item
                         SwapNext, // fieldname
                     )
@@ -302,7 +304,9 @@ FN KeuHarvestSwapCandidates (
     RETURN head
 END
 
-FN KepWakeSwapper ()
+FN KepWakeSwapper (
+    IN kenode : ^KeuNode,
+)
 
     // Wake the swapper.
 
@@ -324,7 +328,7 @@ FN KepWakeSwapper ()
     // Wake the swap thread.
 
     KeSignalEvent (
-        &KeuStackSwapperEvent, // event
+        &kenode^.StackSwapperEvent, // event
         0, // priorityboost
     )
 #END
@@ -359,6 +363,8 @@ FN KepReadyThreadOutswappedProcess (
         RETURN TRUE
     END
 
+    kenode := process^.Node
+
     // The process isn't resident, so we need to enqueue the thread in its
     // swap-in list.
 
@@ -372,7 +378,7 @@ FN KepReadyThreadOutswappedProcess (
         process^.MemoryState = KEP_PROCESS_TRANSITION
 
         KepInsertInSwapList (
-            &KepProcessSwapListHead, // headptr
+            &kenode^.Kep^.ProcessSwapListHead, // headptr
             process, // item
             SwapNext, // fieldname
         )
@@ -388,7 +394,7 @@ FN KepReadyThreadOutswappedProcess (
 
     // Wake the swapper to bring in this process's page directory.
 
-    KepWakeSwapper ()
+    KepWakeSwapper ( kenode )
 
     // Return an indication that we successfully enqueued the thread to the
     // process's deferred ready list.
@@ -440,15 +446,17 @@ FN KepReadyOutswappedThread (
     // The process was still resident, so we're going to enqueue the thread
     // in the global thread in-swap list.
 
+    kenode := process^.Node
+
     KepInsertInSwapList (
-        &KepStackSwapListHead, // headptr
+        &kenode^.Kep^.StackSwapListHead, // headptr
         thread, // item
         ReadyEntry.Next, // fieldname
     )
 
     // Wake the swapper to bring in this thread's stack.
 
-    KepWakeSwapper ()
+    KepWakeSwapper ( kenode )
 
     // Return an indication that we successfully enqueued ourselves to the
     // in-swap list.
@@ -574,6 +582,8 @@ FN KeuAttachProcess (
     thread^.ReadyEntry.Next = CAST process^.SwapListHead TO ^VOID
     process^.SwapListHead = thread
 
+    kenode := process^.Node
+
     IF process^.MemoryState == KEP_PROCESS_OUTSWAPPED THEN
         // We saw the process OUTSWAPPED, so it's now our responsibility to
         // enqueue it to the swapper thread.
@@ -581,7 +591,7 @@ FN KeuAttachProcess (
         process^.MemoryState = KEP_PROCESS_TRANSITION
 
         KepInsertInSwapList (
-            &KepProcessSwapListHead, // headptr
+            &kenode^.Kep^.ProcessSwapListHead, // headptr
             process, // item
             SwapNext, // fieldname
         )
@@ -591,7 +601,7 @@ FN KeuAttachProcess (
 
     // Wake the swapper to bring the process in.
 
-    KepWakeSwapper ()
+    KepWakeSwapper ( kenode )
 
     // Yield the processor. We will get scheduled back in (in the target address
     // space) when the process has been inswapped. The thread lock is
@@ -619,9 +629,7 @@ FN KeuDetachProcess (
 
     KeAssert ( thread^.Process == process )
 
-    oldprocess := thread^.Process
-
-    IF oldprocess == thread^.ActualProcess THEN
+    IF process == thread^.ActualProcess THEN
         // We weren't attached.
 
         LEAVE
@@ -633,18 +641,18 @@ FN KeuDetachProcess (
 
     // Lock the old process's swap state.
 
-    KepAcquireSwapStateElevated ( oldprocess )
+    KepAcquireSwapStateElevated ( process )
 
-    KeAssert ( oldprocess^.MemoryState == KEP_PROCESS_RESIDENT )
+    KeAssert ( process^.MemoryState == KEP_PROCESS_RESIDENT )
     KeAssert ( thread^.ActualProcess^.MemoryState == KEP_PROCESS_RESIDENT )
 
     // Decrement the resident stack count, since we're leaving.
 
-    oldcount := oldprocess^.ResidentThreadCount
+    oldcount := process^.ResidentThreadCount
 
     KeAssert ( oldcount != 0 )
 
-    oldprocess^.ResidentThreadCount = oldcount - 1
+    process^.ResidentThreadCount = oldcount - 1
 
     // XXX The memory barrier below is probably not necessary because the
     //     implied barrier from acquiring the swap state spinlock above,
@@ -658,28 +666,30 @@ FN KeuDetachProcess (
     //
     // KeMemoryBarrier ()
 
-    IF oldprocess^.ThreadCount != 0 AND
+    IF process^.ThreadCount != 0 AND
         oldcount == 1 THEN
 
         // This process has threads, and we just decremented its resident stack
         // count to 0. We need to enqueue it to be outswapped.
 
-        oldprocess^.MemoryState = KEP_PROCESS_TRANSITION
+        process^.MemoryState = KEP_PROCESS_TRANSITION
+
+        kenode := process^.Node
 
         KepInsertInSwapList (
-            &KepProcessOutSwapListHead, // headptr
+            &kenode^.Kep^.ProcessOutSwapListHead, // headptr
             process, // item
             SwapNext, // fieldname
         )
 
         // Wake the swapper to get it to deal with this outswapped process.
 
-        KepWakeSwapper ()
+        KepWakeSwapper ( kenode )
     END
 
     // Release the swap state.
 
-    KepReleaseSwapStateElevated ( oldprocess )
+    KepReleaseSwapStateElevated ( process )
 
     // Switch back to our real address space.
 
