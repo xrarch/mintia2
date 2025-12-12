@@ -5,14 +5,14 @@
 
 #INCLUDE "Exp.hjk"
 
-ExpEventCounterCache : ^MmpPoolCache
-
 #SECTION "INITtext"
-FN ExpInitializeEventCounters ()
+FN ExpInitializeEventCountersForNode (
+    IN expnode : ^ExpNode,
+)
 
     // Initialize the event counter list.
 
-    ExpEventCounterCache = MmCreatePoolCache (
+    expnode^.EventCounterCache = MmCreatePoolCache (
         MmCurrentNode (), // node
         "Event Counters", // name
         SIZEOF ExuEventCounter, // size
@@ -21,11 +21,28 @@ FN ExpInitializeEventCounters ()
     )
 
 #ENTERSECTION "INITtext"
-    IF NOT ExpEventCounterCache THEN
+    IF NOT expnode^.EventCounterCache THEN
         KeCrash ( "ExpInitializeEventCounters: failed to create cache\n" )
     END
 #LEAVESECTION
 
+END
+
+#SECTION "INITtext"
+FN ExpInitializeEventCounters ()
+
+    // Initialize the event counter list.
+
+    i := 0
+    nodes := KeQueryNodeCount ()
+
+    WHILE i < nodes DO
+        expnode := KeNumaNodeById ( i )^.Exp
+
+        ExpInitializeEventCountersForNode ( expnode )
+
+        i += 1
+    END
 END
 
 EXPORT FN ExAllocateEventCounter (
@@ -34,8 +51,10 @@ EXPORT FN ExAllocateEventCounter (
 
     // Allocate an event counter.
 
+    expnode := PsCurrentNode ()^.Exp
+
     counter : ^ExuEventCounter = MmAllocateFromPoolCache (
-        ExpEventCounterCache, // cache
+        expnode^.EventCounterCache, // cache
         wait, // wait
     )
 
@@ -85,8 +104,10 @@ EXPORT FN ExUnreferenceEventCounter (
     IF oldcount == 1 THEN
         // This was the last user of this event counter. Put it on the list.
 
+        expnode := KeNumaNodeFromSpacePointer ( counter )^.Exp
+
         MmFreeToPoolCache (
-            ExpEventCounterCache, // cache
+            expnode^.EventCounterCache, // cache
             counter, // ptr
         )
     END
