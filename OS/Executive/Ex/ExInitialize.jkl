@@ -12,6 +12,7 @@ FNPTR KtMainF ()
 
 PUBLIC ExuZeroPageWorker : KeuThread
 PUBLIC ExuZeroPageWorkerStack : UBYTE[(KEU_STACK_PAGES << RTL_PAGE_SHIFT) + 32]
+PUBLIC ExuZeroPageWorkerTurnstile : KepTurnstile
 
 ExuBootFlags : ULONG = 0
 
@@ -264,7 +265,7 @@ FN ExuStartExecutive ()
         "Zpw", // name
         kstack, // kstack
         KEU_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
-        KeuAllocateInitialTurnstile ( KeBootNode ), // turnstile
+        &ExuZeroPageWorkerTurnstile, // turnstile
         &ExpInitializeExecutive, // startfunc
         0, // context1
         0, // context2

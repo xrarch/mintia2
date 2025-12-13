@@ -386,7 +386,6 @@ END
 #DEFINE KEP_QUEUE_REMOVAL_LOCKS 32
 
 #DEFINE KEP_TURNSTILE_CHAINS 128
-#DEFINE KEP_INITIAL_TURNSTILES [(KEP_MAXIMUM_PROCESSORS + 1)]
 
 STRUCT KepTurnstileChain
     Head : RtlListEntry,
@@ -396,13 +395,9 @@ STRUCT KepTurnstileChain
 END
 
 STRUCT KepNode
-    TurnstileIndex : UBYTE,
-
     StackSwapListHead : ^KeuThread,
     ProcessSwapListHead : ^KeuProcess,
     ProcessOutSwapListHead : ^KeuProcess,
-
-    InitialTurnstiles : KepTurnstile[KEP_INITIAL_TURNSTILES],
 
     TurnstileChains : KepTurnstileChain[KEP_TURNSTILE_CHAINS],
 
