@@ -12,11 +12,6 @@ FNPTR KtMainF ()
 
 ExuBootFlags : ULONG = 0
 
-EXTERN FN (KeStartThreadF) MmuZeroPageWorker (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
-)
-
 #SECTION "INITtext"
 FN ExpGetExistenceArg (
     IN str : ^UBYTE,
@@ -88,6 +83,10 @@ END
 
 #SECTION "INITtext"
 FN ExpInitializeBootFlags ()
+
+    // Initialize all of the boot flags.
+    // Currently we don't move the arguments out of loader space before we free
+    // it, so we can only check them during early initialization.
 
     IF ExpGetExistenceArg ( "-s" ) THEN
         // Boot the system in single user mode.
