@@ -518,7 +518,7 @@ EXPORT FN MmCreatePoolCacheEx (
     // Initialize the per-CPU caches with the global list lock still held to
     // synchronize against changes to the magazine type size.
 
-    cpus := KeMostProcessorsInAnyNode
+    cpus := KeQueryMostProcessorsInAnyNode ()
 
     i := 0
 
@@ -807,7 +807,7 @@ FN MmpPurgeCpuMagazinesPoolCache (
         0, // id
     )
 
-    cpus := KeMostProcessorsInAnyNode
+    cpus := KeQueryMostProcessorsInAnyNode ()
     i := 0
 
     WHILE i < cpus DO
@@ -1273,7 +1273,8 @@ FN MmpInitializePoolCache (
     MmpInitializeSlabCache (
         node, // node
         &node^.PoolCacheSlabs, // scache
-        MMP_PC_SIZE + KeMostProcessorsInAnyNode * MMP_PCPCPU_SIZE, // size
+        MMP_PC_SIZE + KeQueryMostProcessorsInAnyNode () *
+            MMP_PCPCPU_SIZE, // size
         MM_NONPAGED_POOL, // poolindex
         'PoCa', // tag
     )

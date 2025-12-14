@@ -126,8 +126,6 @@ END
 
 EXTERN MmpPartitionType : ObuType
 
-EXTERN MmpPfnDatabase : ^MmpPfe
-
 EXTERN MmpSystemSize : UWORD
 
 // Keep this synchronized with Loader.hjk
@@ -138,12 +136,16 @@ EXTERN MmpSystemSize : UWORD
     #DEFINE MMP_PFE_SIZE 64
 #END
 
+#MACRO MmpFindPfnDatabase () [
+    (KeCurrentVolatileNode ()^.PfnDatabase)
+]
+
 #MACRO MmpPfnToPfe ( pfn ) [
-    (CAST ((pfn) * MMP_PFE_SIZE) + MmpPfnDatabase TO ^MmpPfe)
+    (CAST ((pfn) * MMP_PFE_SIZE) + MmpFindPfnDatabase() TO ^MmpPfe)
 ]
 
 #MACRO MmpPfeToPfn ( pfe ) [
-    (CAST (((pfe) - MmpPfnDatabase) / MMP_PFE_SIZE) TO UWORD)
+    (CAST (((pfe) - MmpFindPfnDatabase()) / MMP_PFE_SIZE) TO UWORD)
 ]
 
 EXTERN FN MmpInitializePartitionStage1 (
@@ -176,11 +178,6 @@ STRUCT MmpChunkSpace
     PendingFlush : ^VOID[MMP_MAXIMUM_CHUNKS_PENDING_FLUSH],
     PendingFlushCount : UBYTE,
 END
-
-EXTERN MmpPoolSpace : MmpChunkSpace
-EXTERN MmpCacheSpace : MmpChunkSpace
-
-EXTERN MmpCacheSpaceChunkPages : UWORD
 
 EXTERN FN MmpInitializeSystemVa (
     IN kenode : ^KeuNode,
@@ -504,6 +501,7 @@ STRUCT MmpNode
 
     Id : UBYTE,
     PgPoolCacheAdjustActive : UBYTE,
+    CacheSpaceChunkPages : UBYTE,
 
     KeNode : ^KeuNode,
 

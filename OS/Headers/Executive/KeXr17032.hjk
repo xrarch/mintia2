@@ -79,27 +79,27 @@
 
 #IF BLD_NUMA
 
-#DEFINE KE_NODE_SPACE_SIZE 0x20000000
+#DEFINE KE_NODE_SPACE_SIZE 0x10000000
 
-#DEFINE KE_BL_BUMP_SPACE_OFFSET 0x00020000
+#DEFINE KE_BL_BUMP_SPACE_OFFSET 0x20000
 
-#DEFINE KE_POOL_SPACE_OFFSET 0x08000000
-#DEFINE KE_POOL_SPACE_SIZE [(128 * 1024 * 1024)]
+#DEFINE KE_POOL_SPACE_OFFSET 0x4000000
+#DEFINE KE_POOL_SPACE_SIZE [(64 * 1024 * 1024)]
 
-#DEFINE KE_DYNAMIC_SPACE_OFFSET 0x10000000
-#DEFINE KE_DYNAMIC_SPACE_SIZE [(128 * 1024 * 1024)]
+#DEFINE KE_DYNAMIC_SPACE_OFFSET 0x8000000
+#DEFINE KE_DYNAMIC_SPACE_SIZE [(64 * 1024 * 1024)]
 
-#DEFINE KE_CACHE_SPACE_OFFSET 0x18000000
-#DEFINE KE_CACHE_SPACE_SIZE [(128 * 1024 * 1024)]
+#DEFINE KE_CACHE_SPACE_OFFSET 0xC000000
+#DEFINE KE_CACHE_SPACE_SIZE [(64 * 1024 * 1024)]
 
 #MACRO KeNumaNodeFromSpacePointer ( ptr ) [
     // We map NUMA node spaces on XR/frame from 0xC0000000 to the top of the
-    // address space in 512MB increments. Two nodes exist, so bit 29 is the node
-    // ID. Masking off the low 29 bits is sufficient to calculate the pointer to
-    // a node structure given a pointer within the node space since it lies at
-    // the base of its node space.
+    // address space in 256MB increments. Four nodes exist, so bits 29:28 are
+    // the node ID. Masking off bits 0:27 is sufficient to calculate the pointer
+    // to a node structure given a pointer within the node space since it lies
+    // at the base of its node space.
 
-    (CAST (ptr & 0xE0000000) TO ^KeuNode)
+    (CAST (ptr & 0xF0000000) TO ^KeuNode)
 ]
 
 #MACRO KeNumaNodeById ( id ) [

@@ -7,10 +7,6 @@
 
 EXPORT KeuLoaderBlock : BlInfoRecord
 
-EXPORT KeBootNode : ^KeuNode
-
-EXPORT KeMostProcessorsInAnyNode : ULONG
-
 FNPTR DbgMainF ()
 
 #IF BLD_CHK
@@ -264,7 +260,7 @@ FN KeuAllocateNodeSpace (
 END
 
 #SECTION "INITtext"
-FN KeuInitializeNode (
+FN KepInitializeNode (
     IN kenode : ^KeuNode,
     IN node : ^BlNodeInfo,
 )
@@ -387,12 +383,11 @@ FN KeuInitializeNode (
 END
 
 #SECTION "INITtext"
-FN KeuInitializeNodes () : ^KepPrb
+FN KepInitializeNodes ()
 
     // Initialize all the NUMA nodes indicated by the loader.
-    // Return a pointer to the boot PRB.
 
-    KeMostProcessorsInAnyNode = 1
+    mostprocs := 1
 
     bootprb : ^KepPrb
 
@@ -406,24 +401,32 @@ FN KeuInitializeNodes () : ^KepPrb
 
         kenode := KeNumaNodeById ( id )
 
-        IF id == 0 THEN
-            KeBootNode = kenode
-            bootprb = KepPrbFromNodeAndNumber ( kenode, 0 )
-        END
-
-        KeuInitializeNode (
+        KepInitializeNode (
             kenode, // kenode
             node, // node
         )
 
-        IF kenode^.ProcessorCount > KeMostProcessorsInAnyNode THEN
-            KeMostProcessorsInAnyNode = kenode^.ProcessorCount
+        IF kenode^.ProcessorCount > mostprocs THEN
+            mostprocs = kenode^.ProcessorCount
         END
 
         listentry = listentry^.Next
     END
 
-    RETURN bootprb
+    // Replicate some commonly accessed state between each node.
+
+    i := 0
+    nodes := KeuLoaderBlock.NodeCount
+
+    WHILE i < nodes DO
+        kenode := KeNumaNodeById ( i )
+
+        kenode^.TotalProcessorCount = KeuLoaderBlock.ProcessorCount
+        kenode^.TotalNodeCount = KeuLoaderBlock.NodeCount
+        kenode^.MostProcessorsInAnyNode = mostprocs
+
+        i += 1
+    END
 END
 
 #IF BLD_MP
@@ -546,7 +549,11 @@ EXPORT FN KeMain (
 
     // Initialize the NUMA nodes.
 
-    prb := KeuInitializeNodes ()
+    KepInitializeNodes ()
+
+    // Acquire a point to the boot Prb.
+
+    prb := KepPrbFromNodeAndNumber ( KeNumaNodeById ( 0 ), 0 )
 
     // Initialize architectural support.
 
@@ -594,22 +601,4 @@ EXPORT FN KeMain (
     KepJumpIntoIdleThread ( prb )
 
     KeCrash ( "KepJumpIntoThread returned\n" )
-END
-
-#IF BLD_MP
-
-EXPORT FN KeQueryProcessorCount () : UWORD
-
-    // Query the number of processors in the system.
-
-    RETURN KeuLoaderBlock.ProcessorCount
-END
-
-#END
-
-EXPORT FN KeQueryNodeCount () : UWORD
-
-    // Query the number of NUMA nodes in the system.
-
-    RETURN KeuLoaderBlock.NodeCount
 END

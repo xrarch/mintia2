@@ -9,8 +9,6 @@ STRUCT MmpChunkEntry
     Next : ^MmpChunkEntry,
 END
 
-PUBLIC MmpCacheSpaceChunkPages : UWORD
-
 #DEFINE MMP_DEFERRED_FLUSH_PAGES 128
 
 #SECTION "INITtext"
@@ -246,7 +244,7 @@ FN MmpInitializeSystemVa (
         entryshift = 18 // 1 << 18 = 256KB
     END
 
-    MmpCacheSpaceChunkPages = (1 << entryshift) >> RTL_PAGE_SHIFT
+    mmpnode^.CacheSpaceChunkPages = (1 << entryshift) >> RTL_PAGE_SHIFT
 
     base = kenode + KE_CACHE_SPACE_OFFSET
 
@@ -272,7 +270,7 @@ FN MmpInitializeSystemVa (
     // Trim four pages off the end of dynamic space per CPU, to be used as
     // 'quick' mappings.
 
-    quickpages := KeMostProcessorsInAnyNode * MMP_QUICK_PER_CPU
+    quickpages := KeQueryMostProcessorsInAnyNode () * MMP_QUICK_PER_CPU
 
     dsize := kenode^.DynamicSpaceSize
 

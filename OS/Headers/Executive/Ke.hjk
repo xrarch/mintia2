@@ -660,10 +660,18 @@ EXTERN FN KeExceptionJacket (
 
 #END
 
-EXTERN KeMostProcessorsInAnyNode : ULONG
-
 STRUCT KeuNode
 // The following fields should never be rearranged.
+// Their offsets should remain constant as they are exported to modules.
+
+    ProcessorCount : ULONG,
+
+    MostProcessorsInAnyNode : ULONG, // Replicated global state
+    TotalProcessorCount : ULONG, // Replicated global state
+    TotalNodeCount : ULONG, // Replicated global state
+    PfnDatabase : ^MmpPfe, // Replicated global state
+
+    Reserved : UWORD[20],
 
     Kep : ^KepNode,
     Mmp : ^MmpNode,
@@ -671,8 +679,7 @@ STRUCT KeuNode
     Obp : ^ObpNode,
     Exp : ^ExpNode,
 
-// Remaining fields may be rearranged but should never be accessed by modules or
-// moved prior to the end.
+// Remaining fields may be rearranged and must never be accessed by modules.
 
     SystemCred : ^ObCredentials,
 
@@ -688,7 +695,6 @@ STRUCT KeuNode
     IntegralPartition : ^MmpPartition,
 
     SystemPageDirectoryPfn : UWORD,
-    ProcessorCount : UWORD,
 
     ConstantZeroPfn : UWORD,
 
@@ -707,13 +713,19 @@ STRUCT KeuNode
     ObTypes : ^ObuType,
 END
 
-EXTERN KeBootNode : ^KeuNode
+#MACRO KeQueryNodeCount () [
+    (KeCurrentVolatileNode ()^.TotalNodeCount)
+]
 
-EXTERN FN KeQueryNodeCount () : UWORD
+#MACRO KeQueryMostProcessorsInAnyNode () [
+    (KeCurrentVolatileNode ()^.MostProcessorsInAnyNode)
+]
 
 #IF BLD_MP
 
-EXTERN FN KeQueryProcessorCount () : UWORD
+#MACRO KeQueryProcessorCount () [
+    (KeCurrentVolatileNode ()^.TotalProcessorCount)
+]
 
 #ELSE
 

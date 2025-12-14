@@ -46,7 +46,9 @@ FN MmuJettisonUnusedResources ()
     listhead := &KeuLoaderBlock.ResourceListHead
     listentry := listhead^.Next
 
-    partition := &KeBootNode^.Mmp^.Partition
+    bootnode := KeNumaNodeById ( 0 )
+
+    partition := &bootnode^.Mmp^.Partition
 
     WHILE listentry != listhead DO
         rsrc := CONTAINEROF listentry TO BlResource.Entry
@@ -371,10 +373,6 @@ FN MmuInitializeStage1 ()
 
     membytes := 0
 
-    // Copy the address of the PFN database.
-
-    MmpPfnDatabase = KeuLoaderBlock.PfnDatabase
-
     // Initialize quota management.
 
     MmpInitializeQuota ()
@@ -393,6 +391,10 @@ FN MmuInitializeStage1 ()
 
     WHILE i < KeuLoaderBlock.NodeCount DO
         kenode := KeNumaNodeById ( i )
+
+        // Stash a pointer to the PFN database in the node.
+
+        kenode^.PfnDatabase = KeuLoaderBlock.PfnDatabase
 
         // Allocate an Mm-private part.
 
