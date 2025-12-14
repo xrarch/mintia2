@@ -30,21 +30,24 @@ FN PspPerformEagerThreadCleanup (
 
     paged^.CleanedUp = TRUE
 
-    node := KeNumaNodeFromSpacePointer ( thread )
-
     // Free the kernel stack.
 
     MmuFreeKernelStack (
-        node, // node
+        KeNumaNodeFromSpacePointer ( thread ), // node
         CONTAINEROF thread^.Tcb.Process TO PsuProcess.Pcb, // process
         thread^.Tcb.KernelStackTop -
         (KEU_STACK_PAGES << RTL_PAGE_SHIFT), // kstack
     )
 
     // Free the turnstile.
+    // Because of turnstile donation, we might not have the same turnstile we
+    // started with, and it might be on a remote node, so recompute the node
+    // pointer from the turnstile's pointer.
 
     MmFreeToPoolCache (
-        node^.Psp^.TurnstileCache, // cache
+        KeNumaNodeFromSpacePointer (
+            thread^.Tcb.Turnstile
+        )^.Psp^.TurnstileCache, // cache
         thread^.Tcb.Turnstile, // ptr
     )
 
