@@ -10,10 +10,6 @@
 
 FNPTR KtMainF ()
 
-PUBLIC ExuZeroPageWorker : KeuThread
-PUBLIC ExuZeroPageWorkerStack : UBYTE[(KEU_STACK_PAGES << RTL_PAGE_SHIFT) + 32]
-PUBLIC ExuZeroPageWorkerTurnstile : KepTurnstile
-
 ExuBootFlags : ULONG = 0
 
 EXTERN FN (KeStartThreadF) MmuZeroPageWorker (
@@ -113,13 +109,76 @@ FN ExpInitializeBootFlags ()
 END
 
 #SECTION "INITtext"
-FN (KeStartThreadF) ExpInitializeExecutive (
+FN (KeStartThreadF) ExuStartSystemProcess (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
 
-    // Initialize the Executive. Called in the context of the future Zero Page
-    // Worker (ZPW) thread.
+    // Perform stage 2 initialization of the Executive. We are now inside the
+    // system process which means we have a proper container for kernel virtual
+    // memory. This thread will become the balance manager.
+
+    // Start the general worker threads.
+
+    ExpInitializeWorkQueues ()
+
+    // Initialize virtual memory.
+    // Starts the worker threads for each node (balance set manager, zero page
+    // worker, etc) among other things.
+
+    // MmuInitializeStage2 ()
+
+    // Initialize modules.
+
+    ExpInitializeModules ()
+
+    // Initialize I/O.
+
+    IouInitialize ()
+
+    // Initialize IPC.
+
+    // IpcInitialize ()
+
+    // Initialize the executive video terminals.
+
+    // ExuInitializeVideoTerminals ()
+
+    // Jettison unused boot resources.
+
+    MmuJettisonUnusedResources ()
+
+    // Initialize the swap worker.
+
+    // MmuInitializeSwapWorker ()
+
+    // Perform kernel tests.
+
+    IF KeuLoaderBlock.KtMain THEN
+        ktmain := CAST KeuLoaderBlock.KtMain TO KtMainF
+
+        ktmain ()
+    END
+
+    // Initialize OSDLL and the SystemInit.exe process.
+
+    PsuInitializeStage2 ()
+
+    // Reuse this thread as the balance manager for node zero.
+
+    MmuBalanceManager ()
+END
+
+#SECTION "INITtext"
+FN ExuStartExecutive ()
+
+    // Called by the Kernel (Ke) after it finishes its own self-initialization.
+    // Responsible for kick-starting the initialization of the rest of
+    // the Executive.
+    //
+    // Performs stage 1 initialization of various components, which is not
+    // allowed to block. Then creates the balance manager thread for the boot
+    // node which will first perform stage 2 initialization in its context.
 
     i := 0
     nodes := KeQueryNodeCount ()
@@ -171,109 +230,6 @@ FN (KeStartThreadF) ExpInitializeExecutive (
     // context we will finish initialization.
 
     PsuInitializeStage1 ()
-
-    // Perform kernel tests.
-
-    IF KeuLoaderBlock.KtMain THEN
-        ktmain := CAST KeuLoaderBlock.KtMain TO KtMainF
-
-        ktmain ()
-    END
-
-    // The Executive is initialized, become the ZPW.
-
-    MmuZeroPageWorker (
-        0, // context1
-        0, // context2
-    )
-END
-
-#SECTION "INITtext"
-FN (KeStartThreadF) ExuStartSystemProcess (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
-)
-
-    // Perform stage 2 initialization of the Executive. We are now inside the
-    // system process which means we have a proper container for kernel virtual
-    // memory. This thread will become the balance manager.
-
-    // Start the general worker threads.
-
-    ExpInitializeWorkQueues ()
-
-    // Initialize virtual memory.
-
-    // MmuInitializeStage2 ()
-
-    // Initialize modules.
-
-    ExpInitializeModules ()
-
-    // Initialize I/O.
-
-    IouInitialize ()
-
-    // Initialize IPC.
-
-    // IpcInitialize ()
-
-    // Initialize the executive video terminals.
-
-    // ExuInitializeVideoTerminals ()
-
-    // Jettison unused boot resources.
-
-    MmuJettisonUnusedResources ()
-
-    // Initialize the swap worker.
-
-    // MmuInitializeSwapWorker ()
-
-    // Initialize OSDLL and the SystemInit.exe process.
-
-    PsuInitializeStage2 ()
-
-    // Become the balance manager.
-
-    MmuBalanceManager ()
-END
-
-#SECTION "INITtext"
-FN ExuStartExecutive ()
-
-    // Called by the Kernel (Ke) after it finishes its own self-initialization.
-    // Responsible for kick-starting the initialization of the rest of
-    // the Executive.
-
-    // We're currently in the context of the boot processor's idle thread, which
-    // is not good enough for us to initialize with, as we'd like to be able to
-    // block and stuff without destroying the scheduler. Therefore, we will now
-    // hand-craft the thread that we perform initialization in. Afterwards, it
-    // will repurpose itself as the Zero Page Worker (ZPW) thread.
-
-    // First get a 32-byte-aligned pointer to its statically allocated kernel
-    // stack.
-
-    kstack := (&ExuZeroPageWorkerStack[0] + 31) & ~31
-
-    // Now initialize the thread object.
-
-    KeuInitializeThread (
-        &KeBootNode^.IdleProcess^.Pcb, // process
-        &ExuZeroPageWorker, // thread
-        "Zpw", // name
-        kstack, // kstack
-        KEU_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
-        &ExuZeroPageWorkerTurnstile, // turnstile
-        &ExpInitializeExecutive, // startfunc
-        0, // context1
-        0, // context2
-    )
-
-    // And ready the thread.
-
-    KeuReadyThread ( &ExuZeroPageWorker )
 
     // Return and become the idle loop for the boot processor.
 END
