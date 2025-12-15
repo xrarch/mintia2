@@ -13,6 +13,41 @@ STRUCT PspThreadContext
     Flags : ULONG,
 END
 
+#IF BLD_NUMA
+
+#SECTION "PAGEtext"
+FN PsuReallocateRemoteTurnstile ()
+
+    // Called by Ke when it notices that the current thread has ended up with a
+    // turnstile allocated on a remote node. It calls this at the next safe
+    // moment, so we can just reallocate it now.
+
+    thread := KeCurrentThread ()
+    oldts := thread^.Turnstile
+
+    // Replace the turnstile before freeing the old one.
+
+    newts := MmAllocateFromPoolCache (
+        KeNumaNodeFromSpacePointer ( thread )^.Psp^.TurnstileCache, // cache
+        TRUE, // wait
+    )
+
+    IF NOT newts THEN
+        // Nevermind. Just leave it.
+
+        LEAVE
+    END
+
+    thread^.Turnstile = newts
+
+    MmFreeToPoolCache (
+        KeNumaNodeFromSpacePointer ( oldts )^.Psp^.TurnstileCache, // cache
+        oldts, // ptr
+    )
+END
+
+#END
+
 #SECTION "PAGEtext"
 FN PspPerformEagerThreadCleanup (
     IN thread : ^PsuThread,

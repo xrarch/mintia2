@@ -688,9 +688,7 @@ LoadContext:
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
     // pending.
 
-    addi t1, a0, KeuThread_KapcListHead
-    mov  t0, long [a0 + (KeuThread_KapcListHead + RtlListEntry_Next)]
-    sub  t0, t0, t1
+    mov  t0, byte [a0 + KeuThread_PendingApcLevelInt]
     beq  t0, .none
 
     // Trigger.

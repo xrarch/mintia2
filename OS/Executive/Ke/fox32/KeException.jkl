@@ -578,10 +578,8 @@ KepJumpIntoThread:
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
     // pending.
 
-    mov  t0, a0
-    add  t0, KeuThread_KapcListHead
-    mov  t1, [a0 + (KeuThread_KapcListHead + RtlListEntry_Next)]
-    sub  t0, t1
+    movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
+    cmp  t0, 0
     ifz  rjmp .none
 
     or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (

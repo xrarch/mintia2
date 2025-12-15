@@ -4,6 +4,8 @@
 
 #INCLUDE "Kep.hjk"
 
+EXTERN FN PsuReallocateRemoteTurnstile ()
+
 #MACRO KepAcknowledgeSoftwareInterrupt ( prb, ipl ) [
     KeAssert ( ipl != KEP_IPL_LOW )
 
@@ -40,10 +42,31 @@ FN (KepSoftwareInterruptHandlerF) KepApcInterrupt ()
     )
 
     current := prb^.CurrentThread
+    current^.PendingApcLevelInt = FALSE
 
     prb^.Ipl = KEP_IPL_APC
 
     KepEnableInterrupts ()
+
+#IF BLD_NUMA
+    IF KeNumaNodeFromSpacePointer ( current ) !=
+        KeNumaNodeFromSpacePointer ( current^.Turnstile ) THEN
+
+        // Due to turnstile donation, we no longer have a turnstile that is
+        // local to our node. At some we point contended on a lock with a thread
+        // from a remote node and he left us with this turnstile that is
+        // allocated in physical memory on a remote node (basically it has
+        // cooties). This situation couldn't be rectified immediately because it
+        // is not safe to try to allocate a new turnstile from inside the
+        // turnstile code, we needed to just deal with it until a safe moment,
+        // which has now come.
+        //
+        // For locality reasons we shouldn't allow this condition to persist and
+        // should upcall into Ps to reallocate the turnstile.
+
+        PsuReallocateRemoteTurnstile ()
+    END
+#END
 
     KepDispatchKernelApcQueue ( current )
 

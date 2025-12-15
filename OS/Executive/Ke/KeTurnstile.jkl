@@ -642,6 +642,27 @@ FN KepBlockOnLock (
         END
     END
 
+#IF BLD_NUMA
+    IF KeNumaNodeFromSpacePointer ( thread ) !=
+        KeNumaNodeFromSpacePointer ( thread^.Turnstile ) THEN
+
+        // We ended up with a turnstile from a remote node. This isn't a
+        // correctness issue but will cause long term performance problems. It's
+        // not safe to try reallocating this right now, so defer it to a safe
+        // moment, which we use the next time we drop below KEP_IPL_APC for.
+        // This works since all of the blocking mutexes that turnstile
+        // allocation depends upon raise to KEP_IPL_APC, so we won't be holding
+        // any such mutexes at that time.
+
+        KepSoftInterruptSelf (
+            KEP_CURRENT_PRB, // targetprb
+            KEP_IPL_APC, // ipl
+        )
+
+        thread^.PendingApcLevelInt = TRUE
+    END
+#END
+
     KepReleaseChain ( chain, ipl )
 
     // Return to retry the lock.
