@@ -360,24 +360,32 @@ FN HaluBroadcastIpi (
     // also guaranteed to be the one we're executing on. We have to do this
     // one at a time on XR/station.
 
-    targetprb := KepPrbFromNodeAndNumber ( KeNumaNodeById ( 0 ), 0 )
-    count := KeQueryProcessorCount ()
     i := 0
+    nodes := KeQueryNodeCount ()
 
     // Now send IPIs to all of the processors in the system (other than me).
 
-    WHILE i < count DO
-        // Don't IPI the processor if it's me.
+    WHILE i < nodes DO
+        kenode := KeNumaNodeById ( i )
 
-        IF targetprb != except THEN
-            HaluTriggerIpi (
-                targetprb, // target
-                type, // type
-            )
+        j := 0
+
+        WHILE j < kenode^.ProcessorCount DO
+            targetprb := KepPrbFromNodeAndNumber ( kenode, j )
+
+            // Don't IPI the processor if it's me.
+
+            IF targetprb != except THEN
+                HaluTriggerIpi (
+                    targetprb, // target
+                    type, // type
+                )
+            END
+
+            j += 1
         END
 
         i += 1
-        targetprb += BL_PRB_SIZE
     END
 END
 
