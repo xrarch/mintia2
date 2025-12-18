@@ -4,12 +4,6 @@
 
 #INCLUDE "Kep.hjk"
 
-#IF BLD_MP
-
-KepInterruptAssignmentCounter : ULONG = 0
-
-#END
-
 FN (KeInterruptF) KepUnexpectedInterrupt (
     IN interrupt : ^KeuInterrupt,
     IN context : ^OsContext,
@@ -35,27 +29,10 @@ FN KeuInitializeInterrupt (
     IN ipl : UWORD,
     IN edgetriggered : UWORD,
     IN sharevector : UWORD,
-    IN procid : UWORD,
+    IN prb : ^KepPrb,
 )
 
     // Initialize an interrupt object.
-
-#IF BLD_MP
-    IF procid == KEU_AUTOMATIC_INTERRUPT_PROCESSOR THEN
-        // Automatically choose the processor ID that should service this
-        // interrupt. Use an incrementing counter to spread the load.
-
-        procid = KeIncrementUlong (
-            &KepInterruptAssignmentCounter, // ptr
-            1, // ulong
-        )
-
-        procid %= KeuLoaderBlock.ProcessorCount
-    END
-
-#ELSE
-    procid = 0
-#END
 
     interrupt^.Handler = &HaluHandleDeviceInterrupt
     interrupt^.Routine = routine
@@ -64,7 +41,7 @@ FN KeuInitializeInterrupt (
     interrupt^.Ipl = ipl
     interrupt^.EdgeTriggered = edgetriggered
     interrupt^.ShareVector = sharevector
-    interrupt^.ProcessorId = procid
+    interrupt^.Prb = prb
     interrupt^.Connected = FALSE
 
 #IF BLD_MP
@@ -172,7 +149,7 @@ FN (KeInterruptF) KepClockTick (
     currentticks : RtlUquad
 
 #IF BLD_MP
-    IF KeNumberPartOfProcessorId ( prb^.Id ) == 0 THEN
+    IF prb^.NodeLocalId == 0 THEN
 #END
 
         // If we're processor zero, then update the time.

@@ -24,9 +24,9 @@ HaluFox32Out:
 ]
 
 #SECTION "INITtext"
-FN HalpInitializeInterrupts ()
-
-    prb := KEP_CURRENT_PRB
+FN HalpInitializeInterrupts (
+    IN prb : ^KepPrb,
+)
 
     // Initialize the timer interrupt object.
 
@@ -40,7 +40,7 @@ FN HalpInitializeInterrupts ()
         KEP_IPL_CLOCK, // ipl
         FALSE, // edgetriggered
         FALSE, // sharevector
-        0, // procid
+        prb, // prb
     )
 
     // Manually insert in PRB.
@@ -59,7 +59,7 @@ FN HaluProcessorInitialize (
 
     // Do whatever is needed to initialize the current processor.
 
-    HalpInitializeInterrupts ()
+    HalpInitializeInterrupts ( prb )
 END
 
 #SECTION "INITtext"

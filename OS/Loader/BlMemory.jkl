@@ -692,17 +692,17 @@ FN BlInitializeNodeMemory (
     )
 
     // Stash words in the Prb at the following indices:
-    // 0 - Processor ID
+    // 0 - Node local ID
     // 1 - Software IDT pointer
     // 2 - Idle stack pointer
-    // 3 - Consecutive ID
+    // 3 - Global ID
 
     i := 0
 
     WHILE i < node^.ProcessorCount DO
         idword := CAST prbva TO ^UWORD
 
-        idword[0] = (node^.Id << 16) | i
+        idword[0] = i
         idword[1] = idtstackbase
         idword[2] = idtstackbase + BL_IDT_SIZE
         idword[3] = BlConsecutiveProcessorId

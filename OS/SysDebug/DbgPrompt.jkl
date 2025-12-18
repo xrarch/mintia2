@@ -385,24 +385,17 @@ FN (DbgCommandF) DbgCommandCpu ()
         LEAVE
     END
 
-    numpart := KeNumberPartOfProcessorId ( numval )
-    nodepart := KeNodePartOfProcessorId ( numval )
-
-    IF nodepart >= KeuLoaderBlock.NodeCount THEN
-        RtlPrint ( "No such node\n" )
-
-        LEAVE
-    END
-
-    node := KeNumaNodeById ( nodepart )
-
-    IF numpart >= node^.ProcessorCount THEN
+    IF numval >= KeuLoaderBlock.ProcessorCount THEN
         RtlPrint ( "No such processor\n" )
 
         LEAVE
     END
 
-    prb := KepPrbFromFullNumber ( numval )
+#IF BLD_MP
+    prb := KeuGlobalProcessorArray[numval]
+#ELSE
+    prb := KEP_CURRENT_PRB
+#END
 
     context := prb^.FrozenContext
 
@@ -440,7 +433,11 @@ FN (DbgCommandF) DbgCommandCpu ()
 
 @PrintCpuInfo
 
-    RtlPrint ( "CPU is %d    PRB @ %p\n", DbgCurrentPrb^.Id, DbgCurrentPrb )
+    RtlPrint (
+        "CPU is %d    PRB @ %p\n", // fmt
+        DbgCurrentPrb^.GlobalId,
+        DbgCurrentPrb,
+    )
 END
 
 FN (DbgCommandF) DbgCommandReady ()
@@ -810,7 +807,7 @@ FN (DbgCommandF) DbgCommandTrace ()
         RtlPrint ( "Running - no context.\n" )
 
 #IF BLD_MP
-        id := thread^.CurrentPrb^.Id
+        id := thread^.CurrentPrb^.GlobalId
 #ELSE
         id := 0
 #END

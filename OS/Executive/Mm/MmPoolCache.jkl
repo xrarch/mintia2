@@ -939,7 +939,7 @@ EXPORT FN MmAllocateFromPoolCache (
 
     percpu := MmpPoolCachePerCpuById (
         cache, // cache
-        KeNumberPartOfProcessorId ( KeCurrentProcessorId () ), // id
+        KeCurrentNodeLocalProcessorId (), // id
     )
 
     ipl := MmpLockMagazineCache ( percpu )
@@ -1030,7 +1030,7 @@ EXPORT FN MmFreeToPoolCache (
 
     // Acquire a pointer to the pool cache's per-cpu magazine cache.
 
-    id := KeNumberPartOfProcessorId ( KeCurrentProcessorId () )
+    id := KeCurrentNodeLocalProcessorId ()
 
     percpu := MmpPoolCachePerCpuById (
         cache, // cache

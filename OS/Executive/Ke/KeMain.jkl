@@ -17,6 +17,8 @@ EXPORT KepAssertionMessage : UBYTE[40]
 
 #IF BLD_MP
 
+EXPORT KeuGlobalProcessorArray : ^KepPrb[KEP_MAXIMUM_PROCESSORS]
+
 KepInitializeCount : ULONG
 
 KepAnnounceSpinlock : KepSpinlock = KEP_INITIAL_SPINLOCK
@@ -56,7 +58,7 @@ FN (KeStartThreadF) KepIdleLoop (
 
     ipl := KepAcquireAnnounce ()
 
-    RtlPrint ( "KepIdleLoop: Processor %u idling\n", prb^.ConsecutiveId )
+    RtlPrint ( "KepIdleLoop: Processor %u idling\n", prb^.GlobalId )
 
     KepReleaseAnnounce ( ipl )
 
@@ -95,10 +97,10 @@ FN KepInitializePrb (
     // Initialize this Prb.
 
     // Loader stashed words in the Prb at the following indices:
-    // 0 - Processor ID
+    // 0 - Node local ID
     // 1 - Software IDT pointer
     // 2 - Idle stack pointer
-    // 3 - Consecutive ID
+    // 3 - Global ID
 
     idword := CAST prb TO ^UWORD
 
@@ -117,10 +119,10 @@ FN KepInitializePrb (
 
     // Place the stashed words at their proper place.
 
-    prb^.Id = id
+    prb^.NodeLocalId = id
     prb^.IrqDispatchTable = CAST irqdt TO ^VOID
     prb^.IdleStackBase = CAST stackbase TO ^VOID
-    prb^.ConsecutiveId = consecid
+    prb^.GlobalId = consecid
 
     // On some architectures, the thing we get from KEP_CURRENT_PRB_LOCAL is not
     // a globally visible address for this Prb.
@@ -221,6 +223,7 @@ FN KepInitializePrb (
 
 #IF BLD_MP
     prb^.IdleThread.CurrentPrb = prb
+    KeuGlobalProcessorArray[consecid] = prb
 #END
 
     prb^.Node = kenode

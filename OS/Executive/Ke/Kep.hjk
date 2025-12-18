@@ -262,8 +262,8 @@ STRUCT KepPrb
     StashedCurrentThreadInfo : ULONG,
 #END
 
-    Id : ULONG,
-    ConsecutiveId : ULONG,
+    GlobalId : ULONG,
+    NodeLocalId : ULONG,
 
     Ipl : UBYTE, // ASM routines assume this is a byte size.
     QuantumEnd : UBYTE,
@@ -772,16 +772,7 @@ EXTERN FN KepAcquireSpinlockInPrb (
 
 EXTERN FN KepStealWork ()
 
-#MACRO KepPrbFromFullNumber ( procid ) [
-    (CAST
-        (KeNumaNodeById(KeNodePartOfProcessorId(procid)) + KE_NODE_PRB_OFFSET +
-        (KeNumberPartOfProcessorId(procid) * BL_PRB_SIZE))
-    TO ^KepPrb)
-]
-
 #MACRO KepPrbFromNodeAndNumber ( node, procid ) [
-    // The NUMA ID field of the processor ID (upper 16 bits) should be zero.
-
     (CAST ((node) + KE_NODE_PRB_OFFSET) + ((procid) * BL_PRB_SIZE) TO ^KepPrb)
 ]
 
@@ -836,13 +827,6 @@ EXTERN FN KepStealWork ()
 #MACRO KepAcquireSwapStateElevated ( process ) []
 
 #MACRO KepReleaseSwapStateElevated ( process ) []
-
-#MACRO KepPrbFromFullNumber ( procid ) [
-    // Processor IDs are encoded with the upper 16 bits as the NUMA node ID and
-    // the lower 16 bits as the processor ID within the node.
-
-    (KEP_CURRENT_PRB)
-]
 
 #MACRO KepPrbFromNodeAndNumber ( node, procid ) [
     // The NUMA ID field of the processor ID (upper 16 bits) should be zero.

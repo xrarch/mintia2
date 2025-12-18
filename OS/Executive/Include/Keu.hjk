@@ -20,7 +20,7 @@ STRUCT KeuInterrupt
     Handler : KeInterruptF,
     Context : UWORD,
     Vector : UWORD,
-    ProcessorId : UWORD,
+    Prb : ^KepPrb,
 
 #IF BLD_MP
     Spinlock : KepSpinlock,
@@ -42,7 +42,7 @@ EXTERN FN KeuInitializeInterrupt (
     IN ipl : UWORD,
     IN edgetriggered : UWORD,
     IN sharevector : UWORD,
-    IN procid : UWORD,
+    IN prb : ^KepPrb,
 )
 
 EXTERN FN KeuConnectInterrupt (
@@ -416,6 +416,8 @@ EXTERN FN KeuAllocateNodeSpace (
 ) : ^VOID
 
 #IF BLD_MP
+
+EXTERN KeuGlobalProcessorArray : ^KepPrb[]
 
 EXTERN FN KeuReaperBarrier (
     IN thread : ^KeuThread,

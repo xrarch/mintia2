@@ -20,16 +20,15 @@ END
 
 #SECTION "INITtext"
 FN HalpInitializeLsic (
-    IN procid : UWORD,
+    IN prb : ^KepPrb,
 )
 
     // Initialize the interrupt controller to mask out all interrupts except
     // for the timer interrupt and IPI interrupt. Then enable interrupts.
+    // Guaranteed to be called on the given processor.
 
-    lsic :=
-        CAST KeuLoaderBlock.U.Xr.LsicBase + procid * HALP_LSIC_GAP TO ^HalpLsic
-
-    prb := KEP_CURRENT_PRB
+    lsic := CAST KeuLoaderBlock.U.Xr.LsicBase +
+        KepCurrentProcessorHwId () * HALP_LSIC_GAP TO ^HalpLsic
 
     // Stash the LSIC base.
 
@@ -64,7 +63,7 @@ FN HalpInitializeLsic (
         KEP_IPL_CLOCK, // ipl
         FALSE, // edgetriggered
         FALSE, // sharevector
-        procid, // procid
+        prb, // prb
     )
 
 #IF BLD_MP
@@ -90,7 +89,7 @@ FN HalpInitializeLsic (
         KEP_IPL_IPI, // ipl
         FALSE, // edgetriggered
         FALSE, // sharevector
-        procid, // procid
+        prb, // prb
     )
 
     // Override the high level handler to bypass all the unnecessary general
@@ -114,7 +113,7 @@ FN HalpInitializeLsic (
         KEP_IPL_IPI, // ipl
         FALSE, // edgetriggered
         FALSE, // sharevector
-        procid, // procid
+        prb, // prb
     )
 
     // Override the high level handler to do absolutely nothing, because no
@@ -136,9 +135,10 @@ FN HaluProcessorInitialize (
     IN prb : ^KepPrb,
 )
 
-    // Do whatever is needed to initialize the current processor.
+    // Do whatever is needed to initialize the given processor.
+    // Guaranteed to be called on that processor.
 
-    HalpInitializeLsic ( KepCurrentProcessorHwId () )
+    HalpInitializeLsic ( prb )
 END
 
 #SECTION "INITtext"

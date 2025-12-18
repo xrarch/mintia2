@@ -640,26 +640,6 @@ EXTERN FN KeExceptionJacket (
     IN flags : UWORD,
 ) : OsStatus
 
-#IF BLD_NUMA
-
-// Processor IDs are encoded with the upper 16 bits as the NUMA node ID and
-// the lower 16 bits as the processor ID within the node.
-
-#MACRO KeNumberPartOfProcessorId ( procid ) [ ((procid) & 0xFFFF) ]
-#MACRO KeNodePartOfProcessorId ( procid ) [ ((procid) >> 16) ]
-
-#ELSE
-
-#IF BLD_MP
-#MACRO KeNumberPartOfProcessorId ( procid ) [(procid)]
-#ELSE
-#MACRO KeNumberPartOfProcessorId ( procid ) [0]
-#END
-
-#MACRO KeNodePartOfProcessorId ( procid ) [0]
-
-#END
-
 STRUCT KeuNode
 // The following fields should never be rearranged.
 // Their offsets should remain constant as they are exported to modules.

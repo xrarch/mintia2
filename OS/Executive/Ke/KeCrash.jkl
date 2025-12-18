@@ -234,12 +234,11 @@ FN KepDoCrashPrints (
     END
 
     RtlPrint (
-        "%s BL=%u IPL=%u NODE=%u CPU=%u [%s, %s, %s]\n",
+        "%s BL=%u IPL=%u CPU=%u [%s, %s, %s]\n",
         PLATFORM_FULL_NAME_STR,
         BLD_BASE_LEVEL,
         prb^.Ipl,
-        KeNodePartOfProcessorId ( prb^.Id ),
-        KeNumberPartOfProcessorId ( prb^.Id ),
+        prb^.GlobalId,
         procname,
         thrdname,
         attprocname,
@@ -381,7 +380,7 @@ EXPORT FN KeCrash (
 
         RtlPrint (
             "KeCrash: Nested on %u: \n", // fmt
-            KeCurrentProcessorId (),
+            KEP_CURRENT_PRB^.GlobalId,
         )
 
         RtlPrintByVarTable (
