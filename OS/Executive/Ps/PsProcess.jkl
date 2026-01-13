@@ -1078,7 +1078,6 @@ END
 #SECTION "PAGEtext"
 FN PsuCreateProcess (
     IN params : ^NsOpenParameters,
-    IN partitionhandle : UWORD,
     IN nodeid : UWORD,
     IN name : ^RtlString,
     IN quotauid : UWORD,
@@ -1092,34 +1091,7 @@ FN PsuCreateProcess (
     access : UWORD
     status : OsStatus
 
-    IF partitionhandle != OS_NULL_HANDLE THEN
-        IF nodeid != OS_NULL_NODE THEN
-            // A node ID was specified along with a partition handle. This is
-            // not valid.
-
-            RETURN OS_STATUS_INVALID_ARGUMENT
-        END
-
-        status = ObuReferenceByHandle (
-            partitionhandle, // handle
-            OS_PARTITION_TYPE, // typeid
-            OUT partition, // object
-            OUT access, // access
-        )
-
-        IF OsError ( status ) THEN
-            RETURN status
-        END
-
-        IF access | OS_ACCESS_WRITE != access THEN
-            // Not a subset of the required access.
-
-            status = OS_STATUS_ACCESS_DENIED
-
-            GOTO Exit
-        END
-    
-    ELSEIF nodeid == OS_NULL_NODE THEN
+    IF nodeid == OS_NULL_NODE THEN
         // Use the current process's partition.
 
         partition = MmCurrentPartition ()
@@ -1189,7 +1161,6 @@ END
 #SECTION "PAGEtext"
 FN OsCreateProcess (
     IN params : ^OsOpenParameters,
-    IN partitionhandle : UWORD,
     IN nodeid : UWORD,
     IN name : ^RtlString,
     IN quotauid : UWORD,
@@ -1224,7 +1195,6 @@ FN OsCreateProcess (
 
     status = PsuCreateProcess (
         &sysparams, // params
-        partitionhandle, // partitionhandle
         nodeid, // nodeid
         &sysname, // name
         quotauid, // quotauid
