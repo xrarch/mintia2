@@ -67,7 +67,7 @@ FN PspPerformEagerThreadCleanup (
     // Free the kernel stack.
 
     MmuFreeKernelStack (
-        KeNumaNodeFromSpacePointer ( thread ), // node
+        KeNumaNodeFromSpacePointer ( thread ), // kenode
         CONTAINEROF thread^.Tcb.Process TO PsuProcess.Pcb, // process
         thread^.Tcb.KernelStackTop -
         (KEU_STACK_PAGES << RTL_PAGE_SHIFT), // kstack
@@ -226,7 +226,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     thread := CAST object TO ^PsuThread
     ctx := CAST context TO ^PspThreadContext
 
-    node := KeNumaNodeFromSpacePointer ( thread )
+    kenode := KeNumaNodeFromSpacePointer ( thread )
 
     status : OsStatus
 
@@ -252,7 +252,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     kstack : ^VOID
 
     status = MmuCreateKernelStack (
-        node, // node
+        kenode, // kenode
         process, // process
         OUT kstack, // kstack
     )
@@ -279,7 +279,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     // Allocate a turnstile.
 
     turnstile := MmAllocateFromPoolCache (
-        node^.Psp^.TurnstileCache, // cache
+        kenode^.Psp^.TurnstileCache, // cache
         TRUE, // wait
     )
 
@@ -410,7 +410,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 @Error5
 
     MmFreeToPoolCache (
-        node^.Psp^.TurnstileCache, // cache
+        kenode^.Psp^.TurnstileCache, // cache
         turnstile, // ptr
     )
 
@@ -421,7 +421,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 @Error3
 
     MmuFreeKernelStack (
-        node, // node
+        kenode, // kenode
         process, // process
         kstack, // kstack
     )
@@ -1091,7 +1091,7 @@ FN PsuCreateThreadObject (
         SIZEOF PsuPagedThread, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
-        process^.Pcb.Node, // node
+        process^.Pcb.Node^.Mmp, // mmnode
     )
 
     RETURN NsuCreateObject (
@@ -1103,7 +1103,7 @@ END
 
 #SECTION "PAGEtext"
 EXPORT FN PsCreateExecutiveThread (
-    IN node : ^KeuNode,
+    IN kenode : ^KeuNode,
     IN name : ^RtlString,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
@@ -1129,7 +1129,7 @@ EXPORT FN PsCreateExecutiveThread (
         startfunc, // startfunc
         context1, // context1
         context2, // context2
-        node^.SystemProcess, // process
+        kenode^.SystemProcess, // process
         0, // flags
         OUT thread, // thread
     )

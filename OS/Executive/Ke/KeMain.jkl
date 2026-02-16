@@ -265,7 +265,7 @@ END
 #SECTION "INITtext"
 FN KepInitializeNode (
     IN kenode : ^KeuNode,
-    IN node : ^BlNodeInfo,
+    IN blnode : ^BlNodeInfo,
 )
 
     // Initialize the given NUMA node.
@@ -277,17 +277,17 @@ FN KepInitializeNode (
 
     // Initialize various node stuff.
 
-    nodeid := node^.Id
+    nodeid := blnode^.Id
 
-    kenode^.SystemPageDirectoryPfn = node^.SystemPageDirectoryPfn
-    kenode^.ProcessorCount = node^.ProcessorCount
+    kenode^.SystemPageDirectoryPfn = blnode^.SystemPageDirectoryPfn
+    kenode^.ProcessorCount = blnode^.ProcessorCount
     kenode^.Id = nodeid
 
-    kenode^.PoolSpaceSize = node^.PoolSpaceSize
-    kenode^.CacheSpaceSize = node^.CacheSpaceSize
-    kenode^.DynamicSpaceSize = node^.DynamicSpaceSize
+    kenode^.PoolSpaceSize = blnode^.PoolSpaceSize
+    kenode^.CacheSpaceSize = blnode^.CacheSpaceSize
+    kenode^.DynamicSpaceSize = blnode^.DynamicSpaceSize
 
-    kenode^.DynamicSpaceBitmap = node^.DynamicSpaceBitmap
+    kenode^.DynamicSpaceBitmap = blnode^.DynamicSpaceBitmap
 
     // Allocate a Ke-private part of the node.
 
@@ -335,14 +335,14 @@ FN KepInitializeNode (
 
     // Initialize the shared user page.
 
-    kenode^.SharedUserPage = node^.VirtualSharedUserPage
+    kenode^.SharedUserPage = blnode^.VirtualSharedUserPage
 
     KepUpdateTime ( kenode, prb )
 
     // Move the loader's descriptor list head into our node.
 
-    kenode^.DescriptorListHead.Next = node^.DescriptorListHead.Next
-    kenode^.DescriptorListHead.Prev = node^.DescriptorListHead.Prev
+    kenode^.DescriptorListHead.Next = blnode^.DescriptorListHead.Next
+    kenode^.DescriptorListHead.Prev = blnode^.DescriptorListHead.Prev
 
     // Fix up the circular list head.
 
@@ -398,15 +398,15 @@ FN KepInitializeNodes ()
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
-        node := CONTAINEROF listentry TO BlNodeInfo.Entry
+        blnode := CONTAINEROF listentry TO BlNodeInfo.Entry
 
-        id := node^.Id
+        id := blnode^.Id
 
         kenode := KeNumaNodeById ( id )
 
         KepInitializeNode (
             kenode, // kenode
-            node, // node
+            blnode, // blnode
         )
 
         IF kenode^.ProcessorCount > mostprocs THEN

@@ -14,25 +14,25 @@ EXTERN FN MmuShouldAccessCrash (
 ) : UWORD
 
 EXTERN FN MmuCreateKernelStack (
-    IN node : ^KeuNode,
+    IN kenode : ^KeuNode,
     IN process : ^PsuProcess,
     OUT kstack : ^VOID,
 ) : OsStatus
 
 EXTERN FN MmuFreeKernelStack (
-    IN node : ^KeuNode,
+    IN kenode : ^KeuNode,
     IN process : ^PsuProcess,
     IN kstack : ^VOID,
 )
 
 EXTERN FN MmuChargeCommit (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN pages : UWORD,
     IN wait : UWORD,
 ) : OsStatus
 
 EXTERN FN MmuUnchargeCommit (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN pages : UWORD,
 )
 
@@ -62,13 +62,13 @@ EXTERN FN MmuUnchargePoolQuota (
 )
 
 EXTERN FN MmuChargeVmQuota (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN quotablock : ^MmpQuotaBlock,
     IN pages : UWORD,
 ) : OsStatus
 
 EXTERN FN MmuUnchargeVmQuota (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN quotablock : ^MmpQuotaBlock,
     IN pages : UWORD,
 )
@@ -86,7 +86,6 @@ EXTERN FN MmuQueryQuota (
 EXTERN FN MmuInitializeProcess (
     IN parentprocess : ^PsuProcess,
     IN process : ^PsuProcess,
-    IN partition : ^MmpPartition,
 ) : OsStatus
 
 EXTERN FN MmuUninitializeProcess (
@@ -193,10 +192,6 @@ EXTERN FN MmuCompleteMdl (
     (PsCurrentNode()^.Mmp)
 ]
 
-#MACRO MmCurrentPartition () [
-    (PsCurrentProcess()^.Partition)
-]
-
-EXTERN FN MmuPartitionToKeNode (
-    IN partition : ^MmpPartition,
+EXTERN FN MmuNodeToKeNode (
+    IN mmnode : ^MmpNode,
 ) : ^KeuNode

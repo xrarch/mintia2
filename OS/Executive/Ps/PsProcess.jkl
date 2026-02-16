@@ -9,7 +9,7 @@ PsuRoundRobinNodeId : ULONG = 0
 
 STRUCT PspProcessContext
     Name : ^RtlString,
-    Partition : ^MmpPartition,
+    MmNode : ^MmpNode,
     QuotaUid : ULONG,
     Flags : ULONG,
 END
@@ -387,7 +387,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
         CAST (process + SIZEOF PsuProcess) TO ^KepAsidInfoEntry
 #END
 
-    kenode := MmuPartitionToKeNode ( ctx^.Partition )
+    kenode := MmuNodeToKeNode ( ctx^.MmNode )
 
     KeuInitializeProcess (
         &process^.Pcb, // process
@@ -416,7 +416,6 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
     status = MmuInitializeProcess (
         currentprocess, // parentprocess
         process, // process
-        ctx^.Partition, // partition
     )
 
     IF OsError ( status ) THEN
@@ -1028,7 +1027,7 @@ PUBLIC PspProcessType : ObuType = {
 #SECTION "PAGEtext"
 FN PsuCreateProcessObject (
     IN params : ^NsOpenParameters,
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN name : ^RtlString,
     IN quotauid : UWORD,
     IN flags : UWORD,
@@ -1042,7 +1041,7 @@ FN PsuCreateProcessObject (
     ctx.Name = name
     ctx.QuotaUid = quotauid
     ctx.Flags = flags
-    ctx.Partition = partition
+    ctx.MmNode = mmnode
 
     obparams : ObParameters
 
@@ -1058,7 +1057,7 @@ FN PsuCreateProcessObject (
         SIZEOF PsuPagedProcess, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
-        MmuPartitionToKeNode ( partition ), // node
+        mmnode, // mmnode
     )
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
@@ -1087,17 +1086,17 @@ FN PsuCreateProcess (
 
     // Create a process object - handle interface.
 
-    partition : ^MmpPartition
+    mmnode : ^MmpNode
     access : UWORD
     status : OsStatus
 
     IF nodeid == OS_NULL_NODE THEN
-        // Use the current process's partition.
+        // Use the current process's node.
 
-        partition = MmCurrentPartition ()
+        mmnode = MmCurrentNode ()
 
     ELSE
-        // Use the specified NUMA node's integral partition.
+        // Use the specified NUMA node.
 
         nodes := KeQueryNodeCount ()
 
@@ -1120,14 +1119,14 @@ FN PsuCreateProcess (
             RETURN OS_STATUS_INVALID_ARGUMENT
         END
 
-        partition = KeNumaNodeById ( nodeid )^.IntegralPartition
+        mmnode = KeNumaNodeById ( nodeid )^.Mmp
     END
 
     process : ^PsuProcess
 
     status = PsuCreateProcessObject (
         params, // params
-        partition, // partition
+        mmnode, // mmnode
         name, // name
         quotauid, // quotauid
         flags, // flags
@@ -1150,10 +1149,6 @@ FN PsuCreateProcess (
     END
 
 @Exit
-
-    IF partition THEN
-        ObUnreferenceObject ( partition )
-    END
 
     RETURN status
 END

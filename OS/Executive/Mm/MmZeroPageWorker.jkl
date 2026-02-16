@@ -18,7 +18,7 @@ FN (KeStartThreadF) MmuZeroPageWorker (
     // than a threshold of free pages. Then, zero them out and place them on
     // the zeroed page list.
 
-    partition := MmCurrentPartition ()
+    mmnode := MmCurrentNode ()
 
     zerobatch : ^MmpPfe[MMP_ZERO_BATCH]
 
@@ -44,7 +44,7 @@ FN (KeStartThreadF) MmuZeroPageWorker (
             KE_KERNEL_MODE, // waitmode
             KE_UNALERTABLE, // alertable
             NULLPTR, // timeout
-            &partition^.ZeroPageEvent.Header, // object
+            &mmnode^.ZeroPageEvent.Header, // object
         )
 
         // Zero at most 64 pages during each 100ms interval.
@@ -53,29 +53,29 @@ FN (KeStartThreadF) MmuZeroPageWorker (
         count : WORD = MMP_ZERO_MAXIMUM
 
         WHILE count > 0 DO
-            IF partition^.FreeList.Count < MMP_ZERO_BATCH THEN
+            IF mmnode^.FreeList.Count < MMP_ZERO_BATCH THEN
                 BREAK
             END
 
             i := 0
 
-            ipl := MmpAcquireListExclusive ( partition )
+            ipl := MmpAcquireListExclusive ( mmnode )
 
-            IF partition^.AvailablePageCount < partition^.SufficientPageCount OR
-                partition^.FreeList.Count < MMP_ZERO_BATCH THEN
+            IF mmnode^.AvailablePageCount < mmnode^.SufficientPageCount OR
+                mmnode^.FreeList.Count < MMP_ZERO_BATCH THEN
 
                 // Don't zero any pages if people are trying to make memory
                 // right now. We'd only step on their toes by holding pages
                 // hostage at idle priority.
 
-                MmpReleaseList ( partition, ipl )
+                MmpReleaseList ( mmnode, ipl )
 
                 BREAK
             END
 
             WHILE i < MMP_ZERO_BATCH DO
                 zerobatch[i] = MmpAllocatePageFromList (
-                    &partition^.FreeList, // list
+                    &mmnode^.FreeList, // list
                     0, // color
                 )
 
@@ -85,10 +85,10 @@ FN (KeStartThreadF) MmuZeroPageWorker (
             // Decrement available pages to reflect the ones we removed from
             // the zero page list.
 
-            avail := partition^.AvailablePageCount - MMP_ZERO_BATCH
-            partition^.AvailablePageCount = avail
+            avail := mmnode^.AvailablePageCount - MMP_ZERO_BATCH
+            mmnode^.AvailablePageCount = avail
 
-            MmpReleaseList ( partition, ipl )
+            MmpReleaseList ( mmnode, ipl )
 
             // Zero the pages.
 
@@ -104,11 +104,11 @@ FN (KeStartThreadF) MmuZeroPageWorker (
 
             i = 0
 
-            ipl = MmpAcquireListExclusive ( partition )
+            ipl = MmpAcquireListExclusive ( mmnode )
 
             WHILE i < MMP_ZERO_BATCH DO
                 MmpInsertPageIntoList (
-                    &partition^.ZeroList, // list
+                    &mmnode^.ZeroList, // list
                     zerobatch[i], // pfe
                     TRUE, // head
                 )
@@ -119,14 +119,14 @@ FN (KeStartThreadF) MmuZeroPageWorker (
             // Increment available pages to reflect the ones added to the zero
             // page list.
 
-            avail = partition^.AvailablePageCount + MMP_ZERO_BATCH
-            partition^.AvailablePageCount = avail
+            avail = mmnode^.AvailablePageCount + MMP_ZERO_BATCH
+            mmnode^.AvailablePageCount = avail
 
-            MmpReleaseList ( partition, ipl )
+            MmpReleaseList ( mmnode, ipl )
 
             // Wake waiters for available pages.
 
-            MmpNewAvailablePage ( partition, avail )
+            MmpNewAvailablePage ( mmnode, avail )
 
             count -= MMP_ZERO_BATCH
         END

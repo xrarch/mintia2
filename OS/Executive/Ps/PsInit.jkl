@@ -304,24 +304,24 @@ FN PsuInitializeStage1 ()
     WHILE i < max DO
         kenode := KeNumaNodeById ( i )
 
-        pspnode : ^PspNode = KeuAllocateNodeSpace (
+        psnode : ^PspNode = KeuAllocateNodeSpace (
             kenode, // kenode
             SIZEOF PspNode, // bytes
         )
 
-        KeAssert ( pspnode != NULLPTR )
+        KeAssert ( psnode != NULLPTR )
 
-        kenode^.Psp = pspnode
-        kenode^.ReaperCustodyList = &pspnode^.ReaperCustodyList
+        kenode^.Psp = psnode
+        kenode^.ReaperCustodyList = &psnode^.ReaperCustodyList
 
         KeuInitializeCustodyList (
-            &pspnode^.ReaperCustodyList, // list
+            &psnode^.ReaperCustodyList, // list
             &PspActivateReaper, // activateroutine
             kenode, // context
         )
 
         ExInitializeTimedWorkItem (
-            &pspnode^.ReaperTimedWorkItem, // item
+            &psnode^.ReaperTimedWorkItem, // item
             &PsuReaperWorker, // routine
         )
 
@@ -329,8 +329,8 @@ FN PsuInitializeStage1 ()
 
 #LEAVESECTION
 
-        pspnode^.TurnstileCache = MmCreatePoolCache (
-            kenode^.Mmp, // node
+        psnode^.TurnstileCache = MmCreatePoolCache (
+            kenode^.Mmp, // mmnode
             "Turnstiles", // name
             SIZEOF KepTurnstile, // size
             MM_NONPAGED_POOL, // poolindex
@@ -339,7 +339,7 @@ FN PsuInitializeStage1 ()
 
 #ENTERSECTION "INITtext"
 
-        IF NOT pspnode^.TurnstileCache THEN
+        IF NOT psnode^.TurnstileCache THEN
             KeCrash ( "%sfailed to create turnstile cache\n",
                 "PsuInitializeStage1: " )
         END
@@ -367,7 +367,7 @@ FN PsuInitializeStage1 ()
 
         status = PsuCreateProcessObject (
             &params, // params
-            kenode^.IntegralPartition, // partition
+            kenode^.Mmp, // mmnode
             &name, // name
             -1, // quotauid
             0, // flags
@@ -401,7 +401,7 @@ FN PsuInitializeStage1 ()
     RtlInitializeString ( &name, "Balance Manager" )
 
     status = PsCreateExecutiveThread (
-        KeNumaNodeById ( 0 ), // node
+        KeNumaNodeById ( 0 ), // kenode
         &name, // name
         &ExuStartSystemProcess, // startfunc
         0, // context1

@@ -1,5 +1,5 @@
 //
-// Implements support for Partition objects.
+// Implements support for memory nodes.
 //
 
 // Partial NUMA support is implemented throughout the memory manager, mostly to
@@ -16,6 +16,7 @@
 
 #INCLUDE "Mmp.hjk"
 
+#SECTION "INITtext"
 FN MmpInitializeAvailablePageList (
     IN list : ^MmpAvailablePageList,
 )
@@ -33,55 +34,51 @@ FN MmpInitializeAvailablePageList (
     END
 END
 
-FN MmpInitializePartitionStage1 (
-    IN partition : ^MmpPartition,
-    IN node : ^MmpNode,
+#SECTION "INITtext"
+FN MmpInitializeNodeStage1 (
+    IN mmnode : ^MmpNode,
 )
 
-    // Perform the first part of initialization for a memory partition.
-    // This is split in two so that we can use it while initializing the system
-    // partition.
-
-    partition^.Node = node
+    // Perform stage 1 (physical) initialization for a memory node.
 
     // Initialize the locks.
 
-    KeInitializeLock ( &partition^.ListLock )
+    KeInitializeLock ( &mmnode^.ListLock )
 
-    KeInitializeLock ( &partition^.CommitLock )
+    KeInitializeLock ( &mmnode^.CommitLock )
 
     // Initialize the events.
 
     KeInitializeEvent (
-        &partition^.LowMemoryEvent, // event
+        &mmnode^.LowMemoryEvent, // event
         "LowMemory", // name
         FALSE, // notification
         FALSE, // signalstate
     )
 
     KeInitializeEvent (
-        &partition^.PageAvailableEvent, // event
+        &mmnode^.PageAvailableEvent, // event
         "PageAvailable", // name
         TRUE, // notification
         TRUE, // signalstate
     )
 
     KeInitializeEvent (
-        &partition^.LowPageAvailableEvent, // event
+        &mmnode^.LowPageAvailableEvent, // event
         "LowPageAvailable", // name
         TRUE, // notification
         TRUE, // signalstate
     )
 
     KeInitializeEvent (
-        &partition^.ModifiedPageEvent, // event
+        &mmnode^.ModifiedPageEvent, // event
         "ModifiedPages", // name
         FALSE, // notification
         FALSE, // signalstate
     )
 
     KeInitializeEvent (
-        &partition^.ZeroPageEvent, // event
+        &mmnode^.ZeroPageEvent, // event
         "ZeroPages", // name
         FALSE, // notification
         FALSE, // signalstate
@@ -89,39 +86,40 @@ FN MmpInitializePartitionStage1 (
 
     // Initialize the list heads.
 
-    RtlInitializeList ( &partition^.ModifiedListHead )
-    partition^.ModifiedPageCount = 0
+    RtlInitializeList ( &mmnode^.ModifiedListHead )
+    mmnode^.ModifiedPageCount = 0
 
-    MmpInitializeAvailablePageList ( &partition^.FreeList )
-    MmpInitializeAvailablePageList ( &partition^.ZeroList )
-    MmpInitializeAvailablePageList ( &partition^.StandbyList )
+    MmpInitializeAvailablePageList ( &mmnode^.FreeList )
+    MmpInitializeAvailablePageList ( &mmnode^.ZeroList )
+    MmpInitializeAvailablePageList ( &mmnode^.StandbyList )
 
-    partition^.AvailablePageCount = 0
-    partition^.FluidPageCount = 0
+    mmnode^.AvailablePageCount = 0
+    mmnode^.FluidPageCount = 0
 
     // Initialize commit.
 
-    partition^.CommitUsage = 0
-    partition^.CommitLimit = 0
-    partition^.TheoreticalCommitLimit = 0
+    mmnode^.CommitUsage = 0
+    mmnode^.CommitLimit = 0
+    mmnode^.TheoreticalCommitLimit = 0
 
     // Initialize thresholds.
 
-    partition^.LowPageCount = 0
-    partition^.SufficientPageCount = 0
-    partition^.ModifiedPageMaximum = 0
-    partition^.ZeroingThreshold = 0
+    mmnode^.LowPageCount = 0
+    mmnode^.SufficientPageCount = 0
+    mmnode^.ModifiedPageMaximum = 0
+    mmnode^.ZeroingThreshold = 0
 
-    partition^.SizeLevel = MM_UNINITIALIZED_SYSTEM
+    mmnode^.SizeLevel = MM_UNINITIALIZED_SYSTEM
 END
 
-FN MmpSetPartitionSize (
-    IN partition : ^MmpPartition,
+#SECTION "INITtext"
+FN MmpSetNodeSize (
+    IN mmnode : ^MmpNode,
 )
 
-    // Calculate the partition size and various threshold values.
+    // Calculate the node size and various threshold values.
 
-    membytes := partition^.TotalPages << RTL_PAGE_SHIFT
+    membytes := mmnode^.TotalPages << RTL_PAGE_SHIFT
     size : UWORD
 
     IF membytes <= 3 * 1024 * 1024 THEN
@@ -150,45 +148,45 @@ FN MmpSetPartitionSize (
         size = MM_MASSIVE_SYSTEM
     END
 
-    partition^.SizeLevel = size
+    mmnode^.SizeLevel = size
 
     // Set the modified page maximum.
 
     IF size <= MM_TINY_SYSTEM THEN
-        partition^.ModifiedPageMaximum = 50
+        mmnode^.ModifiedPageMaximum = 50
 
     ELSEIF size <= MM_LARGE_SYSTEM THEN
-        partition^.ModifiedPageMaximum = 100
+        mmnode^.ModifiedPageMaximum = 100
 
     ELSE
-        partition^.ModifiedPageMaximum = 300
+        mmnode^.ModifiedPageMaximum = 300
     END
 
     // Set the page zeroing threshold.
 
     IF size <= MM_TINY_SYSTEM THEN
-        partition^.ZeroingThreshold = 75
+        mmnode^.ZeroingThreshold = 75
 
     ELSEIF size <= MM_MEDIUM_SYSTEM THEN
-        partition^.ZeroingThreshold = 150
+        mmnode^.ZeroingThreshold = 150
 
     ELSE
-        partition^.ZeroingThreshold = 500
+        mmnode^.ZeroingThreshold = 500
     END
 
     // Set the paging thresholds.
 
     IF size <= MM_TINY_SYSTEM THEN
-        partition^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 8
-        partition^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 50
+        mmnode^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 8
+        mmnode^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 50
 
     ELSEIF size <= MM_LARGE_SYSTEM THEN
-        partition^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 20
-        partition^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 100
+        mmnode^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 20
+        mmnode^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 100
 
     ELSE
-        partition^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 100
-        partition^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 500
+        mmnode^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 100
+        mmnode^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 500
     END
 END
 
@@ -263,14 +261,14 @@ FN MmpAllocatePageFromList (
 END
 
 FN MmpAllocatePageFromStandbyList (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN color : UWORD,
 ) : ^MmpPfe
 
     // Allocate a page from the given standby list.
 
     pfe := MmpAllocatePageFromList (
-        &partition^.StandbyList, // list
+        &mmnode^.StandbyList, // list
         color, // color
     )
 
@@ -353,13 +351,13 @@ FN MmpAllocatePageFromStandbyList (
 END
 
 FN MmpAllocatePage (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN zeroed : UWORD,
     IN low : UWORD,
     IN color : UWORD,
 ) : ^MmpPfe
 
-    // Allocate a page from the given partition. If none available, return
+    // Allocate a page from the given node. If none available, return
     // NULLPTR.
 
     pfe : ^MmpPfe = NULLPTR
@@ -370,9 +368,9 @@ FN MmpAllocatePage (
 
     color &= MMP_COLOR_COUNT - 1
 
-    ipl := MmpAcquireListExclusive ( partition )
+    ipl := MmpAcquireListExclusive ( mmnode )
 
-    avail := partition^.AvailablePageCount
+    avail := mmnode^.AvailablePageCount
 
     IF avail == 0 THEN
         // No pages.
@@ -387,9 +385,9 @@ FN MmpAllocatePage (
     END
 
     IF zeroed THEN
-        IF partition^.ZeroList.Count THEN
+        IF mmnode^.ZeroList.Count THEN
             pfe = MmpAllocatePageFromList (
-                &partition^.ZeroList, // list
+                &mmnode^.ZeroList, // list
                 color, // color
             )
 
@@ -399,54 +397,54 @@ FN MmpAllocatePage (
 
             mustzero = TRUE
 
-            IF partition^.FreeList.Count THEN
+            IF mmnode^.FreeList.Count THEN
                 pfe = MmpAllocatePageFromList (
-                    &partition^.FreeList, // list
+                    &mmnode^.FreeList, // list
                     color, // color
                 )
 
             ELSE
                 pfe = MmpAllocatePageFromStandbyList (
-                    partition, // partition
+                    mmnode, // mmnode
                     color, // color
                 )
             END
         END
 
-    ELSEIF partition^.FreeList.Count THEN
+    ELSEIF mmnode^.FreeList.Count THEN
         pfe = MmpAllocatePageFromList (
-            &partition^.FreeList, // list
+            &mmnode^.FreeList, // list
             color, // color
         )
 
-    ELSEIF partition^.ZeroList.Count THEN
+    ELSEIF mmnode^.ZeroList.Count THEN
         pfe = MmpAllocatePageFromList (
-            &partition^.ZeroList, // list
+            &mmnode^.ZeroList, // list
             color, // color
         )
 
     ELSE
         pfe = MmpAllocatePageFromStandbyList (
-            partition, // partition
+            mmnode, // mmnode
             color, // color
         )
     END
 
     avail -= 1
-    partition^.AvailablePageCount = avail
+    mmnode^.AvailablePageCount = avail
 
-    IF avail < partition^.LowPageCount THEN
+    IF avail < mmnode^.LowPageCount THEN
         // Too few pages. Signal the low memory event.
 
         KeSignalEvent (
-            &partition^.LowMemoryEvent, // event
+            &mmnode^.LowMemoryEvent, // event
             0, // priorityboost
         )
     END
 
 @Out
 
-    MmpReleaseList ( partition, ipl )
+    MmpReleaseList ( mmnode, ipl )
 
     IF mustzero THEN
         KeAssert ( pfe != NULLPTR )
@@ -458,43 +456,43 @@ FN MmpAllocatePage (
 END
 
 FN MmpFreePage (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN pfe : ^MmpPfe,
 )
 
-    // Free the page to the specified partition.
+    // Free the page to the specified node.
 
-    ipl := MmpAcquireListExclusive ( partition )
+    ipl := MmpAcquireListExclusive ( mmnode )
 
-    avail := partition^.AvailablePageCount
+    avail := mmnode^.AvailablePageCount
     avail += 1
 
-    partition^.AvailablePageCount = avail
+    mmnode^.AvailablePageCount = avail
 
     // Insert at the head so that we reuse it more quickly (hot in cache).
 
     MmpInsertPageIntoList (
-        &partition^.FreeList, // list
+        &mmnode^.FreeList, // list
         pfe, // pfe
         TRUE, // head
     )
 
-    IF partition^.FreeList.Count > partition^.ZeroingThreshold AND
-        partition^.ZeroPageEvent.Header.SignalCount == 0 THEN
+    IF mmnode^.FreeList.Count > mmnode^.ZeroingThreshold AND
+        mmnode^.ZeroPageEvent.Header.SignalCount == 0 THEN
 
         // Wake the zero page worker.
 
         KeSignalEvent (
-            &partition^.ZeroPageEvent, // event
+            &mmnode^.ZeroPageEvent, // event
             0, // priorityboost
         )
     END
 
-    MmpReleaseList ( partition, ipl )
+    MmpReleaseList ( mmnode, ipl )
 
     // Wake waiters for available pages.
 
-    MmpNewAvailablePage ( partition, avail )
+    MmpNewAvailablePage ( mmnode, avail )
 END
 
 #DEFINE MMP_MIN_LOOPS_FOR_BACKOFF 2
@@ -502,18 +500,13 @@ END
 #DEFINE MMP_MAX_BACKOFF_MS 1000
 
 FN MmpWaitForPages (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN low : UWORD,
 ) : UWORD
 
-    // Wait for available pages to exist from the given partition.
+    // Wait for available pages to exist from the given node.
     // This function provides no guarantees - caller will have to repeatedly
     // call it until MmpAllocatePage yields a page.
-
-    // Returns TRUE if a timeout occurred, FALSE otherwise.
-    // If a timeout occurred, that indicates that the partition did not have
-    // enough fluid pages for its workload, or is missing a pagefile, and has
-    // deadlocked.
 
     // Randomized exponential back-off is performed to mitigate thundering herd.
     // Some bits of the current thread pointer are used as a seed for xorshift.
@@ -530,22 +523,22 @@ FN MmpWaitForPages (
 
     IF low THEN
         threshold = 0
-        event = &partition^.LowPageAvailableEvent
+        event = &mmnode^.LowPageAvailableEvent
 
     ELSE
         threshold = MMP_BLOCK_FOR_PAGES_THRESHOLD
-        event = &partition^.PageAvailableEvent
+        event = &mmnode^.PageAvailableEvent
     END
 
-    ipl := MmpAcquireListExclusive ( partition )
+    ipl := MmpAcquireListExclusive ( mmnode )
 
-    WHILE partition^.AvailablePageCount <= threshold DO
+    WHILE mmnode^.AvailablePageCount <= threshold DO
         // Wait on the event until we catch the available page count at a
         // sufficient level.
 
         KeResetEvent ( event )
 
-        MmpReleaseList ( partition, ipl )
+        MmpReleaseList ( mmnode, ipl )
 
         IF loops >= MMP_MIN_LOOPS_FOR_BACKOFF THEN
             // Perform exponential backoff.
@@ -581,7 +574,10 @@ FN MmpWaitForPages (
                 loops = 0
             END
 
-            RtlSetUquadToUlong ( &backoff, backoffms )
+            RtlSetUquadToUlong (
+                &backoff, // uquad
+                backoffms, // ulong
+            )
 
             KeSleep (
                 &backoff, // interval
@@ -606,46 +602,40 @@ FN MmpWaitForPages (
         )
 
         IF status == OS_STATUS_WAIT_TIMEOUT THEN
-            IF NOT MmpIsPartitionPhysical ( partition ) THEN
-                // If a node partition is deadlocked, this is a fatal
-                // condition.
+            // If a node is deadlocked, this is a fatal
+            // condition.
 
-                KeCrash (
-                    "Mm: Deadlocked. EVI=%u FRE=%u ZRO=%u MOD=%u AVL=%u\n",
-                    partition^.StandbyList.Count,
-                    partition^.FreeList.Count,
-                    partition^.ZeroList.Count,
-                    partition^.ModifiedPageCount,
-                    partition^.AvailablePageCount,
-                )
-            END
-
-            RETURN TRUE
+            KeCrash (
+                "Mm: Deadlocked. EVI=%u FRE=%u ZRO=%u MOD=%u AVL=%u\n",
+                mmnode^.StandbyList.Count,
+                mmnode^.FreeList.Count,
+                mmnode^.ZeroList.Count,
+                mmnode^.ModifiedPageCount,
+                mmnode^.AvailablePageCount,
+            )
         END
 
         loops += 1
 
-        ipl = MmpAcquireListExclusive ( partition )
+        ipl = MmpAcquireListExclusive ( mmnode )
     END
 
-    MmpReleaseList ( partition, ipl )
-
-    RETURN FALSE
+    MmpReleaseList ( mmnode, ipl )
 END
 
 FN MmpAllocatePageWait (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN zeroed : UWORD,
     IN low : UWORD,
     IN color : UWORD,
 ) : ^MmpPfe
 
     // Allocate a page with the given parameters. Allowed to wait. Returns
-    // NULLPTR on timeout (indicative of partition deadlock).
+    // NULLPTR on timeout (indicative of node deadlock).
 
     WHILE TRUE DO
         pfe := MmpAllocatePage (
-            partition, // partition
+            mmnode, // mmnode
             zeroed, // zeroed
             low, // low
             color, // color
@@ -655,22 +645,20 @@ FN MmpAllocatePageWait (
             RETURN pfe
         END
 
-        IF MmpWaitForPages (
-            partition, // partition
+        MmpWaitForPages (
+            mmnode, // mmnode
             low, // low
-        ) THEN
-            RETURN NULLPTR
-        END
+        )
     END
 END
 
 FN MmuChargeCommit (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN pages : UWORD,
     IN wait : UWORD,
 ) : OsStatus
 
-    // Attempt to charge the specified commit to the memory partition.
+    // Attempt to charge the specified commit to the memory node.
     // It would be unwise to page this routine as it can be called during
     // nonpaged pool allocation.
 
@@ -679,9 +667,9 @@ FN MmuChargeCommit (
     // Acquire the commit lock to block out pagefile contraction that
     // might lower the commit limit and cause us to proceed erroneously.
 
-    ipl := KeAcquireApcLockExclusive ( &partition^.CommitLock )
+    ipl := KeAcquireApcLockExclusive ( &mmnode^.CommitLock )
 
-    IF partition^.CommitUsage + pages < pages THEN
+    IF mmnode^.CommitUsage + pages < pages THEN
         // Overflows the commit usage.
 
         status = OS_STATUS_COMMIT_EXCEEDED
@@ -689,7 +677,7 @@ FN MmuChargeCommit (
         GOTO Exit
     END
 
-    IF partition^.CommitUsage + pages > partition^.TheoreticalCommitLimit THEN
+    IF mmnode^.CommitUsage + pages > mmnode^.TheoreticalCommitLimit THEN
         // Don't even bother trying, there's no way to extend the pagefiles to
         // accommodate this because the theoretical commit limit represents what
         // we could theoretically increase the commit limit to if we were to
@@ -705,15 +693,15 @@ FN MmuChargeCommit (
     // will spin below until a pagefile expansion succeeds.
 
     KeIncrementPtr (
-        &partition^.CommitUsage, // ptr
+        &mmnode^.CommitUsage, // ptr
         pages, // inc
     )
 
-    WHILE partition^.CommitUsage > partition^.CommitLimit DO
-        KeReleaseApcLock ( &partition^.CommitLock, ipl )
+    WHILE mmnode^.CommitUsage > mmnode^.CommitLimit DO
+        KeReleaseApcLock ( &mmnode^.CommitLock, ipl )
 
         status = MmpExpandPageFiles (
-            partition, // partition
+            mmnode, // mmnode
             wait, // wait
             FALSE, // full
         )
@@ -724,14 +712,14 @@ FN MmuChargeCommit (
             RETURN status
         END
 
-        ipl = KeAcquireApcLockExclusive ( &partition^.CommitLock )
+        ipl = KeAcquireApcLockExclusive ( &mmnode^.CommitLock )
 
         IF OsError ( status ) THEN
             // Failed to increase commit limit.
             // Remove the commit charge.
 
             KeIncrementPtr (
-                &partition^.CommitUsage, // ptr
+                &mmnode^.CommitUsage, // ptr
                 -pages, // inc
             )
 
@@ -741,49 +729,49 @@ FN MmuChargeCommit (
 
 @Exit
 
-    KeReleaseApcLock ( &partition^.CommitLock, ipl )
+    KeReleaseApcLock ( &mmnode^.CommitLock, ipl )
 
     RETURN status
 END
 
 FN MmuUnchargeCommit (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN pages : UWORD,
 )
 
-    // Remove the specified commit charge from the partition.
+    // Remove the specified commit charge from the node.
     // If pagefiles can now be contracted, that will be noticed at the next tick
     // of the responsible worker thread.
 
     old := KeIncrementPtr (
-        &partition^.CommitUsage, // ptr
+        &mmnode^.CommitUsage, // ptr
         -pages, // inc
     )
 
     KeAssert ( pages <= old )
 END
 
-EXPORT FN MmGetNodeSize (
-    IN node : ^KeuNode,
+EXPORT FN MmGetKeNodeSize (
+    IN kenode : ^KeuNode,
 ) : UWORD
 
     // Get the size of the given node.
 
-    RETURN node^.Mmp^.Partition.SizeLevel
+    RETURN kenode^.Mmp^.SizeLevel
 END
 
-EXPORT FN MmGetPartitionSize (
-    IN partition : ^MmpPartition,
+EXPORT FN MmGetMmNodeSize (
+    IN mmnode : ^MmpNode,
 ) : UWORD
 
-    // Get the size of the given partition.
+    // Get the size of the given node.
 
-    RETURN partition^.SizeLevel
+    RETURN mmnode^.SizeLevel
 END
 
-FN MmuPartitionToKeNode (
-    IN partition : ^MmpPartition,
+FN MmuNodeToKeNode (
+    IN mmnode : ^MmpNode,
 ) : ^KeuNode
 
-    RETURN partition^.Node^.KeNode
+    RETURN mmnode^.KeNode
 END

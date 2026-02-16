@@ -62,63 +62,23 @@ STRUCT MmpAvailablePageList
     Count : UWORD,
 END
 
-STRUCT MmpPartition
-    FreeList : MmpAvailablePageList,
-    ZeroList : MmpAvailablePageList,
-    StandbyList : MmpAvailablePageList,
-    ModifiedListHead : RtlListEntry,
-
-    AvailablePageCount : UWORD,
-    FluidPageCount : UWORD,
-    ModifiedPageCount : UWORD,
-
-    CommitUsage : UWORD,
-    CommitLimit : UWORD,
-    TheoreticalCommitLimit : UWORD,
-
-    TotalPages : UWORD,
-
-    LowPageCount : UWORD,
-    SufficientPageCount : UWORD,
-    ModifiedPageMaximum : UWORD,
-    ZeroingThreshold : UWORD,
-
-    ListLock : KeLock,
-
-    LowMemoryEvent : KeEvent,
-    PageAvailableEvent : KeEvent,
-    LowPageAvailableEvent : KeEvent,
-    ModifiedPageEvent : KeEvent,
-    ZeroPageEvent : KeEvent,
-
-    CommitLock : KeLock,
-
-    Node : ^MmpNode,
-
-    SizeLevel : UBYTE,
-END
-
-#MACRO MmpIsPartitionPhysical ( partition ) [
-    (&(partition)^.Node^.Partition == (partition))
-]
-
-#MACRO MmpNewAvailablePage ( partition, avail ) [
+#MACRO MmpNewAvailablePage ( mmnode, avail ) [
     IF (avail) > MMP_BLOCK_FOR_PAGES_THRESHOLD AND
-        (partition)^.PageAvailableEvent.Header.SignalCount == 0 THEN
+        (mmnode)^.PageAvailableEvent.Header.SignalCount == 0 THEN
 
         // Signal the available page event.
 
         KeSignalEvent (
-            &(partition)^.PageAvailableEvent, // event
+            &(mmnode)^.PageAvailableEvent, // event
             0, // priorityboost
         )
     END
 
-    IF (partition)^.LowPageAvailableEvent.Header.SignalCount == 0 THEN
+    IF (mmnode)^.LowPageAvailableEvent.Header.SignalCount == 0 THEN
         // Signal the low page available event.
 
         KeSignalEvent (
-            &(partition)^.LowPageAvailableEvent, // event
+            &(mmnode)^.LowPageAvailableEvent, // event
             0, // priorityboost
         )
     END
@@ -146,13 +106,12 @@ EXTERN MmpSystemSize : UWORD
     (CAST (((pfe) - MmpFindPfnDatabase()) / MMP_PFE_SIZE) TO UWORD)
 ]
 
-EXTERN FN MmpInitializePartitionStage1 (
-    IN partition : ^MmpPartition,
-    IN node : ^MmpNode,
+EXTERN FN MmpInitializeNodeStage1 (
+    IN mmnode : ^MmpNode,
 )
 
-EXTERN FN MmpSetPartitionSize (
-    IN partition : ^MmpPartition,
+EXTERN FN MmpSetNodeSize (
+    IN mmnode : ^MmpNode,
 )
 
 EXTERN FN MmpAllocateChunkSpace (
@@ -230,48 +189,48 @@ EXTERN FN MmpFindDynamicSpaceNode (
 ) : ^MmpDynamicSpaceNode
 
 EXTERN FN MmpAllocateDynamicPages (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN pages : UWORD,
 ) : ^VOID
 
 EXTERN FN MmpReleaseDynamicPages (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN flush : UWORD,
 )
 
 EXTERN FN MmpAllocateDynamicSpace (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN pages : UWORD,
     IN wait : UWORD,
 ) : ^MmpDynamicSpaceNode
 
 EXTERN FN MmpReleaseDynamicSpace (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN spacenode : ^MmpDynamicSpaceNode,
     IN flush : UWORD,
 )
 
 EXTERN FN MmpAllocatePage (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN zeroed : UWORD,
     IN low : UWORD,
     IN color : UWORD,
 ) : ^MmpPfe
 
 EXTERN FN MmpFreePage (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN pfe : ^MmpPfe,
 )
 
 EXTERN FN MmpWaitForPages (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN low : UWORD,
 ) : UWORD
 
 EXTERN FN MmpAllocatePageWait (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN zeroed : UWORD,
     IN low : UWORD,
     IN color : UWORD,
@@ -288,12 +247,12 @@ EXTERN FN MmpInsertPageIntoList (
     IN head : UWORD,
 )
 
-#MACRO MmpAcquireListExclusive ( partition ) [
-    KeAcquireApcLockExclusive ( &(partition)^.ListLock )
+#MACRO MmpAcquireListExclusive ( mmnode ) [
+    KeAcquireApcLockExclusive ( &(mmnode)^.ListLock )
 ]
 
-#MACRO MmpReleaseList ( partition, ipl ) [
-    KeReleaseApcLock ( &(partition)^.ListLock, ipl )
+#MACRO MmpReleaseList ( mmnode, ipl ) [
+    KeReleaseApcLock ( &(mmnode)^.ListLock, ipl )
 ]
 
 #MACRO MmpAcquireObjectExclusive ( object ) [
@@ -334,7 +293,7 @@ EXTERN FN MmpInitializeQuotaBlock (
 )
 
 EXTERN FN MmpExpandPageFiles (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN wait : UWORD,
     IN full : UWORD,
 ) : OsStatus
@@ -406,7 +365,7 @@ STRUCT MmpSlabCache
 
     FreeListHead : RtlListEntry,
 
-    Node : ^MmpNode,
+    MmNode : ^MmpNode,
 
     Tag : ULONG,
     SlabSize : ULONG,
@@ -432,7 +391,7 @@ END
 #DEFINE MMP_BLOCK_SIZE_BUCKETS [(1 << MMP_BLOCK_MAX_UNITS_SHIFT) + 1]
 
 FNPTR MmpPoolGetMemoryF (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN low : UWORD,
@@ -440,7 +399,7 @@ FNPTR MmpPoolGetMemoryF (
 ) : UWORD
 
 FNPTR MmpPoolReturnMemoryF (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
@@ -448,8 +407,7 @@ FNPTR MmpPoolReturnMemoryF (
 STRUCT MmpPool
     Lock : KeLock,
 
-    Partition : ^MmpPartition,
-    Node : ^MmpNode,
+    MmNode : ^MmpNode,
 
     GetMemory : MmpPoolGetMemoryF,
     ReturnMemory : MmpPoolReturnMemoryF,
@@ -497,16 +455,40 @@ STRUCT MmpNode
 
     QuickPteBlocks : ^MmpQuickPteBlock,
 
-    Id : UBYTE,
-    PgPoolCacheAdjustActive : UBYTE,
-    CacheSpaceChunkPages : UBYTE,
-
     KeNode : ^KeuNode,
 
     PoolSpace : MmpChunkSpace,
     CacheSpace : MmpChunkSpace,
 
-    Partition : MmpPartition,
+    FreeList : MmpAvailablePageList,
+    ZeroList : MmpAvailablePageList,
+    StandbyList : MmpAvailablePageList,
+    ModifiedListHead : RtlListEntry,
+
+    AvailablePageCount : UWORD,
+    FluidPageCount : UWORD,
+    ModifiedPageCount : UWORD,
+
+    CommitUsage : UWORD,
+    CommitLimit : UWORD,
+    TheoreticalCommitLimit : UWORD,
+
+    TotalPages : UWORD,
+
+    LowPageCount : UWORD,
+    SufficientPageCount : UWORD,
+    ModifiedPageMaximum : UWORD,
+    ZeroingThreshold : UWORD,
+
+    ListLock : KeLock,
+
+    LowMemoryEvent : KeEvent,
+    PageAvailableEvent : KeEvent,
+    LowPageAvailableEvent : KeEvent,
+    ModifiedPageEvent : KeEvent,
+    ZeroPageEvent : KeEvent,
+
+    CommitLock : KeLock,
 
     PoolRecords : MmpPool[MM_MAXIMUM_POOL],
 
@@ -521,4 +503,9 @@ STRUCT MmpNode
     PgPoolCacheAdjustItem : ExWorkItem,
 
     DeferredFlushTable : MmpDeferredFlush[MMP_DEFERRED_FLUSH_PAIRS],
+
+    SizeLevel : UBYTE,
+    Id : UBYTE,
+    PgPoolCacheAdjustActive : UBYTE,
+    CacheSpaceChunkPages : UBYTE,
 END

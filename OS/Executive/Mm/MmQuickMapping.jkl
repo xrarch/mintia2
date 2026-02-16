@@ -25,28 +25,28 @@ FN MmpInitializeQuickPages (
 
     procs := kenode^.ProcessorCount
 
-    mmpnode := kenode^.Mmp
+    mmnode := kenode^.Mmp
 
-    mmpnode^.QuickPteBlocks = MmAllocatePoolEx (
-        kenode^.Mmp, // node
+    mmnode^.QuickPteBlocks = MmAllocatePoolEx (
+        kenode^.Mmp, // mmnode
         MM_NONPAGED_POOL, // poolindex
         MMP_QUICK_PTE_BLOCK_SIZE * procs, // bytes
         'Quic', // tag
         FALSE, // wait
     )
 
-    IF NOT mmpnode^.QuickPteBlocks THEN
+    IF NOT mmnode^.QuickPteBlocks THEN
         KeCrash ( "Failed to allocate quick PTE blocks\n" )
     END
 
     i := 0
 
     WHILE i < procs DO
-        block := mmpnode^.QuickPteBlocks + (i * MMP_QUICK_PTE_BLOCK_SIZE)
+        block := mmnode^.QuickPteBlocks + (i * MMP_QUICK_PTE_BLOCK_SIZE)
 
         block^.NextIndex = 0
 
-        block^.BasePte = mmpnode^.QuickPteBase +
+        block^.BasePte = mmnode^.QuickPteBase +
             ((i * MMP_QUICK_PER_CPU) * SIZEOF MmpPte)
 
         j := 0
@@ -87,13 +87,13 @@ EXPORT FN MmUseQuickPte (
         TRUE, // pinned
     )
 
-    node := KeCurrentVolatileNode ()^.Mmp
+    mmnode := KeCurrentVolatileNode ()^.Mmp
 
     id := KeCurrentNodeLocalProcessorId ()
 
     // Trylock all of this processor's quick PTEs.
 
-    block := node^.QuickPteBlocks + (id * MMP_QUICK_PTE_BLOCK_SIZE)
+    block := mmnode^.QuickPteBlocks + (id * MMP_QUICK_PTE_BLOCK_SIZE)
 
     i := 0
 

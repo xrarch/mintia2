@@ -10,32 +10,19 @@
 FN MmuInitializeProcess (
     IN parentprocess : ^PsuProcess,
     IN process : ^PsuProcess,
-    IN partition : ^MmpPartition,
 ) : OsStatus
 
     // Initialize the process so it can be used by the memory manager.
 
-    IF NOT MmpIsPartitionPhysical ( partition ) THEN
-        // This is not a partition inherent to a NUMA node so we need to up the
-        // refcount. NUMA node partitions are eternal and don't have refcounts,
-        // so we don't do this in that case.
-
-        ObReferenceObject ( partition )
-    END
-
     process^.WorkingSetSize = 0
     process^.PageFaultCount = 0
 
-    // Set the partition object.
-
-    process^.Partition = partition
-
-    IF NOT partition^.Node^.KeNode^.SystemProcess THEN
+    IF NOT process^.Pcb.Node^.SystemProcess THEN
         // There's no system process for this node yet, so we're creating it
         // right now. Give it the system page directory.
 
         process^.Pcb.PageDirectoryPfn =
-            partition^.Node^.KeNode^.SystemPageDirectoryPfn
+            process^.Pcb.Node^.SystemPageDirectoryPfn
 
     ELSE
         KeCrash ( "NYI create address space\n" )
@@ -67,18 +54,6 @@ FN MmuDeleteProcess (
     // First delete the page directory.
 
     KeCrash ( "MmuDeleteProcess NYI\n" )
-
-    partition := process^.Partition
-
-    IF NOT MmpIsPartitionPhysical ( partition ) THEN
-        // Unreference the partition object.
-
-        // Only do this after every page frame the process might possibly have
-        // ever consumed (including page directory, tables, etc) has been
-        // returned.
-
-        ObUnreferenceObject ( process^.Partition )
-    END
 END
 
 #SECTION "PAGEtext"
@@ -140,11 +115,4 @@ EXPORT FN MmCurrentNode () : ^MmpNode
     // Return the current node.
 
     RETURN PsCurrentNode()^.Mmp
-END
-
-EXPORT FN MmCurrentPartition () : ^MmpPartition
-
-    // Return the current partition.
-
-    RETURN PsCurrentProcess()^.Partition
 END

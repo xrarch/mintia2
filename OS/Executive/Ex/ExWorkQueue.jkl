@@ -168,7 +168,7 @@ FN ExpInitializeWorkQueuesForNode (
 
     workthreads : UBYTE[EX_MAX_WORK_PRIORITY]
     
-    systemsize := MmGetNodeSize ( kenode )
+    systemsize := MmGetKeNodeSize ( kenode )
 
     IF systemsize <= MM_TINY_SYSTEM THEN
         workthreads[EX_NONPAGED_WORK_PRIORITY] = 1
@@ -209,7 +209,7 @@ FN ExpInitializeWorkQueuesForNode (
             thread : ^PsuThread
 
             status := PsCreateExecutiveThread (
-                kenode, // node
+                kenode, // kenode
                 &name, // name
                 &ExpWorkQueueLoop, // startfunc
                 &expnode^.WorkQueues[j], // context1

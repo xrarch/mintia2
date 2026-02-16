@@ -26,7 +26,7 @@ EXTERN FN MmIsVirtualValid (
 
 #MACRO MmAllocatePool ( poolindex, bytes, tag, wait ) [
     MmAllocatePoolEx (
-        NULLPTR, // node
+        NULLPTR, // mmnode
         poolindex, // poolindex
         bytes, // bytes
         tag, // tag
@@ -35,7 +35,7 @@ EXTERN FN MmIsVirtualValid (
 ]
 
 EXTERN FN MmAllocatePoolEx (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN poolindex : UWORD,
     IN bytes : UWORD,
     IN tag : ULONG,
@@ -73,12 +73,12 @@ ENUM MmSystemSize : UBYTE
     MM_MASSIVE_SYSTEM,
 END
 
-EXTERN FN MmGetPartitionSize (
-    IN partition : ^MmpPartition,
+EXTERN FN MmGetMmNodeSize (
+    IN mmnode : ^MmpNode,
 ) : UWORD
 
-EXTERN FN MmGetNodeSize (
-    IN node : ^KeuNode,
+EXTERN FN MmGetKeNodeSize (
+    IN kenode : ^KeuNode,
 ) : UWORD
 
 EXTERN FN MmSafeCopyIn (
@@ -144,7 +144,7 @@ FNPTR MmPoolCacheDeleteF (
 )
 
 EXTERN FN MmCreatePoolCacheEx (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN name : ^UBYTE,
     IN size : UWORD,
     IN pageable : UWORD,
@@ -155,7 +155,7 @@ EXTERN FN MmCreatePoolCacheEx (
 ) : ^MmpPoolCache
 
 EXTERN FN MmCreatePoolCache (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN name : ^UBYTE,
     IN size : UWORD,
     IN poolindex : UWORD,

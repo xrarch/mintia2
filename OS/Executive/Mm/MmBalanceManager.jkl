@@ -20,21 +20,20 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
     // Called from the context of a worker thread to perform periodic adjustment
     // work that is unsafe to perform in the context of the balance manager.
 
-    node := CAST context1 TO ^MmpNode
-    partition := &node^.Partition
+    mmnode := CAST context1 TO ^MmpNode
 
-    node^.PgPoolCacheAdjustActive = FALSE
+    mmnode^.PgPoolCacheAdjustActive = FALSE
 
-    empty := partition^.AvailablePageCount < partition^.LowPageCount
+    empty := mmnode^.AvailablePageCount < mmnode^.LowPageCount
 
     MmpAdjustPoolCaches (
-        &node^.PgPoolCacheList, // list
+        &mmnode^.PgPoolCacheList, // list
         context2, // purgepercpu
         empty, // empty
     )
 
     IF empty THEN
-        kenode := node^.KeNode
+        kenode := mmnode^.KeNode
 
         PsuReaperWorker (
             kenode, // context1
@@ -49,7 +48,7 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
 END
 
 FN MmpAdjustAllPoolCachesSafely (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN purgepercpu : UWORD,
     IN empty : UWORD,
 )
@@ -59,13 +58,13 @@ FN MmpAdjustAllPoolCachesSafely (
     // thread because the balance manager cannot safely take page faults as it
     // is a critical memory-making thread.
 
-    IF NOT node^.PgPoolCacheAdjustActive THEN
-        node^.PgPoolCacheAdjustActive = TRUE
+    IF NOT mmnode^.PgPoolCacheAdjustActive THEN
+        mmnode^.PgPoolCacheAdjustActive = TRUE
 
         ExEnqueueWorkItem (
-            &node^.PgPoolCacheAdjustItem, // item
+            &mmnode^.PgPoolCacheAdjustItem, // item
             EX_HIGH_WORK_PRIORITY, // priority
-            CAST node TO UWORD, // context1
+            CAST mmnode TO UWORD, // context1
             purgepercpu, // context2
         )
     END
@@ -74,7 +73,7 @@ FN MmpAdjustAllPoolCachesSafely (
     // of this thread.
 
     MmpAdjustPoolCaches (
-        &node^.NpPoolCacheList, // list
+        &mmnode^.NpPoolCacheList, // list
         purgepercpu, // purgepercpu
         empty, // empty
     )
@@ -98,17 +97,14 @@ FN MmuBalanceManager ()
         TRUE, // setcurrentpriority
     )
 
-    partition := MmCurrentPartition ()
-    node := MmCurrentNode ()
+    mmnode := MmCurrentNode ()
 
-    IF MmpIsPartitionPhysical ( partition ) THEN
-        node^.PgPoolCacheAdjustActive = FALSE
+    mmnode^.PgPoolCacheAdjustActive = FALSE
 
-        ExInitializeWorkItem (
-            &node^.PgPoolCacheAdjustItem, // item
-            &MmpAdjustPagedPoolCacheWorker, // routine
-        )
-    END
+    ExInitializeWorkItem (
+        &mmnode^.PgPoolCacheAdjustItem, // item
+        &MmpAdjustPagedPoolCacheWorker, // routine
+    )
 
     ms := 0
     mssinceadjust := 0
@@ -131,7 +127,7 @@ FN MmuBalanceManager ()
 
     waittable : ^VOID[2]
     waittable[0] = &timer
-    waittable[1] = &partition^.LowMemoryEvent
+    waittable[1] = &mmnode^.LowMemoryEvent
 
     status : OsStatus = 0
 
@@ -165,10 +161,9 @@ FN MmuBalanceManager ()
             ms += MMP_BALANCE_MANAGER_INTERVAL_MS
             dt := ms - mssinceadjust
 
-            IF MmpIsPartitionPhysical ( partition ) AND
-                (dt >= MMP_POOL_ADJUSTMENT_INTERVAL_MS OR
-                (partition^.AvailablePageCount < partition^.LowPageCount AND
-                dt >= MMP_POOL_ADJUSTMENT_SHORT_INTERVAL_MS)) THEN
+            IF dt >= MMP_POOL_ADJUSTMENT_INTERVAL_MS OR
+                (mmnode^.AvailablePageCount < mmnode^.LowPageCount AND
+                dt >= MMP_POOL_ADJUSTMENT_SHORT_INTERVAL_MS) THEN
 
                 // Adjust pool caches.
 
@@ -179,17 +174,17 @@ FN MmuBalanceManager ()
                 IF (ms - mssincepurge) >= MMP_POOL_PURGE_INTERVAL_MS THEN
                     mssincepurge = ms
 
-                    IF partition^.AvailablePageCount <
-                        partition^.SufficientPageCount THEN
+                    IF mmnode^.AvailablePageCount <
+                        mmnode^.SufficientPageCount THEN
 
                         purge = TRUE
                     END
                 END
 
                 MmpAdjustAllPoolCachesSafely (
-                    node, // node
+                    mmnode, // mmnode
                     purge, // purgepercpu
-                    partition^.AvailablePageCount < partition^.LowPageCount,
+                    mmnode^.AvailablePageCount < mmnode^.LowPageCount,
                 )
             END
 

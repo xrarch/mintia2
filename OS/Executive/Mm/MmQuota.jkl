@@ -225,7 +225,7 @@ END
 
 #SECTION "PAGEtext"
 FN MmuChargeVmQuota (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN quotablock : ^MmpQuotaBlock,
     IN pages : UWORD,
 ) : OsStatus
@@ -258,7 +258,7 @@ FN MmuChargeVmQuota (
     // Charge commit.
 
     status := MmuChargeCommit (
-        partition, // partition
+        mmnode, // mmnode
         pages, // pages
         TRUE, // wait
     )
@@ -277,7 +277,7 @@ END
 
 #SECTION "PAGEtext"
 FN MmuUnchargeVmQuota (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN quotablock : ^MmpQuotaBlock,
     IN pages : UWORD,
 )
@@ -294,7 +294,7 @@ FN MmuUnchargeVmQuota (
     // Remove the commit charge.
 
     MmuUnchargeCommit (
-        partition, // partition
+        mmnode, // mmnode
         pages, // pages
     )
 END

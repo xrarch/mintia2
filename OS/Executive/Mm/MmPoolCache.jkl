@@ -74,7 +74,7 @@ STRUCT MmpPoolCache
 
     Context : ^VOID,
 
-    Node : ^MmpNode,
+    MmNode : ^MmpNode,
 
     ProcessorCount : ULONG,
 
@@ -127,7 +127,7 @@ END
 
 #SECTION "PAGEtext"
 FN MmpInitializeSlabCache (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN scache : ^MmpSlabCache,
     IN size : UWORD,
     IN poolindex : UWORD,
@@ -149,7 +149,7 @@ FN MmpInitializeSlabCache (
     scache^.PoolIndex = poolindex
     scache^.Tag = tag
     scache^.ActiveSlabCount = 0
-    scache^.Node = node
+    scache^.MmNode = mmnode
     
     RtlInitializeList ( &scache^.FreeListHead )
 
@@ -254,7 +254,7 @@ FN MmpExtendSlabCache (
 @Retry
 
     slab := MmAllocatePoolEx (
-        scache^.Node, // node
+        scache^.MmNode, // mmnode
         scache^.PoolIndex, // poolindex
         scache^.SlabSize, // bytes
         scache^.Tag, // tag
@@ -279,7 +279,7 @@ FN MmpExtendSlabCache (
         MmpUnlockSlabCache ( scache, ipl )
 
         MmpWaitForPages (
-            &scache^.Node^.Partition, // partition
+            scache^.MmNode, // mmnode
             PsCurrentThread()^.VmPrivileged, // low
         )
 
@@ -448,7 +448,7 @@ END
 
 #SECTION "PAGEtext"
 EXPORT FN MmCreatePoolCacheEx (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN name : ^UBYTE,
     IN size : UWORD,
     IN pageable : UWORD,
@@ -461,7 +461,7 @@ EXPORT FN MmCreatePoolCacheEx (
     // Allocate and return a new pool cache structure.
 
     cache : ^MmpPoolCache = MmpAllocateFromSlabCache (
-        &node^.PoolCacheSlabs, // scache
+        &mmnode^.PoolCacheSlabs, // scache
         TRUE, // wait
     )
 
@@ -474,9 +474,9 @@ EXPORT FN MmCreatePoolCacheEx (
     // pool block.
 
     IF size < MMP_SMALL_POOL_BLOCK THEN
-        cache^.MagazineType = &node^.MagazineTypeTable[MMP_MAGAZINE_SMALL]
+        cache^.MagazineType = &mmnode^.MagazineTypeTable[MMP_MAGAZINE_SMALL]
     ELSE
-        cache^.MagazineType = &node^.MagazineTypeTable[MMP_MAGAZINE_LARGE]
+        cache^.MagazineType = &mmnode^.MagazineTypeTable[MMP_MAGAZINE_LARGE]
     END
 
     // Save the name of the cache.
@@ -488,8 +488,8 @@ EXPORT FN MmCreatePoolCacheEx (
     cache^.Delete = deletefunc
     cache^.Context = context
 
-    cache^.Node = node
-    cache^.ProcessorCount = node^.KeNode^.ProcessorCount
+    cache^.MmNode = mmnode
+    cache^.ProcessorCount = mmnode^.KeNode^.ProcessorCount
 
     KeInitializeLock ( &cache^.DepotLock )
 
@@ -503,9 +503,9 @@ EXPORT FN MmCreatePoolCacheEx (
     list : ^MmpPoolCacheList
 
     IF NOT pageable THEN
-        list = &node^.NpPoolCacheList
+        list = &mmnode^.NpPoolCacheList
     ELSE
-        list = &node^.PgPoolCacheList
+        list = &mmnode^.PgPoolCacheList
     END
 
     MmpLockPoolCacheList ( list )
@@ -559,13 +559,13 @@ FN (MmPoolCacheDeleteF) MmpDeleteSlabBackedCache (
     // Now release the slab cache.
 
     MmpFreeToSlabCache (
-        &scache^.Node^.SlabCacheSlabs, // scache
+        &scache^.MmNode^.SlabCacheSlabs, // scache
         scache, // ptr
     )
 END
 
 EXPORT FN MmCreatePoolCache (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN name : ^UBYTE,
     IN size : UWORD,
     IN poolindex : UWORD,
@@ -575,7 +575,7 @@ EXPORT FN MmCreatePoolCache (
     // Create a slab-backed pool cache.
 
     scache : ^MmpSlabCache = MmpAllocateFromSlabCache (
-        &node^.SlabCacheSlabs, // scache
+        &mmnode^.SlabCacheSlabs, // scache
         TRUE, // wait
     )
 
@@ -586,7 +586,7 @@ EXPORT FN MmCreatePoolCache (
     // Initialize the slab cache used for allocating cached blocks.
 
     MmpInitializeSlabCache (
-        node, // node
+        mmnode, // mmnode
         scache, // scache
         size, // size
         poolindex, // poolindex
@@ -596,7 +596,7 @@ EXPORT FN MmCreatePoolCache (
     // Create the pool cache with the appropriate slab callbacks.
 
     cache := MmCreatePoolCacheEx (
-        node, // node
+        mmnode, // mmnode
         name, // name
         size, // size
         poolindex != MM_NONPAGED_POOL, // pageable
@@ -610,7 +610,7 @@ EXPORT FN MmCreatePoolCache (
         // Failed to allocate the pool cache, so release the slab cache.
 
         MmpFreeToSlabCache (
-            &node^.SlabCacheSlabs, // scache
+            &mmnode^.SlabCacheSlabs, // scache
             scache, // ptr
         )
     END
@@ -873,16 +873,16 @@ EXPORT FN MmDeletePoolCache (
 
     // Delete a pool cache.
 
-    node := cache^.Node
+    mmnode := cache^.MmNode
 
     // Remove from global list.
 
     list : ^MmpPoolCacheList
 
     IF NOT cache^.Pageable THEN
-        list = &node^.NpPoolCacheList
+        list = &mmnode^.NpPoolCacheList
     ELSE
-        list = &node^.PgPoolCacheList
+        list = &mmnode^.PgPoolCacheList
     END
 
     MmpLockPoolCacheList ( list )
@@ -905,7 +905,7 @@ EXPORT FN MmDeletePoolCache (
     // Say that ten times fast.
 
     MmpFreeToSlabCache (
-        &node^.PoolCacheSlabs, // scache
+        &mmnode^.PoolCacheSlabs, // scache
         cache, // ptr
     )
 END
@@ -1173,7 +1173,7 @@ END
 
 #SECTION "INITtext"
 FN MmpInitializeMagazineType (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN magtype : ^MmpMagazineType,
     IN name : ^UBYTE,
     IN size : UWORD,
@@ -1184,7 +1184,7 @@ FN MmpInitializeMagazineType (
     magtype^.Size = size
 
     magtype^.PoolCache = MmCreatePoolCache (
-        node, // node
+        mmnode, // mmnode
         name, // name
         (size + 1) * SIZEOF ^VOID, // size
         MM_NONPAGED_POOL, // poolindex
@@ -1263,16 +1263,16 @@ FN MmpInitializePoolCache (
     //       fewer processors and could perform an invalid memory access if it
     //       tries to access the per-cpu cache with the old index.
 
-    node := kenode^.Mmp
+    mmnode := kenode^.Mmp
 
-    MmpInitializePoolCacheList ( &node^.PgPoolCacheList )
-    MmpInitializePoolCacheList ( &node^.NpPoolCacheList )
+    MmpInitializePoolCacheList ( &mmnode^.PgPoolCacheList )
+    MmpInitializePoolCacheList ( &mmnode^.NpPoolCacheList )
 
     // Initialize a slab cache to allocate pool caches from.
 
     MmpInitializeSlabCache (
-        node, // node
-        &node^.PoolCacheSlabs, // scache
+        mmnode, // mmnode
+        &mmnode^.PoolCacheSlabs, // scache
         MMP_PC_SIZE + KeQueryMostProcessorsInAnyNode () *
             MMP_PCPCPU_SIZE, // size
         MM_NONPAGED_POOL, // poolindex
@@ -1282,8 +1282,8 @@ FN MmpInitializePoolCache (
     // Initialize a slab cache to allocate slab caches from.
 
     MmpInitializeSlabCache (
-        node, // node
-        &node^.SlabCacheSlabs, // scache
+        mmnode, // mmnode
+        &mmnode^.SlabCacheSlabs, // scache
         SIZEOF MmpSlabCache, // size
         MM_NONPAGED_POOL, // poolindex
         'PoSl', // tag
@@ -1292,15 +1292,15 @@ FN MmpInitializePoolCache (
     // Initialize the magazine types.
 
     MmpInitializeMagazineType (
-        node, // node
-        &node^.MagazineTypeTable[MMP_MAGAZINE_SMALL], // magtype
+        mmnode, // mmnode
+        &mmnode^.MagazineTypeTable[MMP_MAGAZINE_SMALL], // magtype
         "Small Block Magazines", // name
         MMP_SMALL_MAGAZINE_SIZE, // size
     )
 
     MmpInitializeMagazineType (
-        node, // node
-        &node^.MagazineTypeTable[MMP_MAGAZINE_LARGE], // magtype
+        mmnode, // mmnode
+        &mmnode^.MagazineTypeTable[MMP_MAGAZINE_LARGE], // magtype
         "Large Block Magazines", // name
         MMP_LARGE_MAGAZINE_SIZE, // size
     )

@@ -213,9 +213,9 @@ FN MmpInitializeSystemVa (
     //
     //                    Maximum size on 32-bit is capped at 256MB.
 
-    mmpnode := kenode^.Mmp
+    mmnode := kenode^.Mmp
 
-    size := mmpnode^.Partition.SizeLevel
+    size := mmnode^.SizeLevel
 
     KeAssert ( SIZEOF MmpChunkEntry <= SIZEOF MmpPte )
 
@@ -224,7 +224,7 @@ FN MmpInitializeSystemVa (
     base : ^VOID = kenode + KE_POOL_SPACE_OFFSET
 
     MmpInitializeChunkSpace (
-        &mmpnode^.PoolSpace, // chunkspace
+        &mmnode^.PoolSpace, // chunkspace
         base, // base
         RTL_PAGE_SHIFT, // entryshift
         kenode^.PoolSpaceSize, // pages
@@ -244,12 +244,12 @@ FN MmpInitializeSystemVa (
         entryshift = 18 // 1 << 18 = 256KB
     END
 
-    mmpnode^.CacheSpaceChunkPages = (1 << entryshift) >> RTL_PAGE_SHIFT
+    mmnode^.CacheSpaceChunkPages = (1 << entryshift) >> RTL_PAGE_SHIFT
 
     base = kenode + KE_CACHE_SPACE_OFFSET
 
     MmpInitializeChunkSpace (
-        &mmpnode^.CacheSpace, // chunkspace
+        &mmnode^.CacheSpace, // chunkspace
         base, // base
         entryshift, // entryshift
         kenode^.CacheSpaceSize, // pages
@@ -257,15 +257,15 @@ FN MmpInitializeSystemVa (
 
     // Initialize dynamic space.
 
-    RtlInitializeAvl ( &mmpnode^.DynamicSpaceRoot )
+    RtlInitializeAvl ( &mmnode^.DynamicSpaceRoot )
 
-    KeInitializeLock ( &mmpnode^.DynamicSpaceLock )
+    KeInitializeLock ( &mmnode^.DynamicSpaceLock )
 
-    KeInitializeLock ( &mmpnode^.DynamicSpaceTreeLock )
+    KeInitializeLock ( &mmnode^.DynamicSpaceTreeLock )
 
     base = kenode + KE_DYNAMIC_SPACE_OFFSET
 
-    mmpnode^.DynamicSpaceBase = base
+    mmnode^.DynamicSpaceBase = base
 
     // Trim four pages off the end of dynamic space per CPU, to be used as
     // 'quick' mappings.
@@ -281,14 +281,14 @@ FN MmpInitializeSystemVa (
     dsize -= quickpages
 
     RtlInitializeBitmap (
-        &mmpnode^.DynamicSpaceBitmap, // header
+        &mmnode^.DynamicSpaceBitmap, // header
         dsize, // sizeinbits
         kenode^.DynamicSpaceBitmap, // data
     )
 
     // Remember the base of the quick pages.
 
-    mmpnode^.QuickPteBase =
+    mmnode^.QuickPteBase =
         MmpPteAddress ( base + (dsize << RTL_PAGE_SHIFT) )
 END
 
@@ -307,10 +307,10 @@ FN MmpInitializeSpaceNodeAllocation (
     //     MmpDynamicSpaceNode being small enough to not trigger page-aligned
     //     pool allocation when slabs are created for it.
 
-    mmpnode := kenode^.Mmp
+    mmnode := kenode^.Mmp
 
-    mmpnode^.SpaceNodeCache = MmCreatePoolCache (
-        mmpnode, // node
+    mmnode^.SpaceNodeCache = MmCreatePoolCache (
+        mmnode, // mmnode
         "Space Nodes", // name
         SIZEOF MmpDynamicSpaceNode, // size
         MM_NONPAGED_POOL, // poolindex
@@ -318,7 +318,7 @@ FN MmpInitializeSpaceNodeAllocation (
     )
 
 #ENTERSECTION "INITtext"
-    IF NOT mmpnode^.SpaceNodeCache THEN
+    IF NOT mmnode^.SpaceNodeCache THEN
         KeCrash ( "Failed to create space node cache\n" )
     END
 #LEAVESECTION "INITtext"
@@ -326,7 +326,7 @@ FN MmpInitializeSpaceNodeAllocation (
 END
 
 FN MmpFlushDynamicSpace (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
 )
 
     // Perform the deferred flushes for dynamic space. Assumes the dynamic space
@@ -335,13 +335,13 @@ FN MmpFlushDynamicSpace (
     // First free the regions.
 
     i := 0
-    max := node^.DeferredFlushIndex
-    flush := &node^.DeferredFlushTable[0]
-    base := node^.DynamicSpaceBase
+    max := mmnode^.DeferredFlushIndex
+    flush := &mmnode^.DeferredFlushTable[0]
+    base := mmnode^.DynamicSpaceBase
 
     WHILE i < max DO
         RtlClearBitsBitmap (
-            &node^.DynamicSpaceBitmap, // header
+            &mmnode^.DynamicSpaceBitmap, // header
             (flush^.Ptr - base) >> RTL_PAGE_SHIFT, // index
             flush^.Pages, // runlength
         )
@@ -350,8 +350,8 @@ FN MmpFlushDynamicSpace (
         i += 1
     END
 
-    node^.DeferredFlushIndex = 0
-    node^.DeferredFlushPages = 0
+    mmnode^.DeferredFlushIndex = 0
+    mmnode^.DeferredFlushPages = 0
 
     // Now do a global TB flush.
 
@@ -365,7 +365,7 @@ FN MmpFindDynamicSpaceNode (
     // Find the dynamic space node in which the pointer resides.
     // Returns NULLPTR if no such node exists.
 
-    node := KeNumaNodeFromSpacePointer ( ptr ) ^.Mmp
+    mmnode := KeNumaNodeFromSpacePointer ( ptr ) ^.Mmp
 
     spacenode : ^MmpDynamicSpaceNode
 
@@ -373,9 +373,9 @@ FN MmpFindDynamicSpaceNode (
     // policy that a shared lock is never taken subordinate to an exclusive
     // lock. There are many imaginable situations where that could occur here.
 
-    ipl := KeAcquireApcLockExclusive ( &node^.DynamicSpaceTreeLock )
+    ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceTreeLock )
 
-    avlnode := node^.DynamicSpaceRoot.Right
+    avlnode := mmnode^.DynamicSpaceRoot.Right
 
     WHILE TRUE DO
         IF NOT avlnode THEN
@@ -397,21 +397,21 @@ FN MmpFindDynamicSpaceNode (
         END
     END
 
-    KeReleaseApcLock ( &node^.DynamicSpaceTreeLock, ipl )
+    KeReleaseApcLock ( &mmnode^.DynamicSpaceTreeLock, ipl )
 
     RETURN spacenode
 END
 
-#MACRO MmpAllocateDynamicSpaceNode ( node ) [
+#MACRO MmpAllocateDynamicSpaceNode ( mmnode ) [
     CAST MmAllocateFromPoolCache (
-        (node)^.SpaceNodeCache, // cache
+        (mmnode)^.SpaceNodeCache, // cache
         FALSE, // wait
     ) TO ^MmpDynamicSpaceNode
 ]
 
-#MACRO MmpFreeDynamicSpaceNode ( node, spacenode ) [
+#MACRO MmpFreeDynamicSpaceNode ( mmnode, spacenode ) [
     MmFreeToPoolCache (
-        (node)^.SpaceNodeCache, // cache
+        (mmnode)^.SpaceNodeCache, // cache
         spacenode, // ptr
     )
 ]
@@ -430,7 +430,7 @@ FN (RtlAvlLessThanF) MmpCompareDynamicSpaceNodes (
 END
 
 FN MmpAllocateDynamicPages (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN pages : UWORD,
 ) : ^VOID
 
@@ -444,34 +444,34 @@ FN MmpAllocateDynamicPages (
     // synchronization for it, since "corruption" is harmless.
 
     index := RtlFindRunBitmap (
-        &node^.DynamicSpaceBitmap, // header
+        &mmnode^.DynamicSpaceBitmap, // header
         pages, // runlength
-        node^.DynamicSpaceHint, // hint
+        mmnode^.DynamicSpaceHint, // hint
     )
 
-    ipl := KeAcquireApcLockExclusive ( &node^.DynamicSpaceLock )
+    ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceLock )
 
     IF index == -1 THEN
         // Dynamic space has completely filled up.
 
-        IF node^.DeferredFlushIndex THEN
+        IF mmnode^.DeferredFlushIndex THEN
             // Try freeing the deferred regions and trying again.
 
-            MmpFlushDynamicSpace ( node )
+            MmpFlushDynamicSpace ( mmnode )
         END
 
         // Search again with the lock held, to be absolutely sure it's full.
 
         index = RtlFindRunBitmap (
-            &node^.DynamicSpaceBitmap, // header
+            &mmnode^.DynamicSpaceBitmap, // header
             pages, // runlength
-            node^.DynamicSpaceHint, // hint
+            mmnode^.DynamicSpaceHint, // hint
         )
 
         IF index == -1 THEN
             // Yep, full.
 
-            KeReleaseApcLock ( &node^.DynamicSpaceLock, ipl )
+            KeReleaseApcLock ( &mmnode^.DynamicSpaceLock, ipl )
 
             RETURN NULLPTR
         END
@@ -480,13 +480,13 @@ FN MmpAllocateDynamicPages (
         // Check that the range is still free with the lock held.
 
         IF NOT RtlCheckClearBitsBitmap (
-            &node^.DynamicSpaceBitmap, // header
+            &mmnode^.DynamicSpaceBitmap, // header
             index, // index
             pages, // runlength
         ) THEN
             // Someone else nabbed it, so retry.
 
-            KeReleaseApcLock ( &node^.DynamicSpaceLock, ipl )
+            KeReleaseApcLock ( &mmnode^.DynamicSpaceLock, ipl )
 
             GOTO Retry
         END
@@ -494,23 +494,23 @@ FN MmpAllocateDynamicPages (
 
     // Set the hint.
 
-    node^.DynamicSpaceHint = index
+    mmnode^.DynamicSpaceHint = index
 
     // Mark bits set.
 
     RtlSetBitsBitmap (
-        &node^.DynamicSpaceBitmap, // header
+        &mmnode^.DynamicSpaceBitmap, // header
         index, // index
         pages, // runlength
     )
 
-    KeReleaseApcLock ( &node^.DynamicSpaceLock, ipl )
+    KeReleaseApcLock ( &mmnode^.DynamicSpaceLock, ipl )
 
-    RETURN CAST node^.DynamicSpaceBase + (index << RTL_PAGE_SHIFT) TO ^VOID
+    RETURN CAST mmnode^.DynamicSpaceBase + (index << RTL_PAGE_SHIFT) TO ^VOID
 END
 
 FN MmpReleaseDynamicPages (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN flush : UWORD,
@@ -518,44 +518,44 @@ FN MmpReleaseDynamicPages (
 
     // Release a portion of dynamic space by pointer and page count.
 
-    ipl := KeAcquireApcLockExclusive ( &node^.DynamicSpaceLock )
+    ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceLock )
 
     IF flush THEN
-        IF node^.DeferredFlushIndex == MMP_DEFERRED_FLUSH_PAIRS THEN
+        IF mmnode^.DeferredFlushIndex == MMP_DEFERRED_FLUSH_PAIRS THEN
             // This exceeds the maximum number of regions pending flush.
 
-            MmpFlushDynamicSpace ( node )
+            MmpFlushDynamicSpace ( mmnode )
         END
 
         // Add this region to the list of pairs pending flush.
 
-        entry := &node^.DeferredFlushTable[node^.DeferredFlushIndex]
+        entry := &mmnode^.DeferredFlushTable[mmnode^.DeferredFlushIndex]
 
         entry^.Ptr = ptr
         entry^.Pages = pages
 
-        node^.DeferredFlushIndex += 1
-        node^.DeferredFlushPages += pages
+        mmnode^.DeferredFlushIndex += 1
+        mmnode^.DeferredFlushPages += pages
 
-        IF node^.DeferredFlushPages >= MMP_DEFERRED_FLUSH_PAGES THEN
+        IF mmnode^.DeferredFlushPages >= MMP_DEFERRED_FLUSH_PAGES THEN
             // Too many pages pending flush.
 
-            MmpFlushDynamicSpace ( node )
+            MmpFlushDynamicSpace ( mmnode )
         END
 
     ELSE
         RtlClearBitsBitmap (
-            &node^.DynamicSpaceBitmap, // header
-            (ptr - node^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // index
+            &mmnode^.DynamicSpaceBitmap, // header
+            (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // index
             pages, // runlength
         )
     END
 
-    KeReleaseApcLock ( &node^.DynamicSpaceLock, ipl )
+    KeReleaseApcLock ( &mmnode^.DynamicSpaceLock, ipl )
 END
 
 FN MmpAllocateDynamicSpace (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN pages : UWORD,
     IN wait : UWORD,
 ) : ^MmpDynamicSpaceNode
@@ -563,7 +563,7 @@ FN MmpAllocateDynamicSpace (
     // Allocate a region of dynamic space and create an AVL node for lookup.
 
     ptr := MmpAllocateDynamicPages (
-        node, // node
+        mmnode, // mmnode
         pages, // pages
     )
 
@@ -573,7 +573,7 @@ FN MmpAllocateDynamicSpace (
 
 @Retry
 
-    spacenode := MmpAllocateDynamicSpaceNode ( node )
+    spacenode := MmpAllocateDynamicSpaceNode ( mmnode )
 
     IF NOT spacenode THEN
         IF NOT wait THEN
@@ -581,7 +581,7 @@ FN MmpAllocateDynamicSpace (
             // wait.
 
             MmpReleaseDynamicPages (
-                node, // node
+                mmnode, // mmnode
                 ptr, // ptr
                 pages, // pages
                 FALSE, // flush
@@ -593,14 +593,14 @@ FN MmpAllocateDynamicSpace (
         // Caller requested wait upon being unable to allocate a node.
 
         MmpWaitForPages (
-            &node^.Partition, // partition
+            mmnode, // mmnode
             FALSE, // low
         )
 
         GOTO Retry
     END
 
-    ipl := KeAcquireApcLockExclusive ( &node^.DynamicSpaceTreeLock )
+    ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceTreeLock )
 
     // Insert the node in the AVL tree.
 
@@ -608,20 +608,20 @@ FN MmpAllocateDynamicSpace (
     spacenode^.EndVa = ptr + (pages << RTL_PAGE_SHIFT)
 
     RtlInsertAvl (
-        &node^.DynamicSpaceRoot, // root
+        &mmnode^.DynamicSpaceRoot, // root
         &spacenode^.Entry, // node
         &MmpCompareDynamicSpaceNodes, // comparisonfunc
     )
 
     // Unlock the tree and return the node.
 
-    KeReleaseApcLock ( &node^.DynamicSpaceTreeLock, ipl )
+    KeReleaseApcLock ( &mmnode^.DynamicSpaceTreeLock, ipl )
 
     RETURN spacenode
 END
 
 FN MmpReleaseDynamicSpace (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN spacenode : ^MmpDynamicSpaceNode,
     IN flush : UWORD,
 )
@@ -631,25 +631,25 @@ FN MmpReleaseDynamicSpace (
     ptr := spacenode^.StartVa
     pages := (spacenode^.EndVa - ptr) >> RTL_PAGE_SHIFT
 
-    ipl := KeAcquireApcLockExclusive ( &node^.DynamicSpaceTreeLock )
+    ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceTreeLock )
 
     // Remove the AVL node from the tree.
 
     RtlRemoveAvl (
-        &node^.DynamicSpaceRoot, // root
+        &mmnode^.DynamicSpaceRoot, // root
         &spacenode^.Entry, // node
     )
 
-    KeReleaseApcLock ( &node^.DynamicSpaceTreeLock, ipl )
+    KeReleaseApcLock ( &mmnode^.DynamicSpaceTreeLock, ipl )
 
     // Free the node.
 
-    MmpFreeDynamicSpaceNode ( node, spacenode )
+    MmpFreeDynamicSpaceNode ( mmnode, spacenode )
 
     // Free the space.
 
     MmpReleaseDynamicPages (
-        node, // node
+        mmnode, // mmnode
         ptr, // ptr
         pages, // pages
         flush, // flush

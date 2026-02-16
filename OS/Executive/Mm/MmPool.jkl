@@ -38,7 +38,7 @@ END
 #DEFINE MMP_POOL_FLAG_USE_PRIVILEGED_MEM 1
 
 FN MmpAllocateExtensionSpace (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
 ) : ^MmpPoolExtension
 
     // Allocate space for a pool extension.
@@ -47,7 +47,7 @@ FN MmpAllocateExtensionSpace (
 
     WHILE TRUE DO
         ext := CAST MmpAllocateChunkSpace (
-            &node^.PoolSpace, // chunkspace
+            &mmnode^.PoolSpace, // chunkspace
         ) TO ^MmpPoolExtension
 
         IF ext THEN
@@ -76,7 +76,7 @@ FN MmpAllocateExtensionSpace (
 END
 
 FN MmpFreeExtensionSpace (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN ext : ^MmpPoolExtension,
     IN flush : UWORD,
 )
@@ -98,14 +98,14 @@ FN MmpFreeExtensionSpace (
 #END
 
     MmpFreeChunkSpace (
-        &node^.PoolSpace, // chunkspace
+        &mmnode^.PoolSpace, // chunkspace
         ext, // ptr
         flush, // flush
     )
 END
 
 FN MmpFreeNonpagedPoolPages (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
@@ -124,7 +124,7 @@ FN MmpFreeNonpagedPoolPages (
         pte[i] = MMP_INVALID_KERNEL_PTE
 
         MmpFreePage (
-            partition, // partition
+            mmnode, // mmnode
             MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ), // pfe
         )
 
@@ -139,7 +139,7 @@ FN MmpFreeNonpagedPoolPages (
 END
 
 FN (MmpPoolReturnMemoryF) MmpFreeNonpagedMemory (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
@@ -148,7 +148,7 @@ FN (MmpPoolReturnMemoryF) MmpFreeNonpagedMemory (
     // space. The space allocator will deal with flushing the TB.
 
     MmpFreeNonpagedPoolPages (
-        partition, // partition
+        mmnode, // mmnode
         ptr, // ptr
         pages, // pages
     )
@@ -156,13 +156,13 @@ FN (MmpPoolReturnMemoryF) MmpFreeNonpagedMemory (
     // Uncharge the commit.
 
     MmuUnchargeCommit (
-        partition, // partition
+        mmnode, // mmnode
         pages, // pages
     )
 END
 
 FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN low : UWORD,
@@ -176,7 +176,7 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
     // First charge commit for these pages.
 
     MmuChargeCommit (
-        partition, // partition
+        mmnode, // mmnode
         pages, // pages
         FALSE, // wait
     )
@@ -191,7 +191,7 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
 @Retry
 
         pfe := MmpAllocatePage (
-            partition, // partition
+            mmnode, // mmnode
             FALSE, // zeroed
             low, // low
             MmpVirtualAddressColor ( colorptr ), // color
@@ -202,7 +202,7 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
                 // Caller said we should wait here for more pages.
 
                 MmpWaitForPages (
-                    partition, // partition
+                    mmnode, // mmnode
                     low, // low
                 )
 
@@ -212,13 +212,13 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
             // Free everything we just did.
 
             MmpFreeNonpagedPoolPages (
-                partition, // partition
+                mmnode, // mmnode
                 ptr, // ptr
                 i, // pages
             )
 
             MmuUnchargeCommit (
-                partition, // partition
+                mmnode, // mmnode
                 pages, // pages
             )
 
@@ -239,7 +239,7 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
 END
 
 FN (MmpPoolReturnMemoryF) MmpFreePagedMemory (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
@@ -250,7 +250,7 @@ FN (MmpPoolReturnMemoryF) MmpFreePagedMemory (
 END
 
 FN (MmpPoolGetMemoryF) MmpGetPagedMemory (
-    IN partition : ^MmpPartition,
+    IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN low : UWORD,
@@ -269,7 +269,7 @@ END
 #SECTION "INITtext"
 FN MmpInitializePool (
     IN pool : ^MmpPool,
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
 )
 
     // Initialize a pool.
@@ -280,8 +280,7 @@ FN MmpInitializePool (
     pool^.BytesUsedExternally = 0
     pool^.BytesUsedPeak = 0
     pool^.Flags = 0
-    pool^.Partition = &node^.Partition
-    pool^.Node = node
+    pool^.MmNode = mmnode
 
     i := 0
 
@@ -303,14 +302,14 @@ END
 #SECTION "INITtext"
 FN MmpInitializeNonpagedPool (
     IN pool : ^MmpPool,
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
 )
 
     // Initialize a nonpaged pool.
 
     MmpInitializePool (
         pool, // pool
-        node, // node
+        mmnode, // mmnode
     )
 
     pool^.GetMemory = &MmpGetNonpagedMemory
@@ -320,14 +319,14 @@ END
 #SECTION "INITtext"
 FN MmpInitializePagedPool (
     IN pool : ^MmpPool,
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
 )
 
     // Initialize a paged pool.
 
     MmpInitializePool (
         pool, // pool
-        node, // node
+        mmnode, // mmnode
     )
 
     pool^.GetMemory = &MmpGetPagedMemory
@@ -341,29 +340,32 @@ FN MmpInitializePools (
 
     // Initialize the system pools as part of stage 1 Mm init.
 
-    node := kenode^.Mmp
+    mmnode := kenode^.Mmp
 
     MmpInitializeNonpagedPool (
-        &node^.PoolRecords[MM_NONPAGED_POOL], // pool
-        node, // node
+        &mmnode^.PoolRecords[MM_NONPAGED_POOL], // pool
+        mmnode, // mmnode
     )
 
     MmpInitializeNonpagedPool (
-        &node^.PoolRecords[MM_PRIVILEGED_POOL], // pool
-        node, // node
+        &mmnode^.PoolRecords[MM_PRIVILEGED_POOL], // pool
+        mmnode, // mmnode
     )
 
     // Allow privileged pool to use privileged memory.
 
-    node^.PoolRecords[MM_PRIVILEGED_POOL].Flags |=
+    mmnode^.PoolRecords[MM_PRIVILEGED_POOL].Flags |=
         MMP_POOL_FLAG_USE_PRIVILEGED_MEM
 
     // Set paged pool to point to nonpaged pool for now, since we don't have
     // enough initialized to deal with faults on paged pool yet.
 
-    node^.PoolTable[MM_NONPAGED_POOL] = &node^.PoolRecords[MM_NONPAGED_POOL]
-    node^.PoolTable[MM_PAGED_POOL] = &node^.PoolRecords[MM_NONPAGED_POOL]
-    node^.PoolTable[MM_PRIVILEGED_POOL] = &node^.PoolRecords[MM_PRIVILEGED_POOL]
+    mmnode^.PoolTable[MM_NONPAGED_POOL] =
+        &mmnode^.PoolRecords[MM_NONPAGED_POOL]
+    mmnode^.PoolTable[MM_PAGED_POOL] = &mmnode^.PoolRecords[MM_NONPAGED_POOL]
+
+    mmnode^.PoolTable[MM_PRIVILEGED_POOL] =
+        &mmnode^.PoolRecords[MM_PRIVILEGED_POOL]
 
     // Initialize pool cache.
 
@@ -376,27 +378,28 @@ END
 
 #SECTION "INITtext"
 FN MmpInitializePagedPools (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
 )
 
     // Initialize the paged pools as part of stage 2 Mm init.
 
     MmpInitializePagedPool (
-        &node^.PoolRecords[MM_PAGED_POOL], // pool
-        node, // node
+        &mmnode^.PoolRecords[MM_PAGED_POOL], // pool
+        mmnode, // mmnode
     )
 
     MmpInitializePagedPool (
-        &node^.PoolRecords[MM_PAGE_TRACKING_POOL], // pool
-        node, // node
+        &mmnode^.PoolRecords[MM_PAGE_TRACKING_POOL], // pool
+        mmnode, // mmnode
     )
 
-    node^.PoolTable[MM_PAGED_POOL] = &node^.PoolRecords[MM_PAGED_POOL]
+    mmnode^.PoolTable[MM_PAGED_POOL] = &mmnode^.PoolRecords[MM_PAGED_POOL]
 
-    node^.PoolTable[MM_PAGE_TRACKING_POOL] =
-        &node^.PoolRecords[MM_PAGE_TRACKING_POOL]
+    mmnode^.PoolTable[MM_PAGE_TRACKING_POOL] =
+        &mmnode^.PoolRecords[MM_PAGE_TRACKING_POOL]
 END
 
+#SECTION "text"
 MmpEightBitLog : UBYTE[256] = {
     0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
     4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
@@ -509,10 +512,10 @@ FN MmpAllocateFromPool (
 
     // No sufficient block. We need to allocate a new pool extension.
 
-    ext := MmpAllocateExtensionSpace ( pool^.Node )
+    ext := MmpAllocateExtensionSpace ( pool^.MmNode )
 
     IF NOT pool^.GetMemory (
-        pool^.Partition, // partition
+        pool^.MmNode, // mmnode
         ext, // ptr
         1, // pages
         pool^.Flags & MMP_POOL_FLAG_USE_PRIVILEGED_MEM, // low
@@ -522,7 +525,7 @@ FN MmpAllocateFromPool (
         // Failed to allocate a pool extension.
 
         MmpFreeExtensionSpace (
-            pool^.Node, // node
+            pool^.MmNode, // mmnode
             ext, // extension
             FALSE, // flush
         )
@@ -538,7 +541,7 @@ FN MmpAllocateFromPool (
         // Wait for free memory and retry.
 
         MmpWaitForPages (
-            pool^.Partition, // partition
+            pool^.MmNode, // mmnode
             pool^.Flags & MMP_POOL_FLAG_USE_PRIVILEGED_MEM, // low
         )
 
@@ -850,13 +853,13 @@ FN MmpFreeToPool (
         // Return the extension.
 
         pool^.ReturnMemory (
-            pool^.Partition, // partition
+            pool^.MmNode, // mmnode
             ext, // ptr
             1, // pages
         )
 
         MmpFreeExtensionSpace (
-            pool^.Node, // node
+            pool^.MmNode, // mmnode
             ext, // extension
             TRUE, // flush
         )
@@ -921,7 +924,7 @@ FN MmpAllocatePageAligned (
     // First acquire some room in dynamic space.
 
     spacenode := MmpAllocateDynamicSpace (
-        pool^.Node, // node
+        pool^.MmNode, // mmnode
         bytes, // pages
         wait, // wait
     )
@@ -938,7 +941,7 @@ FN MmpAllocatePageAligned (
     // Call the pool callback to initialize the allocation.
 
     IF NOT pool^.GetMemory (
-        pool^.Partition, // partition
+        pool^.MmNode, // mmnode
         spacenode^.StartVa, // ptr
         bytes, // pages
         pool^.Flags & MMP_POOL_FLAG_USE_PRIVILEGED_MEM, // low
@@ -951,7 +954,7 @@ FN MmpAllocatePageAligned (
         // into it.
 
         MmpReleaseDynamicSpace (
-            pool^.Node, // node
+            pool^.MmNode, // mmnode
             spacenode, // spacenode
             FALSE, // flush
         )
@@ -997,7 +1000,7 @@ FN MmpFreePageAligned (
     pool := spacenode^.U.Pool.Pool
 
     pool^.ReturnMemory (
-        pool^.Partition, // partition
+        pool^.MmNode, // mmnode
         ptr, // ptr
         (spacenode^.EndVa - spacenode^.StartVa) >> RTL_PAGE_SHIFT, // pages
     )
@@ -1005,14 +1008,14 @@ FN MmpFreePageAligned (
     // Free the dynamic space.
 
     MmpReleaseDynamicSpace (
-        pool^.Node, // node
+        pool^.MmNode, // mmnode
         spacenode, // spacenode
         TRUE, // flush
     )
 END
 
 EXPORT FN MmAllocatePoolEx (
-    IN node : ^MmpNode,
+    IN mmnode : ^MmpNode,
     IN poolindex : UWORD,
     IN bytes : UWORD,
     IN tag : ULONG,
@@ -1023,8 +1026,8 @@ EXPORT FN MmAllocatePoolEx (
 
     KeAssert ( bytes != 0 )
 
-    IF NOT node THEN
-        node = MmCurrentNode ()
+    IF NOT mmnode THEN
+        mmnode = MmCurrentNode ()
     END
 
     thread : ^PsuThread = NULLPTR
@@ -1046,7 +1049,7 @@ EXPORT FN MmAllocatePoolEx (
 
 @Retry
 
-    pool := node^.PoolTable[poolindex]
+    pool := mmnode^.PoolTable[poolindex]
 
     ptr : ^VOID
 
@@ -1206,7 +1209,7 @@ FN MmWaitForPoolMemory ()
     // END
 
     MmpWaitForPages (
-        &MmCurrentNode()^.Partition, // partition
+        MmCurrentNode(), // mmnode
         PsCurrentThread()^.VmPrivileged, // low
     )
 END

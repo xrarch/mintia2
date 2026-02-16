@@ -110,7 +110,7 @@ FN ObuInitializeType (
 
         IF npsize THEN
             pernodetype^.NpPartCache = MmCreatePoolCache (
-                kenode^.Mmp, // node
+                kenode^.Mmp, // mmnode
                 npname, // name
                 npsize, // size
                 MM_NONPAGED_POOL, // poolindex
@@ -124,7 +124,7 @@ FN ObuInitializeType (
 
         IF psize THEN
             pernodetype^.PgPartCache = MmCreatePoolCache (
-                kenode^.Mmp, // node
+                kenode^.Mmp, // mmnode
                 pgname, // name
                 psize, // size
                 MM_PAGED_POOL, // poolindex
@@ -159,7 +159,8 @@ FN ObuAllocateObject (
     psize : UWORD
     npsize : UWORD
 
-    type := &obparams^.AllocationNode^.ObTypes[obparams^.TypeId]
+    kenode := MmuNodeToKeNode ( obparams^.AllocationNode )
+    type := &kenode^.ObTypes[obparams^.TypeId]
 
     internalflags := 0
 

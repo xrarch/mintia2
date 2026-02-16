@@ -381,7 +381,7 @@ END
 BxPageDirectory : ^ULONG
 
 FN BxMapPage (
-    IN node : ^BlNodeInfo,
+    IN blnode : ^BlNodeInfo,
     IN vaddr : ^VOID,
     IN phyaddr : ^VOID,
     IN pttype : BlMemoryDescriptorType,
@@ -396,7 +396,7 @@ FN BxMapPage (
         // Allocate a new page table.
 
         desc := BlAllocatePhysicalRange (
-            node, // node
+            blnode, // blnode
             1, // pages
             pttype, // type
         )
@@ -430,7 +430,7 @@ FN BxMapPage (
 END
 
 FN BxMapRange (
-    IN node : ^BlNodeInfo,
+    IN blnode : ^BlNodeInfo,
     IN vaddr : ^VOID,
     IN phyaddr : ^VOID,
     IN pages : UWORD,
@@ -440,7 +440,7 @@ FN BxMapRange (
 
     WHILE pages DO
         BxMapPage (
-            node, // node
+            blnode, // blnode
             vaddr, // vaddr
             phyaddr, // phyaddr
             pttype, // pttype
@@ -525,7 +525,7 @@ FN BxInitializeMemoryMapping ()
     // Allocate the kernel page directory.
 
     desc := BlAllocatePhysicalRange (
-        BlInfoBlock.BootNode, // node
+        BlInfoBlock.BootNode, // blnode
         1, // pages
         BL_MEMORY_USED, // type
     )
@@ -552,7 +552,7 @@ FN BxInitializeMemoryMapping ()
     // right now).
 
     BxMapRange (
-        BlInfoBlock.BootNode, // node
+        BlInfoBlock.BootNode, // blnode
         0, // vaddr
         0, // phyaddr
         0x400000 >> RTL_PAGE_SHIFT, // pages
@@ -563,7 +563,7 @@ FN BxInitializeMemoryMapping ()
     // Identity map the framebuffer too.
 
     BxMapRange (
-        BlInfoBlock.BootNode, // node
+        BlInfoBlock.BootNode, // blnode
         FRAMEBUFFER_START, // vaddr
         FRAMEBUFFER_START, // phyaddr
         FRAMEBUFFER_SIZE >> RTL_PAGE_SHIFT, // pages
@@ -582,7 +582,7 @@ FN BxInitializeMemoryMapping ()
     // for resets.
 
     BxMapPage (
-        BlInfoBlock.BootNode, // node
+        BlInfoBlock.BootNode, // blnode
         0xF0000000, // vaddr
         0xF0000000, // phyaddr
         BL_MEMORY_USED, // pttype
@@ -606,30 +606,30 @@ FN BxInitializeMemory ()
     // We need to initialize the list of NUMA nodes.
     // fox32 does not have NUMA support so there's only one node.
 
-    node := &BxBootNode
+    blnode := &BxBootNode
 
-    RtlInitializeList ( &node^.DescriptorListHead )
+    RtlInitializeList ( &blnode^.DescriptorListHead )
 
-    node^.StartPhysicalAddress = 0
-    node^.EndPhysicalAddress = -1
+    blnode^.StartPhysicalAddress = 0
+    blnode^.EndPhysicalAddress = -1
 
-    node^.Id = 0
+    blnode^.Id = 0
 
-    node^.NodeSpaceBase = KE_NODE_SPACE_START
+    blnode^.NodeSpaceBase = KE_NODE_SPACE_START
 
-    node^.ProcessorIdBase = 0
-    node^.ProcessorCount = 1
+    blnode^.ProcessorIdBase = 0
+    blnode^.ProcessorCount = 1
 
-    node^.KernelStructureBump = KE_NODE_SPACE_START + KE_BL_BUMP_SPACE_OFFSET
+    blnode^.KernelStructureBump = KE_NODE_SPACE_START + KE_BL_BUMP_SPACE_OFFSET
 
     RtlInsertAtTailList (
         &BlInfoBlock.NodeListHead, // head
-        &node^.Entry, // entry
+        &blnode^.Entry, // entry
     )
 
-    BlInfoBlock.BootNode = node
+    BlInfoBlock.BootNode = blnode
 
-    node^.TotalPages = (64 * 1024 * 1024) / 4096
+    blnode^.TotalPages = (64 * 1024 * 1024) / 4096
 
     descidx := 0
 
@@ -649,7 +649,7 @@ FN BxInitializeMemory ()
     desc^.Type = BL_MEMORY_USED
 
     RtlInsertAtTailList (
-        &node^.DescriptorListHead, // head
+        &blnode^.DescriptorListHead, // head
         &desc^.Entry, // entry
     )
 
@@ -663,7 +663,7 @@ FN BxInitializeMemory ()
     desc^.Type = BL_MEMORY_RECLAIMABLE
 
     RtlInsertAtTailList (
-        &node^.DescriptorListHead, // head
+        &blnode^.DescriptorListHead, // head
         &desc^.Entry, // entry
     )
 
@@ -677,7 +677,7 @@ FN BxInitializeMemory ()
     desc^.Type = BL_MEMORY_FREE
 
     RtlInsertAtTailList (
-        &node^.DescriptorListHead, // head
+        &blnode^.DescriptorListHead, // head
         &desc^.Entry, // entry
     )
 
@@ -691,7 +691,7 @@ FN BxInitializeMemory ()
     desc^.Type = BL_MEMORY_USED
 
     RtlInsertAtTailList (
-        &node^.DescriptorListHead, // head
+        &blnode^.DescriptorListHead, // head
         &desc^.Entry, // entry
     )
 
@@ -705,7 +705,7 @@ FN BxInitializeMemory ()
     desc^.Type = BL_MEMORY_FREE
 
     RtlInsertAtTailList (
-        &node^.DescriptorListHead, // head
+        &blnode^.DescriptorListHead, // head
         &desc^.Entry, // entry
     )
 
@@ -718,7 +718,7 @@ FN BxInitializeMemory ()
 END
 
 FN BxCreateVirtualSpace (
-    IN node : ^BlNodeInfo,
+    IN blnode : ^BlNodeInfo,
     IN base : UWORD,
     IN pages : UWORD,
 ) : UWORD
@@ -737,7 +737,7 @@ FN BxCreateVirtualSpace (
     // Allocate the page tables.
 
     desc := BlAllocatePhysicalRange (
-        node, // node
+        blnode, // blnode
         pagetables, // pages
         BL_MEMORY_USED, // type
     )
@@ -869,7 +869,7 @@ FN BxInitializeIo (
         desc : ^BlMemoryDescriptor
 
         BlInfoBlock.U.Fox.DbgOverlayBase = BlAllocateMappedRange (
-            BlInfoBlock.BootNode, // node
+            BlInfoBlock.BootNode, // blnode
             (bytes + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT, // pages
             BL_KERNEL_STRUCTURES, // prefva
             FALSE, // fixed
@@ -915,7 +915,7 @@ FN BxStartSystem (
     // Map the Prb at 0xFFFFC000.
 
     BxMapPage (
-        BlInfoBlock.BootNode, // node
+        BlInfoBlock.BootNode, // blnode
         0xFFFFC000, // vaddr
         prbphysical, // phyaddr
         BL_MEMORY_USED, // pttype
