@@ -99,24 +99,20 @@
     // to a node structure given a pointer within the node space since it lies
     // at the base of its node space.
 
-    (CAST (ptr & 0xF0000000) TO ^KeuNode)
+    (CAST ((ptr) & 0xF0000000) TO ^KeuNode)
 ]
 
 #MACRO KeNumaNodeById ( id ) [
     (CAST KE_NODE_SPACE_START + ((id) * KE_NODE_SPACE_SIZE) TO ^KeuNode)
 ]
 
-#MACRO KeNumaNodeFromArbitraryPointer ( destnode, srcptr ) [
-    // On an architecture with real NUMA support, this macro should defer to
-    // KeNumaNodeFromSpacePointer in the event the srcptr is in dynamic
-    // space, and should default to the boot node otherwise.
+#MACRO KeNumaNodeFromArbitraryPointer ( ptr ) [
+    // This works even with pointers that are not in node space by ORing the
+    // pointer with KE_NODE_SPACE_START. The effect is that for pointers in a
+    // static section of the kernel or a module, we should get a pointer to
+    // the boot node at 0xC0000000.
 
-    IF (srcptr) >= KE_NODE_SPACE_START THEN
-        (destnode) = KeNumaNodeFromSpacePointer ( srcptr )
-    ELSE
-        // Boot node is node 0.
-        (destnode) = KeNumaNodeById ( 0 )
-    END
+    (CAST (((ptr) & 0xF0000000) | KE_NODE_SPACE_START) TO ^KeuNode) 
 ]
 
 #MACRO KeCurrentVolatileNode () [
@@ -150,12 +146,8 @@
     (CAST KE_NODE_SPACE_START TO ^KeuNode)
 ]
 
-#MACRO KeNumaNodeFromArbitraryPointer ( destnode, srcptr ) [
-    // On an architecture with real NUMA support, this macro should defer to
-    // KeNumaNodeFromSpacePointer in the event the srcptr is in dynamic
-    // space, and should default to the boot node otherwise.
-
-    NOTHING (destnode) = (CAST KE_NODE_SPACE_START TO ^KeuNode)
+#MACRO KeNumaNodeFromArbitraryPointer ( ptr ) [
+    (CAST KE_NODE_SPACE_START TO ^KeuNode)
 ]
 
 #MACRO KeCurrentVolatileNode () [
