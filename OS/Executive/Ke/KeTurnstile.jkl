@@ -155,15 +155,11 @@ FN KepBoostPriority (
     WHILE TRUE DO
         // Boost the owner. His lock is held on entry, released on exit.
 
-        IF NOT KepRaisePriorityFloorThread (
+        boosted := KepRaisePriorityFloorThread (
             owner, // thread
             interactive, // interactive
             priority, // priority
-        ) THEN
-            // Didn't boost, we're done.
-
-            BREAK
-        END
+        )
 
         // We have to follow the chain of lock owners and boost them all.
         // Each blocked thread is linked to its turnstile by BlockedOnTurnstile
@@ -182,31 +178,33 @@ FN KepBoostPriority (
             BREAK
         END
 
-        // Move the waiter in the turnstile's maxheap to reflect a new
-        // bestowed priority.
+        IF boosted THEN
+            // Move the waiter in the turnstile's maxheap to reflect a new
+            // bestowed priority.
 
-        KepAcquireTurnstileElevated ( turnstile )
+            KepAcquireTurnstileElevated ( turnstile )
 
-        RtlRemoveFromHeap (
-            &KepCompareThreads, // comparisonfunc
-            &turnstile^.WaiterHeapRoot, // rootptr
-            &owner^.TurnstileEntry, // entry
-        )
+            RtlRemoveFromHeap (
+                &KepCompareThreads, // comparisonfunc
+                &turnstile^.WaiterHeapRoot, // rootptr
+                &owner^.TurnstileEntry, // entry
+            )
 
-        // Set new bestowed.
+            // Set new bestowed.
 
-        owner^.BestowedPriority = owner^.Priority
-        owner^.BestowedInteractivity = owner^.InteractiveBits
+            owner^.BestowedPriority = owner^.Priority
+            owner^.BestowedInteractivity = owner^.InteractiveBits
 
-        // Re-insert.
+            // Re-insert.
 
-        RtlInsertIntoHeap (
-            &KepCompareThreads, // comparisonfunc
-            &turnstile^.WaiterHeapRoot, // rootptr
-            &owner^.TurnstileEntry, // entry
-        )
+            RtlInsertIntoHeap (
+                &KepCompareThreads, // comparisonfunc
+                &turnstile^.WaiterHeapRoot, // rootptr
+                &owner^.TurnstileEntry, // entry
+            )
 
-        KepReleaseTurnstileElevated ( turnstile )
+            KepReleaseTurnstileElevated ( turnstile )
+        END
 
         // NOTE: Previously we set an owner^.Boosted flag here which indicated
         //       to the owner that if he was in the middle of performing
