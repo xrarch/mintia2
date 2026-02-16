@@ -93,17 +93,13 @@
 #DEFINE KE_CACHE_SPACE_SIZE [(64 * 1024 * 1024)]
 
 #MACRO KeNumaNodeFromSpacePointer ( ptr ) [
-    // We map NUMA node spaces on XR/frame from 0xC0000000 to the top of the
-    // address space in 256MB increments. Four nodes exist, so bits 29:28 are
-    // the node ID. Masking off bits 0:27 is sufficient to calculate the pointer
-    // to a node structure given a pointer within the node space since it lies
-    // at the base of its node space.
+    // We map the virtual NUMA node spaces on XR/frame from 0xC0000000 to the
+    // top of the address space in 256MB increments. Four nodes exist, so bits
+    // 29:28 are the node ID. Masking off bits 0:27 is sufficient to calculate
+    // the pointer to a node structure given a pointer within the node space
+    // since it lies at the base of its node space.
 
     (CAST ((ptr) & 0xF0000000) TO ^KeuNode)
-]
-
-#MACRO KeNumaNodeById ( id ) [
-    (CAST KE_NODE_SPACE_START + ((id) * KE_NODE_SPACE_SIZE) TO ^KeuNode)
 ]
 
 #MACRO KeNumaNodeFromArbitraryPointer ( ptr ) [
@@ -117,6 +113,10 @@
 
 #MACRO KeCurrentVolatileNode () [
     ((CAST 0xFFFFCFF4 TO ^^KeuNode)^)
+]
+
+#MACRO KeNumaNodeById ( id ) [
+    (CAST KE_NODE_SPACE_START + ((id) * KE_NODE_SPACE_SIZE) TO ^KeuNode)
 ]
 
 #ELSE

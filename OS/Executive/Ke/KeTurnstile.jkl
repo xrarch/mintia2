@@ -294,24 +294,28 @@ FN KepBlockOnLock (
     IN current : UWORD,
 )
 
-    // Block on the lock. First acquire a pointer to the current thread.
-
-    thread := KeCurrentThread ()
-
-    // Lock the turnstile chain.
-
-    kenode := KeNumaNodeFromArbitraryPointer ( lock )
-
-    chain := &kenode^.Kep^.TurnstileChains[KepTurnstileHash(lock)]
+    // Block on the lock.
 
     turnstile : ^KepTurnstile
     otherturnstile : ^KepTurnstile
+
+    // First acquire a pointer to the current thread.
+
+    thread := KeCurrentThread ()
+
+    // Get a pointer to the owner, if the lock is held exclusive.
 
     owner : ^KeuThread = NULLPTR
 
     IF current & KEP_LOCK_WRITE_LOCKED THEN
         owner = CAST current & KEP_LOCK_BITS TO ^KeuThread
     END
+
+    // Lock the turnstile chain.
+
+    kenode := KeNumaNodeFromArbitraryPointer ( lock )
+
+    chain := &kenode^.Kep^.TurnstileChains[KepTurnstileHash(lock)]
 
     ipl := KepAcquireChain ( chain )
 
