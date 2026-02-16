@@ -162,7 +162,7 @@ EXTERN FN PsuInitializeStage2 ()
 
 EXTERN FN PsuCreateProcessObject (
     IN params : ^NsOpenParameters,
-    IN mmnode : ^MmpNode,
+    IN kenode : ^KeuNode,
     IN name : ^RtlString,
     IN quotauid : UWORD,
     IN flags : UWORD,
@@ -172,6 +172,7 @@ EXTERN FN PsuCreateProcessObject (
 EXTERN FN PsuCreateThreadObject (
     IN params : ^NsOpenParameters,
     IN name : ^RtlString,
+    IN kenode : ^KeuNode,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -196,15 +197,11 @@ EXTERN FN (ExWorkItemF) PsuReaperWorker (
 ]
 
 #MACRO PsuSystemCredentials () [
-    (PsCurrentNode()^.SystemCred)
+    (KeCurrentVolatileNode()^.SystemCred)
 ]
 
 #MACRO PsuQuotaBlock ( process ) [
     ((process)^.Paged^.HandleTable.QuotaBlock)
-]
-
-#MACRO PsCurrentNode () [
-    (PsCurrentProcess()^.Pcb.Node)
 ]
 
 EXTERN FN PsuBlockRundownProcess (

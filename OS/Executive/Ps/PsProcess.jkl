@@ -9,7 +9,7 @@ PsuRoundRobinNodeId : ULONG = 0
 
 STRUCT PspProcessContext
     Name : ^RtlString,
-    MmNode : ^MmpNode,
+    KeNode : ^KeuNode,
     QuotaUid : ULONG,
     Flags : ULONG,
 END
@@ -387,7 +387,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
         CAST (process + SIZEOF PsuProcess) TO ^KepAsidInfoEntry
 #END
 
-    kenode := MmuNodeToKeNode ( ctx^.MmNode )
+    kenode := ctx^.KeNode
 
     KeuInitializeProcess (
         &process^.Pcb, // process
@@ -1027,7 +1027,7 @@ PUBLIC PspProcessType : ObuType = {
 #SECTION "PAGEtext"
 FN PsuCreateProcessObject (
     IN params : ^NsOpenParameters,
-    IN mmnode : ^MmpNode,
+    IN kenode : ^KeuNode,
     IN name : ^RtlString,
     IN quotauid : UWORD,
     IN flags : UWORD,
@@ -1041,7 +1041,7 @@ FN PsuCreateProcessObject (
     ctx.Name = name
     ctx.QuotaUid = quotauid
     ctx.Flags = flags
-    ctx.MmNode = mmnode
+    ctx.KeNode = kenode
 
     obparams : ObParameters
 
@@ -1057,7 +1057,7 @@ FN PsuCreateProcessObject (
         SIZEOF PsuPagedProcess, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
-        mmnode, // mmnode
+        kenode, // kenode
     )
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
@@ -1086,14 +1086,14 @@ FN PsuCreateProcess (
 
     // Create a process object - handle interface.
 
-    mmnode : ^MmpNode
+    kenode : ^KeuNode
     access : UWORD
     status : OsStatus
 
     IF nodeid == OS_NULL_NODE THEN
-        // Use the current process's node.
+        // Use the current thread's node.
 
-        mmnode = MmCurrentNode ()
+        kenode = KeCurrentThread ()^.Node
 
     ELSE
         // Use the specified NUMA node.
@@ -1119,14 +1119,14 @@ FN PsuCreateProcess (
             RETURN OS_STATUS_INVALID_ARGUMENT
         END
 
-        mmnode = KeNumaNodeById ( nodeid )^.Mmp
+        kenode = KeNumaNodeById ( nodeid )
     END
 
     process : ^PsuProcess
 
     status = PsuCreateProcessObject (
         params, // params
-        mmnode, // mmnode
+        kenode, // kenode
         name, // name
         quotauid, // quotauid
         flags, // flags
@@ -1890,17 +1890,4 @@ FN OsQueryQuotaProcess (
         &sysquota, // src
         SIZEOF OsQuotaQuery, // sz
     )
-END
-
-// The following functions are defined as macros for speed purposes within the
-// Executive but are exported as real functions for the benefit of kernel
-// modules, so we don't need to export these structures.
-
-#UNDEFINE PsCurrentNode
-
-EXPORT FN PsCurrentNode () : ^KeuNode
-
-    // Return the current node.
-
-    RETURN PsCurrentProcess()^.Pcb.Node
 END

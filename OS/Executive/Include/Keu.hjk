@@ -85,6 +85,7 @@ END
 EXTERN FN KeuInitializeThread (
     IN process : ^KeuProcess,
     IN thread : ^KeuThread,
+    IN kenode : ^KeuNode,
     IN name : ^UBYTE,
     IN kstack : ^VOID,
     IN kstacksize : UWORD,
@@ -235,6 +236,8 @@ STRUCT KeuThread
     KapcListHead : RtlListEntry,
     LapcListHead : RtlListEntry,
     UapcListHead : RtlListEntry,
+
+    Node : ^KeuNode,
 
     // My turnstile.
 
@@ -451,3 +454,7 @@ EXTERN FN KeuReaperBarrier (
 #END
 
 EXTERN KeuReaperCustodyList : KeuCustodyList
+
+#MACRO KeCurrentAffinityNode () [
+    (KeCurrentThread()^.Node)
+]

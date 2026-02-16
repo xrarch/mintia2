@@ -102,17 +102,3 @@ FN MmuQueryProcess (
     query^.WorkingSetSize = process^.WorkingSetSize
     query^.PageFaultCount = process^.PageFaultCount
 END
-
-// The following functions are defined as macros for speed purposes within the
-// Executive but are exported as real functions for the benefit of kernel
-// modules, so we don't need to export these structures.
-
-#UNDEFINE MmCurrentNode
-#UNDEFINE MmCurrentPartition
-
-EXPORT FN MmCurrentNode () : ^MmpNode
-
-    // Return the current node.
-
-    RETURN PsCurrentNode()^.Mmp
-END

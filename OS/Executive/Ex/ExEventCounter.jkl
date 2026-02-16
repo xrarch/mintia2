@@ -7,13 +7,13 @@
 
 #SECTION "INITtext"
 FN ExpInitializeEventCountersForNode (
-    IN expnode : ^ExpNode,
+    IN kenode : ^KeuNode,
 )
 
     // Initialize the event counter list.
 
-    expnode^.EventCounterCache = MmCreatePoolCache (
-        MmCurrentNode (), // mmnode
+    kenode^.Exp^.EventCounterCache = MmCreatePoolCache (
+        kenode^.Mmp, // mmnode
         "Event Counters", // name
         SIZEOF ExuEventCounter, // size
         MM_NONPAGED_POOL, // poolindex
@@ -21,7 +21,7 @@ FN ExpInitializeEventCountersForNode (
     )
 
 #ENTERSECTION "INITtext"
-    IF NOT expnode^.EventCounterCache THEN
+    IF NOT kenode^.Exp^.EventCounterCache THEN
         KeCrash ( "ExpInitializeEventCounters: failed to create cache\n" )
     END
 #LEAVESECTION
@@ -37,9 +37,9 @@ FN ExpInitializeEventCounters ()
     nodes := KeQueryNodeCount ()
 
     WHILE i < nodes DO
-        expnode := KeNumaNodeById ( i )^.Exp
+        kenode := KeNumaNodeById ( i )
 
-        ExpInitializeEventCountersForNode ( expnode )
+        ExpInitializeEventCountersForNode ( kenode )
 
         i += 1
     END

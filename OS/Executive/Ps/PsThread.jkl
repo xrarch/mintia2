@@ -344,6 +344,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     IF NOT KeuInitializeThread (
         &process^.Pcb, // process
         &thread^.Tcb, // thread
+        kenode, // kenode
         ctx^.Name^.Data, // name
         kstack, // kstack
         KEU_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
@@ -1061,6 +1062,7 @@ PUBLIC PspThreadType : ObuType = {
 FN PsuCreateThreadObject (
     IN params : ^NsOpenParameters,
     IN name : ^RtlString,
+    IN kenode : ^KeuNode,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -1091,7 +1093,7 @@ FN PsuCreateThreadObject (
         SIZEOF PsuPagedThread, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
-        process^.Pcb.Node^.Mmp, // mmnode
+        kenode, // kenode
     )
 
     RETURN NsuCreateObject (
@@ -1126,6 +1128,7 @@ EXPORT FN PsCreateExecutiveThread (
     status := PsuCreateThreadObject (
         &params, // params
         name, // name
+        kenode, // kenode
         startfunc, // startfunc
         context1, // context1
         context2, // context2
@@ -1151,6 +1154,7 @@ END
 FN PsuCreateThread (
     IN params : ^NsOpenParameters,
     IN name : ^RtlString,
+    IN nodeid : UWORD,
     IN startfunc : KeStartThreadF,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -1163,6 +1167,25 @@ FN PsuCreateThread (
 
     process : ^PsuProcess
     access : UWORD
+
+    kenode : ^KeuNode
+
+    IF nodeid == OS_NULL_NODE THEN
+        // Use the current thread's node.
+
+        kenode = KeCurrentThread ()^.Node
+
+    ELSE
+        // Use the specified NUMA node.
+
+        IF nodeid >= KeQueryNodeCount () THEN
+            // Not a valid node ID.
+
+            RETURN OS_STATUS_INVALID_ARGUMENT
+        END
+
+        kenode = KeNumaNodeById ( nodeid )
+    END
 
     status := ObuReferenceByHandle (
         processhandle, // handle
@@ -1188,6 +1211,7 @@ FN PsuCreateThread (
     status = PsuCreateThreadObject (
         params, // params
         name, // name
+        kenode, // kenode
         startfunc, // startfunc
         context1, // context1
         context2, // context2
@@ -1246,6 +1270,7 @@ END
 FN OsCreateThread (
     IN params : ^OsOpenParameters,
     IN name : ^RtlString,
+    IN nodeid : UWORD,
     IN startfunc : OsStartThreadF,
     IN context : UWORD,
     IN processhandle : UWORD,
@@ -1281,6 +1306,7 @@ FN OsCreateThread (
     status = PsuCreateThread (
         &sysparams, // params
         &sysname, // name
+        nodeid, // nodeid
         &PspUserThreadEntry, // startfunc
         CAST startfunc TO UWORD, // context1
         context, // context2

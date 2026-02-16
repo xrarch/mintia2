@@ -58,6 +58,7 @@ END
 FN KeuInitializeThread (
     IN process : ^KeuProcess,
     IN thread : ^KeuThread,
+    IN kenode : ^KeuNode,
     IN name : ^UBYTE,
     IN kstack : ^VOID,
     IN kstacksize : UWORD,
@@ -80,6 +81,8 @@ FN KeuInitializeThread (
 
     thread^.ActualProcess = process
     thread^.Process = process
+
+    thread^.Node = kenode
 
     thread^.BalancedQueue = NULLPTR
 
@@ -955,4 +958,17 @@ FN KepDispatchUserInterrupts ()
 
         KepDisableInterrupts ()
     END
+END
+
+// The following functions are defined as macros for speed purposes within the
+// Executive but are exported as real functions for the benefit of kernel
+// modules, so we don't need to export these structures.
+
+#UNDEFINE KeCurrentAffinityNode
+
+EXPORT FN KeCurrentAffinityNode () : ^KeuNode
+
+    // Return the current node.
+
+    RETURN KeCurrentThread()^.Node
 END

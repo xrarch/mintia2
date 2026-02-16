@@ -1027,7 +1027,7 @@ EXPORT FN MmAllocatePoolEx (
     KeAssert ( bytes != 0 )
 
     IF NOT mmnode THEN
-        mmnode = MmCurrentNode ()
+        mmnode = MmCurrentAffinityNode ()
     END
 
     thread : ^PsuThread = NULLPTR
@@ -1209,7 +1209,7 @@ FN MmWaitForPoolMemory ()
     // END
 
     MmpWaitForPages (
-        MmCurrentNode(), // mmnode
+        MmCurrentAffinityNode(), // mmnode
         PsCurrentThread()^.VmPrivileged, // low
     )
 END

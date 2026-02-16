@@ -19,7 +19,7 @@ STRUCT ObParameters
 
     Context : ^VOID,
 
-    AllocationNode : ^MmpNode,
+    AllocationNode : ^KeuNode,
 
     Permissions : ObPermissions,
     Flags : ULONG,
@@ -47,7 +47,7 @@ END
     pagedbodysize,
     npquotabias,
     pgquotabias,
-    mmnode,
+    kenode,
 ) [
 
     NOTHING (obparams)^.TypeId = (typeid)
@@ -62,7 +62,7 @@ END
     NOTHING (obparams)^.PagedBodySize = (pagedbodysize)
     NOTHING (obparams)^.NpQuotaBias = (npquotabias)
     NOTHING (obparams)^.PgQuotaBias = (pgquotabias)
-    NOTHING (obparams)^.AllocationNode = (mmnode)
+    NOTHING (obparams)^.AllocationNode = (kenode)
 ]
 
 #MACRO ObInitializeParameters (
@@ -88,7 +88,7 @@ END
         pagedbodysize,
         npquotabias,
         pgquotabias,
-        MmCurrentNode(),
+        KeCurrentAffinityNode(),
     )
 ]
 
