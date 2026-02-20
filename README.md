@@ -21,6 +21,10 @@ VMS and NT. The locking design (usage of turnstiles and priority inheritance) is
 inspired by Solaris. The plug-n-play and power management aspects of the IO
 system are inspired by XNU's IOKit.
 
+## License
+
+MINTIA is licensed under GPLv3. See COPYING.
+
 ## Supported Architectures
 
 <a href="https://github.com/xrarch/xremu"><img src="https://raw.githubusercontent.com/xrarch/mintia2/main/badge-17032.png" width="256"></a>
@@ -54,6 +58,6 @@ With the XR/station emulator (`./xremu/`) and MINTIA repository (`./mintia2/`) i
 
 If it doesn't boot automatically, type this command at the firmware prompt:
 
-`boot dks0s0`
+`boot dks0s0 -tests`
 
-MINTIA ~~should boot to the login prompt.~~ does nothing currently!
+MINTIA should ~~boot to the login prompt~~ show you some cool fireworks.
