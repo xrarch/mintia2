@@ -94,6 +94,15 @@ FN BlMain () : UWORD
         END
     END
 
+#IF BLD_NUMA
+    // Copy the boot node page directory to all other nodes, and perform memory
+    // mirroring.
+
+    IF BlInfoBlock.NodeCount > 1 THEN
+        BlMirrorNumaMemory ()
+    END
+#END
+
     // Start the system.
 
     RtlPrint ( "Starting the system...\n\n" )

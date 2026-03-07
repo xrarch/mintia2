@@ -217,17 +217,17 @@ BxStartMapping:
     mtcr dtbindex, zero
     mtcr itbindex, zero
 
-    la   t0, (0xB02C0000 >> 12)
+    la   t0, (0xB02C0000 >> RTL_PAGE_SHIFT)
     mtcr dtbtag, t0
 
     lshi t0, a2, 5
     ori  t0, t0, (MMP_PTE_V | MMP_PTE_W | MMP_PTE_G | MMP_PTE_K)
     mtcr dtbpte, t0
 
-    rshi t0, a0, 12
+    rshi t0, a0, RTL_PAGE_SHIFT
     mtcr itbtag, t0
 
-    rshi t0, a1, 12
+    rshi t0, a1, RTL_PAGE_SHIFT
     lshi t0, t0, 5
     ori  t0, t0, (MMP_PTE_V | MMP_PTE_W | MMP_PTE_G | MMP_PTE_K)
     mtcr itbpte, t0
@@ -269,10 +269,10 @@ BxStartSystem:
     li   t1, 1
     mtcr dtbindex, t1
 
-    la   t1, (0xFFFFC000 >> 12)
+    la   t1, (0xFFFFC000 >> RTL_PAGE_SHIFT)
     mtcr dtbtag, t1
 
-    rshi t1, a1, 12
+    rshi t1, a1, RTL_PAGE_SHIFT
     lshi t1, t1, 5
     ori  t1, t1, 0x17 // MMP_PTE_V | MMP_PTE_W | MMP_PTE_G | MMP_PTE_K
     mtcr dtbpte, t1
@@ -299,8 +299,8 @@ BxStartSystem:
 // a0 - vaddr
 BxFlushPage:
 
-    rshi t0, a0, 12
-    lshi t0, t0, 12
+    rshi t0, a0, RTL_PAGE_SHIFT
+    lshi t0, t0, RTL_PAGE_SHIFT
     mtcr itbctrl, t0
     mtcr dtbctrl, t0
 
@@ -625,13 +625,13 @@ FN BxInitializeMemory (
 
     RtlFillMemoryWithUlong (
         pgdir, // ptr
-        2048, // size
+        RTL_PAGE_SIZE / 2, // size
         0x00000000, // ulong
     )
 
     RtlFillMemoryWithUlong (
-        pgdir + 2048, // ptr
-        2048, // size
+        pgdir + (RTL_PAGE_SIZE / 2), // ptr
+        RTL_PAGE_SIZE / 2, // size
         0x00000010, // ulong
     )
 
@@ -641,11 +641,11 @@ FN BxInitializeMemory (
 
     pages := FwDeviceDatabase^.Ram[0].PageFrameCount
 
-    IF pages > (4 * 1024 * 1024) / 4096 THEN
+    IF pages > (4 * 1024 * 1024) / RTL_PAGE_SIZE THEN
         // Only map up to 4MB so that we don't allocate extra page tables for no
         // reason.
 
-        pages = (4 * 1024 * 1024) / 4096
+        pages = (4 * 1024 * 1024) / RTL_PAGE_SIZE
     END
 
     BxMapRange (
@@ -718,7 +718,8 @@ FN BxInitializeMemory (
 
     pdeptr := &pgdir[0xB0000000 >> 22]
 
-    pdeptr^ = ((pgdir >> 12) << 5) | MMP_PTE_V | MMP_PTE_W | MMP_PTE_K
+    pdeptr^ = ((pgdir >> RTL_PAGE_SHIFT) << 5) |
+        MMP_PTE_V | MMP_PTE_W | MMP_PTE_K
 END
 
 FN BxMapPage (
@@ -1259,3 +1260,17 @@ FN (BlStartProcessorsF) BxStartProcessors (
 END
 
 #END
+
+FN BxMirrorPageTable (
+    IN blnode : ^BlNodeInfo,
+)
+
+    // Mirror the boot node's page directory to this node's.
+    // Should be allocated in the direct mapped low 4MB.
+
+    RtlCopyBytes (
+        CAST blnode^.SystemPageDirectoryPfn << RTL_PAGE_SHIFT TO ^ULONG, // dest
+        BxBootPageDirectory, // src
+        RTL_PAGE_SIZE, // sz
+    )
+END

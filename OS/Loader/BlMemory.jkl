@@ -936,3 +936,32 @@ FN BlInitializeMemory ()
         listentry = listentry^.Next
     END
 END
+
+#IF BLD_NUMA
+
+FN BlMirrorNumaMemory ()
+
+    // Copy the boot page table to the other nodes and mirror the memory ranges
+    // that have been marked as mirrored.
+
+    blnode : ^BlNodeInfo
+
+    RtlPrint ( "Mirroring NUMA memory...\n" )
+
+    // First mirror the page table.
+
+    listhead := &BlInfoBlock.NodeListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        blnode = CONTAINEROF listentry TO BlNodeInfo.Entry
+
+        IF blnode != BlInfoBlock.BootNode THEN
+            BxMirrorPageTable ( blnode )
+        END
+
+        listentry = listentry^.Next
+    END
+END
+
+#END
