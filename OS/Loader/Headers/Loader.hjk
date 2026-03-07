@@ -33,9 +33,16 @@ FNPTR BlStartProcessorsF (
     IN startfunc : BlStartProcessorF,
 )
 
-STRUCT BlInfoRecordXrStation
+STRUCT BlNodeInfoXrStation
     ExceptionBlock : ^VOID,
     ExceptionBlockPhys : ^VOID,
+END
+
+UNION BlNodeInfoUnion
+    Xr : BlNodeInfoXrStation,
+END
+
+STRUCT BlInfoRecordXrStation
     CitronBase : ^VOID,
     LsicBase : ^VOID,
     NvramBase : ^VOID,
@@ -113,8 +120,9 @@ STRUCT BlNodeInfo
 
     TotalPages : UWORD,
 
-    ProcessorIdBase : UWORD,
     ProcessorCount : UWORD,
+
+    U : BlNodeInfoUnion,
 
     Id : UINT,
 END

@@ -812,13 +812,82 @@ FN BlInitializeNodeMemory (
     blnode^.DynamicSpaceBitmap = bmp
 END
 
+FN BlInitializeNode (
+    IN blnode : ^BlNodeInfo,
+    IN startaddr : UWORD,
+    IN endaddr : UWORD,
+    IN id : UWORD,
+    IN procs : UWORD,
+)
+
+    // Initialize a node structure and insert it into the list of nodes.
+
+    RtlInitializeList ( &blnode^.DescriptorListHead )
+
+    blnode^.StartPhysicalAddress = startaddr
+    blnode^.EndPhysicalAddress = endaddr
+
+    blnode^.Id = id
+
+    blnode^.NodeSpaceBase = KeNumaNodeById ( id )
+
+    blnode^.ProcessorCount = procs
+
+    blnode^.KernelStructureBump = blnode^.NodeSpaceBase +
+        KE_BL_BUMP_SPACE_OFFSET
+
+    blnode^.TotalPages = 0
+
+    RtlInsertAtTailList (
+        &BlInfoBlock.NodeListHead, // head
+        &blnode^.Entry, // entry
+    )
+
+    IF id == 0 THEN
+        BlInfoBlock.BootNode = blnode
+    END
+END
+
+FN BlInitializeMemoryDescriptor (
+    IN blnode : ^BlNodeInfo,
+    IN desc : ^BlMemoryDescriptor,
+    IN startpfn : UWORD,
+    IN pagecount : UWORD,
+    IN type : BlMemoryDescriptorType,
+)
+
+    // Initialize a memory descriptor and insert it into the list.
+
+    desc^.StartPfn = startpfn
+    desc^.PageCount = pagecount
+    desc^.Type = type
+
+    RtlInsertAtTailList (
+        &blnode^.DescriptorListHead, // head
+        &desc^.Entry, // entry
+    )
+
+    blnode^.TotalPages += pagecount
+END
+
 FN BlInitializeMemory ()
+
+    // Initialize virtual memory into the basic shape it should take by the time
+    // the Executive takes control, and initialize the loader's physical memory
+    // allocator.
+
+    blnode : ^BlNodeInfo
 
     // Initialize the node list.
 
     RtlInitializeList ( &BlInfoBlock.NodeListHead )
 
-    // Initialize the kernel space bitmap.
+    // Call the platform to populate the node list.
+
+    BxPopulateNodeList ()
+
+    // Initialize the kernel space bitmap, used to allocate space for kernel
+    // modules that are loaded at boot time.
 
     RtlInitializeBitmap (
         &BlKernelSpaceBitmap, // header
@@ -826,10 +895,25 @@ FN BlInitializeMemory ()
         &BlKernelSpaceBitmapData[0], // data
     )
 
-    // Call the platform code to populate our memory descriptor list, enable
-    // paging, whatever it needs to do.
+    // Call the platform to populate the per-node memory descriptor lists.
 
-    BxInitializeMemory ()
+    listhead := &BlInfoBlock.NodeListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        blnode = CONTAINEROF listentry TO BlNodeInfo.Entry
+
+        BxInitializeMemory ( blnode )
+
+        listentry = listentry^.Next
+    END
+
+    // Enable virtual addressing on the boot processor (this one).
+    // This is a no-op on platforms that enter this loader with virtual
+    // addressing already enabled. On platforms that don't, this is the right
+    // moment to enable it.
+
+    BxEnableVirtualAddressing ()
 
 #IF BLD_CHK
     BlOkayToAllocate = TRUE
@@ -841,11 +925,11 @@ FN BlInitializeMemory ()
 
     // Initialize the per-node virtual spaces.
 
-    listhead := &BlInfoBlock.NodeListHead
-    listentry := listhead^.Next
+    listhead = &BlInfoBlock.NodeListHead
+    listentry = listhead^.Next
 
     WHILE listentry != listhead DO
-        blnode := CONTAINEROF listentry TO BlNodeInfo.Entry
+        blnode = CONTAINEROF listentry TO BlNodeInfo.Entry
 
         BlInitializeNodeMemory ( blnode )
 

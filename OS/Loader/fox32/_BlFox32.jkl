@@ -15,6 +15,7 @@ entry:
     jmp  BxEntry
 
 BxEnableVirtualAddressing:
+.global BxEnableVirtualAddressing
     tlb [BxPageDirectory]
     mse
     ret
@@ -56,8 +57,6 @@ EXTERN FN BxFox32In (
 ) : UWORD
 
 EXTERN FN BxHaltFox32 ()
-
-EXTERN FN BxEnableVirtualAddressing ()
 
 EXTERN _bss : UBYTE
 EXTERN _bss_size : UBYTE
@@ -518,14 +517,115 @@ FN BxRemapCodeRange (
     END
 END
 
-FN BxInitializeMemoryMapping ()
+BxInitialDescriptors : BlMemoryDescriptor[8]
 
-    // Create the initial page tables and turn on memory mapping.
+BxBootNode : BlNodeInfo
+
+FN BxPopulateNodeList ()
+
+    // Populate the list of NUMA nodes.
+
+    blnode := &BxBootNode
+
+    BlInitializeNode (
+        blnode, // blnode
+        0, // startaddr
+        -1, // endaddr
+        0, // id
+        1, // procs
+    )
+END
+
+FN BxInitializeMemory (
+    IN blnode : ^BlNodeInfo,
+)
+
+    // On fox32, this function has to populate the memory
+    // descriptor list, identity map memory, and then enable paging.
+
+    // We need to initialize the list of NUMA nodes.
+    // fox32 does not have NUMA support so there's only one node.
+
+    descidx := 0
+
+    desc := &BxInitialDescriptors[descidx]
+    descidx += 1
+
+    // Figure out the top of the bootloader.
+
+    endreclaimable : UWORD = &_bss_end
+    endreclaimable += RTL_PAGE_SIZE - 1
+    endreclaimable >>= RTL_PAGE_SHIFT
+
+    // Create the descriptor for the IVT.
+
+    BlInitializeMemoryDescriptor (
+        blnode, // blnode
+        desc, // desc
+        0, // startpfn
+        1, // pagecount
+        BL_MEMORY_USED, // type
+    )
+
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
+    
+    // Create the descriptor for the block of memory containing the bootloader.
+
+    BlInitializeMemoryDescriptor (
+        blnode, // blnode
+        desc, // desc
+        1, // startpfn
+        endreclaimable - 1, // pagecount
+        BL_MEMORY_RECLAIMABLE, // type
+    )
+
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
+
+    // Create the descriptor for the first free range.
+
+    BlInitializeMemoryDescriptor (
+        blnode, // blnode
+        desc, // desc
+        endreclaimable, // startpfn
+        (FRAMEBUFFER_START >> RTL_PAGE_SHIFT) - endreclaimable, // pagecount
+        BL_MEMORY_FREE, // type
+    )
+
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
+
+    // Create the descriptor for the fox32 framebuffer.
+
+    BlInitializeMemoryDescriptor (
+        blnode, // blnode
+        desc, // desc
+        FRAMEBUFFER_START >> RTL_PAGE_SHIFT, // startpfn
+        FRAMEBUFFER_SIZE >> RTL_PAGE_SHIFT, // pagecount
+        BL_MEMORY_USED, // type
+    )
+
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
+
+    // Create the descriptor for the second free range.
+
+    BlInitializeMemoryDescriptor (
+        blnode, // blnode
+        desc, // desc
+        FRAMEBUFFER_END >> RTL_PAGE_SHIFT, // startpfn
+        (0x4000000 - FRAMEBUFFER_END) >> RTL_PAGE_SHIFT, // pagecount
+        BL_MEMORY_FREE, // type
+    )
+
+    desc = &BxInitialDescriptors[descidx]
+    descidx += 1
 
     // Allocate the kernel page directory.
 
-    desc := BlAllocatePhysicalRange (
-        BlInfoBlock.BootNode, // blnode
+    desc = BlAllocatePhysicalRange (
+        blnode, // blnode
         1, // pages
         BL_MEMORY_USED, // type
     )
@@ -534,7 +634,7 @@ FN BxInitializeMemoryMapping ()
         BlCrash ( "Failed to allocate page directory\n" )
     END
 
-    BlInfoBlock.BootNode^.SystemPageDirectoryPfn = desc^.StartPfn
+    blnode^.SystemPageDirectoryPfn = desc^.StartPfn
 
     // Fill the bottom half of the page directory with zeroes and the upper half
     // with invalid kernel PTEs.
@@ -552,7 +652,7 @@ FN BxInitializeMemoryMapping ()
     // right now).
 
     BxMapRange (
-        BlInfoBlock.BootNode, // blnode
+        blnode, // blnode
         0, // vaddr
         0, // phyaddr
         0x400000 >> RTL_PAGE_SHIFT, // pages
@@ -563,7 +663,7 @@ FN BxInitializeMemoryMapping ()
     // Identity map the framebuffer too.
 
     BxMapRange (
-        BlInfoBlock.BootNode, // blnode
+        blnode, // blnode
         FRAMEBUFFER_START, // vaddr
         FRAMEBUFFER_START, // phyaddr
         FRAMEBUFFER_SIZE >> RTL_PAGE_SHIFT, // pages
@@ -582,139 +682,12 @@ FN BxInitializeMemoryMapping ()
     // for resets.
 
     BxMapPage (
-        BlInfoBlock.BootNode, // blnode
+        blnode, // blnode
         0xF0000000, // vaddr
         0xF0000000, // phyaddr
         BL_MEMORY_USED, // pttype
         FALSE, // noncached
     )
-
-    // Now we can enable virtual addressing.
-
-    BxEnableVirtualAddressing ()
-END
-
-BxInitialDescriptors : BlMemoryDescriptor[8]
-
-BxBootNode : BlNodeInfo
-
-FN BxInitializeMemory ()
-
-    // On fox32, this function has to populate the memory
-    // descriptor list, identity map memory, and then enable paging.
-
-    // We need to initialize the list of NUMA nodes.
-    // fox32 does not have NUMA support so there's only one node.
-
-    blnode := &BxBootNode
-
-    RtlInitializeList ( &blnode^.DescriptorListHead )
-
-    blnode^.StartPhysicalAddress = 0
-    blnode^.EndPhysicalAddress = -1
-
-    blnode^.Id = 0
-
-    blnode^.NodeSpaceBase = KE_NODE_SPACE_START
-
-    blnode^.ProcessorIdBase = 0
-    blnode^.ProcessorCount = 1
-
-    blnode^.KernelStructureBump = KE_NODE_SPACE_START + KE_BL_BUMP_SPACE_OFFSET
-
-    RtlInsertAtTailList (
-        &BlInfoBlock.NodeListHead, // head
-        &blnode^.Entry, // entry
-    )
-
-    BlInfoBlock.BootNode = blnode
-
-    blnode^.TotalPages = (64 * 1024 * 1024) / 4096
-
-    descidx := 0
-
-    desc := &BxInitialDescriptors[descidx]
-    descidx += 1
-
-    // Figure out the top of the bootloader.
-
-    endreclaimable : UWORD = &_bss_end
-    endreclaimable += RTL_PAGE_SIZE - 1
-    endreclaimable >>= RTL_PAGE_SHIFT
-
-    // Create the descriptor for the IVT.
-
-    desc^.StartPfn = 0
-    desc^.PageCount = 1
-    desc^.Type = BL_MEMORY_USED
-
-    RtlInsertAtTailList (
-        &blnode^.DescriptorListHead, // head
-        &desc^.Entry, // entry
-    )
-
-    desc = &BxInitialDescriptors[descidx]
-    descidx += 1
-    
-    // Create the descriptor for the block of memory containing the bootloader.
-
-    desc^.StartPfn = 1
-    desc^.PageCount = endreclaimable - 1
-    desc^.Type = BL_MEMORY_RECLAIMABLE
-
-    RtlInsertAtTailList (
-        &blnode^.DescriptorListHead, // head
-        &desc^.Entry, // entry
-    )
-
-    desc = &BxInitialDescriptors[descidx]
-    descidx += 1
-
-    // Create the descriptor for the first free range.
-
-    desc^.StartPfn = endreclaimable
-    desc^.PageCount = (FRAMEBUFFER_START >> RTL_PAGE_SHIFT) - endreclaimable
-    desc^.Type = BL_MEMORY_FREE
-
-    RtlInsertAtTailList (
-        &blnode^.DescriptorListHead, // head
-        &desc^.Entry, // entry
-    )
-
-    desc = &BxInitialDescriptors[descidx]
-    descidx += 1
-
-    // Create the descriptor for the fox32 framebuffer.
-
-    desc^.StartPfn = FRAMEBUFFER_START >> RTL_PAGE_SHIFT
-    desc^.PageCount = FRAMEBUFFER_SIZE >> RTL_PAGE_SHIFT
-    desc^.Type = BL_MEMORY_USED
-
-    RtlInsertAtTailList (
-        &blnode^.DescriptorListHead, // head
-        &desc^.Entry, // entry
-    )
-
-    desc = &BxInitialDescriptors[descidx]
-    descidx += 1
-
-    // Create the descriptor for the second free range.
-
-    desc^.StartPfn = FRAMEBUFFER_END >> RTL_PAGE_SHIFT
-    desc^.PageCount = (0x4000000 - FRAMEBUFFER_END) >> RTL_PAGE_SHIFT
-    desc^.Type = BL_MEMORY_FREE
-
-    RtlInsertAtTailList (
-        &blnode^.DescriptorListHead, // head
-        &desc^.Entry, // entry
-    )
-
-    desc = &BxInitialDescriptors[descidx]
-    descidx += 1
-
-    // Enable paging.
-
-    BxInitializeMemoryMapping ()
 END
 
 FN BxCreateVirtualSpace (
