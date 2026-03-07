@@ -42,7 +42,13 @@ FN BlMain () : UWORD
 
     RtlPrint ( "Loading the system...\n" )
 
-    exec := BlLoadDll ( "mpx.sys" )
+    execname := BlGetValueArg ( "EXEC" )
+
+    IF NOT execname THEN
+        execname = "mintia.sys"
+    END
+
+    exec := BlLoadDll ( execname )
 
     IF NOT exec THEN
         BlCrash ( "Failed to load the Executive.\n" )
