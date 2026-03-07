@@ -3,6 +3,7 @@
 //
 
 #INCLUDE "../Mmp.hjk"
+#INCLUDE "../../../Loader/Headers/Loader.hjk"
 
 #SECTION "INITtext"
 FN MmpInitializeArchitecture ()
@@ -10,13 +11,43 @@ FN MmpInitializeArchitecture ()
     // Unmap the lower half mappings made by the Loader so that we catch illegal
     // accesses to them.
 
+    // First unmap those of the other nodes, through the direct map at the
+    // bottom of memory.
+
+    listhead := &KeuLoaderBlock.NodeListHead
+    listentry := listhead^.Next
+
+    WHILE listhead != listentry DO
+        blnode := CONTAINEROF listentry TO BlNodeInfo.Entry
+
+        IF blnode != KeuLoaderBlock.BootNode THEN
+            RtlFillMemoryWithUlong (
+                CAST blnode^.SystemPageDirectoryPfn <<
+                    RTL_PAGE_SHIFT TO ^VOID, // ptr
+                RTL_PAGE_SIZE / 2, // sz
+                0, // ulong
+            )
+        END
+
+        listentry = listentry^.Next
+    END
+
+    // Make sure we're on the boot processor (we should be in the context of the
+    // boot processor's idle thread)
+
+    KeAssert ( KeCurrentVolatileNode ()^.Id == 0 AND
+        KeCurrentNodeLocalProcessorId () == 0 )
+
+    // Now unmap the boot node's direct map. This time, do it through the
+    // virtually linear page table mapping.
+
     RtlFillMemoryWithUlong (
         CAST MMP_DIRECTORY_BASE TO ^VOID, // ptr
-        2048, // sz
+        RTL_PAGE_SIZE / 2, // sz
         0, // ulong
     )
 
-    // Flush TB.
+    // Flush TB on all processors.
 
     KeuSweepTb ( FALSE )
 END
