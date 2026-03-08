@@ -99,14 +99,14 @@ FN ObuInitializeType (
 
         pernodetype := &kenode^.ObTypes[id]
 
-        pernodetype^.CachedPgBodySize = psize
-        pernodetype^.CachedNpBodySize = npsize
-
         RtlCopyBytes (
             pernodetype, // dest
             type, // src
             SIZEOF ObuType, // sz
         )
+
+        pernodetype^.CachedPgBodySize = psize
+        pernodetype^.CachedNpBodySize = npsize
 
         IF npsize THEN
             pernodetype^.NpPartCache = MmCreatePoolCache (

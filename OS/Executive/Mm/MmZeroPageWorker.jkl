@@ -95,7 +95,11 @@ FN (KeStartThreadF) MmuZeroPageWorker (
             i = 0
 
             WHILE i < MMP_ZERO_BATCH DO
-                MmZeroPage ( MmpPfeToPfn ( zerobatch[i] ) )
+                MmZeroPage (
+                    MmpPfeToPfn ( zerobatch[i] ), // pfn
+                    0, // offset
+                    RTL_PAGE_SIZE, // length
+                )
 
                 i += 1
             END

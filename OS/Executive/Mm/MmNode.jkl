@@ -449,7 +449,11 @@ FN MmpAllocatePage (
     IF mustzero THEN
         KeAssert ( pfe != NULLPTR )
 
-        MmZeroPage ( MmpPfeToPfn ( pfe ) )
+        MmZeroPage (
+            MmpPfeToPfn ( pfe ), // pfn
+            0, // offset
+            RTL_PAGE_SIZE, // length
+        )
     END
 
     RETURN pfe

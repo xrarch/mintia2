@@ -101,6 +101,7 @@ FN KepInitializePrb (
     // 1 - Software IDT pointer
     // 2 - Idle stack pointer
     // 3 - Global ID
+    // 4 - Hardware ID
 
     idword := CAST prb TO ^UWORD
 
@@ -108,6 +109,7 @@ FN KepInitializePrb (
     irqdt := idword[1]
     stackbase := idword[2]
     consecid := idword[3]
+    hwid := idword[4]
 
     // Clear the Prb.
 
@@ -123,6 +125,7 @@ FN KepInitializePrb (
     prb^.IrqDispatchTable = CAST irqdt TO ^VOID
     prb^.IdleStackBase = CAST stackbase TO ^VOID
     prb^.GlobalId = consecid
+    prb^.HwId = hwid
 
     // On some architectures, the thing we get from KEP_CURRENT_PRB_LOCAL is not
     // a globally visible address for this Prb.
@@ -559,7 +562,7 @@ EXPORT FN KeMain (
 
     KepInitializeNodes ()
 
-    // Acquire a point to the boot Prb.
+    // Acquire a pointer to the boot Prb.
 
     prb := KepPrbFromNodeAndNumber ( KeNumaNodeById ( 0 ), 0 )
 

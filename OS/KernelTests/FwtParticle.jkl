@@ -189,6 +189,9 @@ FN (KeStartThreadF) FwtExplodeableThread (
     
     count := FwtRand () % 100 + 100
     i = 0
+
+    nodes := KeQueryNodeCount ()
+    nodeid := count % nodes
     
     WHILE i < count DO
         i += 1
@@ -209,9 +212,9 @@ FN (KeStartThreadF) FwtExplodeableThread (
         data^.X = x
         data^.Y = y
         data^.ExplosionRange = explosionrange
-        
+
         IF NOT FwtCreateThread (
-            KeCurrentVolatileNode (), // kenode
+            KeNumaNodeById ( nodeid ), // kenode
             &FwtParticleThread, // startroutine
             data, // fwd
         ) THEN
@@ -223,6 +226,9 @@ FN (KeStartThreadF) FwtExplodeableThread (
                 data, // ptr
             )
         END
+
+        nodeid += 1
+        nodeid %= nodes
     END
     
     PsExitThread ()

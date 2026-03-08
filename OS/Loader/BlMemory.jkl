@@ -20,6 +20,8 @@ BlOkayToAllocate := FALSE
 
 #END
 
+PUBLIC BlVirtualAddressingEnabled := FALSE
+
 #DEFINE BL_BUMP_EXTENSION_FLAG 0x80000000
 
 // BL_DESCRIPTOR_MAX must be set to a value high enough for memory management to
@@ -696,6 +698,7 @@ FN BlInitializeNodeMemory (
     // 1 - Software IDT pointer
     // 2 - Idle stack pointer
     // 3 - Global ID
+    // 4 - Hardware ID
 
     i := 0
 
@@ -706,6 +709,7 @@ FN BlInitializeNodeMemory (
         idword[1] = idtstackbase
         idword[2] = idtstackbase + BL_IDT_SIZE
         idword[3] = BlConsecutiveProcessorId
+        idword[4] = BxHardwareIdForProcessor ( BlConsecutiveProcessorId )
 
         idtstackbase += BL_IDT_STACK_SIZE
         prbva += BL_PRB_SIZE
@@ -812,11 +816,13 @@ FN BlInitializeNodeMemory (
     blnode^.DynamicSpaceBitmap = bmp
 END
 
+BlNodeCount := 0
+
 FN BlInitializeNode (
     IN blnode : ^BlNodeInfo,
     IN startaddr : UWORD,
     IN endaddr : UWORD,
-    IN id : UWORD,
+    IN hwid : UWORD,
     IN procs : UWORD,
 )
 
@@ -827,7 +833,12 @@ FN BlInitializeNode (
     blnode^.StartPhysicalAddress = startaddr
     blnode^.EndPhysicalAddress = endaddr
 
+    id := BlNodeCount
+    BlNodeCount = id + 1
+
     blnode^.Id = id
+
+    blnode^.HwId = hwid
 
     blnode^.NodeSpaceBase = KeNumaNodeById ( id )
 
@@ -914,6 +925,8 @@ FN BlInitializeMemory ()
     // moment to enable it.
 
     BxEnableVirtualAddressing ()
+
+    BlVirtualAddressingEnabled = TRUE
 
 #IF BLD_CHK
     BlOkayToAllocate = TRUE

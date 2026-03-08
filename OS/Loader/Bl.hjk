@@ -31,6 +31,8 @@ EXTERN BlDoRelinkAll : UWORD
 EXTERN BlHeapTop : ^VOID
 EXTERN BlHeapPointer : ^VOID
 
+EXTERN BlVirtualAddressingEnabled : UWORD
+
 // This value is selected because it is 2 * sector size (512).
 
 #DEFINE BL_TEMP_BUFFER_SIZE 1024
@@ -41,7 +43,7 @@ EXTERN FN BlInitializeNode (
     IN blnode : ^BlNodeInfo,
     IN startaddr : UWORD,
     IN endaddr : UWORD,
-    IN id : UWORD,
+    IN hwid : UWORD,
     IN procs : UWORD,
 )
 
@@ -54,6 +56,10 @@ EXTERN FN BlInitializeMemoryDescriptor (
 )
 
 EXTERN FN BxPopulateNodeList ()
+
+EXTERN FN BxHardwareIdForProcessor (
+    IN consecid : UWORD,
+) : UWORD
 
 EXTERN FN BxInitializeMemory (
     IN blnode : ^BlNodeInfo,

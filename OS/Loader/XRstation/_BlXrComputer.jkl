@@ -462,13 +462,13 @@ FN (FwBootstrapEntrypoint) BxEntry (
     FwBootPartition = bootpartition
 
 #IF BLD_MP
-    BlInfoBlock.ProcessorCount = FwDeviceDatabase^.ProcessorCount
+    BlInfoBlock.ProcessorCount = FwDeviceDatabase^.ExtendedProcessorCount
     BlInfoBlock.U.Xr.StartProcessors = &BxStartProcessors
 #ELSE
     BlInfoBlock.ProcessorCount = 1
 #END
 
-    BlInfoBlock.NodeCount = 1
+    BlInfoBlock.NodeCount = FwDeviceDatabase^.NodeCount
 
     // Initialize argument string into a table of null-terminated arguments, as
     // expected by the loader's argument stuff.
@@ -509,24 +509,43 @@ FN BxEnableVirtualAddressing ()
     )
 END
 
-BxBootNode : BlNodeInfo
+BxNodes : BlNodeInfo[FW_NODE_MAX]
 
 FN BxPopulateNodeList ()
 
     // Populate the list of NUMA nodes.
 
-    blnode := &BxBootNode
+    i := 0
 
-    BlInitializeNode (
-        blnode, // blnode
-        0, // startaddr
-        -1, // endaddr
-        0, // id
-        BlInfoBlock.ProcessorCount, // procs
-    )
+    WHILE i < FW_NODE_MAX DO
+        procs := FwDeviceDatabase^.Nodes[i].ProcessorCount
+
+        IF procs != 0 THEN
+            blnode := &BxNodes[i]
+
+            startaddr := 64 * 1024 * 1024 * i
+
+            BlInitializeNode (
+                blnode, // blnode
+                startaddr, // startaddr
+                startaddr + 64 * 1024 * 1024, // endaddr
+                i, // hwid
+                procs, // procs
+            )
+        END
+
+        i += 1
+    END
 END
 
 BxInitialDescriptors : BlMemoryDescriptor[FW_RAM_MAX + 2]
+BxUsedDescriptors := 0
+
+#IF BLD_NUMA
+
+BxPageDirectoryMappingPage : ^VOID
+
+#END
 
 FN BxInitializeMemory (
     IN blnode : ^BlNodeInfo,
@@ -535,57 +554,66 @@ FN BxInitializeMemory (
     // On XR/computer platforms, this function has to populate the memory
     // descriptor list, identity map memory, and then enable paging.
 
-    // Initialize slot zero.
+    i : UWORD
+    base : UWORD
+    desc : ^BlMemoryDescriptor
 
-    ramslotzero := FwDeviceDatabase^.Ram[0].PageFrameCount
+    IF blnode^.Id == 0 THEN
+        // Initialize slot zero.
 
-    // Initialize first descriptor as a reclaimable area covering the firmware
-    // data region up to the end of our BSS section.
+        ramslotzero := FwDeviceDatabase^.Ram[0].PageFrameCount
 
-    endreclaimable : UWORD = &_bss_end
-    endreclaimable += RTL_PAGE_SIZE - 1
-    endreclaimable >>= RTL_PAGE_SHIFT
+        // Initialize first descriptor as a reclaimable area covering the
+        // firmware data region up to the end of our BSS section.
 
-    descidx := 0
+        endreclaimable : UWORD = &_bss_end
+        endreclaimable += RTL_PAGE_SIZE - 1
+        endreclaimable >>= RTL_PAGE_SHIFT
 
-    desc := &BxInitialDescriptors[descidx]
-    descidx += 1
+        desc = &BxInitialDescriptors[BxUsedDescriptors]
+        BxUsedDescriptors += 1
 
-    BlInitializeMemoryDescriptor (
-        blnode, // blnode
-        desc, // desc
-        0, // startpfn
-        endreclaimable, // pagecount
-        BL_MEMORY_RECLAIMABLE, // type
-    )
+        BlInitializeMemoryDescriptor (
+            blnode, // blnode
+            desc, // desc
+            0, // startpfn
+            endreclaimable, // pagecount
+            BL_MEMORY_RECLAIMABLE, // type
+        )
 
-    // Initialize next descriptor as a free area consisting of the remainder of
-    // RAM slot 0 up until the start of the bump allocator.
+        // Initialize next descriptor as a free area consisting of the
+        // remainder of RAM slot 0 up until the start of the bump allocator.
 
-    desc = &BxInitialDescriptors[descidx]
-    descidx += 1
+        desc = &BxInitialDescriptors[BxUsedDescriptors]
+        BxUsedDescriptors += 1
 
-    BlInitializeMemoryDescriptor (
-        blnode, // blnode
-        desc, // desc
-        endreclaimable, // startpfn
-        ramslotzero - endreclaimable, // pagecount
-        BL_MEMORY_FREE, // type
-    )
+        BlInitializeMemoryDescriptor (
+            blnode, // blnode
+            desc, // desc
+            endreclaimable, // startpfn
+            ramslotzero - endreclaimable, // pagecount
+            BL_MEMORY_FREE, // type
+        )
 
-    // Now insert the rest of the RAM slots as free areas.
+        // Now insert the rest of the RAM slots as free areas.
 
-    i := 1
-    base := 32 * 1024 * 1024
+        i = 1
+        base = 32 * 1024 * 1024
+    
+    ELSE
+        i = 0
+        base = blnode^.Id * (64 * 1024 * 1024)
+    END
 
-    WHILE i < FW_RAM_MAX DO
-        pagecount := FwDeviceDatabase^.Ram[i].PageFrameCount
+    WHILE i < 2 DO
+        pagecount :=
+            FwDeviceDatabase^.Ram[base / (32 * 1024 * 1024)].PageFrameCount
 
         IF pagecount THEN
             // Create a descriptor for this RAM slot.
 
-            desc = &BxInitialDescriptors[descidx]
-            descidx += 1
+            desc = &BxInitialDescriptors[BxUsedDescriptors]
+            BxUsedDescriptors += 1
 
             BlInitializeMemoryDescriptor (
                 blnode, // blnode
@@ -609,7 +637,8 @@ FN BxInitializeMemory (
     )
 
     IF NOT desc THEN
-        BlCrash ( "Failed to allocate page directory\n" )
+        BlCrash ( "Failed to allocate page directory for node %d\n",
+            blnode^.Id )
     END
 
     blnode^.SystemPageDirectoryPfn = desc^.StartPfn
@@ -635,27 +664,56 @@ FN BxInitializeMemory (
         0x00000010, // ulong
     )
 
-    // Identity map the first 4MB of RAM so that we don't instantly puke when we
-    // turn on virtual addressing (since that's where we're running from right
-    // now).
+    IF blnode^.Id == 0 THEN
+        // Identity map the first 4MB of RAM so that we don't instantly puke
+        // when we turn on virtual addressing (since that's where we're running
+        // from right now).
 
-    pages := FwDeviceDatabase^.Ram[0].PageFrameCount
+        pages := FwDeviceDatabase^.Ram[0].PageFrameCount
 
-    IF pages > (4 * 1024 * 1024) / RTL_PAGE_SIZE THEN
-        // Only map up to 4MB so that we don't allocate extra page tables for no
-        // reason.
+        IF pages > (4 * 1024 * 1024) / RTL_PAGE_SIZE THEN
+            // Only map up to 4MB so that we don't allocate extra page tables
+            // for no reason.
 
-        pages = (4 * 1024 * 1024) / RTL_PAGE_SIZE
+            pages = (4 * 1024 * 1024) / RTL_PAGE_SIZE
+        END
+
+        BxMapRange (
+            blnode, // blnode
+            0, // vaddr
+            0, // phyaddr
+            pages, // pages
+            BL_MEMORY_RECLAIMABLE, // pttype
+            FALSE, // noncached
+        )
+
+#IF BLD_NUMA
+        // Allocate a page from the kernel structure bump to use for mapping
+        // page directories on remote nodes.
+
+        BxPageDirectoryMappingPage = BlAllocateKernelSpace (
+            blnode, // blnode
+            1, // pages
+            BL_KERNEL_STRUCTURES, // prefva
+            0, // fixed
+        )
+
+        IF NOT BxPageDirectoryMappingPage THEN
+            BlCrash ( "Failed to allocate page directory mapping page\n" )
+        END
+
+        // Make sure the page table is initialized by mapping it to a dummy
+        // page, since we'll be accessing the PTE directly later.
+
+        BxMapPage (
+            blnode, // blnode
+            BxPageDirectoryMappingPage, // va
+            0, // phyaddr
+            BL_MEMORY_USED, // pttype
+            FALSE, // noncached
+        )
+#END
     END
-
-    BxMapRange (
-        blnode, // blnode
-        0, // vaddr
-        0, // phyaddr
-        pages, // pages
-        BL_MEMORY_RECLAIMABLE, // pttype
-        FALSE, // noncached
-    )
 
     // Allocate a page for the exception block.
 
@@ -733,7 +791,7 @@ FN BxMapPage (
     pdeptr := &BxBootPageDirectory[vaddr >> 22]
     pde := pdeptr^
 
-    pagetable := CAST (pde >> 5) << RTL_PAGE_SHIFT TO ^ULONG
+    pagetable : ^ULONG
 
     IF pde & MMP_PTE_V == 0 THEN
         // Allocate a new page table.
@@ -748,9 +806,17 @@ FN BxMapPage (
             BlCrash ( "Failed to allocate page table\n" )
         END
 
-        pagetable = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
+        IF BlVirtualAddressingEnabled THEN
+            // Access thru virtually linear mapping.
+            pagetable = MMP_TABLE_BASE + ((vaddr >> 22) << 12)
+        ELSE
+            // Access physically.
+            pagetable = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
+        END
 
         newpde := (desc^.StartPfn << 5) | MMP_PTE_V | MMP_PTE_W | MMP_PTE_K
+
+        pdeptr^ = newpde
 
         IF vaddr >= MMP_SYSTEM_SPACE THEN
             RtlFillMemoryWithUlong (
@@ -769,7 +835,12 @@ FN BxMapPage (
             )
         END
 
-        pdeptr^ = newpde
+    ELSEIF BlVirtualAddressingEnabled THEN
+        // Access thru virtually linear mapping.
+        pagetable = MMP_TABLE_BASE + ((vaddr >> 22) << 12)
+    ELSE
+        // Access physically.
+        pagetable = CAST (pde >> 5) << RTL_PAGE_SHIFT TO ^ULONG
     END
 
     pteptr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
@@ -825,17 +896,16 @@ FN BxRemapCodePage (
     // Set a code page to read-only.
 
     pdeptr := &BxBootPageDirectory[vaddr >> 22]
+    pde := pdeptr^
 
-    pagetable := CAST (pdeptr^ >> 5) << RTL_PAGE_SHIFT TO ^ULONG
-
-    IF NOT pagetable THEN
+    IF pde & MMP_PTE_V == 0 THEN
         BlCrash ( "BxRemapCodePage\n" )
     END
 
-    pteaddr := &pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
+    pteaddr := MmpPteAddress ( vaddr )
     pte := pteaddr^
 
-    IF NOT (pte & MMP_PTE_V) THEN
+    IF pte & MMP_PTE_V == 0 THEN
         BlCrash ( "BxRemapCodePage 2\n" )
     END
 
@@ -867,14 +937,14 @@ FN BxVirtualToPfn (
     // Translate a virtual address to a physical address. Returns -1 if invalid.
 
     pdeptr := &BxBootPageDirectory[vaddr >> 22]
+    pde := pdeptr^
 
-    pagetable := CAST (pdeptr^ >> 5) << RTL_PAGE_SHIFT TO ^ULONG
-
-    IF NOT pagetable THEN
+    IF pde & MMP_PTE_V == 0 THEN
         RETURN -1
     END
 
-    pte := pagetable[(vaddr >> RTL_PAGE_SHIFT) & 1023]
+    pteaddr := MmpPteAddress ( vaddr )
+    pte := pteaddr^
 
     IF pte & MMP_PTE_V THEN
         RETURN pte >> 5
@@ -1207,6 +1277,26 @@ END
 
 #IF BLD_MP
 
+FN BxNodeLocalIdForProcessor (
+    IN hwid : UWORD,
+) : UWORD
+
+    // Convert hardware ID to node local consecutive ID.
+
+    i := hwid & ~3
+    consecid := 0
+
+    WHILE i < hwid DO
+        IF FwDeviceDatabase^.ExtendedProcessors[i].Present THEN
+            consecid += 1
+        END
+
+        i += 1
+    END
+
+    RETURN consecid
+END
+
 FN (FwKickProcessorCallbackF) BxStartProcessor (
     IN number : UWORD,
     IN context : ^VOID,
@@ -1215,7 +1305,7 @@ FN (FwKickProcessorCallbackF) BxStartProcessor (
     // We're a non-boot processor. We need to turn on paging and stuff and then
     // jump into the Executive.
 
-    blnode := BlInfoBlock.BootNode
+    blnode := &BxNodes[number / 4]
 
     // First turn on virtual addressing.
 
@@ -1227,7 +1317,8 @@ FN (FwKickProcessorCallbackF) BxStartProcessor (
 
     // Calculate the physical address of our Prb.
 
-    prbphys := blnode^.PhysicalPrbBase + (number * BL_PRB_SIZE)
+    prbphys := blnode^.PhysicalPrbBase +
+        (BxNodeLocalIdForProcessor ( number ) * BL_PRB_SIZE)
 
     // Now enter the system.
 
@@ -1248,12 +1339,14 @@ FN (BlStartProcessorsF) BxStartProcessors (
 
     i := 1
 
-    WHILE i < BlInfoBlock.ProcessorCount DO
-        FwKickProcessor (
-            i, // number
-            startfunc, // context
-            &BxStartProcessor, // callback
-        )
+    WHILE i < FW_EXTENDED_PROCESSOR_MAX DO
+        IF FwDeviceDatabase^.ExtendedProcessors[i].Present THEN
+            FwKickProcessor (
+                i, // number
+                startfunc, // context
+                &BxStartProcessor, // callback
+            )
+        END
 
         i += 1
     END
@@ -1261,16 +1354,55 @@ END
 
 #END
 
+FN BxHardwareIdForProcessor (
+    IN consecid : UWORD,
+) : UWORD
+
+    // Return the hardware ID for a processor, given its consecutive ID.
+
+    i := 0
+
+    WHILE TRUE DO
+        IF i >= FW_EXTENDED_PROCESSOR_MAX THEN
+            BlCrash ( "bad consecid\n" )
+        END
+
+        IF FwDeviceDatabase^.ExtendedProcessors[i].Present THEN
+            IF NOT consecid THEN
+                RETURN i
+            END
+
+            consecid -= 1
+        END
+
+        i += 1
+    END
+
+    RETURN i
+END
+
+#IF BLD_NUMA
+
 FN BxMirrorPageTable (
     IN blnode : ^BlNodeInfo,
 )
 
     // Mirror the boot node's page directory to this node's.
-    // Should be allocated in the direct mapped low 4MB.
+
+    // Map the node's page directory into the mapping page we prepared earlier.
+
+    pteaddr := MmpPteAddress ( BxPageDirectoryMappingPage )
+
+    pteaddr^ = (blnode^.SystemPageDirectoryPfn << 5) | MMP_PTE_V | MMP_PTE_K |
+        MMP_PTE_W | MMP_PTE_G
+
+    BxFlushPage ( BxPageDirectoryMappingPage )
 
     RtlCopyBytes (
-        CAST blnode^.SystemPageDirectoryPfn << RTL_PAGE_SHIFT TO ^ULONG, // dest
+        BxPageDirectoryMappingPage, // dest
         BxBootPageDirectory, // src
         RTL_PAGE_SIZE, // sz
     )
 END
+
+#END

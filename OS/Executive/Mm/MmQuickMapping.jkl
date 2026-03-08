@@ -156,6 +156,11 @@ EXPORT FN MmUseQuickPte (
     RETURN status
 END
 
+STRUCT MmpPageZeroContext
+    Offset : UWORD,
+    Length : UWORD,
+END
+
 FN (MmUseQuickPteF) MmpZeroPageFunc (
     IN vaddr : ^VOID,
     IN context : ^VOID,
@@ -163,22 +168,30 @@ FN (MmUseQuickPteF) MmpZeroPageFunc (
 
     // Called with the pointer to a quick mapping to zero the page through.
 
+    ctx := CAST context TO ^MmpPageZeroContext
+
     RtlFillMemoryWithUlong (
-        vaddr, // ptr
-        RTL_PAGE_SIZE, // sz
+        vaddr + ctx^.Offset, // ptr
+        ctx^.Length, // sz
         0, // ulong
     )
 END
 
 EXPORT FN MmZeroPage (
     IN pfn : UWORD,
+    IN offset : UWORD,
+    IN length : UWORD,
 )
 
     // Zero out a page frame.
 
+    ctx : MmpPageZeroContext
+    ctx.Offset = offset
+    ctx.Length = length
+
     MmUseQuickPte (
         &MmpZeroPageFunc, // func
         pfn, // pfn
-        NULLPTR, // context
+        &ctx, // context
     )
 END

@@ -28,7 +28,7 @@ FN HalpInitializeLsic (
     // Guaranteed to be called on the given processor.
 
     lsic := CAST KeuLoaderBlock.U.Xr.LsicBase +
-        KepCurrentProcessorHwId () * HALP_LSIC_GAP TO ^HalpLsic
+        prb^.HwId * HALP_LSIC_GAP TO ^HalpLsic
 
     // Stash the LSIC base.
 
@@ -125,9 +125,6 @@ FN HalpInitializeLsic (
     prb^.IrqDispatchTable[63] = int
 #END
 
-    // Enable interrupts.
-
-    KepEnableInterrupts ()
 END
 
 #SECTION "INITtext"
@@ -150,9 +147,11 @@ FN HaluEarlyInitialize (
     // context. Here we have to establish everything required for base line
     // functionality, including a simple boot console of some variety.
 
-    HalpInitializeConsole ()
+    IF kenode^.Id == 0 THEN
+        HalpInitializeConsole ()
 
-    HalpConfigureTimer ()
+        HalpConfigureTimer ()
+    END
 END
 
 #IF BLD_MP

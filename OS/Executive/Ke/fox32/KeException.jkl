@@ -496,6 +496,16 @@ KepSwitchAddressSpace:
 
     ret
 
+// a0 - thread
+KepJumpIntoThread:
+.global KepJumpIntoThread
+
+    mov  sp, [a0 + KeuThread_Context]
+
+    call KepEnableInterrupts
+
+    jmp  LoadContext
+
 KepThreadTrampoline:
 
     // This is where a new thread begins execution.
@@ -564,12 +574,11 @@ KepSwitchContext:
 
     // Fall-through
 
-// a0 - thread
-KepJumpIntoThread:
-.global KepJumpIntoThread
+    mov  sp, [a0 + KeuThread_Context]
+
+LoadContext:
 
     mov  esp, [a0 + KeuThread_KernelStackTop]
-    mov  sp, [a0 + KeuThread_Context]
 
     // Set thread to RUNNING.
 

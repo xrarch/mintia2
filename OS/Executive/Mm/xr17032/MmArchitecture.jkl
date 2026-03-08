@@ -11,8 +11,7 @@ FN MmpInitializeArchitecture ()
     // Unmap the lower half mappings made by the Loader so that we catch illegal
     // accesses to them.
 
-    // First unmap those of the other nodes, through the direct map at the
-    // bottom of memory.
+    // First unmap those of the other nodes.
 
     listhead := &KeuLoaderBlock.NodeListHead
     listentry := listhead^.Next
@@ -21,11 +20,10 @@ FN MmpInitializeArchitecture ()
         blnode := CONTAINEROF listentry TO BlNodeInfo.Entry
 
         IF blnode != KeuLoaderBlock.BootNode THEN
-            RtlFillMemoryWithUlong (
-                CAST blnode^.SystemPageDirectoryPfn <<
-                    RTL_PAGE_SHIFT TO ^VOID, // ptr
-                RTL_PAGE_SIZE / 2, // sz
-                0, // ulong
+            MmZeroPage (
+                blnode^.SystemPageDirectoryPfn, // pfn
+                0, // offset
+                RTL_PAGE_SIZE / 2, // length
             )
         END
 
