@@ -366,6 +366,8 @@ EXTERN FN BxFlushPage (
 
 EXTERN FN BlMain () : UWORD
 
+#DEFINE BX_EB_VIRTUAL_ADDRESS 0xFFFFE000
+
 // FORWARD
 EXTERN FN (BlStartProcessorsF) BxStartProcessors (
     IN startfunc : BlStartProcessorF,
@@ -503,7 +505,7 @@ FN BxEnableVirtualAddressing ()
     blnode := BlInfoBlock.BootNode
 
     BxStartMapping (
-        blnode^.U.Xr.ExceptionBlock, // excva
+        BX_EB_VIRTUAL_ADDRESS, // excva
         blnode^.U.Xr.ExceptionBlockPhys, // excblock
         blnode^.SystemPageDirectoryPfn, // pagedirpfn
     )
@@ -1318,7 +1320,7 @@ FN (FwKickProcessorCallbackF) BxStartProcessor (
     // First turn on virtual addressing.
 
     BxStartMapping (
-        blnode^.U.Xr.ExceptionBlock, // excva
+        BX_EB_VIRTUAL_ADDRESS, // excva
         blnode^.U.Xr.ExceptionBlockPhys, // excblock
         blnode^.SystemPageDirectoryPfn, // pagedirpfn
     )

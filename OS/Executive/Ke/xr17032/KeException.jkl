@@ -858,8 +858,6 @@ FN KepInitializeArchitecture (
                 &KepSwitchMapCodeEnd - &KepSwitchMapCode, // sz
             )
 
-            KepSwitchMap = CAST blnode^.U.Xr.ExceptionBlock TO KepSwitchMapF
-
             // Copy the syscall handler into the exception block.
             // This one is special because it doesn't need to save as much as the
             // others do.
@@ -873,6 +871,8 @@ FN KepInitializeArchitecture (
 
         KepFlushMyIcache ()
     END
+
+    KepSwitchMap = CAST KEP_EB_VIRTUAL_ADDRESS TO KepSwitchMapF
 
     // Initialize my ASID sequence counter.
 
