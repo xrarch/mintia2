@@ -645,28 +645,26 @@ FN BxInitializeMemory (
 
     blnode^.SystemPageDirectoryPfn = desc^.StartPfn
 
-    // Fill the bottom half of the page directory with zeroes and the upper half
-    // with invalid kernel PTEs.
-
-    pgdir := CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
-
     IF blnode == BlInfoBlock.BootNode THEN
+        // Fill the bottom half of the page directory with zeroes and the upper
+        // half with invalid kernel PTEs.
+
+        pgdir := CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
+
         BxBootPageDirectory = pgdir
-    END
 
-    RtlFillMemoryWithUlong (
-        pgdir, // ptr
-        RTL_PAGE_SIZE / 2, // size
-        0x00000000, // ulong
-    )
+        RtlFillMemoryWithUlong (
+            pgdir, // ptr
+            RTL_PAGE_SIZE / 2, // size
+            0x00000000, // ulong
+        )
 
-    RtlFillMemoryWithUlong (
-        pgdir + (RTL_PAGE_SIZE / 2), // ptr
-        RTL_PAGE_SIZE / 2, // size
-        0x00000010, // ulong
-    )
+        RtlFillMemoryWithUlong (
+            pgdir + (RTL_PAGE_SIZE / 2), // ptr
+            RTL_PAGE_SIZE / 2, // size
+            0x00000010, // ulong
+        )
 
-    IF blnode^.Id == 0 THEN
         // Identity map the first 4MB of RAM so that we don't instantly puke
         // when we turn on virtual addressing (since that's where we're running
         // from right now).
@@ -688,6 +686,14 @@ FN BxInitializeMemory (
             BL_MEMORY_RECLAIMABLE, // pttype
             FALSE, // noncached
         )
+
+        // Create a virtually linear mapping of the page table by inserting the page
+        // directory into one of its own PDEs.
+
+        pdeptr := &pgdir[0xB0000000 >> 22]
+
+        pdeptr^ = ((pgdir >> RTL_PAGE_SHIFT) << 5) |
+            MMP_PTE_V | MMP_PTE_W | MMP_PTE_K
 
 #IF BLD_NUMA
         // Allocate a page from the kernel structure bump to use for mapping
@@ -780,14 +786,6 @@ FN BxInitializeMemory (
         missroutine, // src
         &BxDtbMissHandlerEnd - missroutine, // sz
     )
-
-    // Create a virtually linear mapping of the page table by inserting the page
-    // directory into one of its own PDEs.
-
-    pdeptr := &pgdir[0xB0000000 >> 22]
-
-    pdeptr^ = ((pgdir >> RTL_PAGE_SHIFT) << 5) |
-        MMP_PTE_V | MMP_PTE_W | MMP_PTE_K
 END
 
 FN BxMapPage (
@@ -1401,18 +1399,28 @@ FN BxMirrorPageTable (
 
     // Map the node's page directory into the mapping page we prepared earlier.
 
-    pteaddr := MmpPteAddress ( BxArbitraryMappingPages[0] )
+    pgdir : ^ULONG = BxArbitraryMappingPages[0]
+
+    pteaddr := MmpPteAddress ( pgdir )
 
     pteaddr^ = (blnode^.SystemPageDirectoryPfn << 5) | MMP_PTE_V | MMP_PTE_K |
         MMP_PTE_W | MMP_PTE_G
 
-    BxFlushPage ( BxArbitraryMappingPages[0] )
+    BxFlushPage ( pgdir )
 
     RtlCopyBytes (
-        BxArbitraryMappingPages[0], // dest
+        pgdir, // dest
         BxBootPageDirectory, // src
         RTL_PAGE_SIZE, // sz
     )
+
+    // Create a virtually linear mapping of the page table by inserting the page
+    // directory into one of its own PDEs.
+
+    pdeptr := &pgdir[0xB0000000 >> 22]
+
+    pdeptr^ = (blnode^.SystemPageDirectoryPfn << 5) | MMP_PTE_V | MMP_PTE_W |
+        MMP_PTE_K
 
     // Create entirely new page tables for the region of kernel space mapping
     // the kernel modules so that each node can have its own view of replicated
@@ -1429,7 +1437,7 @@ FN BxMirrorPageTable (
         // a new one from the remote node, copy the old one into it, and replace
         // it.
 
-        pdeaddr := &BxBootPageDirectory[pdindex]
+        pdeaddr := &pgdir[pdindex]
         pde := pdeaddr^
 
         IF pde & MMP_PTE_V THEN
