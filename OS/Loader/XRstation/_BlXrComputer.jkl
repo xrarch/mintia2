@@ -543,7 +543,9 @@ BxUsedDescriptors := 0
 
 #IF BLD_NUMA
 
-BxPageDirectoryMappingPage : ^VOID
+#DEFINE BX_MAPPING_PAGES_COUNT 2
+
+BxArbitraryMappingPages : ^VOID[BX_MAPPING_PAGES_COUNT]
 
 #END
 
@@ -691,27 +693,35 @@ FN BxInitializeMemory (
         // Allocate a page from the kernel structure bump to use for mapping
         // page directories on remote nodes.
 
-        BxPageDirectoryMappingPage = BlAllocateKernelSpace (
+        mappingpage := BlAllocateKernelSpace (
             blnode, // blnode
-            1, // pages
+            BX_MAPPING_PAGES_COUNT, // pages
             BL_KERNEL_STRUCTURES, // prefva
             0, // fixed
         )
 
-        IF NOT BxPageDirectoryMappingPage THEN
-            BlCrash ( "Failed to allocate page directory mapping page\n" )
+        IF NOT mappingpage THEN
+            BlCrash ( "Failed to allocate arbitrary mapping page\n" )
         END
 
-        // Make sure the page table is initialized by mapping it to a dummy
-        // page, since we'll be accessing the PTE directly later.
+        i = 0
 
-        BxMapPage (
-            blnode, // blnode
-            BxPageDirectoryMappingPage, // va
-            0, // phyaddr
-            BL_MEMORY_USED, // pttype
-            FALSE, // noncached
-        )
+        WHILE i < BX_MAPPING_PAGES_COUNT DO
+            // Make sure the page table is initialized by mapping it to a dummy
+            // page, since we'll be accessing the PTE directly later.
+
+            BxMapPage (
+                blnode, // blnode
+                mappingpage, // va
+                0, // phyaddr
+                BL_MEMORY_USED, // pttype
+                FALSE, // noncached
+            )
+
+            BxArbitraryMappingPages[i] = mappingpage
+            mappingpage += RTL_PAGE_SIZE
+            i += 1
+        END
 #END
     END
 
@@ -1391,18 +1401,168 @@ FN BxMirrorPageTable (
 
     // Map the node's page directory into the mapping page we prepared earlier.
 
-    pteaddr := MmpPteAddress ( BxPageDirectoryMappingPage )
+    pteaddr := MmpPteAddress ( BxArbitraryMappingPages[0] )
 
     pteaddr^ = (blnode^.SystemPageDirectoryPfn << 5) | MMP_PTE_V | MMP_PTE_K |
         MMP_PTE_W | MMP_PTE_G
 
-    BxFlushPage ( BxPageDirectoryMappingPage )
+    BxFlushPage ( BxArbitraryMappingPages[0] )
 
     RtlCopyBytes (
-        BxPageDirectoryMappingPage, // dest
+        BxArbitraryMappingPages[0], // dest
         BxBootPageDirectory, // src
         RTL_PAGE_SIZE, // sz
     )
+
+    // Create entirely new page tables for the region of kernel space mapping
+    // the kernel modules so that each node can have its own view of replicated
+    // read-only data.
+    //
+    // This region extends from BL_KERNEL_SPACE for BL_MANAGED_KERNEL_SPACE
+    // bytes.
+
+    pdindex := BL_KERNEL_SPACE >> 22
+    end := (BL_KERNEL_SPACE + BL_MANAGED_KERNEL_SPACE) >> 22
+
+    WHILE pdindex < end DO
+        // If there's a page table in this index of the page directory, allocate
+        // a new one from the remote node, copy the old one into it, and replace
+        // it.
+
+        pdeaddr := &BxBootPageDirectory[pdindex]
+        pde := pdeaddr^
+
+        IF pde & MMP_PTE_V THEN
+            desc := BlAllocatePhysicalRange (
+                blnode, // blnode
+                1, // pages
+                BL_MEMORY_USED, // type
+            )
+
+            IF NOT desc THEN
+                BlCrash ( "Failed to allocate mirror page table\n" )
+            END
+
+            // Map new page table.
+
+            pteaddr = MmpPteAddress ( BxArbitraryMappingPages[1] )
+
+            pteaddr^ = (desc^.StartPfn << 5) | MMP_PTE_V | MMP_PTE_K |
+                MMP_PTE_W | MMP_PTE_G
+
+            BxFlushPage ( BxArbitraryMappingPages[1] )
+
+            // Copy from old page table to new one.
+
+            pteaddr = MmpPteAddress ( pdindex << 22 )
+
+            RtlCopyBytes (
+                BxArbitraryMappingPages[1], // dest
+                pteaddr, // src
+                RTL_PAGE_SIZE, // sz
+            )
+
+            // Set the new page table.
+
+            pdeaddr^ = (desc^.StartPfn << 5) | MMP_PTE_V | MMP_PTE_K |
+                MMP_PTE_W | MMP_PTE_G
+        END
+
+        pdindex += 1
+    END
+END
+
+FN BxMirrorRangeOfPages (
+    IN blnode : ^BlNodeInfo,
+    IN vaddr : ^VOID,
+    IN pages : UWORD,
+)
+
+    // Mirror a range of pages from the boot node to the given node.
+    // Note that earlier, we mirrored the page tables, such that each node now
+    // has its own unique page tables for the range in which these ranges
+    // reside, so we can create unique mappings for each.
+
+    desc := BlAllocatePhysicalRange (
+        blnode, // blnode
+        pages, // pages
+        BL_MEMORY_USED, // type
+    )
+
+    IF NOT desc THEN
+        // Can't mirror. Whatever.
+
+        RtlPrint ( "Failed to allocate mirror memory for node%d\n", blnode^.Id )
+
+        LEAVE
+    END
+
+    // Copy the range into the new physical memory a page at a time.
+
+    mappingpage : ^ULONG = BxArbitraryMappingPages[0]
+    mappingpte := MmpPteAddress ( mappingpage )
+
+    i := 0
+    pfn := desc^.StartPfn
+    srcvaddr := vaddr
+
+    WHILE i < pages DO
+        // Map the physical page using the arbitrary mapping page.
+
+        mappingpte^ = (pfn << 5) | MMP_PTE_V | MMP_PTE_K | MMP_PTE_W | MMP_PTE_G
+
+        BxFlushPage ( mappingpage )
+
+        // Copy into it from the virtually mapped source memory.
+
+        RtlCopyBytes (
+            mappingpage, // dest
+            srcvaddr, // src
+            RTL_PAGE_SIZE, // sz
+        )
+
+        i += 1
+        pfn += 1
+        srcvaddr += RTL_PAGE_SIZE
+    END
+
+    // Now map the remote node's page directory.
+
+    mappingpte^ = (blnode^.SystemPageDirectoryPfn << 5) | MMP_PTE_V | MMP_PTE_K |
+        MMP_PTE_W | MMP_PTE_G
+
+    BxFlushPage ( mappingpage )
+
+    // Update the page mappings.
+
+    ptmappingpage : ^ULONG = BxArbitraryMappingPages[1]
+    ptmappingpte := MmpPteAddress ( ptmappingpage )
+    mappedpt := -1
+
+    i = 0
+    pfn = desc^.StartPfn
+    srcvaddr = vaddr
+
+    WHILE i < pages DO
+        IF srcvaddr & 0xFFC00000 != mappedpt THEN
+            // Need to map the containing page table for these PTEs.
+            // We can just copy the PDE into our mapping PTE since they have the
+            // same format.
+
+            ptmappingpte^ = mappingpage[vaddr >> 22]
+
+            BxFlushPage ( ptmappingpage )
+
+            mappedpt = srcvaddr & 0xFFC00000
+        END
+
+        ptmappingpage[(srcvaddr >> 12) & 1023] = (pfn << 5) | MMP_PTE_V |
+            MMP_PTE_K | MMP_PTE_G
+
+        i += 1
+        pfn += 1
+        srcvaddr += RTL_PAGE_SIZE
+    END
 END
 
 #END

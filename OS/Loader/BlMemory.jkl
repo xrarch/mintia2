@@ -952,6 +952,35 @@ END
 
 #IF BLD_NUMA
 
+STRUCT BlMirroredRange
+    Next : ^BlMirroredRange,
+    VirtualAddress : ^VOID,
+    Pages : UWORD,
+END
+
+BlMirroredRangeListHead : ^BlMirroredRange = NULLPTR
+
+FN BlRegisterMirroredRange (
+    IN vaddr : ^VOID,
+    IN pages : UWORD,
+)
+
+    // Register a mapped range whose physical memory should be mirrored between
+    // the NUMA nodes for locality.
+
+    IF BlInfoBlock.NodeCount == 1 THEN
+        LEAVE
+    END
+
+    range : ^BlMirroredRange = BlAllocateMemory ( SIZEOF BlMirroredRange )
+
+    range^.VirtualAddress = vaddr
+    range^.Pages = pages
+
+    range^.Next = BlMirroredRangeListHead
+    BlMirroredRangeListHead = range
+END
+
 FN BlMirrorNumaMemory ()
 
     // Copy the boot page table to the other nodes and mirror the memory ranges
@@ -961,19 +990,53 @@ FN BlMirrorNumaMemory ()
 
     RtlPrint ( "Mirroring NUMA memory...\n" )
 
-    // First mirror the page table.
-
+    // First mirror the page table by directly copying it into the page tables
+    // of the other nodes. The BxMirrorPageTable routine also creates completely
+    // new page tables for the region of kernel space containing kernel modules,
+    // for each node, so that per-node mappings to their text section and other
+    // read only data can be established, allowing this data to be mirrored
+    // across nodes.
+    
     listhead := &BlInfoBlock.NodeListHead
     listentry := listhead^.Next
 
     WHILE listentry != listhead DO
         blnode = CONTAINEROF listentry TO BlNodeInfo.Entry
 
-        IF blnode != BlInfoBlock.BootNode THEN
+        IF blnode != BlInfoBlock.BootNode AND
+            blnode^.ProcessorCount > 0 THEN
+
             BxMirrorPageTable ( blnode )
         END
 
         listentry = listentry^.Next
+    END
+
+    // Now mirror each range of read-only data.
+
+    range := BlMirroredRangeListHead
+
+    WHILE range DO
+        listhead = &BlInfoBlock.NodeListHead
+        listentry = listhead^.Next
+
+        WHILE listentry != listhead DO
+            blnode = CONTAINEROF listentry TO BlNodeInfo.Entry
+
+            IF blnode != BlInfoBlock.BootNode AND
+                blnode^.ProcessorCount > 0 THEN
+
+                BxMirrorRangeOfPages (
+                    blnode, // blnode
+                    range^.VirtualAddress, // vaddr
+                    range^.Pages, // pages
+                )
+            END
+
+            listentry = listentry^.Next
+        END
+
+        range = range^.Next
     END
 END
 
