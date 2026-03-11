@@ -900,7 +900,11 @@ FN KepSwitchAddressSpace (
 
         // Also, we don't actually need to switch to the remote node's page
         // tables. We can just switch to those of the node local to this
-        // processor and we will get better performance.
+        // processor and we will get better performance. It maps the same stuff
+        // anyways except the page tables will be local. This does mean that
+        // paging kernel text on NUMA systems is difficult, but NUMA systems
+        // should have large amounts of memory anyway, so paging the kernel text
+        // may be unnecessary.
 
         KepSwitchMap (
             KeCurrentVolatileNode ()^.SystemPageDirectoryPfn, // pgtb
