@@ -894,11 +894,16 @@ FN KepSwitchAddressSpace (
     // lock is held. IPL is KEP_IPL_DPC, so we are pinned to this processor.
 
     IF process^.PageDirectoryPfn == process^.Node^.SystemPageDirectoryPfn THEN
+        // This is a per-node system process with a system page directory.
         // Just switch, don't bother dealing with ASIDs since ASID 0 is reserved
         // for the system address space.
 
+        // Also, we don't actually need to switch to the remote node's page
+        // tables. We can just switch to those of the node local to this
+        // processor and we will get better performance.
+
         KepSwitchMap (
-            process^.PageDirectoryPfn, // pgtb
+            KeCurrentVolatileNode ()^.SystemPageDirectoryPfn, // pgtb
             0, // asid
         )
 
