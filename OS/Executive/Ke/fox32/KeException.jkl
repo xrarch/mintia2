@@ -684,10 +684,13 @@ FN KepAbort (
 
     // Abort the current operation of the thread.
 
-    IF NOT OsStatusIsAddressError ( status ) THEN
-        // Not an address error status, so aborting is nonsense.
+    IF NOT OsStatusIsAddressError ( status ) OR
+        KepCurrentIpl () >= KEP_IPL_DPC THEN
 
-        KepFaultCrash ( context, ecause )
+        // Not an address error status, or the error occurred outside of thread
+        // context (IPL >= KEP_IPL_DPC), so aborting is nonsense.
+
+        KepFaultCrash ( context, badaddr )
     END
 
     abortblock := thread^.AbortListHead[thread^.ExecutingKapc]
