@@ -960,6 +960,103 @@ FN KepDispatchUserInterrupts ()
     END
 END
 
+FN KepShouldAccessCrash (
+    IN abortblock : ^KeAbortBlock,
+    IN badaddr : ^VOID,
+    IN status : OsStatus,
+) : UWORD
+
+    // Returns TRUE if the access should crash the system, FALSE if it should
+    // cause an abort. Called by KepAbortThread upon various types of address
+    // errors, if an abort block was set up by KeExceptionJacket.
+
+    // This was an address error, so check where the address was.
+    // The abort block will contain flags telling us whether to catch this
+    // exception or not. If we shouldn't, we'll crash. This is a basic
+    // security/debugging measure and not strictly necessary for
+    // functionality.
+
+    IF badaddr >= KE_SYSTEM_SPACE THEN
+        // Check if we should catch system space errors.
+        // If we shouldn't, or if the status was not an inpage IO error, crash
+        // the system.
+
+        // In system space we ONLY catch inpage IO errors because this is the
+        // only valid type of fallible memory access in the kernel. Kernel mode
+        // code should not be using pointers to bad addresses in kernel space
+        // and they should never be forgiven for doing so.
+
+        IF abortblock^.Flags & KE_ABORT_CATCH_SYSTEM_SPACE == 0
+            OR status != OS_STATUS_INPAGE_IO_ERROR THEN
+
+            // Nope.
+
+            RETURN TRUE
+        END
+
+    ELSEIF abortblock^.Flags & KE_ABORT_CATCH_USER_SPACE == 0 THEN
+        // This was a userspace error and we aren't catching those.
+
+        RETURN TRUE
+    END
+
+    RETURN FALSE
+END
+
+FN KepAbortThread (
+    IN thread : ^KeuThread,
+    IN context : ^OsContext,
+    IN status : OsStatus,
+    IN badaddr : ^VOID,
+    IN extra : UWORD,
+)
+
+    // Abort the current operation of the thread.
+    // Called upon a bad page fault or other problem that occurred in kernel
+    // mode, which may need to cause an early return from KeExceptionJacket.
+
+    IF NOT OsStatusIsAddressError ( status ) OR
+        KepCurrentIpl () >= KEP_IPL_DPC THEN
+
+        // Not an address error status, or the error occurred outside of thread
+        // context (IPL >= KEP_IPL_DPC), so aborting is nonsense.
+
+        KepFaultCrash (
+            context, // context
+            extra, // extra
+        )
+    END
+
+    abortblock := thread^.AbortListHead[thread^.ExecutingKapc]
+
+    IF NOT abortblock OR KepShouldAccessCrash (
+        abortblock, // abortblock
+        badaddr, // badaddr
+        status, // status
+    ) THEN
+
+        // No abortable operation was in progress, or this abort block isn't
+        // catching this type of error. This is just a kernel bug.
+
+        KepFaultCrash (
+            context, // context
+            extra, // extra
+        )
+    END
+
+    // Save the status corresponding to the error.
+
+    abortblock^.Status = status
+
+    // Redirect the trap frame to return to the abort vector.
+
+    KepAbortTrapFrame (
+        thread, // thread
+        abortblock, // abortblock
+        context, // context
+    )
+END
+
 // The following functions are defined as macros for speed purposes within the
 // Executive but are exported as real functions for the benefit of kernel
 // modules, so we don't need to export these structures.

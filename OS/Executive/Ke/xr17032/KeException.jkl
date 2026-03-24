@@ -40,7 +40,7 @@ KepCauseNames : ^UBYTE[16] = {
 
 FN KepFaultCrash (
     IN context : ^OsContext,
-    IN badaddr : ^VOID,
+    IN extra : UWORD,
 )
 
     // Set the FrozenContext to the faulting context because that will be the
@@ -57,7 +57,7 @@ FN KepFaultCrash (
     KeCrash (
         "ERS=%08x BADADDR=%08x EPC=%08x ECAUSE=%s\n", // fmt
         context^.Rs,
-        badaddr,
+        extra,
         context^.Epc,
         KepCauseNames[context^.Rs >> OS_XR_RS_ECAUSE_SHIFT],
     )
@@ -65,42 +65,14 @@ END
 
 EXTERN KepAbortVector : UBYTE
 
-FN KepAbort (
+FN KepAbortTrapFrame (
     IN thread : ^KeuThread,
+    IN abortblock : ^KeAbortBlock,
     IN context : ^OsContext,
-    IN status : OsStatus,
-    IN badaddr : ^VOID,
 )
 
-    // Abort the current operation of the thread.
-
-    IF NOT OsStatusIsAddressError ( status ) OR
-        KepCurrentIpl () >= KEP_IPL_DPC THEN
-
-        // Not an address error status, or the error occurred outside of thread
-        // context (IPL >= KEP_IPL_DPC), so aborting is nonsense.
-
-        KepFaultCrash ( context, badaddr )
-    END
-
-    abortblock := thread^.AbortListHead[thread^.ExecutingKapc]
-
-    IF NOT abortblock OR MmuShouldAccessCrash (
-        abortblock, // abortblock
-        badaddr, // badaddr
-        status, // status
-    ) THEN
-        // No abortable operation was in progress, or this abort block isn't
-        // catching this type of error. This is just a kernel bug.
-
-        KepFaultCrash ( context, badaddr )
-    END
-
-    // Save the status corresponding to the error.
-
-    abortblock^.Status = status
-
-    // Redirect the trap frame to return to the abort vector.
+    // Called by KepAbortThread to redirect the trap frame to return to the
+    // abort vector.
 
     context^.S0 = abortblock
     context^.S1 = thread + (thread^.ExecutingKapc * 4)
@@ -231,11 +203,12 @@ FN (KepHighLevelHandlerF) KepHandleError (
     ELSE
         // Happened in kernel mode, abort the operation.
 
-        KepAbort (
+        KepAbortThread (
             thread, // thread
             context, // context
             KepExceptionToStatus[ecause], // status
             badaddr, // badaddr
+            badaddr, // extra
         )
     END
 
@@ -318,11 +291,12 @@ FN (KepHighLevelHandlerF) KepHandlePageFault (
         ELSE
             // Happened in kernel mode. Abort the current operation.
 
-            KepAbort (
+            KepAbortThread (
                 thread, // thread
                 context, // context
                 status, // status
                 badaddr, // badaddr
+                badaddr, // extra
             )
         END
     END
