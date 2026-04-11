@@ -2,13 +2,7 @@
 // Private memory management header file for the XR/17032 architecture.
 //
 
-// Describes the base address of the virtually linear page table.
-
-#DEFINE MMP_TABLE_BASE 0xB0000000
-#DEFINE MMP_TABLE_END 0xB0400000
-
 #DEFINE MMP_DIRECTORY_BASE 0xB02C0000
-
 #DEFINE MMP_USER_SPACE_END 0x7FFF0000
 
 // Describes the number of levels in the page table.
@@ -30,11 +24,11 @@
 TYPE MmpPte : ULONG
 
 #MACRO MmpPteAddress ( vaddr ) [
-    (CAST (MMP_TABLE_BASE + (((vaddr) >> 12) << 2)) TO ^MmpPte)
+    (CAST (KE_TABLE_BASE + (((vaddr) >> 12) << 2)) TO ^MmpPte)
 ]
 
 #MACRO MmpVirtualAddress ( pteaddr ) [
-    (CAST ((((pteaddr) - MMP_TABLE_BASE) >> 2) << 12) TO ^VOID)
+    (CAST ((((pteaddr) - KE_TABLE_BASE) >> 2) << 12) TO ^VOID)
 ]
 
 #MACRO MmpIsPteValid ( pte ) [

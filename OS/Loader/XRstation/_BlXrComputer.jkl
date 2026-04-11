@@ -818,7 +818,7 @@ FN BxMapPage (
 
         IF BlVirtualAddressingEnabled THEN
             // Access thru virtually linear mapping.
-            pagetable = MMP_TABLE_BASE + ((vaddr >> 22) << 12)
+            pagetable = KE_TABLE_BASE + ((vaddr >> 22) << 12)
         ELSE
             // Access physically.
             pagetable = CAST desc^.StartPfn << RTL_PAGE_SHIFT TO ^ULONG
@@ -847,7 +847,7 @@ FN BxMapPage (
 
     ELSEIF BlVirtualAddressingEnabled THEN
         // Access thru virtually linear mapping.
-        pagetable = MMP_TABLE_BASE + ((vaddr >> 22) << 12)
+        pagetable = KE_TABLE_BASE + ((vaddr >> 22) << 12)
     ELSE
         // Access physically.
         pagetable = CAST (pde >> 5) << RTL_PAGE_SHIFT TO ^ULONG

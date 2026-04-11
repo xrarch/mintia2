@@ -970,37 +970,59 @@ FN KepShouldAccessCrash (
     // cause an abort. Called by KepAbortThread upon various types of address
     // errors, if an abort block was set up by KeExceptionJacket.
 
-    // This was an address error, so check where the address was.
     // The abort block will contain flags telling us whether to catch this
     // exception or not. If we shouldn't, we'll crash. This is a basic
     // security/debugging measure and not strictly necessary for
     // functionality.
 
-    IF badaddr >= KE_SYSTEM_SPACE THEN
-        // Check if we should catch system space errors.
-        // If we shouldn't, or if the status was not an inpage IO error, crash
-        // the system.
+    flags := abortblock^.Flags
 
-        // In system space we ONLY catch inpage IO errors because this is the
-        // only valid type of fallible memory access in the kernel. Kernel mode
-        // code should not be using pointers to bad addresses in kernel space
-        // and they should never be forgiven for doing so.
+    // Check each caught case. If none match, crash the system.
 
-        IF abortblock^.Flags & KE_ABORT_CATCH_SYSTEM_SPACE == 0
-            OR status != OS_STATUS_INPAGE_IO_ERROR THEN
+    IF flags & KE_ABORT_CATCH_PTE_SPACE AND
+        badaddr >= KE_TABLE_BASE AND
+        badaddr < KE_TABLE_END AND
+        status == OS_STATUS_READ_FAULT THEN
 
-            // Nope.
+        // We are catching PTE space faults and this fault lays within the
+        // virtually linear page table, and was a read fault, so this must be an
+        // access of unmapped PTEs which is normal and can occur during fault
+        // handling on an unmapped region. Don't crash.
 
-            RETURN TRUE
-        END
-
-    ELSEIF abortblock^.Flags & KE_ABORT_CATCH_USER_SPACE == 0 THEN
-        // This was a userspace error and we aren't catching those.
-
-        RETURN TRUE
+        RETURN FALSE
     END
 
-    RETURN FALSE
+    IF flags & KE_ABORT_CATCH_SYSTEM_SPACE AND
+        badaddr >= KE_SYSTEM_SPACE AND
+        status == OS_STATUS_INPAGE_IO_ERROR THEN
+
+        // We are catching system space faults and this fault lays within system
+        // space, and is an inpage IO error, which is the only fallible memory
+        // access performed within the kernel. Kernel mode code should not be
+        // using pointers to wholly bad addresses in kernel space and will never
+        // be forgiven for doing so, but accessing fallible mapped file cache is
+        // common, expected, and forgivable.
+        //
+        // Note that an OS_STATUS_INPAGE_IO_ERROR is returned when a mapped file
+        // cache read fails during a page fault, but if a read failure occurs
+        // upon paged kernel pool or code, the page fault handler will duly
+        // crash and we will never see this.
+
+        RETURN FALSE
+    END
+
+    IF flags & KE_ABORT_CATCH_USER_SPACE AND
+        badaddr < KE_SYSTEM_SPACE THEN
+
+        // We are catching userspace faults and this fault lays within
+        // userspace.
+
+        RETURN FALSE
+    END
+
+    // None of the above cases held, so we should crash.
+
+    RETURN TRUE
 END
 
 FN KepAbortThread (
