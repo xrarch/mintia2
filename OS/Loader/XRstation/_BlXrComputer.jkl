@@ -250,6 +250,16 @@ BxStartMapping:
 // a1 - prb
 BxStartSystem:
 .global BxStartSystem
+    // Store console parameters.
+
+    mov  t3, long [FwDeviceDatabase]
+    mov  t1, int [t3 + (FwDeviceDatabaseRecord_ConsoleBox + FwConsoleBoxRecord_CursorX)]
+    mov  t2, int [t3 + (FwDeviceDatabaseRecord_ConsoleBox + FwConsoleBoxRecord_CursorY)]
+
+    la   t0, BlInfoBlock
+    mov  int [t0 + (BlInfoRecord_U + BlInfoRecordXrStation_CursorX)], t1
+    mov  int [t0 + (BlInfoRecord_U + BlInfoRecordXrStation_CursorY)], t2
+
     // Flush the icache.
 
     li   t0, 3
@@ -1248,6 +1258,7 @@ FN BxInitializeIo (
     BlInfoBlock.BootFbBase = NULLPTR
 
     fwfb := &FwDeviceDatabase^.Framebuffer
+    fwbox := &FwDeviceDatabase^.ConsoleBox
 
     IF fwfb^.Type == FW_FRAMEBUFFER_KINNOWFB THEN
         // Available, so map it.
@@ -1269,6 +1280,12 @@ FN BxInitializeIo (
         BlInfoBlock.BootFbBase = devaddr
         BlInfoBlock.BootFbWidth = fwfb^.Width
         BlInfoBlock.BootFbHeight = fwfb^.Height
+        BlInfoBlock.U.Xr.ConsoleX = fwbox^.XCoordinate
+        BlInfoBlock.U.Xr.ConsoleY = fwbox^.YCoordinate
+        BlInfoBlock.U.Xr.ConsoleWidth = fwbox^.Width
+        BlInfoBlock.U.Xr.ConsoleHeight = fwbox^.Height
+        BlInfoBlock.U.Xr.ConsoleBgColor = fwbox^.BgColor
+        BlInfoBlock.U.Xr.ConsoleFgColor = fwbox^.FgColor
     END
 END
 
