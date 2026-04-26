@@ -520,3 +520,25 @@ EXPORT FN HaluSetDebugConsole (
         new, // newvalue
     )
 END
+
+EXPORT FN HalQueryExecutiveGraphicsWindow (
+    OUT x : UWORD,
+    OUT y : UWORD,
+    OUT w : UWORD,
+    OUT h : UWORD,
+) : UWORD
+
+    // Query the window of the boot display in which Executive graphics should
+    // be displayed. Returns FALSE if no boot display, TRUE otherwise.
+
+    IF NOT HalpUseFramebuffer THEN
+        RETURN FALSE
+    END
+
+    x = HalpConsoleX
+    y = HalpConsoleY
+    w = HalpConsoleWidth
+    h = HalpConsoleHeight
+
+    RETURN TRUE
+END

@@ -78,9 +78,23 @@ FN FwtSetPixel (
     FwtPixelPointer ( x, y ) [0] = color
 END
 
-FN FwtInitGraphics ()
+FN FwtInitGraphics () : UWORD
 
     // Initialize graphics for the fireworks test.
+
+    x : UWORD
+    y : UWORD
+    w : UWORD
+    h : UWORD
+
+    IF NOT HalQueryExecutiveGraphicsWindow (
+        OUT x, // x
+        OUT y, // y
+        OUT w, // w
+        OUT h, // h
+    ) THEN
+        RETURN FALSE
+    END
 
     FwtPixBuffer = CAST KeuLoaderBlock.BootFbBase TO ^UBYTE
     FwtPixWidth = KeuLoaderBlock.BootFbWidth
@@ -100,8 +114,8 @@ FN FwtInitGraphics ()
         FwtViewHeight = FwtPixHeight
     END
 
-    FwtViewX = FwtPixWidth - FwtViewWidth - 10
-    FwtViewY = FwtPixHeight - FwtViewHeight - 10
+    FwtViewX = x + w - FwtViewWidth
+    FwtViewY = y + h - FwtViewHeight
 
 #IF ( STRCMP PLATFORM "fox32" )
     FwtPixPitch = FwtPixWidth * 4
