@@ -50,7 +50,8 @@ FN (KepSoftwareInterruptHandlerF) KepApcInterrupt ()
 
 #IF BLD_NUMA
     IF KeNumaNodeFromSpacePointer ( current ) !=
-        KeNumaNodeFromSpacePointer ( current^.Turnstile ) THEN
+        KeNumaNodeFromSpacePointer ( current^.Turnstile ) AND
+        current^.Turnstile THEN
 
         // Due to turnstile donation, we no longer have a turnstile that is
         // local to our node. At some we point contended on a lock with a thread

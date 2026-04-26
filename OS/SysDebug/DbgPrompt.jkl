@@ -821,6 +821,44 @@ FN (DbgCommandF) DbgCommandTrace ()
     DbgTraceThreadContext ( thread^.Context )
 END
 
+FN (DbgCommandF) DbgCommandNode ()
+
+    num : UBYTE[32]
+
+    IF NOT DbgNextToken (
+        &num[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: node [id]\n" )
+
+        LEAVE
+    END
+
+    numval : UWORD
+
+    IF NOT RtlStringToNumber (
+        &num[0], // src
+        32, // bufsize
+        OUT numval, // num
+    ) THEN
+
+        RtlPrint ( "Usage: node [id]\n" )
+
+        LEAVE
+    END
+
+    IF numval >= KeQueryNodeCount () THEN
+        RtlPrint ( "No such node\n" )
+
+        LEAVE
+    END
+
+    node := KeNumaNodeById ( numval )
+
+    RtlPrint ( "System process: %p\n", node^.SystemProcess )
+END
+
 #SECTION "text"
 DbgCommandTable : DbgCommand[] = {
     {
@@ -900,6 +938,11 @@ DbgCommandTable : DbgCommand[] = {
         [Help] = "Dump wait information for a dispatch object.",
     },
 #END
+    {
+        [Name] = "node",
+        [Function] = &DbgCommandNode,
+        [Help] = "Dump information about a node.",
+    },
 
     // Sentinel.
 
