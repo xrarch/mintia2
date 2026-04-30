@@ -185,14 +185,16 @@ FN ExuStartExecutive ()
     WHILE i < nodes DO
         kenode := KeNumaNodeById ( i )
 
-        expnode : ^ExpNode = KeuAllocateNodeSpace (
-            kenode, // kenode
-            SIZEOF ExpNode, // bytes
-        )
+        IF kenode^.ProcessorCount != 0 THEN
+            expnode : ^ExpNode = KeuAllocateNodeSpace (
+                kenode, // kenode
+                SIZEOF ExpNode, // bytes
+            )
 
-        KeAssert ( expnode != NULLPTR )
+            KeAssert ( expnode != NULLPTR )
 
-        kenode^.Exp = expnode
+            kenode^.Exp = expnode
+        END
 
         i += 1
     END

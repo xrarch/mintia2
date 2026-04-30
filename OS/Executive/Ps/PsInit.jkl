@@ -304,92 +304,94 @@ FN PsuInitializeStage1 ()
     WHILE i < max DO
         kenode := KeNumaNodeById ( i )
 
-        psnode : ^PspNode = KeuAllocateNodeSpace (
-            kenode, // kenode
-            SIZEOF PspNode, // bytes
-        )
+        IF kenode^.ProcessorCount != 0 THEN
+            psnode : ^PspNode = KeuAllocateNodeSpace (
+                kenode, // kenode
+                SIZEOF PspNode, // bytes
+            )
 
-        KeAssert ( psnode != NULLPTR )
+            KeAssert ( psnode != NULLPTR )
 
-        kenode^.Psp = psnode
-        kenode^.ReaperCustodyList = &psnode^.ReaperCustodyList
+            kenode^.Psp = psnode
+            kenode^.ReaperCustodyList = &psnode^.ReaperCustodyList
 
-        KeuInitializeCustodyList (
-            &psnode^.ReaperCustodyList, // list
-            &PspActivateReaper, // activateroutine
-            kenode, // context
-        )
+            KeuInitializeCustodyList (
+                &psnode^.ReaperCustodyList, // list
+                &PspActivateReaper, // activateroutine
+                kenode, // context
+            )
 
-        ExInitializeTimedWorkItem (
-            &psnode^.ReaperTimedWorkItem, // item
-            &PsuReaperWorker, // routine
-        )
+            ExInitializeTimedWorkItem (
+                &psnode^.ReaperTimedWorkItem, // item
+                &PsuReaperWorker, // routine
+            )
 
-        // Initialize the turnstile cache.
+            // Initialize the turnstile cache.
 
-#LEAVESECTION
+    #LEAVESECTION
 
-        psnode^.TurnstileCache = MmCreatePoolCache (
-            kenode^.Mmp, // mmnode
-            "Turnstiles", // name
-            SIZEOF KepTurnstile, // size
-            MM_NONPAGED_POOL, // poolindex
-            'Turn', // tag
-        )
+            psnode^.TurnstileCache = MmCreatePoolCache (
+                kenode^.Mmp, // mmnode
+                "Turnstiles", // name
+                SIZEOF KepTurnstile, // size
+                MM_NONPAGED_POOL, // poolindex
+                'Turn', // tag
+            )
 
-#ENTERSECTION "INITtext"
+    #ENTERSECTION "INITtext"
 
-        IF NOT psnode^.TurnstileCache THEN
-            KeCrash ( "%sfailed to create turnstile cache\n",
-                "PsuInitializeStage1: " )
-        END
+            IF NOT psnode^.TurnstileCache THEN
+                KeCrash ( "%sfailed to create turnstile cache\n",
+                    "PsuInitializeStage1: " )
+            END
 
-        // Create the system process.
+            // Create the system process.
 
-        params : NsOpenParameters
+            params : NsOpenParameters
 
-        params.Path.Data = NULLPTR
+            params.Path.Data = NULLPTR
 
-        params.Captured.Flags = 0
-        params.Captured.ObFlags = 0
-        params.Captured.Permissions = OS_ACCESS_OWNER_ALL
+            params.Captured.Flags = 0
+            params.Captured.ObFlags = 0
+            params.Captured.Permissions = OS_ACCESS_OWNER_ALL
 
-        sysprocname : UBYTE[32]
+            sysprocname : UBYTE[32]
 
-        RtlFormat (
-            &sysprocname[0], // dest
-            32, // bufsize
-            "SystemNode%u", // fmt
-            i,
-        )
+            RtlFormat (
+                &sysprocname[0], // dest
+                32, // bufsize
+                "SystemNode%u", // fmt
+                i,
+            )
 
-        RtlInitializeString ( &name, &sysprocname[0] )
+            RtlInitializeString ( &name, &sysprocname[0] )
 
-        status = PsuCreateProcessObject (
-            &params, // params
-            kenode, // kenode
-            &name, // name
-            -1, // quotauid
-            0, // flags
-            OUT kenode^.SystemProcess, // process
-        )
+            status = PsuCreateProcessObject (
+                &params, // params
+                kenode, // kenode
+                &name, // name
+                -1, // quotauid
+                0, // flags
+                OUT kenode^.SystemProcess, // process
+            )
 
-        IF OsError ( status ) THEN
-            KeCrash ( "%sfailed to create system process (%x)\n",
-                "PsuInitializeStage1: ", status )
-        END
+            IF OsError ( status ) THEN
+                KeCrash ( "%sfailed to create system process (%x)\n",
+                    "PsuInitializeStage1: ", status )
+            END
 
-        // Set the system process's session.
+            // Set the system process's session.
 
-        status = PsuSetGroupProcess (
-            kenode^.SystemProcess, // process
-            NULLPTR, // group
-            TRUE, // newsession
-        )
+            status = PsuSetGroupProcess (
+                kenode^.SystemProcess, // process
+                NULLPTR, // group
+                TRUE, // newsession
+            )
 
-        IF OsError ( status ) THEN
-            KeCrash ( "%sfailed to set system session (%x)\n",
-                "PsuInitializeStage1: ", status )
+            IF OsError ( status ) THEN
+                KeCrash ( "%sfailed to set system session (%x)\n",
+                    "PsuInitializeStage1: ", status )
+            END
         END
 
         i += 1

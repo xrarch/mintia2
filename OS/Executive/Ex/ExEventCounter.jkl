@@ -12,6 +12,10 @@ FN ExpInitializeEventCountersForNode (
 
     // Initialize the event counter list.
 
+    IF NOT kenode^.Exp THEN
+        LEAVE
+    END
+
     kenode^.Exp^.EventCounterCache = MmCreatePoolCache (
         kenode^.Mmp, // mmnode
         "Event Counters", // name

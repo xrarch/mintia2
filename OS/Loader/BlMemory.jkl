@@ -637,6 +637,13 @@ FN BlInitializeNodeMemory (
         0, // ulong
     )
 
+    IF blnode^.ProcessorCount == 0 THEN
+        // This is a memory-only node, none of these structures are needed
+        // because there are no processors to use them.
+
+        LEAVE
+    END
+
     // Allocate the software IDTs and idle stacks for each processor.
     // We assume we can use a single 4KB chunk of memory, split in half.
 

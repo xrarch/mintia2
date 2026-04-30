@@ -97,42 +97,44 @@ FN ObuInitializeType (
     WHILE i < nodes DO
         kenode := KeNumaNodeById ( i )
 
-        pernodetype := &kenode^.ObTypes[id]
+        IF kenode^.ProcessorCount != 0 THEN
+            pernodetype := &kenode^.ObTypes[id]
 
-        RtlCopyBytes (
-            pernodetype, // dest
-            type, // src
-            SIZEOF ObuType, // sz
-        )
-
-        pernodetype^.CachedPgBodySize = psize
-        pernodetype^.CachedNpBodySize = npsize
-
-        IF npsize THEN
-            pernodetype^.NpPartCache = MmCreatePoolCache (
-                kenode^.Mmp, // mmnode
-                npname, // name
-                npsize, // size
-                MM_NONPAGED_POOL, // poolindex
-                type^.Tag, // tag
+            RtlCopyBytes (
+                pernodetype, // dest
+                type, // src
+                SIZEOF ObuType, // sz
             )
 
-            IF NOT pernodetype^.NpPartCache THEN
-                KeCrash ( error, type^.Name, "failed to allocate np cache\n" )
+            pernodetype^.CachedPgBodySize = psize
+            pernodetype^.CachedNpBodySize = npsize
+
+            IF npsize THEN
+                pernodetype^.NpPartCache = MmCreatePoolCache (
+                    kenode^.Mmp, // mmnode
+                    npname, // name
+                    npsize, // size
+                    MM_NONPAGED_POOL, // poolindex
+                    type^.Tag, // tag
+                )
+
+                IF NOT pernodetype^.NpPartCache THEN
+                    KeCrash ( error, type^.Name, "failed to alloc np cache\n" )
+                END
             END
-        END
 
-        IF psize THEN
-            pernodetype^.PgPartCache = MmCreatePoolCache (
-                kenode^.Mmp, // mmnode
-                pgname, // name
-                psize, // size
-                MM_PAGED_POOL, // poolindex
-                type^.Tag, // tag
-            )
+            IF psize THEN
+                pernodetype^.PgPartCache = MmCreatePoolCache (
+                    kenode^.Mmp, // mmnode
+                    pgname, // name
+                    psize, // size
+                    MM_PAGED_POOL, // poolindex
+                    type^.Tag, // tag
+                )
 
-            IF NOT pernodetype^.PgPartCache THEN
-                KeCrash ( error, type^.Name, "failed to allocate pg cache\n" )
+                IF NOT pernodetype^.PgPartCache THEN
+                    KeCrash ( error, type^.Name, "failed to alloc pg cache\n" )
+                END
             END
         END
 

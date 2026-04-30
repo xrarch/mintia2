@@ -308,6 +308,29 @@ FN KepInitializeNode (
 
     kepnode^.BlNode = blnode
 
+    // Perform early initialization of the HAL. This will perform baseline
+    // initialization of integral platform components such as the interval
+    // timer. Also, we get a boot console which is guaranteed to stay sane
+    // throughout the lifetime of the system and at any IPL.
+
+    HaluEarlyInitialize ( kenode )
+
+    // Move the loader's descriptor list head into our node.
+
+    kenode^.DescriptorListHead.Next = blnode^.DescriptorListHead.Next
+    kenode^.DescriptorListHead.Prev = blnode^.DescriptorListHead.Prev
+
+    // Fix up the circular list head.
+
+    kenode^.DescriptorListHead.Next^.Prev = &kenode^.DescriptorListHead
+    kenode^.DescriptorListHead.Prev^.Next = &kenode^.DescriptorListHead
+
+    IF kenode^.ProcessorCount == 0 THEN
+        // This is a memory-only node, so don't initialize the remaining things.
+
+        LEAVE
+    END
+
     // Initialize a per-node idle process.
 
     PsuInitializeIdleProcess ( kenode )
@@ -334,28 +357,11 @@ FN KepInitializeNode (
         initprb += BL_PRB_SIZE
     END
 
-    // Perform early initialization of the HAL. This will perform baseline
-    // initialization of integral platform components such as the interval
-    // timer. Also, we get a boot console which is guaranteed to stay sane
-    // throughout the lifetime of the system and at any IPL.
-
-    HaluEarlyInitialize ( kenode )
-
     // Initialize the shared user page.
 
     kenode^.SharedUserPage = blnode^.VirtualSharedUserPage
 
     KepUpdateTime ( kenode, prb )
-
-    // Move the loader's descriptor list head into our node.
-
-    kenode^.DescriptorListHead.Next = blnode^.DescriptorListHead.Next
-    kenode^.DescriptorListHead.Prev = blnode^.DescriptorListHead.Prev
-
-    // Fix up the circular list head.
-
-    kenode^.DescriptorListHead.Next^.Prev = &kenode^.DescriptorListHead
-    kenode^.DescriptorListHead.Prev^.Next = &kenode^.DescriptorListHead
 
     // Initialize the stack swapper event. This is waited upon by a component
     // of Mm which outswaps kernel stacks and processes.

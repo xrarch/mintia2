@@ -5,7 +5,29 @@
 #INCLUDE "Psp.hjk"
 #INCLUDE "<ll>/System/OsQuota.hjk"
 
-PsuRoundRobinNodeId : ULONG = 0
+PspRoundRobinNodeId : ULONG = 0
+
+EXPORT FN PsGenerateNode () : ^KeuNode
+
+    // Grab a node ID to put a process or thread on.
+
+    nodes := KeQueryNodeCount ()
+
+    WHILE TRUE DO
+        nodeid := KeIncrementUlong (
+            &PspRoundRobinNodeId, // ptr
+            1, // inc
+        )
+
+        nodeid %= nodes
+
+        kenode := KeNumaNodeById ( nodeid )
+
+        IF kenode^.ProcessorCount != 0 THEN
+            RETURN kenode
+        END
+    END
+END
 
 STRUCT PspProcessContext
     Name : ^RtlString,
@@ -1098,28 +1120,28 @@ FN PsuCreateProcess (
     ELSE
         // Use the specified NUMA node.
 
-        nodes := KeQueryNodeCount ()
-
         IF nodeid == OS_NEXT_NODE THEN
             // Use the next node in a round robin fashion.
             // Used for trivial passive balancing of processes between nodes.
 
-            nodeid = KeIncrementUlong (
-                &PsuRoundRobinNodeId, // ptr
-                1, // inc
-            )
-
-            IF nodeid >= nodes THEN
-                nodeid %= nodes
-            END
+            kenode = PsGenerateNode ()
         
-        ELSEIF nodeid >= nodes THEN
-            // Not a valid node ID.
+        ELSE
 
-            RETURN OS_STATUS_INVALID_ARGUMENT
+            IF nodeid >= KeQueryNodeCount () THEN
+                // Not a valid node ID.
+
+                RETURN OS_STATUS_INVALID_ARGUMENT
+            END
+
+            kenode = KeNumaNodeById ( nodeid )
+
+            IF kenode^.ProcessorCount == 0 THEN
+                // Can't put a process on a memory-only node.
+
+                RETURN OS_STATUS_INVALID_ARGUMENT
+            END
         END
-
-        kenode = KeNumaNodeById ( nodeid )
     END
 
     process : ^PsuProcess

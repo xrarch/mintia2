@@ -392,10 +392,12 @@ FN NspInitializeTree ()
     WHILE i < count DO
         kenode := KeNumaNodeById ( i )
 
-        idleproc := kenode^.IdleProcess^.Paged
+        IF kenode^.ProcessorCount != 0 THEN
+            idleproc := kenode^.IdleProcess^.Paged
 
-        idleproc^.RootHandle.Entry = &NspRootEntry.Entry
-        idleproc^.RootHandle.Subspace = &NspRootSubspace
+            idleproc^.RootHandle.Entry = &NspRootEntry.Entry
+            idleproc^.RootHandle.Subspace = &NspRootSubspace
+        END
 
         i += 1
     END

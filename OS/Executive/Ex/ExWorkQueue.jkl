@@ -258,7 +258,9 @@ FN ExpInitializeWorkQueues ()
     WHILE i < max DO
         kenode := KeNumaNodeById ( i )
 
-        ExpInitializeWorkQueuesForNode ( kenode )
+        IF kenode^.ProcessorCount != 0 THEN
+            ExpInitializeWorkQueuesForNode ( kenode )
+        END
 
         i += 1
     END

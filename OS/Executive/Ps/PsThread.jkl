@@ -1117,6 +1117,8 @@ EXPORT FN PsCreateExecutiveThread (
     // Helper function for creating a thread that only executes code in the
     // system executive.
 
+    KeAssert ( kenode^.ProcessorCount != 0 )
+
     params : NsOpenParameters
 
     params.Path.Data = NULLPTR
@@ -1185,6 +1187,12 @@ FN PsuCreateThread (
         END
 
         kenode = KeNumaNodeById ( nodeid )
+
+        IF kenode^.ProcessorCount == 0 THEN
+            // Memory-only nodes can't have threads.
+
+            RETURN OS_STATUS_INVALID_ARGUMENT
+        END
     END
 
     status := ObuReferenceByHandle (

@@ -15,32 +15,34 @@ FN ObuInitialize ()
     WHILE i < max DO
         kenode := KeNumaNodeById ( i )
 
-        obpnode : ^ObpNode = KeuAllocateNodeSpace (
-            kenode, // kenode
-            SIZEOF ObpNode, // bytes
-        )
+        IF kenode^.ProcessorCount != 0 THEN
+            obpnode : ^ObpNode = KeuAllocateNodeSpace (
+                kenode, // kenode
+                SIZEOF ObpNode, // bytes
+            )
 
-        KeAssert ( obpnode != NULLPTR )
+            KeAssert ( obpnode != NULLPTR )
 
-        kenode^.Obp = obpnode
+            kenode^.Obp = obpnode
 
-        ExInitializeTimedWorkItem (
-            &obpnode^.DeferredDeletionTimedWorkItem, // item
-            &ObuDeferredDeletionWorker, // routine
-        )
+            ExInitializeTimedWorkItem (
+                &obpnode^.DeferredDeletionTimedWorkItem, // item
+                &ObuDeferredDeletionWorker, // routine
+            )
 
-        KeuInitializeCustodyList (
-            &obpnode^.DeferredDeletionList, // list
-            &ObpActivateDeletionWorker, // activateroutine
-            kenode, // context
-        )
+            KeuInitializeCustodyList (
+                &obpnode^.DeferredDeletionList, // list
+                &ObpActivateDeletionWorker, // activateroutine
+                kenode, // context
+            )
 
-        kenode^.ObTypes = KeuAllocateNodeSpace (
-            kenode, // kenode
-            SIZEOF ObuType * OS_MAX_TYPE, // bytes
-        )
+            kenode^.ObTypes = KeuAllocateNodeSpace (
+                kenode, // kenode
+                SIZEOF ObuType * OS_MAX_TYPE, // bytes
+            )
 
-        KeAssert ( kenode^.ObTypes != NULLPTR )
+            KeAssert ( kenode^.ObTypes != NULLPTR )
+        END
 
         i += 1
     END

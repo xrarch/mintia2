@@ -530,9 +530,9 @@ FN BxPopulateNodeList ()
     i := 0
 
     WHILE i < FW_NODE_MAX DO
-        procs := FwDeviceDatabase^.Nodes[i].ProcessorCount
+        fwnode := &FwDeviceDatabase^.Nodes[i]
 
-        IF procs != 0 THEN
+        IF fwnode^.Present THEN
             blnode := &BxNodes[i]
 
             startaddr := 64 * 1024 * 1024 * i
@@ -542,7 +542,7 @@ FN BxPopulateNodeList ()
                 startaddr, // startaddr
                 startaddr + 64 * 1024 * 1024, // endaddr
                 i, // hwid
-                procs, // procs
+                fwnode^.ProcessorCount, // procs
             )
         END
 
@@ -640,6 +640,13 @@ FN BxInitializeMemory (
 
         base += 32 * 1024 * 1024
         i += 1
+    END
+
+    IF blnode^.ProcessorCount == 0 THEN
+        // This is a memory-only node, so don't create structures that are only
+        // used by processors in the node.
+
+        LEAVE
     END
 
     // Allocate the kernel page directory for the node.

@@ -460,41 +460,43 @@ FN MmuInitializeStage1 ()
 
         MmpSetNodeSize ( mmnode )
 
-        // Initialize the system virtual address allocator.
+        IF kenode^.ProcessorCount != 0 THEN
+            // Initialize the system virtual address allocator.
 
-        MmpInitializeSystemVa ( kenode )
+            MmpInitializeSystemVa ( kenode )
 
-        // Initialize the system pools.
+            // Initialize the system pools.
 
-        MmpInitializePools ( kenode )
+            MmpInitializePools ( kenode )
 
-        // Initialize the quick map pages.
+            // Initialize the quick map pages.
 
-        MmpInitializeQuickPages ( kenode )
+            MmpInitializeQuickPages ( kenode )
 
-        // Initialize commit to something acceptable before creation of the
-        // pagefiles.
+            // Initialize the zones for quick MDL allocation.
 
-        mmnode^.CommitLimit = mmnode^.AvailablePageCount + 300
-        mmnode^.TheoreticalCommitLimit = mmnode^.CommitLimit
+            MmpInitializeMdlCache ( kenode )
 
-        // Give the idle process a quota block. We stash this in the handle
-        // table. Idle process has no real handle table.
+            // Initialize the zones for quick kernel stack allocation.
 
-        kenode^.IdleProcess^.Paged^.HandleTable.QuotaBlock = &MmpSystemQuota
+            MmpInitializeKernelStackCache ( kenode )
 
-        // Initialize the zones for quick MDL allocation.
+            // Allocate one page which just remains constantly zeroed for the
+            // lifetime of the system.
 
-        MmpInitializeMdlCache ( kenode )
+            MmpInitializeZeroedPage ( kenode )
 
-        // Initialize the zones for quick kernel stack allocation.
+            // Initialize commit to something acceptable before creation of the
+            // pagefiles.
 
-        MmpInitializeKernelStackCache ( kenode )
+            mmnode^.CommitLimit = mmnode^.AvailablePageCount + 300
+            mmnode^.TheoreticalCommitLimit = mmnode^.CommitLimit
 
-        // Allocate one page which just remains constantly zeroed for the
-        // lifetime of the system.
+            // Give the idle process a quota block. We stash this in the handle
+            // table. Idle process has no real handle table.
 
-        MmpInitializeZeroedPage ( kenode )
+            kenode^.IdleProcess^.Paged^.HandleTable.QuotaBlock = &MmpSystemQuota
+        END
 
         i += 1
     END
