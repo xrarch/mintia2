@@ -160,6 +160,7 @@ FN ObuAllocateObject (
 
     psize : UWORD
     npsize : UWORD
+    status : OsStatus
 
     type := &obparams^.AllocationNode^.ObTypes[obparams^.TypeId]
 
@@ -183,24 +184,28 @@ FN ObuAllocateObject (
 
     quotablock := PsuQuotaBlock ( process )
 
-    status := MmuChargePoolQuota (
-        quotablock, // quotablock
-        npquota, // charge
-        MM_NONPAGED_POOL, // poolindex
-    )
+    IF npquota THEN
+        status = MmuChargePoolQuota (
+            quotablock, // quotablock
+            npquota, // charge
+            MM_NONPAGED_POOL, // poolindex
+        )
 
-    IF OsError ( status ) THEN
-        RETURN status
+        IF OsError ( status ) THEN
+            GOTO Error0
+        END
     END
 
-    status = MmuChargePoolQuota (
-        quotablock, // quotablock
-        pquota, // charge
-        MM_PAGED_POOL, // poolindex
-    )
+    IF pquota THEN
+        status = MmuChargePoolQuota (
+            quotablock, // quotablock
+            pquota, // charge
+            MM_PAGED_POOL, // poolindex
+        )
 
-    IF OsError ( status ) THEN
-        GOTO Error1
+        IF OsError ( status ) THEN
+            GOTO Error1
+        END
     END
 
     nppart := NULLPTR
@@ -341,19 +346,25 @@ FN ObuAllocateObject (
 
 @Error2
 
-    MmuUnchargePoolQuota (
-        quotablock, // quotablock
-        pquota, // charge
-        MM_PAGED_POOL, // poolindex
-    )
+    IF pquota THEN
+        MmuUnchargePoolQuota (
+            quotablock, // quotablock
+            pquota, // charge
+            MM_PAGED_POOL, // poolindex
+        )
+    END
 
 @Error1
 
-    MmuUnchargePoolQuota (
-        quotablock, // quotablock
-        npquota, // charge
-        MM_NONPAGED_POOL, // poolindex
-    )
+    IF npquota THEN
+        MmuUnchargePoolQuota (
+            quotablock, // quotablock
+            npquota, // charge
+            MM_NONPAGED_POOL, // poolindex
+        )
+    END
+
+@Error0
 
     RETURN status
 END
