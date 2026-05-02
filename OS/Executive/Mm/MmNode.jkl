@@ -289,60 +289,47 @@ FN MmpAllocatePageFromStandbyList (
 
     pfe^.Object = NULLPTR
 
-    IF pfe^.Type == MMP_BACKED_PFE_TYPE THEN
-        // Remove from AVL tree of object.
+    KeAssert ( pfe^.Type == MMP_IN_USE_PFE_TYPE )
 
-        ob := CONTAINEROF object TO MmuBackedObject.Hdr
+    // Reset the tracking table entry for this page.
 
-        RtlRemoveAvl (
-            &ob^.PageTreeRoot, // root
-            &pfe^.U.Backed.Entry, // node
+    entry := pfe^.TrackingTableEntry
+    entry^ = pfe^.Backing
+
+    // If this wasn't a page of paged pool or the paged executive, the
+    // tracking table entry resides in page tracking pool, and we can
+    // decrement the refcount on that page of tracking pool, which may
+    // allow it to be paged out if it gets trimmed from the system working
+    // set.
+    //
+    // Note that if it WAS paged pool or paged executive, the containing
+    // page for the tracking PTE was an actual system space page table -
+    // we never page those out!
+    //
+    // Note that *user* page tables can be reclaimed, but are *not*
+    // reclaimed here. Freeing them up when the last PTE has been trimmed
+    // out of a page table is the province of architecture-specific pmap
+    // code.
+
+    IF pfe^.Flags & MMP_PAGED_EXEC_PFE_FLAG == 0 THEN
+        poolpfe := MmpPfnToPfe (
+            MmpPfnFromPte (
+                (MmpPteAddress ( entry ))^
+            )
         )
 
-    ELSE
+        // Tracking pool should consist of anonymous pages.
 
-        KeAssert ( pfe^.Type == MMP_ANON_PFE_TYPE )
+        KeAssert ( poolpfe^.Type == MMP_IN_USE_PFE_TYPE )
 
-        // Reset the tracking table entry for this anonymous page.
-
-        entry := pfe^.U.Anon.TrackingTableEntry
-        entry^ = pfe^.U.Anon.Backing
-
-        // If this wasn't a page of paged pool or the paged executive, the
-        // tracking table entry resides in page tracking pool, and we can
-        // decrement the refcount on that page of tracking pool, which may
-        // allow it to be paged out if it gets trimmed from the system working
+        // This page of tracking pool should have at least 2
+        // references: one for being pinned (due to having this tracking
+        // entry resident), and another for being in the system working
         // set.
-        //
-        // Note that if it WAS paged pool or paged executive, the containing
-        // page for the tracking PTE was an actual system space page table -
-        // we never page those out!
-        //
-        // Note that *user* page tables can be reclaimed, but are *not*
-        // reclaimed here. Freeing them up when the last PTE has been trimmed
-        // out of a page table is the province of architecture-specific pmap
-        // code.
 
-        IF pfe^.Flags & MMP_PAGED_POOL_PFE_FLAG == 0 THEN
-            poolpfe := MmpPfnToPfe (
-                MmpPfnFromPte (
-                    (MmpPteAddress ( entry ))^
-                )
-            )
+        KeAssert ( poolpfe^.References >= 2 )
 
-            // Tracking pool should consist of anonymous pages.
-
-            KeAssert ( poolpfe^.Type == MMP_ANON_PFE_TYPE )
-
-            // This page of tracking pool should have at least 2
-            // references: one for being pinned (due to having this tracking
-            // entry resident), and another for being in the system working
-            // set.
-
-            KeAssert ( poolpfe^.References >= 2 )
-
-            poolpfe^.References -= 1
-        END
+        poolpfe^.References -= 1
     END
 
     KeReleaseLock ( &object^.StructureLock )

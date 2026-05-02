@@ -21,37 +21,23 @@
 
 #DEFINE MMP_UNINITIALIZED_PFE_TYPE 0
 #DEFINE MMP_FREE_PFE_TYPE 1
-#DEFINE MMP_BACKED_PFE_TYPE 2
-#DEFINE MMP_ANON_PFE_TYPE 3
+#DEFINE MMP_IN_USE_PFE_TYPE 2
 
 #DEFINE MMP_MODIFIED_PFE_FLAG 1
 #DEFINE MMP_DELETED_PFE_FLAG 2
-#DEFINE MMP_PAGED_POOL_PFE_FLAG 4
+#DEFINE MMP_PAGED_EXEC_PFE_FLAG 4
 
 STRUCT MmpFreePfe
     Next : ^MmpPfe,
 END
 
-STRUCT MmpBackedPfe
-    OffsetInObject : RtlUquad,
-    Entry : RtlAvlNode,
-END
-
-STRUCT MmpAnonPfe
-    TrackingTableEntry : ^MmpPte,
-    Backing : MmpPte,
-END
-
-UNION MmpInUseUnion
-    Backed : MmpBackedPfe,
-    Anon : MmpAnonPfe,
-END
-
 STRUCT MmpPfe
-    U : MmpInUseUnion,
+    TrackingTableEntry : ^MmpPte,
     Object : ^MmuObject,
     Entry : RtlListEntry,
 
+    OffsetInObject : RtlUquad,
+    Backing : MmpPte,
     References : ULONG,
     Type : UBYTE,
     Flags : UBYTE,
@@ -89,9 +75,9 @@ EXTERN MmpSystemSize : UWORD
 // Keep this synchronized with Loader.hjk
 
 #IF ( == BLD_BITS 32 )
-    #DEFINE MMP_PFE_SIZE 40
+    #DEFINE MMP_PFE_SIZE 36
 #ELSE
-    #DEFINE MMP_PFE_SIZE 64
+    #DEFINE MMP_PFE_SIZE 56
 #END
 
 #MACRO MmpFindPfnDatabase () [
