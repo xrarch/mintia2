@@ -76,8 +76,6 @@ FN MmuUnreferenceQuotaBlock (
 
     // Decrement the refcount of the quota block.
 
-    KeAcquireLockExclusive ( &MmpQuotaListLock )
-
     oldcount := KeIncrementUlong (
         &quotablock^.References, // ptr
         0xFFFFFFFF, // inc
@@ -86,12 +84,12 @@ FN MmuUnreferenceQuotaBlock (
     IF oldcount == 1 THEN
         // Remove from the list.
 
+        KeAcquireLockExclusive ( &MmpQuotaListLock )
+
         RtlRemoveEntryList ( &quotablock^.Entry )
-    END
 
-    KeReleaseLock ( &MmpQuotaListLock )
+        KeReleaseLock ( &MmpQuotaListLock )
 
-    IF oldcount == 1 THEN
         // Free.
 
         MmFreePool (
@@ -113,6 +111,8 @@ FN MmuLookupQuotaBlock (
 
     listhead := &MmpQuotaBlockListHead
 
+@Retry
+
     KeAcquireLockExclusive ( &MmpQuotaListLock )
 
     quotablock : ^MmpQuotaBlock
@@ -121,10 +121,27 @@ FN MmuLookupQuotaBlock (
     WHILE listentry != listhead DO
         quotablock = CONTAINEROF listentry TO MmpQuotaBlock.Entry
 
-        IF quotablock^.Uid == uid THEN
-            MmuReferenceQuotaBlock ( quotablock )
+        refs := quotablock^.References
+
+        IF quotablock^.Uid == uid AND
+            refs != 0 THEN
+
+            // Try to CAS the reference count.
+            // If it became zero, then the quotablock is in the process of being
+            // deleted by another thread and we shouldn't grab it, we should
+            // retry.
+
+            new := KeCompareSwapUlong (
+                &quotablock^.References, // ptr
+                refs + 1, // newvalue
+                refs, // expectedvalue
+            )
 
             KeReleaseLock ( &MmpQuotaListLock )
+
+            IF new != refs THEN
+                GOTO Retry
+            END
 
             RETURN quotablock
         END
