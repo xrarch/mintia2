@@ -78,7 +78,7 @@ EXPORT FN KepFreezeOtherProcessors ()
         spincount := KEP_FREEZE_SPIN
 
         WHILE KepFrozenProcessorCount != expected AND spincount DO
-            // Language BARRIER so this loop isn't optimized out.
+            // Compiler BARRIER so this loop isn't optimized out.
 
             BARRIER
 
@@ -120,7 +120,7 @@ EXPORT FN KepUnfreezeOtherProcessors ()
         // It's zero now, they've been released. Wait for them.
 
         WHILE KepFrozenProcessorCount DO
-            // Language BARRIER so this loop isn't optimized out.
+            // Compiler BARRIER so this loop isn't optimized out.
 
             BARRIER
 
@@ -165,7 +165,7 @@ FN KepExecuteOnOtherProcessor (
         // 0xFF means theres no clear bits; no free table slots. Spin-wait for
         // a free table slot.
         
-        // Use a language BARRIER to stop this loop from being optimized out.
+        // Use a compiler BARRIER to stop this loop from being optimized out.
 
         BARRIER
 
@@ -220,7 +220,7 @@ FN KepExecuteOnOtherProcessor (
     // 4. Spin-wait for execution of our callback.
 
     WHILE prb^.IpiSpin DO
-        // Do a language BARRIER so that this loop isn't optimized out.
+        // Do a compiler BARRIER so that this loop isn't optimized out.
 
         BARRIER
 
@@ -271,7 +271,7 @@ FN KepExecuteOnEveryoneElse (
         // 0xFF means theres no clear bits; no free table slots. Spin-wait for
         // a free table slot.
         
-        // Use a language BARRIER to stop this loop from being optimized out.
+        // Use a compiler BARRIER to stop this loop from being optimized out.
 
         BARRIER
 
@@ -341,7 +341,7 @@ FN KepExecuteOnEveryoneElse (
                         deferred, // set
                     )
 
-                    // Language-level BARRIER to stop the read from InIdleLoop
+                    // Compiler BARRIER to stop the read from InIdleLoop
                     // being smushed together by the compiler.
 
                     BARRIER
@@ -406,7 +406,7 @@ FN KepExecuteOnEveryoneElse (
     // Spin-wait for execution of our callback.
 
     WHILE prb^.IpiSpin DO
-        // Do a language BARRIER so that this loop isn't optimized out.
+        // Do a compiler BARRIER so that this loop isn't optimized out.
 
         BARRIER
 
@@ -501,7 +501,7 @@ FN (KeInterruptF) KepServiceIpi (
         )
 
         WHILE KepFreezeCount DO
-            // Do a language BARRIER so that this loop isn't optimized out.
+            // Do a compiler BARRIER so that this loop isn't optimized out.
 
             BARRIER
 
