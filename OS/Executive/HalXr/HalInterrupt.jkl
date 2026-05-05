@@ -273,26 +273,17 @@ FN HaluEnableInterrupt (
     // Enable the interrupt with the given vector.
     // Interrupts are disabled and we are running on the target processor.
 
-    lsic := CAST prb^.LsicBase TO ^HalpLsic
+    mask := &(CAST prb^.LsicBase TO ^HalpLsic)^.Masks[vector / 32]
 
-    maskptr := &lsic^.Mask0
+    oldmask := mask^
 
-    IF vector >= 32 THEN
-        vector -= 32
-        maskptr = &lsic^.Mask1
-    END
+    // Compiler BARRIER to ensure no optimization-induced bugs.
 
-    // Read the current LSIC mask.
+    BARRIER
 
-    mask := maskptr^
+    // Clear bit in mask (enabling the interrupt).
 
-    // Clear the bit for this interrupt (enabling it).
-
-    mask &= ~(1 << vector)
-
-    // Set the new mask.
-
-    maskptr^ = mask
+    mask^ = oldmask & ~(1 << (vector & 31))
 END
 
 FN HaluDisableInterrupt (
@@ -303,26 +294,17 @@ FN HaluDisableInterrupt (
     // Disable the interrupt with the given vector.
     // Interrupts are disabled and we are running on the target processor.
 
-    lsic := CAST prb^.LsicBase TO ^HalpLsic
+    mask := &(CAST prb^.LsicBase TO ^HalpLsic)^.Masks[vector / 32]
 
-    maskptr := &lsic^.Mask0
+    oldmask := mask^
 
-    IF vector >= 32 THEN
-        vector -= 32
-        maskptr = &lsic^.Mask1
-    END
+    // Compiler BARRIER to ensure no optimization-induced bugs.
 
-    // Read the current LSIC mask.
+    BARRIER
 
-    mask := maskptr^
+    // Set bit in mask (disabling the interrupt).
 
-    // Set the bit for this interrupt (disabling it).
-
-    mask |= 1 << vector
-
-    // Set the new mask.
-
-    maskptr^ = mask
+    mask^ = oldmask | (1 << (vector & 31))
 END
 
 #IF BLD_MP
@@ -344,10 +326,10 @@ FN HaluTriggerIpi (
     // IPI.
 
     IF type == KEP_IPI_SYNCHRONOUS THEN
-        lsic^.Pending0 = 1 << 1
+        lsic^.Pendings[0] = 1 << 1
 
     ELSE
-        lsic^.Pending1 = 1 << 31
+        lsic^.Pendings[1] = 1 << 31
     END
 END
 
