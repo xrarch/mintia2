@@ -371,6 +371,22 @@ FN KepSatisfyObject (
     RETURN NULLPTR
 END
 
+EXPORT FN KeIsKilledThread (
+    IN thread : ^KeuThread,
+) : UWORD
+
+    // Return whether the thread has been killed.
+    // Useful for keeping things responsive to termination during lengthy
+    // operations.
+
+    IF thread^.IgnoreEventCount THEN
+        RETURN FALSE
+    END
+
+    RETURN thread^.SignalMask[OS_SIGNAL_KILL / 32] &
+        (1 << (OS_SIGNAL_KILL & 31))
+END
+
 FN KepWaitCheck (
     IN thread : ^KeuThread,
     IN ipl : UWORD,
