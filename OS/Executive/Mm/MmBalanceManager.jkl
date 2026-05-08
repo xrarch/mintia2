@@ -176,6 +176,13 @@ FN (KeStartThreadF) MmuBalanceManager (
 
         ELSEIF status == 1 THEN
             // The low memory event was set.
+            // Try to free up page frames in a hurry.
+
+            MmpAdjustAllPoolCachesSafely (
+                mmnode, // mmnode
+                TRUE, // empty
+            )
+
             // Trim working sets.
 
         END
