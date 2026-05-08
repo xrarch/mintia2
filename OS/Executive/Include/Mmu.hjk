@@ -114,6 +114,8 @@ EXTERN FN MmuUninitializeThread (
 
 EXTERN FN MmuInitializeStage1 ()
 
+EXTERN FN MmuInitializeStage2 ()
+
 EXTERN FN MmuJettisonUnusedResources ()
 
 // With three levels this can describe 4,311,810,312 pages, or about 18TB.
@@ -157,7 +159,15 @@ EXTERN FN MmuPageFault (
     IN usermode : UWORD,
 ) : OsStatus
 
-EXTERN FN MmuBalanceManager ()
+EXTERN FN (KeStartThreadF) MmuBalanceManager (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+EXTERN FN (KeStartThreadF) MmuZeroPageWorker (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
 
 #DEFINE MMU_MDL_FREE 1
 #DEFINE MMU_MDL_UNPIN 2

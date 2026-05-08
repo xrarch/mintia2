@@ -513,4 +513,69 @@ FN MmuInitializeStage1 ()
     RtlPrint ( "MmuInitialize: %u KB\n", membytes / 1024 )
 END
 
+FN MmuInitializeStage2 ()
+
+    // Initialize virtual memory.
+
+    // Create the worker threads for each node (balance set manager, zero page
+    // worker, etc).
+
+    status : OsStatus
+    name : RtlString
+    thread : ^PsuThread
+
+    i := 0
+
+    WHILE i < KeuLoaderBlock.NodeCount DO
+        kenode := KeNumaNodeById ( i )
+
+        IF kenode^.ProcessorCount != 0 THEN
+            // Don't create balance set manager for node 0 because it repurposes
+            // a boot time thread for this purpose.
+
+            IF i != 0 THEN
+                RtlInitializeString ( &name, "Balance Manager" )
+
+                status = PsCreateExecutiveThread (
+                    kenode, // kenode
+                    &name, // name
+                    &MmuBalanceManager, // startfunc
+                    0, // context1
+                    0, // context2
+                    0, // flags
+                    OUT thread, // thread
+                )
+
+                IF OsError ( status ) THEN
+                    KeCrash ( "%sfailed to create bal mgr (%x)\n",
+                        "MmuInitializeStage2: ", status )
+                END
+
+                ObUnreferenceObject ( thread )
+            END
+
+            RtlInitializeString ( &name, "Zero Page Worker" )
+
+            status = PsCreateExecutiveThread (
+                kenode, // kenode
+                &name, // name
+                &MmuZeroPageWorker, // startfunc
+                0, // context1
+                0, // context2
+                0, // flags
+                OUT thread, // thread
+            )
+
+            IF OsError ( status ) THEN
+                KeCrash ( "%sfailed to create zero page worker (%x)\n",
+                    "MmuInitializeStage2: ", status )
+            END
+
+            ObUnreferenceObject ( thread )
+        END
+
+        i += 1
+    END
+END
+
 #LEAVESECTION
