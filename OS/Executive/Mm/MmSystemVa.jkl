@@ -402,10 +402,10 @@ FN MmpFindDynamicSpaceNode (
     RETURN spacenode
 END
 
-#MACRO MmpAllocateDynamicSpaceNode ( mmnode ) [
+#MACRO MmpAllocateDynamicSpaceNode ( mmnode, wait ) [
     CAST MmAllocateFromPoolCache (
         (mmnode)^.SpaceNodeCache, // cache
-        FALSE, // wait
+        wait, // wait
     ) TO ^MmpDynamicSpaceNode
 ]
 
@@ -571,33 +571,23 @@ FN MmpAllocateDynamicSpace (
         RETURN NULLPTR
     END
 
-@Retry
-
-    spacenode := MmpAllocateDynamicSpaceNode ( mmnode )
+    spacenode := MmpAllocateDynamicSpaceNode (
+        mmnode, // mmnode
+        wait, // wait
+    )
 
     IF NOT spacenode THEN
-        IF NOT wait THEN
-            // Failed to allocate a node instantly and caller told us not to
-            // wait.
+        // Failed to allocate a node instantly and caller told us not to
+        // wait.
 
-            MmpReleaseDynamicPages (
-                mmnode, // mmnode
-                ptr, // ptr
-                pages, // pages
-                FALSE, // flush
-            )
-
-            RETURN NULLPTR
-        END
-
-        // Caller requested wait upon being unable to allocate a node.
-
-        MmpWaitForPages (
+        MmpReleaseDynamicPages (
             mmnode, // mmnode
-            FALSE, // low
+            ptr, // ptr
+            pages, // pages
+            FALSE, // flush
         )
 
-        GOTO Retry
+        RETURN NULLPTR
     END
 
     ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceTreeLock )

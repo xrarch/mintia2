@@ -507,7 +507,13 @@ FN MmpWaitForPages (
     // Wait for available pages to exist from the given node.
     // This function provides no guarantees - caller will have to repeatedly
     // call it until MmpAllocatePage yields a page.
-
+    //
+    // Note that each time this function returns, the caller should retry its
+    // entire allocation path. For example, if the caller is a cache layer, then
+    // it should try to look for a cached block to have appeared to take instead
+    // of calling this function again. This avoids a class of resource
+    // granularity deadlocks (described below).
+    //
     // Randomized exponential back-off is performed to mitigate thundering herd.
     // Some bits of the current thread pointer are used as a seed for xorshift.
 
@@ -516,7 +522,7 @@ FN MmpWaitForPages (
     event : ^KeEvent
 
     timeout : RtlUquad
-    RtlSetUquadToUlong ( &timeout, 60000 )
+    RtlSetUquadToUlong ( &timeout, 5000 )
 
     backoff : RtlUquad
     backoffms := MMP_INITIAL_BACKOFF_MS
@@ -602,17 +608,19 @@ FN MmpWaitForPages (
         )
 
         IF status == OS_STATUS_WAIT_TIMEOUT THEN
-            // If a node is deadlocked, this is a fatal
-            // condition.
+            // No pages were freed for several seconds. Return to the upper
+            // level codepath so that it can retry. If we're lucky, we might be
+            // able to pick up a newly freed pool block, or something else that
+            // obviates the need to grab a page frame at all.
+            //
+            // This actually mitigates a possible class of deadlocks where, for
+            // example, the entirety of physical memory may be filled with pool
+            // pages, and pool blocks are being allocated and freed, but no
+            // physical pages are ever freed. Instead of sitting here forever,
+            // we should retry so we can grab one of those freed pool blocks.
+            // This should be very rare.
 
-            KeCrash (
-                "Mm: Deadlocked. EVI=%u FRE=%u ZRO=%u MOD=%u AVL=%u\n",
-                mmnode^.StandbyList.Count,
-                mmnode^.FreeList.Count,
-                mmnode^.ZeroList.Count,
-                mmnode^.ModifiedPageCount,
-                mmnode^.AvailablePageCount,
-            )
+            LEAVE
         END
 
         loops += 1
@@ -630,8 +638,7 @@ FN MmpAllocatePageWait (
     IN color : UWORD,
 ) : ^MmpPfe
 
-    // Allocate a page with the given parameters. Allowed to wait. Returns
-    // NULLPTR on timeout (indicative of node deadlock).
+    // Allocate a page with the given parameters. Allowed to wait.
 
     WHILE TRUE DO
         pfe := MmpAllocatePage (
