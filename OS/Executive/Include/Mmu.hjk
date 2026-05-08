@@ -145,10 +145,13 @@ STRUCT MmuObject
     TriplyIndirectArray : ^^^^UWORD,
 
     // The object lock is superior to the page list lock.
+    // It guards against concurrent flushes and other high level operations.
 
     Lock : KeLock,
 
     // The structure lock is inferior to the page list lock.
+    // It guards against concurrent modifications of the object structure, such
+    // as removals of page frames.
 
     StructureLock : KeLock,
 END
