@@ -22,7 +22,7 @@ FN (MmPoolCacheAllocateF) MmpAllocateKernelStack (
     )
 
     IF NOT kstack THEN
-        // Couldn't acquire them.
+        // Couldn't allocate system space.
 
         RETURN NULLPTR
     END
@@ -40,7 +40,7 @@ FN (MmPoolCacheAllocateF) MmpAllocateKernelStack (
     WHILE i < KEU_STACK_PAGES DO
         // Allocate a physical page.
 
-        pfes[i] = MmpAllocatePageWait (
+        pfes[i] = MmpAllocatePage (
             mmnode, // mmnode
             FALSE, // zeroed
             FALSE, // low
@@ -52,6 +52,24 @@ FN (MmPoolCacheAllocateF) MmpAllocateKernelStack (
             // Deallocate the ones we did allocate and return the appropriate
             // status.
 
+            MmpReleaseDynamicPages (
+                mmnode, // mmnode
+                kstack, // ptr
+                KEU_STACK_PAGES + 1, // pages
+                FALSE, // flush
+            )
+
+            IF wait THEN
+                // Wait for a page frame BEFORE releasing the ones we already
+                // allocated, so that we wait for a free frame IN ADDITION TO
+                // those, otherwise we might inf loop here.
+
+                MmpWaitForPages (
+                    mmnode, // mmnode
+                    FALSE, // low
+                )
+            END
+
             WHILE i DO
                 i -= 1
 
@@ -61,14 +79,11 @@ FN (MmPoolCacheAllocateF) MmpAllocateKernelStack (
                 )
             END
 
-            MmpReleaseDynamicPages (
-                mmnode, // mmnode
-                kstack, // ptr
-                KEU_STACK_PAGES + 1, // pages
-                FALSE, // flush
-            )
+            IF NOT wait THEN
+                RETURN NULLPTR
+            END
 
-            RETURN NULLPTR
+            RETURN MM_POOL_CACHE_RETRY_RETURN
         END
 
         i += 1

@@ -242,93 +242,6 @@ FN MmpInitializeSlabCache (
     scache^.SlabSize = slabsize
 END
 
-FN MmpExtendSlabCache (
-    IN scache : ^MmpSlabCache,
-    IN ipl : UWORD,
-    IN wait : UWORD,
-) : ^VOID
-
-    // Extend the slab cache. Its lock is held.
-    // Returns TRUE if extended, FALSE otherwise.
-
-@Retry
-
-    slab := MmAllocatePoolEx (
-        scache^.MmNode, // mmnode
-        scache^.PoolIndex, // poolindex
-        scache^.SlabSize, // bytes
-        scache^.Tag, // tag
-        FALSE, // wait
-    )
-
-    // RtlPrint ( "extend %p\n", slab )
-
-    IF NOT slab THEN
-        // Failure.
-
-        IF NOT wait THEN
-            // Caller specified not to wait, so break out.
-
-            RETURN FALSE
-        END
-
-        // We can't wait for pages with a slab cache lock held or we'll deadlock
-        // memory management so instead we first try with wait=FALSE, and
-        // failing that, we wait for free pages outside of the lock.
-
-        MmpUnlockSlabCache ( scache, ipl )
-
-        MmpWaitForPages (
-            scache^.MmNode, // mmnode
-            PsCurrentThread()^.VmPrivileged, // low
-        )
-
-        MmpLockSlabCache ( scache )
-
-        GOTO Retry
-    END
-
-    scache^.ActiveSlabCount += 1
-
-    // Initialize the slab header.
-
-    slabheader : ^MmpSlabHeader = slab
-    slabheader^.References = 0
-
-    // Initialize each block in the slab.
-
-    block := (
-        slab + SIZEOF MmpSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1)
-    ) & ~(RTL_ALIGN_BYTES - 1)
-
-    firstblock := block
-
-    blocksize := scache^.Size
-
-    i := 0
-    count := scache^.BlocksPerSlab
-
-    WHILE i < count DO
-        // Set back pointer to header.
-
-        (CAST (block - SIZEOF ^VOID) TO ^^MmpSlabHeader)^ = slabheader
-
-        // Add to free list.
-
-        RtlInsertAtTailList (
-            &scache^.FreeListHead, // head
-            CAST block TO ^RtlListEntry, // entry
-        )
-
-        i += 1
-        block += blocksize
-    END
-
-    // Return the first block.
-
-    RETURN firstblock
-END
-
 FN MmpFreeSlab (
     IN scache : ^MmpSlabCache,
     IN slab : ^MmpSlabHeader,
@@ -381,27 +294,94 @@ FN (MmPoolCacheAllocateF) MmpAllocateFromSlabCache (
 
     block := scache^.FreeListHead.Next
 
-    IF block == &scache^.FreeListHead THEN
-        // There are no entries so we need to make more.
+    IF block != &scache^.FreeListHead THEN
+        // Increment the reference count on the slab header.
 
-        block = MmpExtendSlabCache (
-            scache, // scache
-            ipl, // ipl
-            wait, // wait
-        )
+        (CAST (block - SIZEOF ^VOID) TO ^^MmpSlabHeader)^^.References += 1
 
-        IF NOT block THEN
-            GOTO Exit
-        END
+        // Pop the block from the free list.
+
+        RtlRemoveEntryList ( CAST block TO ^RtlListEntry )
+
+        GOTO Exit
     END
 
-    // Increment the reference count on the slab header.
+    // There are no entries so we need to make more.
 
-    (CAST (block - SIZEOF ^VOID) TO ^^MmpSlabHeader)^^.References += 1
+    slab := MmAllocatePoolEx (
+        scache^.MmNode, // mmnode
+        scache^.PoolIndex, // poolindex
+        scache^.SlabSize, // bytes
+        scache^.Tag, // tag
+        FALSE, // wait
+    )
 
-    // Pop the block from the free list.
+    // RtlPrint ( "extend %p\n", slab )
 
-    RtlRemoveEntryList ( CAST block TO ^RtlListEntry )
+    IF NOT slab THEN
+        // Failure.
+
+        IF NOT wait THEN
+            // Caller specified not to wait, so break out.
+
+            block = NULLPTR
+
+            GOTO Exit
+        END
+
+        // We can't wait for pages with a slab cache lock held or we'll deadlock
+        // memory management so instead we first try with wait=FALSE, and
+        // failing that, we wait for free pages outside of the lock.
+
+        MmpUnlockSlabCache ( scache, ipl )
+
+        MmpWaitForPages (
+            scache^.MmNode, // mmnode
+            PsCurrentThread()^.VmPrivileged, // low
+        )
+
+        RETURN MM_POOL_CACHE_RETRY_RETURN
+    END
+
+    scache^.ActiveSlabCount += 1
+
+    // Initialize the slab header.
+
+    slabheader : ^MmpSlabHeader = slab
+    slabheader^.References = 1
+
+    // Initialize each block in the slab.
+
+    block = (
+        slab + SIZEOF MmpSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1)
+    ) & ~(RTL_ALIGN_BYTES - 1)
+
+    // Set back pointer to header.
+
+    NOTHING (CAST (block - SIZEOF ^VOID) TO ^^MmpSlabHeader)^ = slabheader
+
+    blocksize := scache^.Size
+
+    initblock := block + blocksize
+
+    i := 1
+    count := scache^.BlocksPerSlab
+
+    WHILE i < count DO
+        // Set back pointer to header.
+
+        (CAST (initblock - SIZEOF ^VOID) TO ^^MmpSlabHeader)^ = slabheader
+
+        // Add to free list.
+
+        RtlInsertAtTailList (
+            &scache^.FreeListHead, // head
+            CAST initblock TO ^RtlListEntry, // entry
+        )
+
+        i += 1
+        initblock += blocksize
+    END
 
 @Exit
 
@@ -942,6 +922,8 @@ EXPORT FN MmAllocateFromPoolCache (
         KeCurrentNodeLocalProcessorId (), // id
     )
 
+@RetryTakeLock
+
     ipl := MmpLockMagazineCache ( percpu )
 
 @Retry
@@ -1013,10 +995,16 @@ EXPORT FN MmAllocateFromPoolCache (
     // Magazine layer wasn't of any help so we need to drop through to the slab
     // layer of this cache.
 
-    RETURN cache^.Allocate (
+    block = cache^.Allocate (
         cache^.Context, // context
         wait, // wait
     )
+
+    IF block != MM_POOL_CACHE_RETRY_RETURN THEN
+        RETURN block
+    END
+
+    GOTO RetryTakeLock
 END
 
 EXPORT FN MmFreeToPoolCache (

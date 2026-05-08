@@ -502,7 +502,7 @@ END
 FN MmpWaitForPages (
     IN mmnode : ^MmpNode,
     IN low : UWORD,
-) : UWORD
+)
 
     // Wait for available pages to exist from the given node.
     // This function provides no guarantees - caller will have to repeatedly
@@ -536,13 +536,19 @@ FN MmpWaitForPages (
         event = &mmnode^.PageAvailableEvent
     END
 
-    ipl := MmpAcquireListExclusive ( mmnode )
-
-    WHILE mmnode^.AvailablePageCount <= threshold DO
+    WHILE TRUE DO
         // Wait on the event until we catch the available page count at a
         // sufficient level.
 
-        KeResetEvent ( event )
+        IF mmnode^.AvailablePageCount > threshold THEN
+            LEAVE
+        END
+
+        ipl := MmpAcquireListExclusive ( mmnode )
+
+        IF mmnode^.AvailablePageCount <= threshold THEN
+            KeResetEvent ( event )
+        END
 
         MmpReleaseList ( mmnode, ipl )
 
@@ -624,11 +630,7 @@ FN MmpWaitForPages (
         END
 
         loops += 1
-
-        ipl = MmpAcquireListExclusive ( mmnode )
     END
-
-    MmpReleaseList ( mmnode, ipl )
 END
 
 FN MmpAllocatePageWait (
