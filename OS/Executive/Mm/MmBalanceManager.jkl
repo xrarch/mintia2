@@ -10,7 +10,6 @@
 
 #DEFINE MMP_POOL_ADJUSTMENT_SHORT_INTERVAL_MS 1000
 #DEFINE MMP_POOL_ADJUSTMENT_INTERVAL_MS 5000
-#DEFINE MMP_POOL_PURGE_INTERVAL_MS 10000
 
 FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
     IN context1 : UWORD,
@@ -28,7 +27,6 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
 
     MmpAdjustPoolCaches (
         &mmnode^.PgPoolCacheList, // list
-        context2, // purgepercpu
         empty, // empty
     )
 
@@ -49,7 +47,6 @@ END
 
 FN MmpAdjustAllPoolCachesSafely (
     IN mmnode : ^MmpNode,
-    IN purgepercpu : UWORD,
     IN empty : UWORD,
 )
 
@@ -65,7 +62,7 @@ FN MmpAdjustAllPoolCachesSafely (
             &mmnode^.PgPoolCacheAdjustItem, // item
             EX_HIGH_WORK_PRIORITY, // priority
             CAST mmnode TO UWORD, // context1
-            purgepercpu, // context2
+            0, // context2
         )
     END
 
@@ -74,7 +71,6 @@ FN MmpAdjustAllPoolCachesSafely (
 
     MmpAdjustPoolCaches (
         &mmnode^.NpPoolCacheList, // list
-        purgepercpu, // purgepercpu
         empty, // empty
     )
 END
@@ -108,7 +104,6 @@ FN MmuBalanceManager ()
 
     ms := 0
     mssinceadjust := 0
-    mssincepurge := 0
 
     timer : KeTimer
 
@@ -169,22 +164,10 @@ FN MmuBalanceManager ()
 
                 mssinceadjust = ms
 
-                purge := FALSE
-
-                IF (ms - mssincepurge) >= MMP_POOL_PURGE_INTERVAL_MS THEN
-                    mssincepurge = ms
-
-                    IF mmnode^.AvailablePageCount <
-                        mmnode^.SufficientPageCount THEN
-
-                        purge = TRUE
-                    END
-                END
-
                 MmpAdjustAllPoolCachesSafely (
                     mmnode, // mmnode
-                    purge, // purgepercpu
-                    mmnode^.AvailablePageCount < mmnode^.LowPageCount,
+                    mmnode^.AvailablePageCount <
+                        mmnode^.LowPageCount, // empty
                 )
             END
 

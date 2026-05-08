@@ -337,6 +337,18 @@ FN MmpAllocatePageFromStandbyList (
     RETURN pfe
 END
 
+FN MmpMakeMorePages (
+    IN mmnode : ^MmpNode,
+)
+
+    // Try to make free pages, asynchronously.
+
+    KeSignalEvent (
+        &mmnode^.LowMemoryEvent, // event
+        0, // priorityboost
+    )
+END
+
 FN MmpAllocatePage (
     IN mmnode : ^MmpNode,
     IN zeroed : UWORD,
@@ -421,12 +433,9 @@ FN MmpAllocatePage (
     mmnode^.AvailablePageCount = avail
 
     IF avail < mmnode^.LowPageCount THEN
-        // Too few pages. Signal the low memory event.
+        // Too few pages. Try to make more, asynchronously.
 
-        KeSignalEvent (
-            &mmnode^.LowMemoryEvent, // event
-            0, // priorityboost
-        )
+        MmpMakeMorePages ( mmnode )
     END
 
 @Out
