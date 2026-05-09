@@ -332,6 +332,15 @@ FN MmpAllocatePageFromStandbyList (
         poolpfe^.References -= 1
     END
 
+    IF pfe^.Backing == 0 THEN
+        // This must have been a file page or something else.
+        // Call into the object layer to tell it there is one fewer tracking
+        // table entry within this object at the offset recorded in the PFE.
+
+        KeAssert ( FALSE )
+        KeCrash ( "NYI" )
+    END
+
     KeReleaseLock ( &object^.StructureLock )
 
     RETURN pfe
