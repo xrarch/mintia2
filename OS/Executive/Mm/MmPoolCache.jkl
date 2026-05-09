@@ -915,14 +915,14 @@ EXPORT FN MmAllocateFromPoolCache (
     block : ^VOID
     rounds : WORD
 
+@RetryTakeLock
+
     // Acquire a pointer to the pool cache's per-cpu magazine cache.
 
     percpu := MmpPoolCachePerCpuById (
         cache, // cache
         KeCurrentNodeLocalProcessorId (), // id
     )
-
-@RetryTakeLock
 
     ipl := MmpLockMagazineCache ( percpu )
 
