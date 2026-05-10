@@ -265,7 +265,27 @@ FN PsuInitializeStage1 ()
 
     // Initialize the process type.
 
-    ObuInitializeType ( &PspProcessType )
+    pstypeptr := &PspProcessType
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    // Put enough space at the end of the nonpaged part of the process for the
+    // ASID table.
+
+    pstype : ObuType
+
+    RtlCopyBytes (
+        &pstype, // dest
+        &PspProcessType, // src
+        SIZEOF ObuType, // sz
+    )
+
+    pstypeptr = &pstype
+
+    pstype.TypicalBodySize +=
+        SIZEOF KepAsidInfoEntry * KeQueryProcessorCount ()
+#END
+
+    ObuInitializeType ( pstypeptr )
 
     // Initialize the thread type.
 
