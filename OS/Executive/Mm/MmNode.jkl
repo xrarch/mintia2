@@ -473,8 +473,7 @@ FN MmpFreePage (
 
     ipl := MmpAcquireListExclusive ( mmnode )
 
-    avail := mmnode^.AvailablePageCount
-    avail += 1
+    avail := mmnode^.AvailablePageCount + 1
 
     mmnode^.AvailablePageCount = avail
 
@@ -575,16 +574,19 @@ FN MmpWaitForPages (
 
                 thrd := KeCurrentThread ()
                 seed = (thrd >> RTL_ALIGN_SHIFT) $ (thrd >> RTL_PAGE_SHIFT)
-#IF ( == BLD_BITS 32 )
-                seed $= KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Low
-#ELSE
-                seed $= KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Quad
-#END
             END
 
-            // Jitter the backoff interval by the low 3 bits of the seed.
+            // XOR with bits of the uptime every iteration.
 
-            backoffms += seed & 7
+#IF ( == BLD_BITS 32 )
+            seed $= KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Low
+#ELSE
+            seed $= KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Quad
+#END
+
+            // Jitter the backoff interval by the low 4 bits of the seed.
+
+            backoffms += seed & 15
 
             IF backoffms >= MMP_MAX_BACKOFF_MS THEN
                 // This thread has been waiting a long time for pages and may
