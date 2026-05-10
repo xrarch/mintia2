@@ -21,6 +21,7 @@ FN MmpInitializeQuotaBlock (
     IN nplimit : UWORD,
     IN pglimit : UWORD,
     IN vmlimit : UWORD,
+    IN openfilelimit : UWORD,
     IN uid : UWORD,
 )
 
@@ -39,6 +40,9 @@ FN MmpInitializeQuotaBlock (
 
     quotablock^.VmPages.Used = 0
     quotablock^.VmPages.Limit = vmlimit
+
+    quotablock^.OpenFiles.Used = 0
+    quotablock^.OpenFiles.Limit = openfilelimit
 
     // Insert in the quota block list.
 
@@ -152,9 +156,9 @@ FN MmuLookupQuotaBlock (
     IF NOT copyquotablock THEN
         // Just return failure.
 
-        KeReleaseLock ( &MmpQuotaListLock )
+        quotablock = NULLPTR
 
-        RETURN NULLPTR
+        GOTO Out
     END
 
     // Allocate a quota block from paged pool.
@@ -169,9 +173,7 @@ FN MmuLookupQuotaBlock (
     IF NOT quotablock THEN
         // Just return failure.
 
-        KeReleaseLock ( &MmpQuotaListLock )
-
-        RETURN NULLPTR
+        GOTO Out
     END
 
     MmpInitializeQuotaBlock (
@@ -179,13 +181,63 @@ FN MmuLookupQuotaBlock (
         copyquotablock^.Pool[MM_NONPAGED_POOL].Limit, // nplimit
         copyquotablock^.Pool[MM_PAGED_POOL].Limit, // pglimit
         copyquotablock^.VmPages.Limit, // vmlimit
+        copyquotablock^.OpenFiles.Limit, // openfilelimit
         uid, // uid
     )
+
+@Out
 
     KeReleaseLock ( &MmpQuotaListLock )
 
     RETURN quotablock
 END
+
+#MACRO MmpChargeQuota ( limit, charge ) [
+
+    // Apply the quota charge to the block. Use a CAS loop to atomically check
+    // and increment the quota usage.
+
+    limitptr := (limit)
+    chargeval := (charge)
+
+    WHILE TRUE DO
+        old := limitptr^.Used
+
+        IF old + chargeval < chargeval THEN
+            // Overflows the pool quota.
+
+            RETURN OS_STATUS_QUOTA_EXCEEDED
+        END
+
+        IF old + chargeval > limitptr^.Limit THEN
+            RETURN OS_STATUS_QUOTA_EXCEEDED
+        END
+
+        IF KeCompareSwapPtr (
+            &limitptr^.Used, // ptr
+            old + chargeval, // newvalue
+            old, // expectedvalue
+        ) == old THEN
+
+            RETURN OS_STATUS_SUCCESS
+        END
+    END
+]
+
+#MACRO MmpUnchargeQuota ( limit, charge ) [
+
+    // Remove the quota charge from the block.
+
+    limitptr := (limit)
+    chargeval := (charge)
+
+    old := KeIncrementPtr (
+        &limitptr^.Used, // ptr
+        -chargeval, // inc
+    )
+
+    KeAssert ( chargeval <= old )
+]
 
 #SECTION "PAGEtext"
 FN MmuChargePoolQuota (
@@ -194,33 +246,12 @@ FN MmuChargePoolQuota (
     IN poolindex : UWORD,
 ) : OsStatus
 
-    // Apply the quota charge to the block. Use a CAS loop to atomically check
-    // and increment the quota usage.
+    // Apply the quota charge to the block.
 
-    limit := &quotablock^.Pool[poolindex]
-
-    WHILE TRUE DO
-        old := limit^.Used
-
-        IF old + charge < charge THEN
-            // Overflows the pool quota.
-
-            RETURN OS_STATUS_QUOTA_EXCEEDED
-        END
-
-        IF old + charge > limit^.Limit THEN
-            RETURN OS_STATUS_QUOTA_EXCEEDED
-        END
-
-        IF KeCompareSwapPtr (
-            &limit^.Used, // ptr
-            old + charge, // newvalue
-            old, // expectedvalue
-        ) == old THEN
-
-            RETURN OS_STATUS_SUCCESS
-        END
-    END
+    MmpChargeQuota (
+        &quotablock^.Pool[poolindex], // limit
+        charge, // charge
+    )
 END
 
 #SECTION "PAGEtext"
@@ -232,12 +263,34 @@ FN MmuUnchargePoolQuota (
 
     // Remove the quota charge from the block.
 
-    old := KeIncrementPtr (
-        &quotablock^.Pool[poolindex].Used, // ptr
-        -charge, // inc
+    MmpUnchargeQuota (
+        &quotablock^.Pool[poolindex], // limit
+        charge, // charge
     )
+END
 
-    KeAssert ( charge <= old )
+#SECTION "PAGEtext"
+FN MmuChargeOpenFileQuota (
+    IN quotablock : ^MmpQuotaBlock,
+    IN charge : UWORD,
+) : OsStatus
+
+    MmpChargeQuota (
+        &quotablock^.OpenFiles, // limit
+        charge, // charge
+    )
+END
+
+#SECTION "PAGEtext"
+FN MmuUnchargeOpenFileQuota (
+    IN quotablock : ^MmpQuotaBlock,
+    IN charge : UWORD,
+)
+
+    MmpUnchargeQuota (
+        &quotablock^.OpenFiles, // limit
+        charge, // charge
+    )
 END
 
 #SECTION "PAGEtext"
@@ -327,6 +380,7 @@ FN MmuSetQuotaLimits (
     quotablock^.Pool[MM_NONPAGED_POOL].Limit = query^.NpPoolLimit
     quotablock^.Pool[MM_PAGED_POOL].Limit = query^.PgPoolLimit
     quotablock^.VmPages.Limit = query^.VmLimit
+    quotablock^.OpenFiles.Limit = query^.OpenFileLimit
 END
 
 #SECTION "PAGEtext"
@@ -345,4 +399,7 @@ FN MmuQueryQuota (
 
     query^.VmUsed = quotablock^.VmPages.Used
     query^.VmLimit = quotablock^.VmPages.Limit
+
+    query^.OpenFileUsed = quotablock^.OpenFiles.Used
+    query^.OpenFileLimit = quotablock^.OpenFiles.Limit
 END
