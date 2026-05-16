@@ -11,6 +11,7 @@
 #DEFINE MMP_POOL_ADJUSTMENT_SHORT_INTERVAL_MS 1000
 #DEFINE MMP_POOL_ADJUSTMENT_INTERVAL_MS 5000
 
+#SECTION "PAGEtext"
 FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -25,13 +26,12 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
 
     empty := mmnode^.AvailablePageCount < mmnode^.LowPageCount
 
-    MmpAdjustPoolCaches (
-        &mmnode^.PgPoolCacheList, // list
-        empty, // empty
-    )
-
     IF empty THEN
         kenode := mmnode^.KeNode
+
+        // Perform all deferred asynchronous deletions now, before adjusting
+        // pool caches, so that they are all freed to the pool caches and we
+        // can free up as much as possible.
 
         PsuReaperWorker (
             kenode, // context1
@@ -43,6 +43,11 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
             0, // context2
         )
     END
+
+    MmpAdjustPoolCaches (
+        &mmnode^.PgPoolCacheList, // list
+        empty, // empty
+    )
 END
 
 FN MmpAdjustAllPoolCachesSafely (
