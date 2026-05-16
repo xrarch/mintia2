@@ -149,15 +149,7 @@ EXPORT FN PsExitThread (
 
     thread^.Paged^.TerminationStatus = status
 
-    // Make our priority the lowest real-time priority to expedite the releasing
-    // of this thread's resources.
-
-    KeSetPriorityThread (
-        &thread^.Tcb, // thread
-        OS_PRIORITY_LOW_REALTIME, // priority
-    )
-
-    // Ignore events so nothing weird happens while we're cleaning up.
+    // Ignore events so nothing aborts us while we're cleaning up.
 
     KeuIgnoreEvents ()
 
