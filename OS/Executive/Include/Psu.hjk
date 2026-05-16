@@ -46,6 +46,9 @@ STRUCT PsuPagedProcess
     ProcessGroup : ^PsuProcessGroup,
     SessionGroup : ^PsuProcessGroup,
 
+    ActivationStatus : UWORD,
+    TerminationStatus : UWORD,
+
     RootLock : KeLock,
     ActivationLock : KeLock,
     HandleTableLock : KeLock,
@@ -56,9 +59,6 @@ STRUCT PsuPagedProcess
     ParentPid : ULONG,
 
     RundownDefermentCount : ULONG,
-
-    ActivationStatus : OsStatus,
-    TerminationStatus : OsStatus,
 
     GrantedPrivileges : UBYTE[(OS_PRIVILEGE_MAX + 7) / 8],
     EnabledPrivileges : UBYTE[(OS_PRIVILEGE_MAX + 7) / 8],
@@ -88,8 +88,9 @@ STRUCT PsuPagedThread
 
     DeferredObjectHead : ^ObuHeader,
 
+    TerminationStatus : UWORD,
+
     Tid : ULONG,
-    TerminationStatus : OsStatus,
 
     Mode : UBYTE,
     DeletingObject : UBYTE,

@@ -128,7 +128,9 @@ FN (ObuTypeDeleteF) PspDeleteThreadObject (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN PsExitThread ()
+EXPORT FN PsExitThread (
+    IN status : UWORD,
+)
 
     // This thread has reached the end of its life. Usermode will never regain
     // control.
@@ -136,6 +138,16 @@ EXPORT FN PsExitThread ()
     thread := PsCurrentThread ()
 
     process := PsCurrentProcess ()
+
+    // Save the exit status.
+
+    IF NOT status THEN
+        // Inherit the process's exit status, if any.
+
+        status = process^.Paged^.TerminationStatus
+    END
+
+    thread^.Paged^.TerminationStatus = status
 
     // Make our priority the lowest real-time priority to expedite the releasing
     // of this thread's resources.
@@ -179,8 +191,10 @@ EXPORT FN PsExitThread ()
         // Decrement the rundown deferment count and possibly cause process
         // rundown.
 
-        IF thread^.Paged^.TerminationStatus != OS_STATUS_SUCCESS THEN
-            process^.Paged^.TerminationStatus = thread^.Paged^.TerminationStatus
+        IF NOT process^.Paged^.TerminationStatus THEN
+            // Give the process our exit status.
+
+            process^.Paged^.TerminationStatus = status
         END
 
         PsuUnblockRundownProcess ( process )
@@ -210,7 +224,7 @@ FN (KeStartThreadF) PspUserThreadEntry (
 
     // ...
 
-    // Enter usermode for the first time, in some architecture-dependent way.
+    // Enter usermode for the first time.
 
     // ...
 
@@ -536,61 +550,13 @@ FN (KeuCustodyListActivateF) PspActivateReaper (
 END
 
 #SECTION "PAGEtext"
-FN PsuTerminateThreadObject (
-    IN thread : ^PsuThread,
-    IN status : OsStatus,
+FN OsExitThread (
+    IN status : UWORD,
 )
 
-    // Terminate the thread object.
+    // Exit the current thread, system service.
 
-    IF status != OS_STATUS_SUCCESS THEN
-        thread^.Paged^.TerminationStatus = status
-    END
-
-    KeSignalThread (
-        &thread^.Tcb, // thread
-        OS_SIGNAL_KILL, // signal
-    )
-END
-
-#SECTION "PAGEtext"
-FN OsTerminateThread (
-    IN handle : UWORD,
-    IN status : OsStatus,
-) : OsStatus
-
-    // Terminate a thread, system service.
-
-    thread : ^PsuThread
-    access : UWORD
-
-    retstatus := ObuReferenceByHandle (
-        handle, // handle
-        OS_THREAD_TYPE, // typeid
-        OUT thread, // object
-        OUT access, // access
-    )
-
-    IF OsError ( retstatus ) THEN
-        RETURN retstatus
-    END
-
-    IF access | OS_ACCESS_EXEC != access THEN
-        retstatus = OS_STATUS_ACCESS_DENIED
-
-        GOTO Exit
-    END
-
-    PsuTerminateThreadObject (
-        thread, // thread
-        status, // status
-    )
-
-@Exit
-
-    ObUnreferenceObject ( thread )
-
-    RETURN retstatus
+    PsExitThread ( status )
 END
 
 #SECTION "PAGEtext"
@@ -1246,9 +1212,9 @@ FN PsuCreateThread (
             // such). Set the thread terminated and ready it so that it kills
             // itself.
 
-            PsuTerminateThreadObject (
-                thread, // thread
-                status, // status
+            KeSignalThread (
+                &thread^.Tcb, // thread
+                OS_SIGNAL_KILL, // signal
             )
 
             KeuReadyThread ( &thread^.Tcb )

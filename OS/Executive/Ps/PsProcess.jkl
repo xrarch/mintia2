@@ -121,7 +121,7 @@ END
 #SECTION "PAGEtext"
 FN PspSignalActivation (
     IN process : ^PsuProcess,
-    IN status : OsStatus,
+    IN status : UWORD,
 )
 
     // Signal the activation of the process.
@@ -163,7 +163,7 @@ FN PspAwaitActivation (
     IN process : ^PsuProcess,
     IN timeout : ^RtlUquad,
     IN alertable : UWORD,
-    OUT activationstatus : OsStatus,
+    OUT activationstatus : UWORD,
 ) : OsStatus
 
     // Wait for the activation of the process.
@@ -965,7 +965,7 @@ END
 
 #SECTION "PAGEtext"
 FN OsSignalActivationProcess (
-    IN status : OsStatus,
+    IN status : UWORD,
 )
 
     // Signal activation for the current process, system service.
@@ -981,7 +981,7 @@ FN OsAwaitActivationProcess (
     IN handle : UWORD,
     IN timeout : ^RtlUquad,
     IN alertable : UWORD,
-    OUT activationstatus : OsStatus,
+    OUT activationstatus : UWORD,
 ) : OsStatus
 
     // Await activation for the given process, system service.
@@ -1625,43 +1625,26 @@ FN PsuTerminateProcessObject (
 END
 
 #SECTION "PAGEtext"
-FN OsTerminateProcess (
-    IN processhandle : UWORD,
-    IN status : OsStatus,
-) : OsStatus
+FN OsExitProcess (
+    IN status : UWORD,
+)
 
-    // Terminate a process, system service.
+    // Terminate the current process, system service.
 
-    process : ^PsuProcess
-    access : UWORD
+    process := PsCurrentProcess ()
 
-    retstatus := ObuReferenceByHandle (
-        processhandle, // handle
-        OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+    process^.Paged^.TerminationStatus = status
+
+    // Kill all the other threads in the process.
+
+    KeSignalProcess (
+        &process^.Pcb, // process
+        OS_SIGNAL_KILL, // signal
     )
 
-    IF OsError ( retstatus ) THEN
-        RETURN retstatus
-    END
+    // Exit this thread.
 
-    IF access | OS_ACCESS_EXEC != access THEN
-        retstatus = OS_STATUS_ACCESS_DENIED
-
-        GOTO Exit
-    END
-
-    PsuTerminateProcessObject (
-        process, // process
-        status, // status
-    )
-
-@Exit
-
-    ObUnreferenceObject ( process )
-
-    RETURN retstatus
+    PsExitThread ( status )
 END
 
 #SECTION "PAGEtext"
