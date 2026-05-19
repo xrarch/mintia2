@@ -43,6 +43,7 @@ END
 EXPORT FN ExEnqueueWorkItem (
     IN item : ^ExWorkItem,
     IN priority : ExWorkQueuePriority,
+    IN head : UWORD,
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -59,7 +60,7 @@ EXPORT FN ExEnqueueWorkItem (
     KeInsertIntoBalancedQueue (
         &KeCurrentAffinityNode()^.Exp^.WorkQueues[priority], // queue
         &item^.QueueEntry, // item
-        FALSE, // head
+        head, // head
         0, // priorityboost
     )
 END
@@ -67,6 +68,7 @@ END
 EXPORT FN ExEnqueueTimedWorkItem (
     IN item : ^ExTimedWorkItem,
     IN priority : ExWorkQueuePriority,
+    IN head : UWORD,
     IN interval : ^RtlUquad,
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -75,6 +77,7 @@ EXPORT FN ExEnqueueTimedWorkItem (
     // Enqueue the timer embedded in the work item.
 
     item^.Priority = priority
+    item^.Head = head
 
     KeEnqueueTimer (
         &item^.Timer, // timer
@@ -98,6 +101,7 @@ FN (KeDpcF) ExpTimedWorkItemDpc (
     ExEnqueueWorkItem (
         &item^.Item, // item
         item^.Priority, // priority
+        item^.Head, // head
         context1, // context1
         context2, // context2
     )

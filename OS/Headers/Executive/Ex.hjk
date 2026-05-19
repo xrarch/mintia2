@@ -76,6 +76,7 @@ END
 EXTERN FN ExEnqueueWorkItem (
     IN item : ^ExWorkItem,
     IN priority : ExWorkQueuePriority,
+    IN head : UWORD,
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -85,11 +86,13 @@ STRUCT ExTimedWorkItem
     Dpc : KeDpc,
     Timer : KeTimer,
     Priority : ExWorkQueuePriority,
+    Head : UBYTE,
 END
 
 EXTERN FN ExEnqueueTimedWorkItem (
     IN item : ^ExTimedWorkItem,
     IN priority : ExWorkQueuePriority,
+    IN head : UWORD,
     IN interval : ^RtlUquad,
     IN context1 : UWORD,
     IN context2 : UWORD,
