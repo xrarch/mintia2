@@ -851,6 +851,17 @@ FN BlInitializeNode (
 
     blnode^.ProcessorCount = procs
 
+#IF BLD_MP
+    blnode^.ProcessorCount = procs
+
+#ELSE
+    IF procs AND id == 0 THEN
+        blnode^.ProcessorCount = 1
+    ELSE
+        blnode^.ProcessorCount = 0
+    END
+#END
+
     blnode^.KernelStructureBump = blnode^.NodeSpaceBase +
         KE_BL_BUMP_SPACE_OFFSET
 
