@@ -708,29 +708,6 @@ FN KepReadyThread (
     // Ready the thread by inserting it into an appropriate ready queue.
     // Thread lock is held.
 
-@Retry
-
-    IF thread^.Process^.MemoryState != KEP_PROCESS_RESIDENT THEN
-        // The thread's process is outswapped.
-
-        IF KepReadyThreadOutswappedProcess ( thread ) THEN
-            GOTO Retry
-        END
-
-        LEAVE
-
-    ELSEIF NOT thread^.KernelStackResident THEN
-        // The thread's kernel stack is outswapped.
-
-        IF KepReadyOutswappedThread ( thread ) THEN
-            GOTO Retry
-        END
-
-        LEAVE
-    END
-
-    thread^.InSwapList = FALSE
-
     myprb := KEP_CURRENT_PRB
 
 #IF BLD_MP
@@ -1257,12 +1234,6 @@ FN KepReinsertThread (
     // Thread and ready queue lock are held.
 
     KeAssert ( thread^.Status == KE_THREAD_READY )
-
-    IF thread^.InSwapList THEN
-        // It's in a stack swapper list, no need to do anything here.
-
-        LEAVE
-    END
 
     // We changed the priority level, so the thread is now on the wrong
     // ready queue. Manually unlink it from the queue, and then re-ready

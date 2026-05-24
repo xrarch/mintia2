@@ -32,28 +32,6 @@ FN (KeApcF) KepSuspendThreadApc (
     )
 END
 
-FN KepAddSwappableThreadToProcess (
-    IN process : ^KeuProcess,
-    IN thread : ^KeuThread,
-)
-
-    // Nonpaged helper routine for adding a thread's resident stack count to the
-    // process.
-
-    ipl := KepAcquireSwapState ( process )
-
-    // We should be attached to the process right now, meaning there is at least
-    // one thread whose stack is not swapped out, and therefore the process
-    // cannot be either as we only outswap processes after their threads are all
-    // gone.
-
-    KeAssert ( process^.MemoryState == KEP_PROCESS_RESIDENT )
-
-    process^.ResidentThreadCount += 1
-
-    KepReleaseSwapState ( process, ipl )
-END
-
 #SECTION "PAGEtext"
 FN KeuInitializeThread (
     IN process : ^KeuProcess,
@@ -113,10 +91,6 @@ FN KeuInitializeThread (
     thread^.RemainingQuantum = KEP_DEFAULT_QUANTUM
 
     thread^.InteractiveBits = 0
-
-    thread^.InSwapList = FALSE
-    thread^.KernelStackResident = TRUE
-    thread^.KernelStackSwappable = TRUE
 
     // Initialize the suspension LAPC.
 
@@ -192,8 +166,6 @@ FN KeuInitializeThread (
     thread^.CurrentMode = KE_KERNEL_MODE
 #END
 
-    thread^.SwapCandidatePrb = NULLPTR
-
     thread^.IgnoreEventCount = 0
 
     // Initialize signal state.
@@ -252,13 +224,6 @@ FN KeuInitializeThread (
 
     KeReleaseLock ( &process^.Lock )
 
-    // Call nonpaged helper routine to increment the resident stack count.
-
-    KepAddSwappableThreadToProcess (
-        process, // process
-        thread, // thread
-    )
-
     RETURN TRUE
 END
 
@@ -315,22 +280,6 @@ FN KeuUninitializeThread (
     END
 
     KeReleaseLock ( &process^.Lock )
-
-    // Remove the thread's resident stack from the process's counter.
-    // Note that we have to do this *after* decrementing the thread count, or
-    // a race condition with KeuDetachProcess is possible in which it will see a
-    // nonzero thread count while decrementing the resident count, and enqueue
-    // the process to be outswapped. By decrementing the resident count
-    // afterward, we guarantee that KeuDetachProcess won't see it transition to
-    // zero after the process's threads have all died.
-
-    ipl := KepAcquireSwapState ( process )
-
-    KeAssert ( process^.ResidentThreadCount != 0 )
-
-    process^.ResidentThreadCount -= 1
-
-    KepReleaseSwapState ( process, ipl )
 
     RETURN terminated
 END

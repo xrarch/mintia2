@@ -116,9 +116,6 @@ STRUCT KeuProcess
 
     SignalThread : ^KeuThread,
 
-    SwapNext : ^KeuProcess,
-    SwapListHead : ^KeuThread,
-
     Node : ^KeuNode,
 
     PageDirectoryPfn : UWORD,
@@ -127,17 +124,11 @@ STRUCT KeuProcess
     AsidTable : ^KepAsidInfoEntry,
 #END
 
-#IF BLD_MP
-    SwapStateSpinlock : KepSpinlock,
-#END
-
     Lock : KeLock,
 
-    ResidentThreadCount : ULONG,
     ThreadCount : ULONG,
 
     Terminated : UBYTE,
-    MemoryState : UBYTE,
     BasePriority : UBYTE,
 END
 
@@ -173,7 +164,6 @@ STRUCT KeuThread
     AffinityPrb : ^KepPrb,
     CurrentPrb : ^KepPrb,
 #END
-    SwapCandidatePrb : ^KepPrb,
 
 #IF BLD_MP
     Spinlock : KepSpinlock,
@@ -197,14 +187,12 @@ STRUCT KeuThread
     Alertable : UBYTE,
     WaitMode : UBYTE,
     WaitIpl : UBYTE,
-    InSwapList : UBYTE,
     InteractiveBits : UBYTE,
     CurrentQueue : UBYTE,
     SuspendCount : UBYTE,
     Terminated : UBYTE,
     KernelStackResident : UBYTE,
     IgnoreEventCount : UBYTE,
-    KernelStackSwappable : UBYTE,
     AttachIpl : UBYTE,
     PriorityFloor : UBYTE,
     PendingEventsSet : UBYTE,
@@ -225,8 +213,7 @@ STRUCT KeuThread
     // the commonly accessed ones are within range of immediate offsets on
     // various architectures (especially fox32 whose range is only 255 bytes).
 
-    // NOTE: The ReadyEntry is reused by thread reaping and kernel stack
-    //       swapping.
+    // NOTE: The ReadyEntry is reused by thread reaping.
 
     ReadyEntry : RtlListEntry,
     BalancedQueueEntry : RtlListEntry,
@@ -308,35 +295,6 @@ EXTERN FN KeuDeliverOnWaitSignalThread (
 #MACRO KeuInvalidSignal ( signal ) [
     (((signal) == 0) | ((signal) >= OS_SIGNAL_COUNT))
 ]
-
-EXTERN FN KeuFlushThreadInSwapQueue (
-    IN kenode : ^KeuNode,
-) : ^KeuThread
-
-EXTERN FN KeuFlushProcessInSwapQueue (
-    IN kenode : ^KeuNode,
-) : ^KeuProcess
-
-EXTERN FN KeuFlushProcessOutSwapQueue (
-    IN kenode : ^KeuNode,
-) : ^KeuProcess
-
-EXTERN FN KeuSetProcessOutswapped (
-    IN process : ^KeuProcess,
-) : UWORD
-
-EXTERN FN KeuHarvestSwapCandidates (
-    IN kenode : ^KeuNode,
-    IN procid : UWORD,
-) : ^KeuThread
-
-EXTERN FN KeuReadyInswappedThread (
-    IN thread : ^KeuThread,
-)
-
-EXTERN FN KeuReadyInswappedProcess (
-    IN process : ^KeuProcess,
-)
 
 EXTERN FN KeuExitThread (
     IN thread : ^KeuThread,

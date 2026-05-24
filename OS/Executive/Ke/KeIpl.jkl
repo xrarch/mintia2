@@ -106,22 +106,6 @@ FN (KepSoftwareInterruptHandlerF) KepDpcInterrupt ()
         KepQuantumEnd ( prb )
     END
 
-#IF BLD_MP
-    IF prb^.WakeStackSwapper THEN
-        // A request was made to wake the stack swapper.
-        // On MP we do this here because when we noticed we had to, we were deep
-        // in some spinlocks. UP does not have this issue because DPC level is
-        // DPC level, so we just signal the event at that time instead of here.
-
-        prb^.WakeStackSwapper = FALSE
-
-        KeSignalEvent (
-            &prb^.Node^.StackSwapperEvent, // event
-            0, // priorityboost
-        )
-    END
-#END
-
     IF prb^.NextThread THEN
         // A next thread was selected to preempt the current one.
         // Switch to it immediately.

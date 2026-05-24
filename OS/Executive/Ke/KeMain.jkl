@@ -136,13 +136,10 @@ FN KepInitializePrb (
 
     RtlInitializeList ( &prb^.DpcListHead )
 
-    RtlInitializeList ( &prb^.StackSwapCandidateListHead )
-
 #IF BLD_MP
     KepInitializeSpinlock ( &prb^.DpcQueueLock )
     KepInitializeSpinlock ( &prb^.ReadyQueueLock )
     KepInitializeSpinlock ( &prb^.TimerTreeLock )
-    KepInitializeSpinlock ( &prb^.StackSwapListLock )
 
     prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
     prb^.IdleDeferredIpiEvents = 0
@@ -362,16 +359,6 @@ FN KepInitializeNode (
     kenode^.SharedUserPage = blnode^.VirtualSharedUserPage
 
     KepUpdateTime ( kenode, prb )
-
-    // Initialize the stack swapper event. This is waited upon by a component
-    // of Mm which outswaps kernel stacks and processes.
-
-    KeInitializeEvent (
-        &kenode^.StackSwapperEvent, // event
-        "StackSwap", // name
-        FALSE, // notification
-        FALSE, // signalstate
-    )
 
 #IF BLD_MP
     // Initialize the work balancing DPC.

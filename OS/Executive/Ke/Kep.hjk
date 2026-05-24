@@ -58,11 +58,6 @@
 
 #DEFINE KEP_WORK_BALANCE_INTERVAL 1000
 
-// Interval in milliseconds for which a thread must be asleep before we outswap
-// its stack.
-
-#DEFINE KEP_STACK_SWAP_INTERVAL_MS 10000
-
 // Minimum load to steal threads from a processor.
 // This is a count of threads on its ready queue.
 
@@ -189,9 +184,6 @@ STRUCT KepPrb
     TimerTreeLock : KepSpinlock,
     CacheAlign3 : UBYTE[KE_CACHE_ALIGN - SIZEOF KepSpinlock],
 
-    StackSwapListLock : KepSpinlock,
-    CacheAlign4 : UBYTE[KE_CACHE_ALIGN - SIZEOF KepSpinlock],
-
     IpiFunction : KepIpiF,
 
     IdlePrbListEntry : RtlListEntry,
@@ -236,8 +228,6 @@ STRUCT KepPrb
 
     DpcListHead : RtlListEntry,
 
-    StackSwapCandidateListHead : RtlListEntry,
-
     TimerExpirationDpc : KeDpc,
 
     PendingSoftwareInterrupts : ULONG,
@@ -274,7 +264,6 @@ STRUCT KepPrb
     CheckInteractivity : UBYTE,
 
 #IF BLD_MP
-    WakeStackSwapper : UBYTE,
     StealWork : UBYTE,
     InIdleLoop : UBYTE,
 #END
@@ -345,10 +334,6 @@ END
 #DEFINE KEP_WB_UNWAITED 1
 #DEFINE KEP_WB_DEQUEUED 2
 
-#DEFINE KEP_PROCESS_RESIDENT 1
-#DEFINE KEP_PROCESS_OUTSWAPPED 2
-#DEFINE KEP_PROCESS_TRANSITION 3
-
 #DEFINE KEP_THREAD_WAIT_NONE 0
 #DEFINE KEP_THREAD_WAIT_TRY 1
 #DEFINE KEP_THREAD_WAIT_ABORTED 2
@@ -396,10 +381,6 @@ STRUCT KepTurnstileChain
 END
 
 STRUCT KepNode
-    StackSwapListHead : ^KeuThread,
-    ProcessSwapListHead : ^KeuProcess,
-    ProcessOutSwapListHead : ^KeuProcess,
-
     BlNode : ^BlNodeInfo,
 
     TurnstileChains : KepTurnstileChain[KEP_TURNSTILE_CHAINS],
@@ -776,22 +757,6 @@ EXTERN FN KepAcquireSpinlockInPrb (
     KepReleaseSpinlock ( &(thread)^.Spinlock )
 ]
 
-#MACRO KepAcquireSwapState ( process ) [
-    KepAcquireSpinlockRaise ( &(process)^.SwapStateSpinlock )
-]
-
-#MACRO KepReleaseSwapState ( process, ipl ) [
-    KepReleaseSpinlockLower ( &(process)^.SwapStateSpinlock, ipl )
-]
-
-#MACRO KepAcquireSwapStateElevated ( process ) [
-    KepAcquireSpinlock ( &(process)^.SwapStateSpinlock )
-]
-
-#MACRO KepReleaseSwapStateElevated ( process ) [
-    KepReleaseSpinlock ( &(process)^.SwapStateSpinlock )
-]
-
 EXTERN FN KepStealWork ()
 
 #MACRO KepPrbFromNodeAndNumber ( kenode, procid ) [
@@ -837,18 +802,6 @@ EXTERN FN KepStealWork ()
 #MACRO KepAcquireThreadElevated ( thread ) []
 
 #MACRO KepReleaseThreadElevated ( thread ) []
-
-#MACRO KepAcquireSwapState ( process ) [
-    KepRaiseIpl ( KEP_IPL_DPC )
-]
-
-#MACRO KepReleaseSwapState ( process, ipl ) [
-    KepLowerIpl ( ipl )
-]
-
-#MACRO KepAcquireSwapStateElevated ( process ) []
-
-#MACRO KepReleaseSwapStateElevated ( process ) []
 
 #MACRO KepPrbFromNodeAndNumber ( kenode, procid ) [
     // The NUMA ID field of the processor ID (upper 16 bits) should be zero.
@@ -964,34 +917,6 @@ EXTERN FN KepInitializeContext (
 EXTERN KepIndexFirstBitClear : UBYTE[256]
 
 EXTERN KepIndexFirstBitSet : UBYTE[256]
-
-EXTERN FN KepInsertSwapCandidateListFunc (
-    IN thread : ^KeuThread,
-)
-
-EXTERN FN KepRemoveSwapCandidateListFunc (
-    IN thread : ^KeuThread,
-)
-
-#MACRO KepInsertSwapCandidateList ( thread, waitmode ) [
-    IF (waitmode) == KE_USER_MODE THEN
-        KepInsertSwapCandidateListFunc ( thread )
-    END
-]
-
-#MACRO KepRemoveSwapCandidateList ( thread ) [
-    IF (thread)^.SwapCandidatePrb THEN
-        KepRemoveSwapCandidateListFunc ( thread )
-    END
-]
-
-EXTERN FN KepReadyOutswappedThread (
-    IN thread : ^KeuThread,
-) : UWORD
-
-EXTERN FN KepReadyThreadOutswappedProcess (
-    IN thread : ^KeuThread,
-) : UWORD
 
 #DEFINE KEP_THREAD_PENDING_KAPC 1
 #DEFINE KEP_THREAD_PENDING_UAPC 2

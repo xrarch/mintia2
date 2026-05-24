@@ -182,11 +182,6 @@ FN KepWaitThread (
 
     KepIndicateActive ( thread )
 
-    // If we were placed on a list of kernel stack outswap candidates, remove
-    // ourselves.
-
-    KepRemoveSwapCandidateList ( thread )
-
     // Return the status.
 
     RETURN thread^.WaitStatus
@@ -800,11 +795,6 @@ EXPORT FN KeWaitForObjects (
 
     KepIndicateDeactivated ( thread )
 
-    // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
-    // insert ourselves on the current processor's outswap candidate list.
-
-    KepInsertSwapCandidateList ( thread, waitmode )
-
     // Lock our thread.
 
     KepAcquireThreadElevated ( thread )
@@ -845,11 +835,6 @@ EXPORT FN KeWaitForObjects (
         // deactivated. We have to undo that now.
 
         KepIndicateActive ( thread )
-
-        // If we were placed on a list of kernel stack outswap candidates, we
-        // have to remove ourselves.
-
-        KepRemoveSwapCandidateList ( thread )
 
         // The guy who aborted the wait left our status in our thread struct.
 

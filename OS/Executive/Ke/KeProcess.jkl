@@ -27,17 +27,10 @@ FN KeuInitializeProcess (
     process^.SignalThread = NULLPTR
     process^.Terminated = FALSE
     process^.PageDirectoryPfn = 0
-    process^.MemoryState = KEP_PROCESS_RESIDENT
-    process^.ResidentThreadCount = 0
-    process^.SwapListHead = NULLPTR
     process^.BasePriority = OS_PRIORITY_DEFAULT
     process^.Node = kenode
 
     KeInitializeLock ( &process^.Lock )
-
-#IF BLD_MP
-    KepInitializeSpinlock ( &process^.SwapStateSpinlock )
-#END
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     // We assume the AsidTable pointer was already set by the caller.
@@ -158,4 +151,73 @@ EXPORT FN KeSetBasePriorityProcess (
     END
 
     KeReleaseLock ( &process^.Lock )
+END
+
+FN KeuAttachProcess (
+    IN process : ^KeuProcess,
+    IN try : UWORD,
+) : UWORD
+
+    // Switch the current thread to this process's address space. It will be
+    // able to fault upon its userspace and so on. Returns TRUE upon success,
+    // FALSE upon failure. Failure can only occur if try is set.
+
+    thread := KeCurrentThread ()
+
+    KeAssert ( thread^.Process == thread^.ActualProcess )
+
+    IF thread^.Process == process THEN
+        // Already in the correct address space.
+
+        RETURN TRUE
+    END
+
+    // Mask KAPCs since we won't be in the right address space to receive them.
+
+    thread^.AttachIpl = KepRaiseIpl ( KEP_IPL_APC )
+
+    // Acquire the current thread's lock.
+
+    KepAcquireThread ( thread )
+
+    thread^.Process = process
+
+    // Perform an immediate switch to the new process's address space.
+
+    KepSwitchAddressSpace ( process )
+
+    KepReleaseThread ( thread, KEP_IPL_APC )
+
+    RETURN TRUE
+END
+
+FN KeuDetachProcess (
+    IN process : ^KeuProcess,
+)
+
+    // Detach from the process that was previously attached to.
+
+    thread := KeCurrentThread ()
+
+    KeAssert ( thread^.Process == process )
+
+    IF process == thread^.ActualProcess THEN
+        // We weren't attached.
+
+        LEAVE
+    END
+
+    // Lock the thread.
+
+    KepAcquireThread ( thread )
+
+    // Switch back to our real address space.
+
+    thread^.Process = thread^.ActualProcess
+
+    KepSwitchAddressSpace ( thread^.ActualProcess )
+
+    // Release thread lock, lower IPL, unmask APCs.
+
+    KepReleaseThread ( thread, thread^.AttachIpl )
 END
