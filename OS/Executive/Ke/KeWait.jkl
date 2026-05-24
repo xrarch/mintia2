@@ -505,61 +505,6 @@ FN KepCaptureCurrentTicksFunc (
     KepCaptureCurrentTicks ( time )
 END
 
-#MACRO KepWaitHead (
-    thread, ipl, alertable, waitmode, waitblocktable, waitcount, status
-) [
-
-    // Clear timeout wait block flags field.
-
-    thread^.TimeoutWaitBlock.Flags = 0
-
-    // Set the wait values in the thread.
-
-    thread^.Alertable = alertable
-    thread^.WaitMode = waitmode
-    thread^.WaitIpl = ipl
-
-    // Store the wait block table in the thread.
-
-    thread^.WaitBlockTable = waitblocktable
-    thread^.WaitCount = waitcount
-
-    // Acquire the thread lock to check for interrupting events.
-
-    KepAcquireThreadElevated ( thread )
-
-    IF thread^.PendingEventsSet THEN
-        // There are pending events that need checking.
-
-        status = KepWaitCheck (
-            thread, // thread
-            ipl, // ipl
-            alertable, // alertable
-            waitmode, // waitmode
-        )
-
-        IF status THEN
-            // KepWaitCheck already released the thread and lowered IPL.
-
-            IF status == OS_STATUS_TRY_AGAIN THEN
-                GOTO Retry
-            END
-
-            RETURN status
-        END
-    END
-
-    // Set the thread to wait-try.
-    //
-    // Note that this wait-try tactic was derived from an explanation given
-    // by Arun Kishan in an interview about how the Windows kernel team
-    // broke up the dispatcher spinlock.
-
-    KepSetWaitAttempt ( thread, KEP_THREAD_WAIT_TRY )
-
-    KepReleaseThreadElevated ( thread )
-]
-
 FN KepKernelApcReceived (
     IN timeout : ^RtlUquad,
     IN starttime : ^RtlUquad,
@@ -602,7 +547,6 @@ EXPORT FN KeWaitForObjects (
     // The following parameters should never be given by executive callers and
     // should have been rejected by the object manager.
 
-    KeAssert ( objectcount != 0 )
     KeAssert ( objectcount <= 0xFF )
 
     thread := KeCurrentThread ()
@@ -626,7 +570,7 @@ EXPORT FN KeWaitForObjects (
     END
 
     // Initialize all of the wait blocks now.
-    // This isn't just to reduce time at KEP_IPL_DPC - if we initialize them
+    // This isn't just to reduce time at KEP_IPL_DPC, if we initialize them
     // while enqueuing wait blocks to the objects, clearing the Flags field
     // is racey with other processors satisfying object waits.
 
@@ -660,20 +604,57 @@ EXPORT FN KeWaitForObjects (
         KepCaptureCurrentTicksFunc ( &starttime )
     END
 
-    // The following function is a macro that can perform an early return.
-    // It puts us in a WAIT_TRY state and raises IPL to KEP_IPL_DPC.
-
     status : OsStatus
 
-    KepWaitHead (
-        thread, // thread
-        ipl, // ipl
-        alertable, // alertable
-        waitmode, // waitmode
-        waitblocktable, // waitblocktable
-        objectcount, // waitcount
-        status, // status
-    )
+    // Clear timeout wait block flags field.
+
+    thread^.TimeoutWaitBlock.Flags = 0
+
+    // Set the wait values in the thread.
+
+    thread^.Alertable = alertable
+    thread^.WaitMode = waitmode
+    thread^.WaitIpl = ipl
+
+    // Store the wait block table in the thread.
+
+    thread^.WaitBlockTable = waitblocktable
+    thread^.WaitCount = objectcount
+
+    // Acquire the thread lock to check for interrupting events.
+
+    KepAcquireThreadElevated ( thread )
+
+    IF thread^.PendingEventsSet THEN
+        // There are pending events that need checking.
+
+        status = KepWaitCheck (
+            thread, // thread
+            ipl, // ipl
+            alertable, // alertable
+            waitmode, // waitmode
+        )
+
+        IF status THEN
+            // KepWaitCheck already released the thread and lowered IPL.
+
+            IF status == OS_STATUS_TRY_AGAIN THEN
+                GOTO Retry
+            END
+
+            RETURN status
+        END
+    END
+
+    // Set the thread to wait-try.
+    //
+    // Note that this wait-try tactic was derived from an explanation given
+    // by Arun Kishan in an interview about how the Windows kernel team
+    // broke up the dispatcher spinlock.
+
+    KepSetWaitAttempt ( thread, KEP_THREAD_WAIT_TRY )
+
+    KepReleaseThreadElevated ( thread )
 
     timer : ^KeTimer
     object : ^KepDispatchHeader
@@ -695,6 +676,32 @@ EXPORT FN KeWaitForObjects (
             // If this isn't a notification event, consume the count.
 
             IF object^.Type != KEP_DISPATCH_EVENT_NOTIF THEN
+                IF object^.Type == KEP_DISPATCH_BALANCED_QUEUE THEN
+                    // This is a balanced queue and it has a non-zero signal
+                    // count, so it must contain an item. Take it now.
+
+                    queue := CONTAINEROF object TO KeBalancedQueue.Header
+
+                    IF queue^.ActiveThreadCount > queue^.MaximumThreadCount THEN
+                        // There are too many threads processing items from this
+                        // queue, so wait anyway.
+
+                        GOTO WaitOnObject
+                    END
+
+                    // Grab the item.
+
+                    item := queue^.ItemListHead.Next
+
+                    // Stash it in the thread object.
+
+                    thread^.QueueItem = item
+
+                    // Remove it from the list.
+
+                    RtlRemoveEntryList ( item )
+                END
+
                 object^.SignalCount = signal - 1
             END
 
@@ -734,6 +741,8 @@ EXPORT FN KeWaitForObjects (
 
             GOTO KernelApcReceived
         END
+
+@WaitOnObject
 
         // Enqueue our wait block to the object.
 
@@ -884,182 +893,6 @@ EXPORT FN KeWaitForObjects (
     GOTO Retry
 END
 
-EXPORT FN KeSleep (
-    IN interval : ^RtlUquad,
-    IN waitmode : UWORD,
-    IN alertable : UWORD,
-) : OsStatus
-
-    thread := KeCurrentThread ()
-
-    capturedinterval : RtlUquad
-
-    RtlMoveUquad (
-        &capturedinterval, // destquad
-        interval, // srcquad
-    )
-
-@Retry
-
-    // Raise IPL to stop APCs from corrupting our wait state if they come in
-    // and try to wait in our context.
-
-    ipl := KepRaiseIpl ( KEP_IPL_DPC )
-
-    KeAssert ( ipl < KEP_IPL_DPC )
-
-    // Capture the start time.
-
-    starttime : RtlUquad
-
-    KepCaptureCurrentTicks ( &starttime )
-
-    // The following function is a macro that can perform an early return.
-    // It puts us in a WAIT_TRY state and raises IPL to KEP_IPL_DPC.
-
-    status : OsStatus
-
-    KepWaitHead (
-        thread, // thread
-        ipl, // ipl
-        alertable, // alertable
-        waitmode, // waitmode
-        NULLPTR, // waitblocktable
-        0, // waitcount
-        status, // status
-    )
-
-    // Start the timeout.
-    // NOTE: The timer object and the timeout wait block have been
-    //       initialized by KeuInitializeThread already.
-
-    waitblock := &thread^.TimeoutWaitBlock
-    timer := &thread^.Timeout
-
-    // Insert the wait block in the timer's list.
-    // This is safe to do without a lock because only we ever mess with
-    // this timer in the context of this thread.
-
-    RtlInsertAtTailList (
-        &timer^.Header.WaitListHead, // head
-        &waitblock^.Entry, // entry
-    )
-
-    timer^.Header.WaiterCount = 1
-
-    // Enqueue the timer.
-
-    KeEnqueueTimer (
-        timer, // timer
-        &capturedinterval, // interval
-        0, // context1
-        0, // context2
-    )
-
-    // If we're associated with a balanced queue, we have to indicate that we
-    // are blocking so that someone else can be awoken. We have to do this
-    // before acquiring the thread lock because of lock ordering.
-
-    KepIndicateDeactivated ( thread )
-
-    // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
-    // insert ourselves on the current processor's outswap candidate list.
-
-    KepInsertSwapCandidateList ( thread, waitmode )
-
-    // Lock our thread.
-
-    KepAcquireThreadElevated ( thread )
-
-#IF BLD_MP
-    // Check if an interrupting event (such as the object being signaled, a user
-    // APC, etc) from another processor aborted our wait while we were enqueuing
-    // wait blocks.
-
-    IF thread^.WaitAttempt == KEP_THREAD_WAIT_ABORTED THEN
-        // It was aborted. We have to dequeue all our wait blocks and return.
-        //
-        // Release the thread lock so we don't violate the object->thread
-        // lock ordering.
-
-        KepReleaseThreadElevated ( thread )
-
-        // We need to get rid of the timer.
-
-        // Dequeue it.
-
-        KeDequeueTimer ( timer )
-
-        // Remove the wait block.
-        // We don't need the timer's object lock because we've been
-        // nonpreemptible and blocking out the expiration DPC for this
-        // processor since we enqueued it. Therefore it is still in our
-        // custody.
-
-        RtlRemoveEntryList ( &waitblock^.Entry )
-
-        // The guy who aborted the wait left our status in our thread struct.
-
-        status = thread^.WaitStatus
-
-        // Set to not waiting.
-
-        KepSetWaitAttempt ( thread, KEP_THREAD_WAIT_NONE )
-
-        // If we're associated with a balanced queue, we indicated that we were
-        // deactivated. We have to undo that now.
-
-        KepIndicateActive ( thread )
-
-        // If we were placed on a list of kernel stack outswap candidates, we
-        // have to remove ourselves.
-
-        KepRemoveSwapCandidateList ( thread )
-
-        KepLowerIpl ( ipl )
-
-        IF status != OS_STATUS_KERNEL_APC THEN
-            RETURN status
-        END
-
-        GOTO KernelApcReceived
-    END
-
-    thread^.WaitAttempt = KEP_THREAD_WAIT_COMMITTED
-#END
-
-    // The wait shall proceed.
-
-    status = KepWaitThread (
-        thread, // thread
-        TRUE, // hastimeout
-    )
-
-    KepLowerIpl ( ipl )
-
-    // KepWaitThread returns with the thread lock released.
-    // All of our wait blocks have been dequeued, timer dequeued, etc.
-
-    IF status != OS_STATUS_KERNEL_APC THEN
-        RETURN status
-    END
-
-@KernelApcReceived
-
-    IF alertable == KE_CANCEL_ON_KAPC THEN
-        RETURN status
-    END
-
-    IF KepKernelApcReceived (
-        &capturedinterval, // timeout
-        &starttime, // starttime
-    ) THEN
-        RETURN OS_STATUS_WAIT_TIMEOUT
-    END
-
-    GOTO Retry
-END
-
 EXPORT FN KeWaitForSingleObject (
     IN waitmode : UWORD,
     IN alertable : UWORD,
@@ -1071,281 +904,15 @@ EXPORT FN KeWaitForSingleObject (
     // interval in milliseconds can be supplied. If it is NULLPTR, the timeout
     // is infinite.
 
-    thread := KeCurrentThread ()
+    objecttable : ^KepDispatchHeader[1]
+    objecttable[0] = object
 
-    singlewaitblock := &thread^.WaitBlocks[0]
-
-    capturedtimeout : RtlUquad
-
-    IF timeout THEN
-        RtlMoveUquad (
-            &capturedtimeout, // dest
-            timeout, // src
-        )
-    END
-
-    // Initialize all of the wait blocks now.
-    // This isn't just to reduce time at KEP_IPL_DPC - if we initialize them
-    // while enqueuing wait blocks to the objects, clearing the Flags field
-    // is racey with other processors satisfying object waits.
-
-    singlewaitblock^.Thread = thread
-    singlewaitblock^.Object = object
-    singlewaitblock^.WakeStatus = 0
-    singlewaitblock^.Flags = 0
-
-@Retry
-
-    // Raise IPL to stop APCs from corrupting our wait state if they come in
-    // and try to wait in our context.
-
-    ipl := KepRaiseIpl ( KEP_IPL_DPC )
-
-    KeAssert ( ipl < KEP_IPL_DPC )
-
-    // Capture the start time.
-
-    starttime : RtlUquad
-
-    IF timeout THEN
-        KepCaptureCurrentTicksFunc ( &starttime )
-    END
-
-    // The following function is a macro that can perform an early return.
-    // It puts us in a WAIT_TRY state and raises IPL to KEP_IPL_DPC.
-
-    status : OsStatus
-
-    KepWaitHead (
-        thread, // thread
-        ipl, // ipl
-        alertable, // alertable
+    RETURN KeWaitForObjects (
         waitmode, // waitmode
-        singlewaitblock, // waitblocktable
-        1, // waitcount
-        status, // status
+        alertable, // alertable
+        timeout, // timeout
+        1, // objectcount
+        &objecttable[0], // objecttable
+        NULLPTR, // waitblocktable
     )
-
-    timer : ^KeTimer
-
-    KepAcquireObjectElevated ( object )
-
-    IF object^.Type != KEP_DISPATCH_BALANCED_QUEUE THEN
-        IF object^.SignalCount THEN
-            // Already signaled. Our wait has been satisfied before it began.
-            // If this isn't a notification event, consume the count.
-
-            IF object^.Type != KEP_DISPATCH_EVENT_NOTIF THEN
-                object^.SignalCount -= 1
-            END
-
-            KepReleaseObjectElevated ( object )
-
-            KepSetWaitAttempt ( thread, KEP_THREAD_WAIT_NONE )
-
-            KepLowerIpl ( ipl )
-
-            RETURN 0
-        END
-
-        // Enqueue our wait block to the object, at the tail to promote
-        // fairness.
-
-        RtlInsertAtTailList (
-            &object^.WaitListHead, // head
-            &singlewaitblock^.Entry, // entry
-        )
-
-    ELSE
-        // This is a balanced queue. If there's a pending item, grab it.
-
-        queue := CONTAINEROF object TO KeBalancedQueue.Header
-
-        IF NOT RtlEmptyList ( &queue^.ItemListHead ) AND
-            queue^.ActiveThreadCount <= queue^.MaximumThreadCount THEN
-
-            // Grab the item.
-
-            item := queue^.ItemListHead.Next
-
-            // Stash it in the thread object.
-
-            thread^.QueueItem = item
-
-            // Remove it from the list.
-
-            RtlRemoveEntryList ( item )
-
-            // Back out and return.
-
-            KepReleaseObjectElevated ( object )
-
-            KepSetWaitAttempt ( thread, KEP_THREAD_WAIT_NONE )
-
-            KepLowerIpl ( ipl )
-
-            RETURN 0
-        END
-
-        // Enqueue our wait block to the object, at the head to promote cache
-        // affinity.
-
-        RtlInsertAtHeadList (
-            &object^.WaitListHead, // head
-            &singlewaitblock^.Entry, // entry
-        )
-    END
-
-    // Increment waiter count.
-
-    KeAssert ( object^.WaiterCount != 0xFFFFFFFF )
-
-    object^.WaiterCount += 1
-
-    // Release the object lock.
-
-    KepReleaseObjectElevated ( object )
-
-    waitblock : ^KepWaitBlock
-
-    IF timeout THEN
-        // Start the timeout.
-        // NOTE: The timer object and the timeout wait block have been
-        //       initialized by KeuInitializeThread already.
-
-        waitblock = &thread^.TimeoutWaitBlock
-        timer = &thread^.Timeout
-
-        // Insert the wait block in the timer's list.
-        // This is safe to do without a lock because only we ever mess with
-        // this timer in the context of this thread.
-
-        RtlInsertAtTailList (
-            &timer^.Header.WaitListHead, // head
-            &waitblock^.Entry, // entry
-        )
-
-        timer^.Header.WaiterCount = 1
-
-        // Enqueue the timer.
-
-        KeEnqueueTimer (
-            timer, // timer
-            &capturedtimeout, // interval
-            0, // context1
-            0, // context2
-        )
-    END
-
-    // If we're associated with a balanced queue, we have to indicate that we
-    // are blocking so that someone else can be awoken. We have to do this
-    // before acquiring the thread lock because of lock ordering.
-
-    KepIndicateDeactivated ( thread )
-
-    // If this is a KE_USER_MODE wait, and our kernel stack is swappable,
-    // insert ourselves on the current processor's outswap candidate list.
-
-    KepInsertSwapCandidateList ( thread, waitmode )
-
-    // Lock our thread.
-
-    KepAcquireThreadElevated ( thread )
-
-#IF BLD_MP
-    // Check if an interrupting event (such as the object being signaled, a user
-    // APC, etc) from another processor aborted our wait while we were enqueuing
-    // wait blocks.
-
-    IF thread^.WaitAttempt == KEP_THREAD_WAIT_ABORTED THEN
-        // It was aborted. We have to dequeue all our wait blocks and return.
-        //
-        // Release the thread lock so we don't violate the object->thread
-        // lock ordering.
-
-        KepReleaseThreadElevated ( thread )
-
-        IF timeout THEN
-            // We need to get rid of the timer.
-
-            waitblock = &thread^.TimeoutWaitBlock
-            timer = &thread^.Timeout
-
-            // Dequeue it.
-
-            KeDequeueTimer ( timer )
-
-            // Remove the wait block.
-            // We don't need the timer's object lock because we've been
-            // nonpreemptible and blocking out the expiration DPC for this
-            // processor since we enqueued it. Therefore it is still in our
-            // custody.
-
-            RtlRemoveEntryList ( &waitblock^.Entry )
-        END
-
-        // The guy who aborted the wait left our status in our thread struct.
-
-        status = thread^.WaitStatus
-
-        // Dequeue the single wait block.
-
-        KepDequeueWaitBlock ( singlewaitblock )
-
-        // Set to not waiting.
-
-        KepSetWaitAttempt ( thread, KEP_THREAD_WAIT_NONE )
-
-        // If we're associated with a balanced queue, we indicated that we were
-        // deactivated. We have to undo that now.
-
-        KepIndicateActive ( thread )
-
-        // If we were placed on a list of kernel stack outswap candidates, we
-        // have to remove ourselves.
-
-        KepRemoveSwapCandidateList ( thread )
-
-        KepLowerIpl ( ipl )
-
-        IF status != OS_STATUS_KERNEL_APC THEN
-            RETURN status
-        END
-
-        GOTO KernelApcReceived
-    END
-
-    thread^.WaitAttempt = KEP_THREAD_WAIT_COMMITTED
-#END
-
-    // The wait shall proceed.
-
-    status = KepWaitThread (
-        thread, // thread
-        timeout, // hastimeout
-    )
-
-    KepLowerIpl ( ipl )
-
-    // KepWaitThread returns with the thread lock released.
-    // All of our wait blocks have been dequeued, timer dequeued, etc.
-
-    IF status != OS_STATUS_KERNEL_APC THEN
-        RETURN status
-    END
-
-@KernelApcReceived
-
-    IF alertable == KE_CANCEL_ON_KAPC THEN
-        RETURN status
-    END
-
-    IF timeout AND KepKernelApcReceived (
-        &capturedtimeout, // timeout
-        &starttime, // starttime
-    ) THEN
-        RETURN OS_STATUS_WAIT_TIMEOUT
-    END
-
-    GOTO Retry
 END

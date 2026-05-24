@@ -484,11 +484,16 @@ EXTERN FN KeWaitForObjects (
     IN waitblocktable : ^KepWaitBlock,
 ) : OsStatus
 
-EXTERN FN KeSleep (
-    IN interval : ^RtlUquad,
-    IN waitmode : UWORD,
-    IN alertable : UWORD,
-) : OsStatus
+#MACRO KeSleep ( interval, waitmode, alertable ) [
+    KeWaitForObjects (
+        waitmode, // waitmode
+        alertable, // alertable
+        interval, // timeout
+        0, // objectcount,
+        NULLPTR, // objecttable
+        NULLPTR, // waitblocktable
+    )
+]
 
 EXTERN FN KeWaitForSingleObject (
     IN waitmode : UWORD,

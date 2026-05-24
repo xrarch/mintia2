@@ -161,6 +161,8 @@ EXPORT FN KeInsertIntoBalancedQueue (
         )
     END
 
+    queue^.Header.SignalCount += 1
+
     KepReleaseObject ( &queue^.Header, ipl )
 END
 
@@ -233,6 +235,10 @@ EXPORT FN KeRemoveFromBalancedQueue (
             item = queue^.ItemListHead.Next
 
             RtlRemoveEntryList ( item )
+
+            KeAssert ( queue^.Header.SignalCount != 0 )
+
+            queue^.Header.SignalCount -= 1
 
             KepReleaseObject ( &queue^.Header, ipl )
 
