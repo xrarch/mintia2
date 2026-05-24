@@ -176,6 +176,12 @@ FN KepMasterContinuation ()
 
     KepWaitTail ( thread, waitblock, count )
 
+    // Before lowering IPL, save wait parameters just in case we need to wait
+    // again below. If we don't save them here, a KAPC could come in and corrupt
+    // them as soon as we lower IPL, if it waits in its context.
+
+    // ...
+
     waitstatus := thread^.WaitStatus
 
     KepLowerIpl ( thread^.WaitIpl )
@@ -199,7 +205,7 @@ FN KepMasterContinuation ()
         ELSE
             // The wait should continue.
 
-            KeWaitForObjects (
+            waitstatus = KeWaitForObjects (
                 waitmode, // waitmode
                 alertable, // alertable
                 timeout, // timeout
@@ -208,11 +214,6 @@ FN KepMasterContinuation ()
                 waitblocktable, // waitblocktable
                 continuation, // continuation
             )
-
-            // Because we passed in the same continuation to KeWaitForObjects,
-            // the call should never return.
-
-            KeAssert ( FALSE )
         END
     END
 
