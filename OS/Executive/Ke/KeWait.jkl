@@ -124,39 +124,14 @@ END
     END
 ]
 
-FN KepWaitThread (
-    IN thread : ^KeuThread,
-    IN hastimeout : UWORD,
-) : OsStatus
-
-    // This function is entered with the thread lock held (IPLDPC).
-
-    prb := KEP_CURRENT_PRB
-
-    KeAssert ( thread != &prb^.IdleThread )
-
-    // Set the thread status to WAITING.
-
-    thread^.Status = KE_THREAD_WAITING
-
-    // Store tick we slept on.
-
-    thread^.StateMs = KepLowTick ()
-
-    // Yield.
-
-    KepYield (
-        thread, // current
-        prb, // prb
-    )
+#MACRO KepWaitTail ( thread, waitblock, count ) [
+    // Macro containing wait-end processing code executed in the context of the
+    // awoken thread, common to both the continuation and non-continuation case.
 
     // We're back! Thread lock is dropped, but we're still at KEP_IPL_DPC.
 
     // All of our wait blocks have been marked UNWAITED, but may not have been
     // dequeued, so we have to do that now.
-
-    waitblock := thread^.WaitBlockTable
-    count := thread^.WaitCount
 
     WHILE count DO
         KepDequeueWaitBlock ( waitblock )
@@ -181,6 +156,115 @@ FN KepWaitThread (
     // awake now.
 
     KepIndicateActive ( thread )
+]
+
+FN KepMasterContinuation ()
+
+    // This routine is called in the context of any thread that was awoken after
+    // performing a wait with a continuation.
+
+    // We are at KEP_IPL_DPC and do not have the thread lock.
+
+    thread := KeCurrentThread ()
+
+    continuation := &thread^.Continuation
+
+    // First we must do common wait-end processing.
+
+    waitblock := thread^.WaitBlockTable
+    count := thread^.WaitCount
+
+    KepWaitTail ( thread, waitblock, count )
+
+    waitstatus := thread^.WaitStatus
+
+    KepLowerIpl ( thread^.WaitIpl )
+
+    IF waitstatus == OS_STATUS_KERNEL_APC AND
+        alertable != KE_CANCEL_ON_KAPC THEN
+
+        // Awoke due to delivery of a kernel APC, and the alertable mode does
+        // not indicate that the wait should be cancelled. Therefore we need to
+        // adjust the timeout and put the thread back to sleep.
+
+        IF timeout AND KepKernelApcReceived (
+            &capturedtimeout, // timeout
+            &starttime, // starttime
+        ) THEN
+
+            // The wait timed out.
+
+            waitstatus = OS_STATUS_WAIT_TIMEOUT
+
+        ELSE
+            // The wait should continue.
+
+            KeWaitForObjects (
+                waitmode, // waitmode
+                alertable, // alertable
+                timeout, // timeout
+                objectcount, // objectcount
+                objecttable, // objecttable
+                waitblocktable, // waitblocktable
+                continuation, // continuation
+            )
+
+            // Because we passed in the same continuation to KeWaitForObjects,
+            // the call should never return.
+
+            KeAssert ( FALSE )
+        END
+    END
+
+    // Now call the continuation.
+
+    continuation^.Function (
+        continuation, // continuation
+        waitstatus, // waitstatus
+    )
+
+    KeCrash ( "Continuation returned\n" )
+END
+
+FN KepWaitThread (
+    IN thread : ^KeuThread,
+    IN hastimeout : UWORD,
+    IN continuation : ^KeContinuation,
+) : OsStatus
+
+    // This function is entered with the thread lock held (IPLDPC).
+
+    prb := KEP_CURRENT_PRB
+
+    KeAssert ( thread != &prb^.IdleThread )
+
+    // Set the thread status to WAITING.
+
+    thread^.Status = KE_THREAD_WAITING
+
+    // Store tick we slept on.
+
+    thread^.StateMs = KepLowTick ()
+
+    // Yield.
+
+    KepYield (
+        thread, // current
+        prb, // prb
+        continuation, // continuation
+    )
+
+    // If we got back here, then we better not have had a continuation.
+    // If we did, then we should be executing that right now.
+
+    KeAssert ( continuation == NULLPTR )
+
+    // Do common wait-end processing.
+
+    waitblock := thread^.WaitBlockTable
+    count := thread^.WaitCount
+
+    KepWaitTail ( thread, waitblock, count )
 
     // Return the status.
 
@@ -533,6 +617,7 @@ EXPORT FN KeWaitForObjects (
     IN objectcount : UWORD,
     IN objecttable : ^^KepDispatchHeader,
     IN waitblocktable : ^KepWaitBlock,
+    IN continuation : ^KeContinuation,
 ) : OsStatus
 
     // Wait for any of multiple objects to enter a signaled state. A timeout
@@ -851,6 +936,7 @@ EXPORT FN KeWaitForObjects (
     status = KepWaitThread (
         thread, // thread
         timeout, // hastimeout
+        continuation, // continuation
     )
 
     KepLowerIpl ( ipl )
@@ -883,6 +969,7 @@ EXPORT FN KeWaitForSingleObject (
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
     IN object : ^KepDispatchHeader,
+    IN continuation : ^KeContinuation,
 ) : OsStatus
 
     // Wait for a single object to enter a signaled state. A timeout
@@ -899,5 +986,6 @@ EXPORT FN KeWaitForSingleObject (
         1, // objectcount
         &objecttable[0], // objecttable
         NULLPTR, // waitblocktable
+        continuation, // continuation
     )
 END
