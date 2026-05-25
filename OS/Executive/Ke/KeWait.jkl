@@ -885,10 +885,21 @@ EXPORT FN KeWaitForObjects (
 
         // Enqueue our wait block to the object.
 
-        RtlInsertAtTailList (
-            &object^.WaitListHead, // head
-            &waitblock^.Entry, // entry
-        )
+        IF object^.Type == KEP_DISPATCH_BALANCED_QUEUE THEN
+            // Insert at head so that worker threads are scheduled in a LIFO
+            // order, which promotes cache locality.
+
+            RtlInsertAtHeadList (
+                &object^.WaitListHead, // head
+                &waitblock^.Entry, // entry
+            )
+
+        ELSE
+            RtlInsertAtTailList (
+                &object^.WaitListHead, // head
+                &waitblock^.Entry, // entry
+            )
+        END
 
         // Increment waiter count.
 
