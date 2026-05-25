@@ -64,13 +64,12 @@ FN PspPerformEagerThreadCleanup (
 
     paged^.CleanedUp = TRUE
 
-    // Free the kernel stack.
+        // Free the kernel stack.
 
     MmuFreeKernelStack (
         KeNumaNodeFromSpacePointer ( thread ), // kenode
         CONTAINEROF thread^.Tcb.Process TO PsuProcess.Pcb, // process
-        thread^.Tcb.KernelStackTop -
-        (KEU_STACK_PAGES << RTL_PAGE_SHIFT), // kstack
+        thread^.Tcb.KernelStackTop, // kstack
     )
 
     // Free the turnstile.
@@ -513,7 +512,6 @@ FN (KeuCustodyListActivateF) PspActivateReaper (
 
     // Called by Ke when the reaper list transitions to non-empty.
     // Enqueue the reaper timer. Fires in 100ms to trigger thread reaping.
-    // PspActivateReaperDpc will be invoked, which will enqueue the work item.
 
     kenode := CAST list^.Context TO ^KeuNode
 
@@ -524,8 +522,88 @@ FN (KeuCustodyListActivateF) PspActivateReaper (
     ExEnqueueTimedWorkItem (
         &kenode^.Psp^.ReaperTimedWorkItem, // item
         EX_HIGH_WORK_PRIORITY, // priority
-        TRUE, // head
+        FALSE, // head
         &interval, // interval
+        kenode, // context1
+        0, // context2
+    )
+END
+
+#SECTION "PAGEtext"
+FN (KeuProcessCustodyListF) PspAllocateStackForThread (
+    IN list : ^KeuCustodyList,
+    IN object : ^VOID,
+    IN context : ^VOID,
+)
+
+    // Called to allocate a stack for a thread as a KeuProcessCustodyList
+    // callback.
+
+    // Ke uses the ready queue link of the thread as the stack allocation list
+    // link.
+
+    thread := CONTAINEROF object TO KeuThread.ReadyEntry.Next
+    psthrd := CONTAINEROF thread TO PsuThread.Tcb
+
+    threadlisthead := CAST context TO ^^KeuThread
+
+    kenode := KeCurrentAffinityNode ()
+
+    KeAssert ( thread^.KernelStackTop == NULLPTR )
+
+    kstack := MmuAllocateKernelStack ( kenode )
+
+    // Should not fail to allocate a kernel stack because it internally calls
+    // wait=TRUE, and commit was charged for the kernel stack earlier.
+
+    KeAssert ( kstack != NULLPTR )
+
+    thread^.KernelStackTop = kstack
+
+    // Put the thread on the list for deferred readying.
+
+    thread^.ReadyEntry.Next = CAST threadlisthead^ TO ^VOID
+    threadlisthead^ = thread
+END
+
+#SECTION "PAGEtext"
+FN (ExWorkItemF) PspStackAllocateWorker (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Implements the stack allocation worker.
+
+    kenode := CAST context1 TO ^KeuNode
+
+    threadlisthead : ^KeuThread[1]
+    threadlisthead[0] = NULLPTR
+
+    KeuProcessCustodyList (
+        kenode^.StackAllocateCustodyList, // list
+        &PspAllocateStackForThread, // callback
+        &threadlisthead[0], // context
+    )
+
+    // Re-ready all the threads. Do this as a batch that prevents preemption so
+    // that this worker thread can't get preempted repeatedly.
+
+    KeuBatchReadyThreads ( threadlisthead[0] )
+END
+
+FN (KeuCustodyListActivateF) PspActivateStackAllocation (
+    IN list : ^KeuCustodyList,
+)
+
+    // Called by Ke when the stack allocation list transitions to non-empty.
+    // Enqueue the stack allocation work item.
+
+    kenode := CAST list^.Context TO ^KeuNode
+
+    ExEnqueueWorkItem (
+        &kenode^.Psp^.StackAllocateWorkItem, // item
+        EX_HIGH_WORK_PRIORITY, // priority
+        TRUE, // head
         kenode, // context1
         0, // context2
     )

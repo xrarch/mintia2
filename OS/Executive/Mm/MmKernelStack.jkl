@@ -29,11 +29,6 @@ FN (MmPoolCacheAllocateF) MmpAllocateKernelStack (
 
     pfes : ^MmpPfe[KEU_STACK_PAGES]
 
-    // TEMP: Naive implementation. Full implementation will initialize these
-    //       pages as modified anonymous memory so that kernel stacks can be
-    //       swapped. We don't yet know exactly what anonymous PFEs will
-    //       look like at time of writing.
-
     i := 0
     ptr := kstack + RTL_PAGE_SIZE
 
@@ -112,7 +107,7 @@ FN (MmPoolCacheAllocateF) MmpAllocateKernelStack (
         i += 1
     END
 
-    RETURN kstack + RTL_PAGE_SIZE
+    RETURN kstack + RTL_PAGE_SIZE + (KEU_STACK_PAGES << RTL_PAGE_SHIFT)
 END
 
 #SECTION "PAGEtext"
@@ -124,6 +119,8 @@ FN (MmPoolCacheFreeF) MmpFreeKernelStack (
     // Free a kernel stack.
 
     mmnode := CAST context TO ^MmpNode
+
+    ptr -= KEU_STACK_PAGES << RTL_PAGE_SHIFT
 
     // Acquire a pointer to the first PTE for this region.
 
@@ -146,9 +143,6 @@ FN (MmPoolCacheFreeF) MmpFreeKernelStack (
         pte[i] = MMP_INVALID_KERNEL_PTE
 
         // Free the page frame.
-
-        // TEMP: Does not yet handle kernel stacks being private anonymous
-        //       memory.
 
         MmpFreePage (
             mmnode, // mmnode
@@ -250,14 +244,16 @@ FN MmuFreeKernelStack (
     IN kstack : ^VOID,
 )
 
-    // Free a kernel stack. It must be in an inswapped state.
+    // Free a kernel stack.
 
     mmnode := kenode^.Mmp
 
-    MmFreeToPoolCache (
-        mmnode^.KernelStackCache, // cache
-        kstack, // ptr
-    )
+    IF kstack THEN
+        MmFreeToPoolCache (
+            mmnode^.KernelStackCache, // cache
+            kstack, // ptr
+        )
+    END
 
     // Uncharge the virtual memory quota consumed by the kernel stack.
 
@@ -265,5 +261,18 @@ FN MmuFreeKernelStack (
         mmnode, // mmnode
         PsuQuotaBlock ( process ), // quotablock
         KEU_STACK_PAGES, // pages
+    )
+END
+
+#SECTION "PAGEtext"
+FN MmuAllocateKernelStack (
+    IN kenode : ^KeuNode,
+) : ^VOID
+    
+    // Allocate a new kernel stack.
+
+    RETURN MmAllocateFromPoolCache (
+        kenode^.Mmp^.KernelStackCache, // cache
+        TRUE, // wait
     )
 END

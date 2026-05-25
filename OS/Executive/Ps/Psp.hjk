@@ -19,10 +19,21 @@ EXTERN PspProcessListHead : RtlListEntry
 STRUCT PspNode
     ReaperTimedWorkItem : ExTimedWorkItem,
     ReaperCustodyList : KeuCustodyList,
+    StackAllocateWorkItem : ExWorkItem,
+    StackAllocateCustodyList : KeuCustodyList,
     TurnstileCache : ^MmpPoolCache,
 END
 
+EXTERN FN (ExWorkItemF) PspStackAllocateWorker (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
 EXTERN FN (KeuCustodyListActivateF) PspActivateReaper (
+    IN list : ^KeuCustodyList,
+)
+
+EXTERN FN (KeuCustodyListActivateF) PspActivateStackAllocation (
     IN list : ^KeuCustodyList,
 )
 

@@ -198,6 +198,14 @@ FN KepMasterContinuation ()
 
     continuation := &thread^.Continuation
 
+    func := continuation^.Function
+
+    // Clear the continuation function field, because this field being non-zero
+    // is used to indicate that the thread is pending execution of a
+    // continuation.
+
+    continuation^.Function = NULLPTR
+
     // First we must do common wait-end processing.
 
     KepWaitTail ( thread )
@@ -291,7 +299,7 @@ FN KepMasterContinuation ()
 
     // Now call the continuation.
 
-    continuation^.Function (
+    func (
         continuation, // continuation
         waitstatus, // waitstatus
     )
@@ -666,6 +674,13 @@ EXPORT FN KeWaitForObjects (
     // Wait for any of multiple objects to enter a signaled state. A timeout
     // interval in milliseconds can be supplied. If it is NULLPTR, the timeout
     // is infinite.
+    //
+    // If a continuation is provided, and the thread is actually blocked, then
+    // the thread will execute the continuation function on a fresh stack when
+    // it is awoken. If the thread is not blocked (because the wait is aborted
+    // prior to the blocking decision being made, or an object is already
+    // signaled), then this function will return to the caller. The caller must
+    // be prepared for either case.
 
     // The following parameters should never be given by executive callers and
     // should have been rejected by the object manager.
@@ -977,7 +992,7 @@ EXPORT FN KeWaitForObjects (
 
     // The wait shall proceed.
 
-    IF continuation THEN
+    IF continuation AND timeout THEN
         // Save information that may later be needed for a retry.
 
         RtlMoveUquad (

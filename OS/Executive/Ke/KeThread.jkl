@@ -81,13 +81,13 @@ FN KeuInitializeThread (
 
     thread^.Context = KepInitializeContext (
         thread, // thread
-        kstack + kstacksize, // kstack
+        kstack, // kstack
         startfunc, // startfunc
         context1, // context1
         context2, // context2
     )
 
-    thread^.KernelStackTop = kstack + kstacksize
+    thread^.KernelStackTop = kstack
 
     thread^.RemainingQuantum = KEP_DEFAULT_QUANTUM
 
@@ -747,7 +747,7 @@ FN KeuExitThread (
     // Atomically enqueue to reaper list.
 
     KeuInsertCustodyList (
-        thread^.Process^.Node^.ReaperCustodyList, // list
+        thread^.Node^.ReaperCustodyList, // list
         &thread^.ReadyEntry.Next, // link
     )
 

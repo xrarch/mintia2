@@ -334,6 +334,7 @@ FN PsuInitializeStage1 ()
 
             kenode^.Psp = psnode
             kenode^.ReaperCustodyList = &psnode^.ReaperCustodyList
+            kenode^.StackAllocateCustodyList = &psnode^.StackAllocateCustodyList
 
             KeuInitializeCustodyList (
                 &psnode^.ReaperCustodyList, // list
@@ -344,6 +345,17 @@ FN PsuInitializeStage1 ()
             ExInitializeTimedWorkItem (
                 &psnode^.ReaperTimedWorkItem, // item
                 &PsuReaperWorker, // routine
+            )
+
+            KeuInitializeCustodyList (
+                &psnode^.StackAllocateCustodyList, // list
+                &PspActivateStackAllocation, // activateroutine
+                kenode, // context
+            )
+
+            ExInitializeWorkItem (
+                &psnode^.StackAllocateWorkItem, // item
+                &PspStackAllocateWorker, // routine
             )
 
             // Initialize the turnstile cache.

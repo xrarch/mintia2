@@ -380,13 +380,21 @@ STRUCT KepTurnstileChain
 #END
 END
 
+STRUCT KepCachedStack
+    Next : ^VOID,
+END
+
 STRUCT KepNode
     BlNode : ^BlNodeInfo,
 
     TurnstileChains : KepTurnstileChain[KEP_TURNSTILE_CHAINS],
 
+    StackCacheListHead : ^KepCachedStack,
+
 #IF BLD_MP
     QueueRemovalLocks : KepSpinlock[KEP_QUEUE_REMOVAL_LOCKS],
+
+    StackCacheLock : KepSpinlock,
 
     WorkBalanceDpc : KeDpc,
 
@@ -395,6 +403,8 @@ STRUCT KepNode
     NextWorkBalanceMs : LONG,
 #END
 
+    CachedStackCount : ULONG,
+    CachedStackMinimum : ULONG,
 END
 
 EXTERN FN KepLowerIpl (
@@ -758,6 +768,14 @@ EXTERN FN KepAcquireSpinlockInPrb (
     KepReleaseSpinlock ( &(thread)^.Spinlock )
 ]
 
+#MACRO KepAcquireStackCacheElevated ( kenode ) [
+    KepAcquireSpinlock ( &(kenode)^.StackCacheLock )
+]
+
+#MACRO KepReleaseStackCacheElevated ( kenode ) [
+    KepReleaseSpinlock ( &(kenode)^.StackCacheLock )
+]
+
 EXTERN FN KepStealWork ()
 
 #MACRO KepPrbFromNodeAndNumber ( kenode, procid ) [
@@ -803,6 +821,10 @@ EXTERN FN KepStealWork ()
 #MACRO KepAcquireThreadElevated ( thread ) []
 
 #MACRO KepReleaseThreadElevated ( thread ) []
+
+#MACRO KepAcquireStackCacheElevated ( kenode ) []
+
+#MACRO KepReleaseStackCacheElevated ( kenode ) []
 
 #MACRO KepPrbFromNodeAndNumber ( kenode, procid ) [
     // The NUMA ID field of the processor ID (upper 16 bits) should be zero.

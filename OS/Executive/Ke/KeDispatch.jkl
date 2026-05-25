@@ -265,11 +265,75 @@ FN KepUpdateInteractivity (
     KepSoftInterruptSelf ( prb, KEP_IPL_DPC )
 END
 
+FN KepAllocateKernelStack (
+    IN thread : ^KeuThread,
+    IN handoffallowed : UWORD,
+) : UWORD
+
+    // The thread lost its kernel stack when it blocked on a continuation.
+    // We need to give it a kernel stack back.
+    //
+    // Returns whether handoff was determined to succeed.
+
+    KeAssert ( thread^.KernelStackTop == NULLPTR )
+
+    IF handoffallowed AND
+        KeCurrentThread()^.Node == thread^.Node THEN
+
+        // We're going to block on a continuation, and won't need our kernel
+        // stack anymore. We also have the same affinity node that the
+        // target thread does. Therefore it's a very wise idea to do direct
+        // hand-off of our kernel stack to the target thread.
+
+        RETURN TRUE
+
+    ELSE
+        // Try to get a kernel stack from the per-node cache list.
+
+        kepnode := thread^.Node^.Kep
+
+        KepAcquireStackCacheElevated ( kepnode )
+
+        kstack := kepnode^.StackCacheListHead
+
+        IF kstack THEN
+            kepnode^.StackCacheListHead = kstack^.Next
+            thread^.KernelStackTop = kstack + SIZEOF ^VOID
+
+            total := kepnode^.CachedStackCount
+            kepnode^.CachedStackCount = total - 1
+
+            IF total < kepnode^.CachedStackMinimum THEN
+                kepnode^.CachedStackMinimum = total
+            END
+        END
+
+        KepReleaseStackCacheElevated ( kepnode )
+
+        IF NOT kstack THEN
+            // Failed to allocate a kernel stack for the thread.
+            // Enqueue it to the stack-allocating worker thread and return
+            // an error.
+
+            KeuInsertCustodyList (
+                thread^.Node^.StackAllocateCustodyList, // list
+                &thread^.ReadyEntry.Next, // link
+            )
+        END
+    END
+
+    RETURN FALSE
+END
+
 FN KepSwitchThread (
     IN current : ^KeuThread,
     IN thread : ^KeuThread,
+    IN continuation : ^KeContinuation,
+    IN handoff : UWORD,
 )
 
+    // Switch to the context of a new thread.
+    //
     // The current thread is locked, unless it is NULLPTR (in which case this is
     // the first thread switch in the lifetime of the system).
     //
@@ -323,11 +387,9 @@ FN KepSwitchThread (
         current, // oldthread
     )
 
-    KeAssert ( current == KeCurrentThread () )
+    // We're back in the context of the "current" thread.
 
-    // We're back in the context of the "current" thread. This is always where
-    // the hole that the gopher pops back out of is, except in the case of a
-    // newly created thread being dispatched for the first time.
+    KeAssert ( current == KeCurrentThread () )
 END
 
 FN KepInsertThread (
@@ -776,6 +838,30 @@ FN KeuReadyThread (
     KepReleaseThread ( thread, ipl )
 END
 
+FN KeuBatchReadyThreads (
+    IN threadlisthead : ^KeuThread,
+)
+
+    // External interface for readying a batch of threads.
+    // They are linked through ReadyEntry.
+
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+
+    WHILE threadlisthead DO
+        next : ^VOID = threadlisthead^.ReadyEntry.Next
+
+        KepAcquireThreadElevated ( threadlisthead )
+
+        KepReadyThread ( threadlisthead )
+
+        KepReleaseThreadElevated ( threadlisthead )
+
+        threadlisthead = next
+    END
+
+    KepLowerIpl ( ipl )
+END
+
 #IF BLD_MP
 
 #MACRO KepSkipPinnedThreads ( migrate, thread, readybits, queue, i ) [
@@ -1144,34 +1230,59 @@ FN KepPreemptThread (
     // Called at KEP_IPL_DPC when theres a thread we've been preempted by and
     // it's time to switch into it.
 
+    // Acquire a pointer to the current thread.
+
+    current := prb^.CurrentThread
+
+@Retry
+
     // Grab the next thread with the ready queue lock held.
 
     KepAcquireReadyQueueElevated ( prb )
 
     next := prb^.NextThread
-    prb^.NextThread = NULLPTR
 
-#IF BLD_MP
-    IF NOT next THEN
-        // If there's somehow no next thread, just return.
+    IF next THEN
+        prb^.NextThread = NULLPTR
+        next^.Status = KE_THREAD_INFLIGHT
 
-        KepReleaseReadyQueueElevated ( prb )
-        
-        LEAVE
+    ELSE
+        // See if anybody else should preempt us.
+
+        next = KepSelectThread (
+            prb, // prb
+            current, // current
+            TRUE, // exclusive
+            FALSE, // migrate
+        )
     END
-#END
-
-    next^.Status = KE_THREAD_INFLIGHT
 
     KepReleaseReadyQueueElevated ( prb )
+
+    IF NOT next THEN
+        LEAVE
+    END
+
+    IF NOT next^.KernelStackTop THEN
+        // Allocate a kernel stack for the next thread.
+
+        KepAllocateKernelStack (
+            next, // thread
+            FALSE, // handoffallowed
+        )
+
+        IF NOT next^.KernelStackTop THEN
+            // Still doesn't have a stack, so just give up on it.
+            // Note that it is now in the custody of a worker thread and will be
+            // re-readied later.
+
+            GOTO Retry
+        END
+    END
 
     // Wait for the next thread to no longer be switching off his stack.
 
     KepWaitForSwitch ( next )
-
-    // Acquire a pointer to the current thread.
-
-    current := prb^.CurrentThread
 
     // Acquire the current thread's lock.
 
@@ -1218,6 +1329,8 @@ FN KepPreemptThread (
     KepSwitchThread (
         current, // current
         next, // thread
+        NULLPTR, // continuation
+        FALSE, // handoff
     )
 
     // KepSwitchThread returns with the thread lock released.
@@ -1643,6 +1756,8 @@ FN KepYield (
 
     // Yield the processor. Thread lock is held on entry, released on exit.
 
+@Retry
+
     // Try to find a thread to switch into.
 
     KepAcquireReadyQueueElevated ( prb )
@@ -1678,6 +1793,25 @@ FN KepYield (
     KepReleaseReadyQueueElevated ( prb )
 
     IF next THEN
+        handoff := FALSE
+
+        IF NOT next^.KernelStackTop THEN
+            // Allocate a kernel stack for the next thread.
+
+            handoff = KepAllocateKernelStack (
+                next, // thread
+                continuation != NULLPTR, // handoffallowed
+            )
+
+            IF NOT next^.KernelStackTop THEN
+                // Still doesn't have a stack, so just give up on it.
+                // Note that it is now in the custody of a worker thread and will be
+                // re-readied later.
+
+                GOTO Retry
+            END
+        END
+
         // Wait for the next thread to no longer be switching off his stack.
 
         KepWaitForSwitch ( next )
@@ -1688,6 +1822,8 @@ FN KepYield (
         KepSwitchThread (
             current, // current
             next, // thread
+            continuation, // continuation
+            handoff, // handoff
         )
 
     ELSE
@@ -1706,6 +1842,8 @@ FN KepYield (
         KepSwitchThread (
             current, // current
             &prb^.IdleThread, // thread
+            continuation, // continuation
+            FALSE, // handoff
         )
     END
 END
