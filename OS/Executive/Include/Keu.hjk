@@ -147,8 +147,6 @@ EXTERN FN KeuDetachProcess (
     IN process : ^KeuProcess,
 )
 
-#DEFINE KEP_THREAD_WAIT_BLOCKS 4
-
 STRUCT KeuThread
     WaitBlockTable : ^KepWaitBlock,
     Context : ^OsContext,
@@ -187,11 +185,11 @@ STRUCT KeuThread
     Alertable : UBYTE,
     WaitMode : UBYTE,
     WaitIpl : UBYTE,
+    WaitHasTimeout : UBYTE,
     InteractiveBits : UBYTE,
     CurrentQueue : UBYTE,
     SuspendCount : UBYTE,
     Terminated : UBYTE,
-    KernelStackResident : UBYTE,
     IgnoreEventCount : UBYTE,
     AttachIpl : UBYTE,
     PriorityFloor : UBYTE,
@@ -217,7 +215,6 @@ STRUCT KeuThread
 
     ReadyEntry : RtlListEntry,
     BalancedQueueEntry : RtlListEntry,
-    WaitEntry : RtlListEntry,
     ProcessListEntry : RtlListEntry,
 
     KapcListHead : RtlListEntry,
@@ -261,7 +258,12 @@ STRUCT KeuThread
 
     TerminationEvent : KeEvent,
 
-    WaitBlocks : KepWaitBlock[KEP_THREAD_WAIT_BLOCKS],
+    Continuation : KeContinuation,
+
+    RemainingWaitTimeout : RtlUquad,
+    StartWaitTime : RtlUquad,
+
+    WaitBlocks : KepWaitBlock[KE_THREAD_WAIT_BLOCKS],
 
     LastFaultStatus : OsStatus,
 

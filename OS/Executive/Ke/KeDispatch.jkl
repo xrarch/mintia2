@@ -1638,6 +1638,7 @@ END
 FN KepYield (
     IN current : ^KeuThread,
     IN prb : ^KepPrb,
+    IN continuation : ^KeContinuation,
 )
 
     // Yield the processor. Thread lock is held on entry, released on exit.
@@ -2195,6 +2196,7 @@ FN KepPinThread (
     KepYield (
         current, // current
         myprb, // prb
+        NULLPTR, // continuation
     )
 
     // We are now pinned to the requested processor. The thread lock has been

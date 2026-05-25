@@ -374,6 +374,8 @@ FNPTR KeStartThreadF (
 
 #DEFINE KE_SUSPEND_MAX 255
 
+#DEFINE KE_THREAD_WAIT_BLOCKS 4
+
 EXTERN FN KeInitializeEvent (
     IN event : ^KeEvent,
     IN name : ^UBYTE,
@@ -482,9 +484,10 @@ EXTERN FN KeWaitForObjects (
     IN objectcount : UWORD,
     IN objecttable : ^^KepDispatchHeader,
     IN waitblocktable : ^KepWaitBlock,
+    IN continuation : ^KeContinuation,
 ) : OsStatus
 
-#MACRO KeSleep ( interval, waitmode, alertable ) [
+#MACRO KeSleep ( interval, waitmode, alertable, continuation ) [
     KeWaitForObjects (
         waitmode, // waitmode
         alertable, // alertable
@@ -492,6 +495,7 @@ EXTERN FN KeWaitForObjects (
         0, // objectcount,
         NULLPTR, // objecttable
         NULLPTR, // waitblocktable
+        continuation, // continuation
     )
 ]
 
@@ -500,6 +504,7 @@ EXTERN FN KeWaitForSingleObject (
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
     IN object : ^KepDispatchHeader,
+    IN continuation : ^KeContinuation,
 ) : OsStatus
 
 STRUCT KeBalancedQueue
@@ -649,6 +654,18 @@ EXTERN FN KeExceptionJacket (
     IN context : ^VOID,
     IN flags : UWORD,
 ) : OsStatus
+
+FNPTR KeContinuationF (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
+)
+
+STRUCT KeContinuation
+    Function : KeContinuationF,
+    Parameter1 : ^VOID,
+    Parameter2 : ^VOID,
+    Parameter3 : ^VOID,
+END
 
 STRUCT KeuNode
 // The following fields should never be rearranged.

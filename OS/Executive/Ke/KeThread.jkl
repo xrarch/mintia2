@@ -29,6 +29,7 @@ FN (KeApcF) KepSuspendThreadApc (
         KE_UNALERTABLE, // alertable
         NULLPTR, // timeout
         &thread^.SuspendHeader, // object
+        NULLPTR, // continuation
     )
 END
 
@@ -237,8 +238,6 @@ FN KeuUninitializeThread (
 
     // NOTE: This is not part of KeuExitThread because it returns whether the
     //       process should be terminated, and only Ps knows what to do then.
-
-    KeAssert ( thread^.KernelStackResident != FALSE )
 
     terminated := FALSE
 
@@ -762,6 +761,7 @@ FN KeuExitThread (
     KepYield (
         thread, // thread
         KEP_CURRENT_PRB, // prb
+        NULLPTR, // continuation
     )
 
 #IF BLD_CHK
