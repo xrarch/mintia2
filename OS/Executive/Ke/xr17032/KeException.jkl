@@ -610,8 +610,109 @@ KepJumpIntoThread:
 
 // a0 - newthread
 // a1 - oldthread
-KepSwitchContext:
-.global KepSwitchContext
+KepHandoffStack:
+.global KepHandoffStack
+
+    // Hand off the current thread's kernel stack to the new thread, and execute
+    // the new thread's continuation on it.
+
+    // First set the stack pointer to the top of the stack.
+
+    mov  sp, long [a1 + KeuThread_KernelStackTop]
+
+    // Indicate that the current thread no longer has a kernel stack.
+
+    mov  long [a1 + KeuThread_KernelStackTop], zero
+
+    // Give it to the new thread.
+
+    mov  long [a0 + KeuThread_KernelStackTop], sp
+
+    // Release thread lock. Inline KepReleaseSpinlock here for speed.
+
+#IF BLD_MP
+    // Indicate no longer switching off of our stack.
+
+    mov  byte [a1 + KeuThread_Switching], 0
+
+    // Memory barrier to ensure old writes are committed.
+
+    wmb
+
+    // Set spinlock un-owned.
+
+    mov  long [a1 + KeuThread_Spinlock], zero
+#END
+
+    // Set thread to RUNNING.
+
+    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
+    // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
+    // pending.
+
+    mov  t0, byte [a0 + KeuThread_PendingApcLevelInt]
+    beq  t0, .none
+
+    // Trigger.
+
+    subi a0, zero, (KEP_PRB_LESS_ZERO - KepPrb_PendingSoftwareInterrupts)
+    li   a1, (1 << ((KEP_IPL_APC) - 1))
+    jal  KeOrUlong
+
+.none:
+
+    // Set link register to zero to terminate stack traces.
+
+    mov  lr, zero
+
+    // Jump to the master continuation.
+
+    j    KepMasterContinuation
+
+// a0 - continuation
+// a1 - waitstatus
+// a2 - thread
+KepExecuteContinuation:
+.global KepExecuteContinuation
+
+    // Reset the current thread's kernel stack to the top and execute the
+    // continuation.
+
+    mov  sp, long [a2 + KeuThread_KernelStackTop]
+    mov  t0, long [a0 + KeContinuation_Function]
+
+    // Set link register to zero to terminate stack traces and jump to the
+    // continuation. The arguments are already in the correct registers.
+
+    mov  lr, zero
+    jalr zero, t0, 0
+
+// a0 - newthread
+// a1 - oldthread
+KepSwitchContinuationToContinuation:
+.global KepSwitchContinuationToContinuation
+    brk
+    ret
+
+// a0 - newthread
+// a1 - oldthread
+KepSwitchNormalToContinuation:
+.global KepSwitchNormalToContinuation
+    brk
+    ret
+
+// a0 - newthread
+// a1 - oldthread
+KepSwitchContinuationToNormal:
+.global KepSwitchContinuationToNormal
+    brk
+    ret
+
+// a0 - newthread
+// a1 - oldthread
+KepSwitchNormalToNormal:
+.global KepSwitchNormalToNormal
     
     // Save the current context and restore the new.
     // We only need to save the callee-saved registers as this has the same

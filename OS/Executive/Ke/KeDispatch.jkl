@@ -325,6 +325,39 @@ FN KepAllocateKernelStack (
     RETURN FALSE
 END
 
+FNPTR KepSwitchContextF (
+    IN newthread : ^KeuThread,
+    IN oldthread : ^KeuThread,
+)
+
+EXTERN FN (KepSwitchContextF) KepSwitchContinuationToContinuation (
+    IN newthread : ^KeuThread,
+    IN oldthread : ^KeuThread,
+)
+
+EXTERN FN (KepSwitchContextF) KepSwitchNormalToContinuation (
+    IN newthread : ^KeuThread,
+    IN oldthread : ^KeuThread,
+)
+
+EXTERN FN (KepSwitchContextF) KepSwitchContinuationToNormal (
+    IN newthread : ^KeuThread,
+    IN oldthread : ^KeuThread,
+)
+
+EXTERN FN (KepSwitchContextF) KepSwitchNormalToNormal (
+    IN newthread : ^KeuThread,
+    IN oldthread : ^KeuThread,
+)
+
+#SECTION "text"
+KepSwitchContextTable : KepSwitchContextF[4] = {
+    [0] = &KepSwitchContinuationToContinuation,
+    [1] = &KepSwitchNormalToContinuation,
+    [2] = &KepSwitchContinuationToNormal,
+    [3] = &KepSwitchNormalToNormal,
+}
+
 FN KepSwitchThread (
     IN current : ^KeuThread,
     IN thread : ^KeuThread,
@@ -344,6 +377,7 @@ FN KepSwitchThread (
     KeAssert ( current != thread )
     KeAssert ( current != NULLPTR )
     KeAssert ( thread != NULLPTR )
+    KeAssert ( (thread^.KernelStackTop != NULLPTR) OR handoff )
 
     // Set affinity to this processor.
 
@@ -374,18 +408,35 @@ FN KepSwitchThread (
     // the CurrentThread field of the Prb after that moment. We want that to
     // always be safe so here we do this.
 
-    prb^.CurrentThread = thread
-    prb^.KernelStackTop = thread^.KernelStackTop
-
     KepSetCurrentThreadForProcessor ( thread )
+
+    prb^.CurrentThread = thread
 
     // Note that KepSwitchContext releases the old thread's lock.
     // It is not reacquired before switching back in.
 
-    KepSwitchContext (
-        thread, // newthread
-        current, // oldthread
-    )
+    IF handoff THEN
+        // Hand off our stack to the new thread.
+
+        KepHandoffStack (
+            thread, // newthread
+            current, // oldthread
+        )
+
+    ELSE
+        prb^.KernelStackTop = thread^.KernelStackTop
+
+        // Select the optimized context switch routine for the case we're
+        // dealing with.
+
+        index := CAST ((NOT continuation) |
+            ((NOT thread^.Continuation.Function) << 1)) TO UWORD
+
+        KepSwitchContextTable[index] (
+            thread, // newthread
+            current, // oldthread
+        )
+    END
 
     // We're back in the context of the "current" thread.
 
@@ -1803,7 +1854,7 @@ FN KepYield (
                 continuation != NULLPTR, // handoffallowed
             )
 
-            IF NOT next^.KernelStackTop THEN
+            IF NOT handoff AND NOT next^.KernelStackTop THEN
                 // Still doesn't have a stack, so just give up on it.
                 // Note that it is now in the custody of a worker thread and will be
                 // re-readied later.

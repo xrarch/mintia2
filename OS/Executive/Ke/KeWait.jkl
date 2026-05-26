@@ -211,100 +211,106 @@ FN KepMasterContinuation ()
     KepWaitTail ( thread )
 
     waitstatus := thread^.WaitStatus
-    alertable := thread^.Alertable
 
-    IF waitstatus == OS_STATUS_KERNEL_APC AND
-        alertable != KE_CANCEL_ON_KAPC THEN
+    IF waitstatus != OS_STATUS_KERNEL_APC OR
+        thread^.Alertable == KE_CANCEL_ON_KAPC THEN
 
-        // Awoke due to delivery of a kernel APC, and the alertable mode does
-        // not indicate that the wait should be cancelled. Therefore we need to
-        // adjust the timeout and put the thread back to sleep.
-
-        // Capture the wait parameters before lowering IPL so that they
-        // don't get corrupted by KAPCs that may arrive.
-
-        waitmode := thread^.WaitMode
-        objectcount := thread^.WaitCount
-        hastimeout := thread^.WaitHasTimeout
-        waitblocktable := thread^.WaitBlockTable
-        objecttable : ^^KepDispatchHeader = NULLPTR
-
-        IF objectcount <= KE_THREAD_WAIT_BLOCKS THEN
-            // The integral thread wait block table was used.
-            // This wait block table cannot be reused directly, because when we
-            // lower IPL to deliver KAPCs below, it can be corrupted. So we have
-            // to save the objects they point to now.
-
-            savedobjects : ^KepDispatchHeader[KE_THREAD_WAIT_BLOCKS]
-
-            i := 0
-
-            WHILE i < objectcount DO
-                savedobjects[i] = waitblocktable[i].Object
-
-                i += 1
-            END
-
-            objecttable = &savedobjects[0]
-            waitblocktable = NULLPTR
-        END
-        
-        remainingtimeout : RtlUquad
-        starttime : RtlUquad
-
-        timeout : ^RtlUquad = NULLPTR
-
-        IF hastimeout THEN
-            timeout = &remainingtimeout
-
-            RtlMoveUquad (
-                timeout, // dest
-                &thread^.RemainingWaitTimeout, // src
-            )
-
-            RtlMoveUquad (
-                &starttime, // dest
-                &thread^.StartWaitTime, // src
-            )
-        END
+        // Didn't wake up due to delivery of a KAPC, or we did but the
+        // alertability mode indicated to cancel upon that event. Therefore we
+        // should not restart the wait.
 
         KepLowerIpl ( thread^.WaitIpl )
 
-        IF hastimeout AND KepKernelApcReceived (
-            &remainingtimeout, // timeout
-            &starttime, // starttime
-        ) THEN
+@ExecuteContinuation
 
-            // The wait timed out.
+        func (
+            continuation, // continuation
+            waitstatus, // waitstatus
+        )
 
-            waitstatus = OS_STATUS_WAIT_TIMEOUT
-
-        ELSE
-            // The wait should continue.
-
-            waitstatus = KeWaitForObjects (
-                waitmode, // waitmode
-                alertable, // alertable
-                timeout, // timeout
-                objectcount, // objectcount
-                objecttable, // objecttable
-                waitblocktable, // waitblocktable
-                continuation, // continuation
-            )
-        END
-    
-    ELSE
-        KepLowerIpl ( thread^.WaitIpl )
+        KeCrash ( "Continuation returned\n" )
     END
 
-    // Now call the continuation.
+    // Awoke due to delivery of a kernel APC, and the alertable mode does
+    // not indicate that the wait should be cancelled. Therefore we need to
+    // adjust the timeout and put the thread back to sleep.
 
-    func (
+    // Capture the wait parameters before lowering IPL so that they
+    // don't get corrupted by KAPCs that may arrive.
+
+    waitmode := thread^.WaitMode
+    objectcount := thread^.WaitCount
+    hastimeout := thread^.WaitHasTimeout
+    waitblocktable := thread^.WaitBlockTable
+    alertable := thread^.Alertable
+    objecttable : ^^KepDispatchHeader = NULLPTR
+
+    IF objectcount <= KE_THREAD_WAIT_BLOCKS THEN
+        // The integral thread wait block table was used.
+        // This wait block table cannot be reused directly, because when we
+        // lower IPL to deliver KAPCs below, it can be corrupted. So we have
+        // to save the objects they point to now.
+
+        savedobjects : ^KepDispatchHeader[KE_THREAD_WAIT_BLOCKS]
+
+        i := 0
+
+        WHILE i < objectcount DO
+            savedobjects[i] = waitblocktable[i].Object
+
+            i += 1
+        END
+
+        objecttable = &savedobjects[0]
+        waitblocktable = NULLPTR
+    END
+    
+    remainingtimeout : RtlUquad
+    starttime : RtlUquad
+
+    timeout : ^RtlUquad = NULLPTR
+
+    IF hastimeout THEN
+        timeout = &remainingtimeout
+
+        RtlMoveUquad (
+            timeout, // dest
+            &thread^.RemainingWaitTimeout, // src
+        )
+
+        RtlMoveUquad (
+            &starttime, // dest
+            &thread^.StartWaitTime, // src
+        )
+    END
+
+    KepLowerIpl ( thread^.WaitIpl )
+
+    IF hastimeout AND KepKernelApcReceived (
+        &remainingtimeout, // timeout
+        &starttime, // starttime
+    ) THEN
+
+        // The wait timed out.
+
+        waitstatus = OS_STATUS_WAIT_TIMEOUT
+
+        GOTO ExecuteContinuation
+    END
+
+    // The wait should continue.
+
+    KeWaitForObjects (
+        waitmode, // waitmode
+        alertable, // alertable
+        timeout, // timeout
+        objectcount, // objectcount
+        objecttable, // objecttable
+        waitblocktable, // waitblocktable
         continuation, // continuation
-        waitstatus, // waitstatus
     )
 
-    KeCrash ( "Continuation returned\n" )
+    KeAssert ( FALSE )
 END
 
 FN KepWaitThread (
@@ -781,7 +787,7 @@ EXPORT FN KeWaitForObjects (
                 GOTO Retry
             END
 
-            RETURN status
+            GOTO Exit
         END
     END
 
@@ -874,11 +880,7 @@ EXPORT FN KeWaitForObjects (
 
             KepLowerIpl ( ipl )
 
-            IF status != OS_STATUS_KERNEL_APC THEN
-                RETURN status
-            END
-
-            GOTO KernelApcReceived
+            GOTO Exit
         END
 
 @WaitOnObject
@@ -1027,21 +1029,42 @@ EXPORT FN KeWaitForObjects (
     // KepWaitThread returns with the thread lock released.
     // All of our wait blocks have been dequeued, timer dequeued, etc.
 
-    IF status != OS_STATUS_KERNEL_APC THEN
-        RETURN status
-    END
+@Exit
 
-@KernelApcReceived
+    // All of the exit cases from this function are funneled into the Exit label
+    // above. If we're leaving because we received a KAPC, and the caller did
+    // not specify that we should cancel upon receiving a KAPC, then we have to
+    // retry the wait. Otherwise we need to return the status.
 
-    IF alertable == KE_CANCEL_ON_KAPC THEN
-        RETURN status
+    IF status != OS_STATUS_KERNEL_APC OR
+        alertable == KE_CANCEL_ON_KAPC THEN
+
+        IF NOT continuation THEN
+            RETURN status
+        END
+
+        KeCopyContinuationParameters (
+            &thread^.Continuation, // dest
+            continuation, // src
+        )
+
+        KepExecuteContinuation (
+            continuation, // continuation
+            status, // waitstatus
+            thread, // thread
+        )
+
+        KeAssert ( FALSE )
     END
 
     IF timeout AND KepKernelApcReceived (
         &remainingtimeout, // timeout
         &starttime, // starttime
     ) THEN
-        RETURN OS_STATUS_WAIT_TIMEOUT
+
+        status = OS_STATUS_WAIT_TIMEOUT
+
+        GOTO Exit
     END
 
     GOTO Retry
