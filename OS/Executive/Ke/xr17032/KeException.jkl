@@ -679,25 +679,8 @@ KepExecuteContinuation:
     // Reset the current thread's kernel stack to the top and execute the
     // continuation.
 
-    // First copy the parameters into the integral thread continuation.
-
-    mov  t0, long [a0 + KeContinuation_Function]
-    mov  t1, long [a0 + KeContinuation_Parameter1]
-    mov  t2, long [a0 + KeContinuation_Parameter2]
-    mov  t3, long [a0 + KeContinuation_Parameter3]
-    mov  long [a2 + (KeuThread_Continuation + KeContinuation_Function)], t0
-    mov  long [a2 + (KeuThread_Continuation + KeContinuation_Parameter1)], t1
-    mov  long [a2 + (KeuThread_Continuation + KeContinuation_Parameter2)], t2
-    mov  long [a2 + (KeuThread_Continuation + KeContinuation_Parameter3)], t3
-
-    // Set the continuation argument to point to the integral thread
-    // continuation.
-
-    addi a0, a2, KeuThread_Continuation
-
-    // Now set the stack pointer.
-
     mov  sp, long [a2 + KeuThread_KernelStackTop]
+    mov  t0, long [a0 + KeContinuation_Function]
 
     // Set link register to zero to terminate stack traces and jump to the
     // continuation.
