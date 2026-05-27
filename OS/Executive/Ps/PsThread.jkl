@@ -547,11 +547,9 @@ FN (KeuProcessCustodyListF) PspAllocateStackForThread (
 
     threadlisthead := CAST context TO ^^KeuThread
 
-    kenode := KeCurrentAffinityNode ()
-
     KeAssert ( thread^.KernelStackTop == NULLPTR )
 
-    kstack := MmuAllocateKernelStack ( kenode )
+    kstack := MmuAllocateKernelStack ( thread^.Node )
 
     // Should not fail to allocate a kernel stack because it internally calls
     // wait=TRUE, and commit was charged for the kernel stack earlier.

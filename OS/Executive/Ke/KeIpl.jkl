@@ -6,6 +6,10 @@
 
 EXTERN FN PsuReallocateRemoteTurnstile ()
 
+EXTERN FN (KeuCustodyListActivateF) PspActivateStackAllocation (
+    IN list : ^KeuCustodyList,
+)
+
 #MACRO KepAcknowledgeSoftwareInterrupt ( prb, ipl ) [
     KeAssert ( ipl != KEP_IPL_LOW )
 
@@ -105,6 +109,18 @@ FN (KepSoftwareInterruptHandlerF) KepDpcInterrupt ()
 
         KepQuantumEnd ( prb )
     END
+
+#IF BLD_MP
+    IF prb^.ActivateStackAllocator THEN
+        prb^.ActivateStackAllocator = FALSE
+
+        // Deferred upcall into Ps to avoid wrongly ordered spinlocks at the
+        // moment where stack allocation was requested by Ke. This is ugly but
+        // it's the most efficient way to avoid a nasty deadlock.
+
+        PspActivateStackAllocation ( prb^.Node^.StackAllocateCustodyList )
+    END
+#END
 
     IF prb^.NextThread THEN
         // A next thread was selected to preempt the current one.

@@ -266,6 +266,7 @@ STRUCT KepPrb
 #IF BLD_MP
     StealWork : UBYTE,
     InIdleLoop : UBYTE,
+    ActivateStackAllocator : UBYTE,
 #END
 
     // Put big stuff at the end to make sure the common fields are readily in
@@ -392,11 +393,11 @@ STRUCT KepNode
     StackCacheListHead : ^KepCachedStack,
 
 #IF BLD_MP
+    WorkBalanceDpc : KeDpc,
+
     QueueRemovalLocks : KepSpinlock[KEP_QUEUE_REMOVAL_LOCKS],
 
     StackCacheLock : KepSpinlock,
-
-    WorkBalanceDpc : KeDpc,
 
     MaximumBalanceIterations : ULONG,
 

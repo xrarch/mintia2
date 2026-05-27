@@ -265,6 +265,29 @@ FN KepUpdateInteractivity (
     KepSoftInterruptSelf ( prb, KEP_IPL_DPC )
 END
 
+#IF BLD_MP
+
+FN (KeuCustodyListActivateF) KeuDeferActivateStackAllocation (
+    IN list : ^KeuCustodyList,
+)
+
+    // The stack allocation custody list was activated by having a thread
+    // enqueued to it. A work item must be enqueued to the stack allocating
+    // thread, but this cannot occur under the spinlocks we currently hold
+    // due to wrong ordering. So we defer it instead.
+
+    prb := KEP_CURRENT_PRB_LOCAL
+
+    prb^.ActivateStackAllocator = TRUE
+
+    KepSoftInterruptSelf (
+        prb, // prb
+        KEP_IPL_DPC, // ipl
+    )
+END
+
+#END
+
 FN KepAllocateKernelStack (
     IN thread : ^KeuThread,
     IN handoffallowed : UWORD,
@@ -312,11 +335,10 @@ FN KepAllocateKernelStack (
 
         IF NOT kstack THEN
             // Failed to allocate a kernel stack for the thread.
-            // Enqueue it to the stack-allocating worker thread and return
-            // an error.
+            // Enqueue it to the stack-allocating worker thread.
 
             KeuInsertCustodyList (
-                thread^.Node^.StackAllocateCustodyList, // list
+                KeCurrentVolatileNode()^.StackAllocateCustodyList, // list
                 &thread^.ReadyEntry.Next, // link
             )
         END
