@@ -378,6 +378,10 @@ EXTERN FN KeuProcessCustodyList (
     NOTHING (list)^.Context = (context)
 ]
 
+STRUCT KeuCachedStack
+    Next : ^KeuCachedStack,
+END
+
 EXTERN FN KeuPopKernelStack (
     IN kenode : ^KeuNode,
 ) : ^VOID
@@ -386,6 +390,14 @@ EXTERN FN KeuAllocateNodeSpace (
     IN kenode : ^KeuNode,
     IN bytes : UWORD,
 ) : ^VOID
+
+EXTERN FN KeuFlushStackCache (
+    IN kenode : ^KeuNode,
+) : ^KeuCachedStack
+
+EXTERN FN KeuReapStackCache (
+    IN kenode : ^KeuNode,
+) : ^KeuCachedStack
 
 #IF BLD_MP
 

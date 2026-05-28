@@ -11,7 +11,6 @@
 #DEFINE MMP_POOL_ADJUSTMENT_SHORT_INTERVAL_MS 1000
 #DEFINE MMP_POOL_ADJUSTMENT_INTERVAL_MS 5000
 
-#SECTION "PAGEtext"
 FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -21,14 +20,15 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
     // work that is unsafe to perform in the context of the balance manager.
 
     mmnode := CAST context1 TO ^MmpNode
+    kenode := mmnode^.KeNode
 
     mmnode^.PgPoolCacheAdjustActive = FALSE
 
     empty := mmnode^.AvailablePageCount < mmnode^.LowPageCount
 
-    IF empty THEN
-        kenode := mmnode^.KeNode
+    kstacktoreap : ^KeuCachedStack = NULLPTR
 
+    IF empty THEN
         // Perform all deferred asynchronous deletions now, before adjusting
         // pool caches, so that they are all freed to the pool caches and we
         // can free up as much as possible.
@@ -42,6 +42,22 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
             kenode, // context1
             0, // context2
         )
+
+        kstacktoreap = KeuFlushStackCache ( kenode )
+    
+    ELSE
+        kstacktoreap = KeuReapStackCache ( kenode )
+    END
+
+    WHILE kstacktoreap DO
+        next := kstacktoreap^.Next
+
+        MmuDeleteKernelStack (
+            kenode, // kenode
+            kstacktoreap + SIZEOF KeuCachedStack, // kstack
+        )
+
+        kstacktoreap = next
     END
 
     MmpAdjustPoolCaches (
@@ -66,7 +82,7 @@ FN MmpAdjustAllPoolCachesSafely (
         ExEnqueueWorkItem (
             &mmnode^.PgPoolCacheAdjustItem, // item
             EX_HIGH_WORK_PRIORITY, // priority
-            TRUE, // head
+            empty, // head
             CAST mmnode TO UWORD, // context1
             0, // context2
         )
@@ -87,7 +103,6 @@ FN (KeContinuationF) MmuBalanceManager (
 )
 
     // Responsible for:
-    // o Kernel thread stack swapping.
     // o Process swapping.
     // o Working set trimming.
     // o Pool cache adjustment.

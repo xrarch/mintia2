@@ -288,6 +288,76 @@ END
 
 #END
 
+FN KeuFlushStackCache (
+    IN kenode : ^KeuNode,
+) : ^KeuCachedStack
+
+    // Detach the entire list of cached stacks and return it to the caller.
+
+    kepnode := kenode^.Kep
+
+    ipl := KepAcquireStackCache ( kepnode )
+
+    kstack := kepnode^.StackCacheListHead
+    kepnode^.StackCacheListHead = NULLPTR
+
+    kepnode^.CachedStackMinimum = kepnode^.CachedStackCount
+    kepnode^.CachedStackCount = 0
+
+    KepReleaseStackCache ( kepnode, ipl )
+
+    RETURN kstack
+END
+
+FN KeuReapStackCache (
+    IN kenode : ^KeuNode,
+) : ^KeuCachedStack
+
+    // Return cached stacks to reap.
+
+    kstacklisthead : ^KeuCachedStack = NULLPTR
+
+    kepnode := kenode^.Kep
+
+    ipl := KepAcquireStackCache ( kepnode )
+
+    reapamount := kepnode^.CachedStackMinimum
+
+    total := kepnode^.CachedStackCount
+    kepnode^.CachedStackMinimum = total
+
+    IF total - reapamount < (kenode^.ProcessorCount + 1) THEN
+        // Never want to go below a number of stacks that is equivalent to the
+        // number of processors in the node plus one.
+
+        IF total <= (kenode^.ProcessorCount + 1) THEN
+            // Don't reap.
+
+            GOTO Exit
+        END
+
+        reapamount = total - (kenode^.ProcessorCount + 1)
+    END
+
+    kepnode^.CachedStackCount = total - reapamount
+
+    WHILE reapamount DO
+        kstack := kepnode^.StackCacheListHead
+        kepnode^.StackCacheListHead = kstack^.Next
+
+        kstack^.Next = kstacklisthead
+        kstacklisthead = kstack
+
+        reapamount -= 1
+    END
+
+@Exit
+
+    KepReleaseStackCache ( kepnode, ipl )
+
+    RETURN kstacklisthead
+END
+
 FN KepCacheKernelStack (
     IN thread : ^KeuThread,
 )
@@ -299,7 +369,7 @@ FN KepCacheKernelStack (
 
     kepnode := thread^.Node^.Kep
 
-    kstack : ^KepCachedStack = thread^.KernelStackTop - SIZEOF KepCachedStack
+    kstack : ^KeuCachedStack = thread^.KernelStackTop - SIZEOF KeuCachedStack
     thread^.KernelStackTop = NULLPTR
 
     KepAcquireStackCacheElevated ( kepnode )
@@ -321,12 +391,12 @@ FN KepPopKernelStack (
 
     kstack := kepnode^.StackCacheListHead
 
-    IF kstack THEN
+    IF  kstack THEN
         kepnode^.StackCacheListHead = kstack^.Next
-        kstack += SIZEOF KepCachedStack
+        kstack += SIZEOF KeuCachedStack
 
-        total := kepnode^.CachedStackCount
-        kepnode^.CachedStackCount = total - 1
+        total := kepnode^.CachedStackCount - 1
+        kepnode^.CachedStackCount = total
 
         IF total < kepnode^.CachedStackMinimum THEN
             kepnode^.CachedStackMinimum = total

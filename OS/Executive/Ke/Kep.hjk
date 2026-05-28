@@ -381,16 +381,12 @@ STRUCT KepTurnstileChain
 #END
 END
 
-STRUCT KepCachedStack
-    Next : ^VOID,
-END
-
 STRUCT KepNode
     BlNode : ^BlNodeInfo,
 
     TurnstileChains : KepTurnstileChain[KEP_TURNSTILE_CHAINS],
 
-    StackCacheListHead : ^KepCachedStack,
+    StackCacheListHead : ^KeuCachedStack,
 
 #IF BLD_MP
     WorkBalanceDpc : KeDpc,
@@ -779,6 +775,17 @@ EXTERN FN KepAcquireSpinlockInPrb (
 
 #MACRO KepReleaseThreadElevated ( thread ) [
     KepReleaseSpinlock ( &(thread)^.Spinlock )
+]
+
+#MACRO KepAcquireStackCache ( kenode ) [
+    KepAcquireSpinlockRaise ( &(kenode)^.StackCacheLock )
+]
+
+#MACRO KepReleaseStackCache ( kenode, oldipl ) [
+    KepReleaseSpinlockLower (
+        &(kenode)^.StackCacheLock, // spinlock
+        oldipl, // oldipl
+    )
 ]
 
 #MACRO KepAcquireStackCacheElevated ( kenode ) [
