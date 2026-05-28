@@ -44,14 +44,14 @@ KepAnnounceSpinlock : KepSpinlock = KEP_INITIAL_SPINLOCK
 #END
 
 // FORWARD
-EXTERN FN (KeStartThreadF) KepThreadedMain (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+EXTERN FN (KeContinuationF) KepThreadedMain (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
 )
 
-FN (KeStartThreadF) KepIdleLoop (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+FN (KeContinuationF) KepIdleLoop (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
 )
 
     prb := KEP_CURRENT_PRB_LOCAL
@@ -197,13 +197,13 @@ FN KepInitializePrb (
 
     // Initialize the idle thread.
 
-    startfunc : KeStartThreadF
+    function : KeContinuationF
 
     IF bootprocessor THEN
-        startfunc = &KepThreadedMain
+        function = &KepThreadedMain
 
     ELSE
-        startfunc = &KepIdleLoop
+        function = &KepIdleLoop
     END
 
     KeuInitializeThread (
@@ -214,9 +214,9 @@ FN KepInitializePrb (
         prb^.IdleStackBase, // kstack
         BL_IDLE_STACK_SIZE, // kstacksize
         NULLPTR, // turnstile
-        startfunc, // startfunc
-        0, // context1
-        0, // context2
+        function, // function
+        NULLPTR, // parameter1
+        NULLPTR, // parameter2
     )
 
     prb^.IdleThread.Priority = OS_PRIORITY_IDLE
@@ -467,9 +467,9 @@ END
 EXTERN FN ExuStartExecutive ()
 
 #SECTION "INITtext"
-FN (KeStartThreadF) KepThreadedMain (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+FN (KeContinuationF) KepThreadedMain (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
 )
 
     // This is the first code that runs in thread context during the lifetime of
@@ -480,8 +480,8 @@ FN (KeStartThreadF) KepThreadedMain (
     // Go into the idle loop.
 
     KepIdleLoop (
-        context1, // context1
-        context2, // context2
+        continuation, // continuation
+        waitstatus, // waitstatus
     )
 END
 

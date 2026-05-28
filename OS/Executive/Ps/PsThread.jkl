@@ -6,9 +6,9 @@
 
 STRUCT PspThreadContext
     Name : ^RtlString,
-    StartFunc : KeStartThreadF,
-    Context1 : UWORD,
-    Context2 : UWORD,
+    Function : KeContinuationF,
+    Parameter1 : ^VOID,
+    Parameter2 : ^VOID,
     Process : ^PsuProcess,
     Flags : ULONG,
 END
@@ -198,9 +198,9 @@ EXPORT FN PsExitThread (
 END
 
 #SECTION "PAGEtext"
-FN (KeStartThreadF) PspUserThreadEntry (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+FN (KeContinuationF) PspUserThreadEntry (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
 )
 
     // Entry point for all usermode threads.
@@ -297,7 +297,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     // Use the start function to determine whether this is a usermode or kernel
     // thread.
 
-    IF ctx^.StartFunc == &PspUserThreadEntry THEN
+    IF ctx^.Function == &PspUserThreadEntry THEN
         paged^.Mode = KE_USER_MODE
     ELSE
         paged^.Mode = KE_KERNEL_MODE
@@ -347,9 +347,9 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
         kstack, // kstack
         KEU_STACK_PAGES << RTL_PAGE_SHIFT, // kstacksize
         turnstile, // turnstile
-        ctx^.StartFunc, // startfunc
-        ctx^.Context1, // context1
-        ctx^.Context2, // context2
+        ctx^.Function, // function
+        ctx^.Parameter1, // parameter1
+        ctx^.Parameter2, // parameter2
     ) THEN
         // The process was terminated already.
 
@@ -548,6 +548,8 @@ FN (KeuProcessCustodyListF) PspAllocateStackForThread (
     threadlisthead := CAST context TO ^^KeuThread
 
     KeAssert ( thread^.KernelStackTop == NULLPTR )
+
+    RtlPrint ( " AAA " )
 
     kstack := MmuAllocateKernelStack ( thread^.Node )
 
@@ -1088,9 +1090,9 @@ FN PsuCreateThreadObject (
     IN params : ^NsOpenParameters,
     IN name : ^RtlString,
     IN kenode : ^KeuNode,
-    IN startfunc : KeStartThreadF,
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+    IN function : KeContinuationF,
+    IN parameter1 : ^VOID,
+    IN parameter2 : ^VOID,
     IN process : ^PsuProcess,
     IN flags : UWORD,
     OUT thread : ^PsuThread,
@@ -1101,9 +1103,9 @@ FN PsuCreateThreadObject (
     ctx : PspThreadContext
 
     ctx.Name = name
-    ctx.StartFunc = startfunc
-    ctx.Context1 = context1
-    ctx.Context2 = context2
+    ctx.Function = function
+    ctx.Parameter1 = parameter1
+    ctx.Parameter2 = parameter2
     ctx.Process = process
     ctx.Flags = flags
 
@@ -1132,9 +1134,9 @@ END
 EXPORT FN PsCreateExecutiveThread (
     IN kenode : ^KeuNode,
     IN name : ^RtlString,
-    IN startfunc : KeStartThreadF,
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+    IN function : KeContinuationF,
+    IN parameter1 : ^VOID,
+    IN parameter2 : ^VOID,
     IN flags : UWORD,
     OUT thread : ^PsuThread,
 ) : OsStatus
@@ -1156,9 +1158,9 @@ EXPORT FN PsCreateExecutiveThread (
         &params, // params
         name, // name
         kenode, // kenode
-        startfunc, // startfunc
-        context1, // context1
-        context2, // context2
+        function, // function
+        parameter1, // parameter1
+        parameter2, // parameter2
         kenode^.SystemProcess, // process
         0, // flags
         OUT thread, // thread
@@ -1182,9 +1184,9 @@ FN PsuCreateThread (
     IN params : ^NsOpenParameters,
     IN name : ^RtlString,
     IN nodeid : UWORD,
-    IN startfunc : KeStartThreadF,
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+    IN function : KeContinuationF,
+    IN parameter1 : ^VOID,
+    IN parameter2 : ^VOID,
     IN processhandle : UWORD,
     IN flags : UWORD,
     OUT handle : UWORD,
@@ -1245,9 +1247,9 @@ FN PsuCreateThread (
         params, // params
         name, // name
         kenode, // kenode
-        startfunc, // startfunc
-        context1, // context1
-        context2, // context2
+        function, // function
+        parameter1, // parameter1
+        parameter2, // parameter2
         process, // process
         flags, // flags
         OUT thread, // thread
@@ -1305,7 +1307,7 @@ FN OsCreateThread (
     IN name : ^RtlString,
     IN nodeid : UWORD,
     IN startfunc : OsStartThreadF,
-    IN context : UWORD,
+    IN context : ^VOID,
     IN processhandle : UWORD,
     IN flags : UWORD,
     OUT handle : UWORD,
@@ -1340,9 +1342,9 @@ FN OsCreateThread (
         &sysparams, // params
         &sysname, // name
         nodeid, // nodeid
-        &PspUserThreadEntry, // startfunc
-        CAST startfunc TO UWORD, // context1
-        context, // context2
+        &PspUserThreadEntry, // function
+        startfunc, // parameter1
+        context, // parameter2
         processhandle, // processhandle
         flags, // flags
         OUT handle, // handle

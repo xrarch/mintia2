@@ -7,7 +7,7 @@
 
 FN FwtCreateThread (
     IN kenode : ^KeuNode,
-    IN startroutine : KeStartThreadF,
+    IN function : KeContinuationF,
     IN fwd : ^FwtData,
 ) : UWORD
 
@@ -22,9 +22,9 @@ FN FwtCreateThread (
     status := PsCreateExecutiveThread (
         kenode, // kenode
         &name, // name
-        startroutine, // startfunc
-        CAST fwd TO UWORD, // context1
-        NULLPTR, // context2
+        function, // function
+        fwd, // parameter1
+        NULLPTR, // parameter2
         0, // flags
         OUT thread, // thread
     )

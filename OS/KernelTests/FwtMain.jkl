@@ -6,9 +6,9 @@
 
 PUBLIC FwtDataCache : ^MmpPoolCache
 
-FN (KeStartThreadF) FwtMainThread (
-    IN context1 : UWORD,
-    IN context2 : UWORD
+FN (KeContinuationF) FwtMainThread (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
 )
 
     // Main loop for fireworks test.
@@ -68,9 +68,9 @@ FN FwtMain ()
     status := PsCreateExecutiveThread (
         KeCurrentAffinityNode (), // kenode
         &name, // name
-        &FwtMainThread, // startfunc
-        NULLPTR, // context1
-        NULLPTR, // context2
+        &FwtMainThread, // function
+        NULLPTR, // parameter1
+        NULLPTR, // parameter2
         0, // flags
         OUT thread // thread
     )

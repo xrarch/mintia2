@@ -5,16 +5,16 @@
 #INCLUDE "Exp.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
-FN (KeStartThreadF) ExpWorkQueueLoop (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+FN (KeContinuationF) ExpWorkQueueLoop (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
 )
 
     // This is the main loop for all of the worker threads.
     // My priority was already set by ExpInitializeWorkQueues.
     // I will spin waiting for work forever.
 
-    queue := CAST context1 TO ^KeBalancedQueue
+    queue := CAST continuation^.Parameter1 TO ^KeBalancedQueue
 
     WHILE TRUE DO
         entry : ^RtlListEntry
@@ -215,9 +215,9 @@ FN ExpInitializeWorkQueuesForNode (
             status := PsCreateExecutiveThread (
                 kenode, // kenode
                 &name, // name
-                &ExpWorkQueueLoop, // startfunc
-                &expnode^.WorkQueues[j], // context1
-                0, // context2
+                &ExpWorkQueueLoop, // function
+                &expnode^.WorkQueues[j], // parameter1
+                0, // parameter2
                 0, // flags
                 OUT thread, // thread
             )

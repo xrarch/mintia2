@@ -85,15 +85,14 @@ FN (KeContinuationF) FwtParticleContinuation (
     )
 END
 
-FN (KeStartThreadF) FwtParticleThread (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+FN (KeContinuationF) FwtParticleThread (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
 )
 
     // Main loop for a fireworks particle thread.
 
-    thisfwd : ^FwtData
-    thisfwd = CAST context1 TO ^FwtData
+    thisfwd : ^FwtData = continuation^.Parameter1
     
     angle := FwtRand () % (1 << FWT_FIXED_POINT)
     
@@ -114,20 +113,17 @@ FN (KeStartThreadF) FwtParticleThread (
     thisfwd^.Color = FwtRandomColor ()
     thisfwd^.I = 0
 
-    cont := KeGetContinuation ()
-
-    cont^.Function = &FwtParticleContinuation
-    cont^.Parameter1 = CAST context1 TO ^VOID
+    continuation^.Function = &FwtParticleContinuation
 
     FwtParticleLoopTail (
         thisfwd, // thisfwd
-        cont, // continuation
+        continuation, // continuation
     )
 END
 
-FN (KeStartThreadF) FwtExplodeableThread (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+FN (KeContinuationF) FwtExplodeableThread (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
 )
 
     // Main loop for an explodeable particle thread.

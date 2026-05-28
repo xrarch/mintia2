@@ -42,9 +42,9 @@ FN KeuInitializeThread (
     IN kstack : ^VOID,
     IN kstacksize : UWORD,
     IN turnstile : ^KepTurnstile,
-    IN startfunc : KeStartThreadF,
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+    IN function : KeContinuationF,
+    IN parameter1 : ^VOID,
+    IN parameter2 : ^VOID,
 ) : UWORD
 
     // Initialize a thread object. Returns TRUE upon success, FALSE if the
@@ -77,17 +77,14 @@ FN KeuInitializeThread (
 
     thread^.Terminated = FALSE
 
-    thread^.HasContinuation = FALSE
+    thread^.HasContinuation = TRUE
+    thread^.WaitStatus = 0
+    thread^.WaitCount = 0
+    thread^.WaitIpl = KEP_IPL_LOW
 
-    // Initialize the context on the kernel stack.
-
-    thread^.Context = KepInitializeContext (
-        thread, // thread
-        kstack, // kstack
-        startfunc, // startfunc
-        context1, // context1
-        context2, // context2
-    )
+    thread^.Continuation.Function = function
+    thread^.Continuation.Parameter1 = parameter1
+    thread^.Continuation.Parameter2 = parameter2
 
     thread^.KernelStackTop = kstack
 
@@ -692,6 +689,9 @@ END
 
 #END
 
+#SECTION "text"
+KepDummyContinuation : KeContinuation
+
 FN KeuExitThread (
     IN thread : ^KeuThread,
 )
@@ -760,10 +760,13 @@ FN KeuExitThread (
     // Yield. Control will never return to this thread.
     // The thread lock is released automatically.
 
+    // Pass in a dummy continuation so that the thread's kernel stack may be
+    // directly handed off on the way out.
+
     KepYield (
         thread, // thread
         KEP_CURRENT_PRB, // prb
-        NULLPTR, // continuation
+        &KepDummyContinuation, // continuation
     )
 
 #IF BLD_CHK
