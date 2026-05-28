@@ -64,12 +64,20 @@ FN PspPerformEagerThreadCleanup (
 
     paged^.CleanedUp = TRUE
 
-        // Free the kernel stack.
+    // Free the kernel stack.
 
-    MmuFreeKernelStack (
+    IF thread^.Tcb.KernelStackTop THEN
+        MmuDeleteKernelStack (
+            KeNumaNodeFromSpacePointer ( thread ), // kenode
+            thread^.Tcb.KernelStackTop, // kstack
+        )
+    END
+
+    // Uncharge the kernel stack.
+
+    MmuUnchargeKernelStack (
         KeNumaNodeFromSpacePointer ( thread ), // kenode
         CONTAINEROF thread^.Tcb.Process TO PsuProcess.Pcb, // process
-        thread^.Tcb.KernelStackTop, // kstack
     )
 
     // Free the turnstile.
@@ -252,18 +260,24 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
         RETURN OS_STATUS_NO_MEMORY
     END
 
-    // Allocate the kernel stack.
+    // Charge for the kernel stack.
 
-    kstack : ^VOID
-
-    status = MmuCreateKernelStack (
+    status = MmuChargeKernelStack (
         kenode, // kenode
         process, // process
-        OUT kstack, // kstack
     )
 
     IF OsError ( status ) THEN
         GOTO Error2
+    END
+
+    kstack := NULLPTR
+
+    IF flags & OS_THREAD_EAGER_KERNEL_STACK THEN
+        // Eagerly allocate the kernel stack. This should be infallible since
+        // we charged commit for it successfully.
+
+        kstack = MmuAllocateKernelStack ( kenode )
     END
 
     // Create a TID.
@@ -415,10 +429,16 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
 @Error3
 
-    MmuFreeKernelStack (
+    IF kstack THEN
+        MmuDeleteKernelStack (
+            kenode, // kenode
+            kstack, // kstack
+        )
+    END
+
+    MmuUnchargeKernelStack (
         kenode, // kenode
         process, // process
-        kstack, // kstack
     )
 
 @Error2
@@ -548,8 +568,6 @@ FN (KeuProcessCustodyListF) PspAllocateStackForThread (
     threadlisthead := CAST context TO ^^KeuThread
 
     KeAssert ( thread^.KernelStackTop == NULLPTR )
-
-    RtlPrint ( " AAA " )
 
     kstack := MmuAllocateKernelStack ( thread^.Node )
 
@@ -1162,7 +1180,7 @@ EXPORT FN PsCreateExecutiveThread (
         parameter1, // parameter1
         parameter2, // parameter2
         kenode^.SystemProcess, // process
-        0, // flags
+        flags, // flags
         OUT thread, // thread
     )
 

@@ -191,13 +191,12 @@ FN MmpInitializeKernelStackCache (
 END
 
 #SECTION "PAGEtext"
-FN MmuCreateKernelStack (
+FN MmuChargeKernelStack (
     IN kenode : ^KeuNode,
     IN process : ^PsuProcess,
-    OUT kstack : ^VOID,
 ) : OsStatus
 
-    // Create a kernel stack.
+    // Charge for a kernel stack.
 
     mmnode := kenode^.Mmp
 
@@ -205,55 +204,22 @@ FN MmuCreateKernelStack (
 
     // Charge the process's virtual memory quota for the kernel stack.
 
-    status := MmuChargeVmQuota (
+    RETURN MmuChargeVmQuota (
         mmnode, // mmnode
         quotablock, // quotablock
         KEU_STACK_PAGES, // pages
     )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    // Allocate it.
-
-    kstack = MmAllocateFromPoolCache (
-        mmnode^.KernelStackCache, // cache
-        TRUE, // wait
-    )
-
-    IF NOT kstack THEN
-        // Failed to allocate it so uncharge and report an error.
-
-        MmuUnchargeVmQuota (
-            mmnode, // mmnode
-            quotablock, // quotablock
-            KEU_STACK_PAGES, // pages
-        )
-
-        status = OS_STATUS_NO_MEMORY
-    END
-
-    RETURN status
 END
 
 #SECTION "PAGEtext"
-FN MmuFreeKernelStack (
+FN MmuUnchargeKernelStack (
     IN kenode : ^KeuNode,
     IN process : ^PsuProcess,
-    IN kstack : ^VOID,
 )
 
-    // Free a kernel stack.
+    // Uncharge for a kernel stack.
 
     mmnode := kenode^.Mmp
-
-    IF kstack THEN
-        MmFreeToPoolCache (
-            mmnode^.KernelStackCache, // cache
-            kstack, // ptr
-        )
-    END
 
     // Uncharge the virtual memory quota consumed by the kernel stack.
 
@@ -274,5 +240,21 @@ FN MmuAllocateKernelStack (
     RETURN MmAllocateFromPoolCache (
         kenode^.Mmp^.KernelStackCache, // cache
         TRUE, // wait
+    )
+END
+
+#SECTION "PAGEtext"
+FN MmuDeleteKernelStack (
+    IN kenode : ^KeuNode,
+    IN kstack : ^VOID,
+)
+
+    // Delete a kernel stack.
+
+    mmnode := kenode^.Mmp
+
+    MmFreeToPoolCache (
+        mmnode^.KernelStackCache, // cache
+        kstack, // ptr
     )
 END
