@@ -311,6 +311,48 @@ FN KepCacheKernelStack (
     KepReleaseStackCacheElevated ( kepnode )
 END
 
+FN KepPopKernelStack (
+    IN kepnode : ^KepNode,
+) : ^VOID
+
+    // Pop a kernel stack from the node's cache.
+
+    KepAcquireStackCacheElevated ( kepnode )
+
+    kstack := kepnode^.StackCacheListHead
+
+    IF kstack THEN
+        kepnode^.StackCacheListHead = kstack^.Next
+        kstack += SIZEOF KepCachedStack
+
+        total := kepnode^.CachedStackCount
+        kepnode^.CachedStackCount = total - 1
+
+        IF total < kepnode^.CachedStackMinimum THEN
+            kepnode^.CachedStackMinimum = total
+        END
+    END
+
+    KepReleaseStackCacheElevated ( kepnode )
+
+    RETURN kstack
+END
+
+FN KeuPopKernelStack (
+    IN kenode : ^KeuNode,
+) : ^VOID
+
+    // External interface for popping a kernel stack from the node's cache.
+
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+
+    kstack := KepPopKernelStack ( kenode^.Kep )
+
+    KepLowerIpl ( ipl )
+
+    RETURN kstack
+END
+
 FN KepAllocateKernelStack (
     IN thread : ^KeuThread,
     IN handoffallowed : UWORD,
@@ -336,25 +378,9 @@ FN KepAllocateKernelStack (
     ELSE
         // Try to get a kernel stack from the per-node cache list.
 
-        kepnode := thread^.Node^.Kep
+        kstack := KepPopKernelStack ( thread^.Node^.Kep )
 
-        KepAcquireStackCacheElevated ( kepnode )
-
-        kstack := kepnode^.StackCacheListHead
-
-        IF kstack THEN
-            kepnode^.StackCacheListHead = kstack^.Next
-            thread^.KernelStackTop = kstack + SIZEOF KepCachedStack
-
-            total := kepnode^.CachedStackCount
-            kepnode^.CachedStackCount = total - 1
-
-            IF total < kepnode^.CachedStackMinimum THEN
-                kepnode^.CachedStackMinimum = total
-            END
-        END
-
-        KepReleaseStackCacheElevated ( kepnode )
+        thread^.KernelStackTop = kstack
 
         IF NOT kstack THEN
             // Failed to allocate a kernel stack for the thread.

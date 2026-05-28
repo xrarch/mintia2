@@ -5,192 +5,6 @@
 #INCLUDE "Mmp.hjk"
 
 #SECTION "PAGEtext"
-FN (MmPoolCacheAllocateF) MmpAllocateKernelStack (
-    IN context : ^VOID,
-    IN wait : UWORD,
-) : ^VOID
-
-    // Allocate a kernel stack by request of the cache layer.
-
-    mmnode := CAST context TO ^MmpNode
-
-    // Allocate the required system space.
-
-    kstack := MmpAllocateDynamicPages (
-        mmnode, // mmnode
-        KEU_STACK_PAGES + 1, // pages
-    )
-
-    IF NOT kstack THEN
-        // Couldn't allocate system space.
-
-        RETURN NULLPTR
-    END
-
-    pfes : ^MmpPfe[KEU_STACK_PAGES]
-
-    i := 0
-    ptr := kstack + RTL_PAGE_SIZE
-
-    WHILE i < KEU_STACK_PAGES DO
-        // Allocate a physical page.
-
-        pfes[i] = MmpAllocatePage (
-            mmnode, // mmnode
-            FALSE, // zeroed
-            FALSE, // low
-            MmpVirtualAddressColor ( ptr ), // color
-        )
-
-        IF NOT pfes[i] THEN
-            // Failed to allocate this page frame.
-            // Deallocate the ones we did allocate and return the appropriate
-            // status.
-
-            MmpReleaseDynamicPages (
-                mmnode, // mmnode
-                kstack, // ptr
-                KEU_STACK_PAGES + 1, // pages
-                FALSE, // flush
-            )
-
-            IF wait THEN
-                // Wait for a page frame BEFORE releasing the ones we already
-                // allocated, so that we wait for a free frame IN ADDITION TO
-                // those, otherwise we might inf loop here.
-
-                MmpWaitForPages (
-                    mmnode, // mmnode
-                    FALSE, // low
-                )
-            END
-
-            WHILE i DO
-                i -= 1
-
-                MmpFreePage (
-                    mmnode, // mmnode
-                    pfes[i], // pfe
-                )
-            END
-
-            IF NOT wait THEN
-                RETURN NULLPTR
-            END
-
-            RETURN MM_POOL_CACHE_RETRY_RETURN
-        END
-
-        i += 1
-        ptr += RTL_PAGE_SIZE
-    END
-
-    // Acquire a pointer to the first PTE for this region.
-
-    pte := MmpPteAddress ( kstack )
-
-    // Set the guard page invalid.
-
-    pte[0] = MMP_INVALID_KERNEL_PTE
-
-    // Skip to the first real stack page.
-
-    pte = &pte[1]
-
-    // Map the stack pages.
-
-    i = 0
-
-    WHILE i < KEU_STACK_PAGES DO
-        pte[i] = MmpBuildPoolPte ( MmpPfeToPfn ( pfes[i]) )
-
-        i += 1
-    END
-
-    RETURN kstack + RTL_PAGE_SIZE + (KEU_STACK_PAGES << RTL_PAGE_SHIFT)
-END
-
-#SECTION "PAGEtext"
-FN (MmPoolCacheFreeF) MmpFreeKernelStack (
-    IN context : ^VOID,
-    IN ptr : ^VOID,
-)
-
-    // Free a kernel stack.
-
-    mmnode := CAST context TO ^MmpNode
-
-    ptr -= KEU_STACK_PAGES << RTL_PAGE_SHIFT
-
-    // Acquire a pointer to the first PTE for this region.
-
-    pte := MmpPteAddress ( ptr )
-
-    // Free the kernel stack pages.
-
-    i := 0
-
-    WHILE i < KEU_STACK_PAGES DO
-        // Load the PTE for this page.
-
-        ptecontents := pte[i]
-
-        KeAssert ( MmpIsPteValid ( ptecontents ) )
-
-        // Clear the PTE, makes it more likely we'll see it if a bad pointer
-        // within this space is used later. Due to the TB it's not 100% though.
-
-        pte[i] = MMP_INVALID_KERNEL_PTE
-
-        // Free the page frame.
-
-        MmpFreePage (
-            mmnode, // mmnode
-            MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ), // pfe
-        )
-
-        i += 1
-    END
-
-    // Release the system space containing the stack.
-
-    MmpReleaseDynamicPages (
-        mmnode, // mmnode
-        ptr - RTL_PAGE_SIZE, // ptr
-        KEU_STACK_PAGES + 1, // pages
-        TRUE, // flush
-    )
-END
-
-#SECTION "INITtext"
-FN MmpInitializeKernelStackCache (
-    IN kenode : ^KeuNode,
-)
-
-    // Initialize the zones we use for quickly allocating kernel stacks.
-
-    mmnode := kenode^.Mmp
-
-    mmnode^.KernelStackCache = MmCreatePoolCacheEx (
-        mmnode, // mmnode
-        "Kstacks", // name
-        KEU_STACK_PAGES * RTL_PAGE_SIZE, // size
-        TRUE, // pageable
-        &MmpAllocateKernelStack, // allocfunc
-        &MmpFreeKernelStack, // freefunc
-        NULLPTR, // deletefunc
-        mmnode, // context
-    )
-
-#ENTERSECTION "INITtext"
-    IF NOT mmnode^.KernelStackCache THEN
-        KeCrash ( "MmpInitializeKernelStackCache: failed to create cache\n" )
-    END
-#LEAVESECTION
-
-END
-
-#SECTION "PAGEtext"
 FN MmuChargeKernelStack (
     IN kenode : ^KeuNode,
     IN process : ^PsuProcess,
@@ -237,10 +51,106 @@ FN MmuAllocateKernelStack (
     
     // Allocate a new kernel stack.
 
-    RETURN MmAllocateFromPoolCache (
-        kenode^.Mmp^.KernelStackCache, // cache
-        TRUE, // wait
+@Retry
+
+    kstack := KeuPopKernelStack ( kenode )
+
+    IF kstack THEN
+        RETURN kstack
+    END
+
+    mmnode := kenode^.Mmp
+
+    // Allocate the required system space.
+
+    kstack = MmpAllocateDynamicPages (
+        mmnode, // mmnode
+        KEU_STACK_PAGES + 1, // pages
     )
+
+    IF NOT kstack THEN
+        // Couldn't allocate system space.
+
+        MmpWaitForSystemSpace ( mmnode )
+
+        GOTO Retry
+    END
+
+    pfes : ^MmpPfe[KEU_STACK_PAGES]
+
+    i := 0
+    ptr := kstack + RTL_PAGE_SIZE
+
+    WHILE i < KEU_STACK_PAGES DO
+        // Allocate a physical page.
+
+        pfes[i] = MmpAllocatePage (
+            mmnode, // mmnode
+            FALSE, // zeroed
+            FALSE, // low
+            MmpVirtualAddressColor ( ptr ), // color
+        )
+
+        IF NOT pfes[i] THEN
+            // Failed to allocate this page frame.
+            // Deallocate the ones we did allocate and return the appropriate
+            // status.
+
+            MmpReleaseDynamicPages (
+                mmnode, // mmnode
+                kstack, // ptr
+                KEU_STACK_PAGES + 1, // pages
+                FALSE, // flush
+            )
+
+            // Wait for a page frame BEFORE releasing the ones we already
+            // allocated, so that we wait for a free frame IN ADDITION TO
+            // those, otherwise we might inf loop here.
+
+            MmpWaitForPages (
+                mmnode, // mmnode
+                FALSE, // low
+            )
+
+            WHILE i DO
+                i -= 1
+
+                MmpFreePage (
+                    mmnode, // mmnode
+                    pfes[i], // pfe
+                )
+            END
+
+            GOTO Retry
+        END
+
+        i += 1
+        ptr += RTL_PAGE_SIZE
+    END
+
+    // Acquire a pointer to the first PTE for this region.
+
+    pte := MmpPteAddress ( kstack )
+
+    // Set the guard page invalid.
+
+    pte[0] = MMP_INVALID_KERNEL_PTE
+
+    // Skip to the first real stack page.
+
+    pte = &pte[1]
+
+    // Map the stack pages.
+
+    i = 0
+
+    WHILE i < KEU_STACK_PAGES DO
+        pte[i] = MmpBuildPoolPte ( MmpPfeToPfn ( pfes[i]) )
+
+        i += 1
+    END
+
+    RETURN kstack + RTL_PAGE_SIZE + (KEU_STACK_PAGES << RTL_PAGE_SHIFT)
 END
 
 #SECTION "PAGEtext"
@@ -253,8 +163,44 @@ FN MmuDeleteKernelStack (
 
     mmnode := kenode^.Mmp
 
-    MmFreeToPoolCache (
-        mmnode^.KernelStackCache, // cache
-        kstack, // ptr
+    kstack -= KEU_STACK_PAGES << RTL_PAGE_SHIFT
+
+    // Acquire a pointer to the first PTE for this region.
+
+    pte := MmpPteAddress ( kstack )
+
+    // Free the kernel stack pages.
+
+    i := 0
+
+    WHILE i < KEU_STACK_PAGES DO
+        // Load the PTE for this page.
+
+        ptecontents := pte[i]
+
+        KeAssert ( MmpIsPteValid ( ptecontents ) )
+
+        // Clear the PTE, makes it more likely we'll see it if a bad pointer
+        // within this space is used later. Due to the TB it's not 100% though.
+
+        pte[i] = MMP_INVALID_KERNEL_PTE
+
+        // Free the page frame.
+
+        MmpFreePage (
+            mmnode, // mmnode
+            MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ), // pfe
+        )
+
+        i += 1
+    END
+
+    // Release the system space containing the stack.
+
+    MmpReleaseDynamicPages (
+        mmnode, // mmnode
+        kstack - RTL_PAGE_SIZE, // ptr
+        KEU_STACK_PAGES + 1, // pages
+        TRUE, // flush
     )
 END

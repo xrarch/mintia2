@@ -233,6 +233,10 @@ EXTERN FN MmpInsertPageIntoList (
     IN head : UWORD,
 )
 
+EXTERN FN MmpWaitForSystemSpace (
+    IN mmnode : ^MmpNode,
+)
+
 #MACRO MmpAcquireListExclusive ( mmnode ) [
     KeAcquireApcLockExclusive ( &(mmnode)^.ListLock )
 ]
@@ -289,10 +293,6 @@ EXTERN FN MmpExpandPageFiles (
 EXTERN FN MmpInitializeArchitecture ()
 
 EXTERN FN MmpInitializeMdlCache (
-    IN kenode : ^KeuNode,
-)
-
-EXTERN FN MmpInitializeKernelStackCache (
     IN kenode : ^KeuNode,
 )
 
@@ -436,7 +436,6 @@ STRUCT MmpNode
 
     SpaceNodeCache : ^MmpPoolCache,
     MdlCache : ^MmpPoolCache,
-    KernelStackCache : ^MmpPoolCache,
 
     QuickPteBase : ^MmpPte,
 

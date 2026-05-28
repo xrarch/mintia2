@@ -674,6 +674,25 @@ FN MmpAllocatePageWait (
     END
 END
 
+FN MmpWaitForSystemSpace (
+    IN mmnode : ^MmpNode,
+)
+
+    // Uh-oh! If we're out of pool space there isn't much good to be done.
+    // Sleep for 500ms and retry.
+
+    interval : RtlUquad
+    
+    RtlSetUquadToUlong ( &interval, 500 )
+
+    KeSleep (
+        &interval, // interval
+        KE_KERNEL_MODE, // waitmode
+        KE_UNALERTABLE, // alertable
+        NULLPTR, // continuation
+    )
+END
+
 FN MmuChargeCommit (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
