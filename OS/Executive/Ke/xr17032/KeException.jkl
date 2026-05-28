@@ -620,6 +620,10 @@ KepHandoffStack:
 
     mov  sp, long [a1 + KeuThread_KernelStackTop]
 
+    // Set thread to RUNNING.
+
+    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
     // Indicate that the current thread no longer has a kernel stack.
 
     mov  long [a1 + KeuThread_KernelStackTop], zero
@@ -643,10 +647,6 @@ KepHandoffStack:
 
     mov  long [a1 + KeuThread_Spinlock], zero
 #END
-
-    // Set thread to RUNNING.
-
-    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
 
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
     // pending.
@@ -705,6 +705,10 @@ KepSwitchContinuationToContinuation:
 
     mov  sp, long [a0 + KeuThread_KernelStackTop]
 
+    // Set thread to RUNNING.
+
+    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
     // Save argument registers before calling routine to put the kernel stack
     // on the queue.
 
@@ -729,10 +733,6 @@ KepSwitchContinuationToContinuation:
 
     mov  long [s1 + KeuThread_Spinlock], zero
 #END
-
-    // Set thread to RUNNING.
-
-    mov  byte [s0 + KeuThread_Status], KE_THREAD_RUNNING
 
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
     // pending.
@@ -789,6 +789,10 @@ KepSwitchNormalToContinuation:
 
     mov  sp, long [a0 + KeuThread_KernelStackTop]
 
+    // Set thread to RUNNING.
+
+    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
     // Release thread lock. Inline KepReleaseSpinlock here for speed.
 
 #IF BLD_MP
@@ -804,10 +808,6 @@ KepSwitchNormalToContinuation:
 
     mov  long [a1 + KeuThread_Spinlock], zero
 #END
-
-    // Set thread to RUNNING.
-
-    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
 
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
     // pending.
@@ -844,6 +844,10 @@ KepSwitchContinuationToNormal:
 
     mov  sp, long [a0 + KeuThread_Context]
 
+    // Set thread to RUNNING.
+
+    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
     // Save argument registers before calling routine to put the kernel stack
     // on the queue.
 
@@ -868,10 +872,6 @@ KepSwitchContinuationToNormal:
 
     mov  long [s1 + KeuThread_Spinlock], zero
 #END
-
-    // Set thread to RUNNING.
-
-    mov  byte [s0 + KeuThread_Status], KE_THREAD_RUNNING
 
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
     // pending.
@@ -950,6 +950,10 @@ KepSwitchNormalToNormal:
 
     mov  sp, long [a0 + KeuThread_Context]
 
+    // Set thread to RUNNING.
+
+    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
     // Release thread lock. Inline KepReleaseSpinlock here for speed.
 
 #IF BLD_MP
@@ -965,12 +969,6 @@ KepSwitchNormalToNormal:
 
     mov  long [a1 + KeuThread_Spinlock], zero
 #END
-
-LoadContext:
-
-    // Set thread to RUNNING.
-
-    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
 
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
     // pending.
