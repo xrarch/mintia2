@@ -457,6 +457,8 @@ FN KepSwitchThread (
 
     prb^.CurrentThread = thread
 
+    current^.HasContinuation = NOT NOT continuation
+
     // Note that KepSwitchContext releases the old thread's lock.
     // It is not reacquired before switching back in.
 
@@ -475,7 +477,7 @@ FN KepSwitchThread (
         // dealing with.
 
         index := CAST ((NOT continuation) |
-            ((NOT thread^.Continuation.Function) << 1)) TO UWORD
+            ((NOT thread^.HasContinuation) << 1)) TO UWORD
 
         KepSwitchContextTable[index] (
             thread, // newthread

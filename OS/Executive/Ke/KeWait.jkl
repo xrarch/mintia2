@@ -196,15 +196,11 @@ FN KepMasterContinuation ()
 
     thread := KeCurrentThread ()
 
+    thread^.HasContinuation = FALSE
+
     continuation := &thread^.Continuation
 
     func := continuation^.Function
-
-    // Clear the continuation function field, because this field being non-zero
-    // is used to indicate that the thread is pending execution of a
-    // continuation.
-
-    continuation^.Function = NULLPTR
 
     // First we must do common wait-end processing.
 

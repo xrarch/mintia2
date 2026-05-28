@@ -7,12 +7,16 @@
 #DEFINE FWT_GRAVITY_AMT 10
 #DEFINE FWT_INTERVAL_MS 16
 
-FN (KeStartThreadF) FwtParticleThread (
-    IN context1 : UWORD,
-    IN context2 : UWORD,
+FN FwtParticleLoopTail (
+    IN thisfwd : ^FwtData,
+    IN continuation : ^KeContinuation,
 )
 
-    // Main loop for a fireworks particle thread.
+    FwtSetPixel (
+        thisfwd^.Color, // color
+        thisfwd^.X, // x
+        thisfwd^.Y, // y
+    )
 
     interval : RtlUquad
 
@@ -31,79 +35,94 @@ FN (KeStartThreadF) FwtParticleThread (
     )
 #END
 
+    KeSleep (
+        &interval, // interval
+        KE_KERNEL_MODE, // waitmode
+        FALSE, // alertable
+        continuation, // continuation
+    )
+END
+
+FN (KeContinuationF) FwtParticleContinuation (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
+)
+
+    thisfwd := CAST continuation^.Parameter1 TO ^FwtData
+
+    FwtSetPixel (
+        FWT_BACKGROUND_COLOR, // color
+        thisfwd^.X, // x
+        thisfwd^.Y, // y
+    )
+
+    IF thisfwd^.I >= thisfwd^.ExpireIn THEN
+        MmFreeToPoolCache (
+            FwtDataCache, // cache
+            thisfwd, // ptr
+        )
+
+        PsExitThread ( 0 )
+    END
+
+    thisfwd^.I += FWT_INTERVAL_MS
+    
+    // Update the particle
+
+    thisfwd^.ActX += thisfwd^.VelX * FWT_INTERVAL_MS / 1000
+    thisfwd^.ActY += thisfwd^.VelY * FWT_INTERVAL_MS / 1000
+    
+    thisfwd^.X = FWT_FP_TO_INT ( thisfwd^.ActX )
+    thisfwd^.Y = FWT_FP_TO_INT ( thisfwd^.ActY )
+    
+    // Gravity
+
+    thisfwd^.VelY += FWT_INT_TO_FP ( FWT_GRAVITY_AMT ) * FWT_INTERVAL_MS / 1000
+
+    FwtParticleLoopTail (
+        thisfwd, // thisfwd
+        continuation, // continuation
+    )
+END
+
+FN (KeStartThreadF) FwtParticleThread (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Main loop for a fireworks particle thread.
+
     thisfwd : ^FwtData
     thisfwd = CAST context1 TO ^FwtData
     
     angle := FwtRand () % (1 << FWT_FIXED_POINT)
     
-    // Back the data up from thisfwd.
+    thisfwd^.ActX = FWT_INT_TO_FP ( thisfwd^.X )
+    thisfwd^.ActY = FWT_INT_TO_FP ( thisfwd^.Y )
 
-    x := thisfwd^.X
-    y := thisfwd^.Y
-    explosionrange := thisfwd^.ExplosionRange
-    
-    // And free it.
-
-    MmFreeToPoolCache (
-        FwtDataCache, // cache
-        thisfwd, // ptr
-    )
-    
-    actx := FWT_INT_TO_FP ( x )
-    acty := FWT_INT_TO_FP ( y )
-
-    velx := FWT_MUL_FP_FP_SM (
+    thisfwd^.VelX = FWT_MUL_FP_FP_SM (
         FwtCos ( angle ), // fp1
         FwtRandFpSign (), // fp2
-    ) * explosionrange
+    ) * thisfwd^.ExplosionRange
 
-    vely := FWT_MUL_FP_FP_SM (
+    thisfwd^.VelY = FWT_MUL_FP_FP_SM (
         FwtSin ( angle ), // fp1
         FwtRandFpSign (), // fp2
-    ) * explosionrange
+    ) * thisfwd^.ExplosionRange
     
-    expirein := 2000 + FwtRand () % 1000
-    color := FwtRandomColor ()
+    thisfwd^.ExpireIn = 2000 + FwtRand () % 1000
+    thisfwd^.Color = FwtRandomColor ()
+    thisfwd^.I = 0
 
-    i := 0
-    t := 0
+    cont := KeGetContinuation ()
 
-    WHILE i < expirein DO
-        FwtSetPixel (
-            color, // color
-            x, // x
-            y, // y
-        )
+    cont^.Function = &FwtParticleContinuation
+    cont^.Parameter1 = CAST context1 TO ^VOID
 
-        KeSleep (
-            &interval, // interval
-            KE_KERNEL_MODE, // waitmode
-            FALSE, // alertable
-            NULLPTR, // continuation
-        )
-
-        i += FWT_INTERVAL_MS
-        
-        FwtSetPixel (
-            FWT_BACKGROUND_COLOR, // color
-            x, // x
-            y, // y
-        )
-        
-        // Update the particle
-
-        actx += velx * FWT_INTERVAL_MS / 1000
-        acty += vely * FWT_INTERVAL_MS / 1000
-        
-        x = FWT_FP_TO_INT ( actx )
-        y = FWT_FP_TO_INT ( acty )
-        
-        // Gravity
-
-        vely += FWT_INT_TO_FP ( FWT_GRAVITY_AMT ) * FWT_INTERVAL_MS / 1000
-    END
-    
-    PsExitThread ( 0 )
+    FwtParticleLoopTail (
+        thisfwd, // thisfwd
+        cont, // continuation
+    )
 END
 
 FN (KeStartThreadF) FwtExplodeableThread (
