@@ -26,8 +26,6 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
 
     empty := mmnode^.AvailablePageCount < mmnode^.LowPageCount
 
-    kstacktoreap : ^KeuCachedStack = NULLPTR
-
     IF empty THEN
         // Perform all deferred asynchronous deletions now, before adjusting
         // pool caches, so that they are all freed to the pool caches and we
@@ -42,22 +40,6 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
             kenode, // context1
             0, // context2
         )
-
-        kstacktoreap = KeuFlushStackCache ( kenode )
-    
-    ELSE
-        kstacktoreap = KeuReapStackCache ( kenode )
-    END
-
-    WHILE kstacktoreap DO
-        next := kstacktoreap^.Next
-
-        MmuDeleteKernelStack (
-            kenode, // kenode
-            kstacktoreap + SIZEOF KeuCachedStack, // kstack
-        )
-
-        kstacktoreap = next
     END
 
     MmpAdjustPoolCaches (
@@ -86,6 +68,27 @@ FN MmpAdjustAllPoolCachesSafely (
             CAST mmnode TO UWORD, // context1
             0, // context2
         )
+    END
+
+    kstacktoreap : ^KeuCachedStack = NULLPTR
+
+    kenode := mmnode^.KeNode
+
+    IF empty THEN
+        kstacktoreap = KeuFlushStackCache ( kenode )
+    ELSE
+        kstacktoreap = KeuReapStackCache ( kenode )
+    END
+
+    WHILE kstacktoreap DO
+        next := kstacktoreap^.Next
+
+        MmuDeleteKernelStack (
+            kenode, // kenode
+            kstacktoreap + SIZEOF KeuCachedStack, // kstack
+        )
+
+        kstacktoreap = next
     END
 
     // Immediately chuck the nonpaged pool caches from the context
