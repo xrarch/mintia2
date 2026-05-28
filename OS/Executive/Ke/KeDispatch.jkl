@@ -288,6 +288,29 @@ END
 
 #END
 
+FN KepCacheKernelStack (
+    IN thread : ^KeuThread,
+)
+
+    // The thread is losing its kernel stack, which should be placed on the
+    // per-node cache list. This occurs when a thread blocks on a continuation.
+
+    KeAssert ( thread^.KernelStackTop != NULLPTR )
+
+    kepnode := thread^.Node^.Kep
+
+    kstack : ^KepCachedStack = thread^.KernelStackTop - SIZEOF KepCachedStack
+    thread^.KernelStackTop = NULLPTR
+
+    KepAcquireStackCacheElevated ( kepnode )
+
+    kstack^.Next = kepnode^.StackCacheListHead
+    kepnode^.StackCacheListHead = kstack
+    kepnode^.CachedStackCount += 1
+
+    KepReleaseStackCacheElevated ( kepnode )
+END
+
 FN KepAllocateKernelStack (
     IN thread : ^KeuThread,
     IN handoffallowed : UWORD,
@@ -321,7 +344,7 @@ FN KepAllocateKernelStack (
 
         IF kstack THEN
             kepnode^.StackCacheListHead = kstack^.Next
-            thread^.KernelStackTop = kstack + SIZEOF ^VOID
+            thread^.KernelStackTop = kstack + SIZEOF KepCachedStack
 
             total := kepnode^.CachedStackCount
             kepnode^.CachedStackCount = total - 1

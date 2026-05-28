@@ -690,20 +690,226 @@ KepExecuteContinuation:
 // a1 - oldthread
 KepSwitchContinuationToContinuation:
 .global KepSwitchContinuationToContinuation
-    brk
+        
+    // Switch from an outgoing thread that is yielding with a continuation, to
+    // an incoming thread that yielded with a continuation. In this case, no
+    // saving or restoring of registers is needed, so it can be very speedy.
+    //
+    // The incoming thread has a kernel stack allocated earlier.
+    // The outgoing thread still has its kernel stack, which must be placed
+    // on the per-node cache list.
+
+    // First switch to incoming thread stack, so that we can put the outgoing
+    // thread stack on a list from which it may then be yoinked by another
+    // processor and reused.
+
+    mov  sp, long [a0 + KeuThread_KernelStackTop]
+
+    // Save argument registers before calling routine to put the kernel stack
+    // on the queue.
+
+    mov  s0, a0
+    mov  s1, a1
+
+    mov  a0, a1
+    jal  KepCacheKernelStack
+
+    // Release thread lock. Inline KepReleaseSpinlock here for speed.
+
+#IF BLD_MP
+    // Indicate no longer switching off of our stack.
+
+    mov  byte [s1 + KeuThread_Switching], 0
+
+    // Memory barrier to ensure old writes are committed.
+
+    wmb
+
+    // Set spinlock un-owned.
+
+    mov  long [s1 + KeuThread_Spinlock], zero
+#END
+
+    // Set thread to RUNNING.
+
+    mov  byte [s0 + KeuThread_Status], KE_THREAD_RUNNING
+
+    // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
+    // pending.
+
+    mov  t0, byte [s0 + KeuThread_PendingApcLevelInt]
+    beq  t0, .none
+
+    // Trigger.
+
+    subi s0, zero, (KEP_PRB_LESS_ZERO - KepPrb_PendingSoftwareInterrupts)
+    li   a1, (1 << ((KEP_IPL_APC) - 1))
+    jal  KeOrUlong
+
+.none:
+
+    // Set link register to zero to terminate stack traces.
+    mov  lr, zero
+
+    // Jump to the master continuation.
+    j    KepMasterContinuation
 
 // a0 - newthread
 // a1 - oldthread
 KepSwitchNormalToContinuation:
 .global KepSwitchNormalToContinuation
-    brk
-    ret
+
+    // Switch from an outgoing thread that needs its full context saved, to an
+    // incoming thread that will execute a continuation.
+
+    subi sp, sp, OsContext__SIZEOF
+    mov  long [sp + OsContext_Lr], lr
+    mov  long [sp + OsContext_S0], s0
+    mov  long [sp + OsContext_S1], s1
+    mov  long [sp + OsContext_S2], s2
+    mov  long [sp + OsContext_S3], s3
+    mov  long [sp + OsContext_S4], s4
+    mov  long [sp + OsContext_S5], s5
+    mov  long [sp + OsContext_S6], s6
+    mov  long [sp + OsContext_S7], s7
+    mov  long [sp + OsContext_S8], s8
+    mov  long [sp + OsContext_S9], s9
+    mov  long [sp + OsContext_S10], s10
+    mov  long [sp + OsContext_S11], s11
+    mov  long [sp + OsContext_S12], s12
+    mov  long [sp + OsContext_S13], s13
+    mov  long [sp + OsContext_S14], s14
+    mov  long [sp + OsContext_S15], s15
+    mov  long [sp + OsContext_S16], s16
+    mov  long [sp + OsContext_S17], s17
+
+    mov  long [a1 + KeuThread_Context], sp
+
+    // Load stack of new thread.
+
+    mov  sp, long [a0 + KeuThread_KernelStackTop]
+
+    // Release thread lock. Inline KepReleaseSpinlock here for speed.
+
+#IF BLD_MP
+    // Indicate no longer switching off of our stack.
+
+    mov  byte [a1 + KeuThread_Switching], 0
+
+    // Memory barrier to ensure old writes are committed.
+
+    wmb
+
+    // Set spinlock un-owned.
+
+    mov  long [a1 + KeuThread_Spinlock], zero
+#END
+
+    // Set thread to RUNNING.
+
+    mov  byte [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
+    // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
+    // pending.
+
+    mov  t0, byte [a0 + KeuThread_PendingApcLevelInt]
+    beq  t0, .none
+
+    // Trigger.
+
+    subi a0, zero, (KEP_PRB_LESS_ZERO - KepPrb_PendingSoftwareInterrupts)
+    li   a1, (1 << ((KEP_IPL_APC) - 1))
+    jal  KeOrUlong
+
+.none:
+
+    // Set link register to zero to terminate stack traces.
+    mov  lr, zero
+
+    // Jump to the master continuation.
+    j    KepMasterContinuation
 
 // a0 - newthread
 // a1 - oldthread
 KepSwitchContinuationToNormal:
 .global KepSwitchContinuationToNormal
-    brk
+    
+    // Switch from an outgoing thread that is blocking on a continuation and
+    // does not need its context saved, to an incoming thread that will not
+    // execute a continuation and needs its context restored.
+
+    // First switch to incoming thread stack, so that we can put the outgoing
+    // thread stack on a list from which it may then be yoinked by another
+    // processor and reused.
+
+    mov  sp, long [a0 + KeuThread_Context]
+
+    // Save argument registers before calling routine to put the kernel stack
+    // on the queue.
+
+    mov  s0, a0
+    mov  s1, a1
+
+    mov  a0, a1
+    jal  KepCacheKernelStack
+
+    // Release thread lock. Inline KepReleaseSpinlock here for speed.
+
+#IF BLD_MP
+    // Indicate no longer switching off of our stack.
+
+    mov  byte [s1 + KeuThread_Switching], 0
+
+    // Memory barrier to ensure old writes are committed.
+
+    wmb
+
+    // Set spinlock un-owned.
+
+    mov  long [s1 + KeuThread_Spinlock], zero
+#END
+
+    // Set thread to RUNNING.
+
+    mov  byte [s0 + KeuThread_Status], KE_THREAD_RUNNING
+
+    // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
+    // pending.
+
+    mov  t0, byte [s0 + KeuThread_PendingApcLevelInt]
+    beq  t0, .none
+
+    // Trigger.
+
+    subi s0, zero, (KEP_PRB_LESS_ZERO - KepPrb_PendingSoftwareInterrupts)
+    li   a1, (1 << ((KEP_IPL_APC) - 1))
+    jal  KeOrUlong
+
+.none:
+
+    mov  lr, long [sp + OsContext_Lr]
+    mov  s0, long [sp + OsContext_S0]
+    mov  s1, long [sp + OsContext_S1]
+    mov  s2, long [sp + OsContext_S2]
+    mov  s3, long [sp + OsContext_S3]
+    mov  s4, long [sp + OsContext_S4]
+    mov  s5, long [sp + OsContext_S5]
+    mov  s6, long [sp + OsContext_S6]
+    mov  s7, long [sp + OsContext_S7]
+    mov  s8, long [sp + OsContext_S8]
+    mov  s9, long [sp + OsContext_S9]
+    mov  s10, long [sp + OsContext_S10]
+    mov  s11, long [sp + OsContext_S11]
+    mov  s12, long [sp + OsContext_S12]
+    mov  s13, long [sp + OsContext_S13]
+    mov  s14, long [sp + OsContext_S14]
+    mov  s15, long [sp + OsContext_S15]
+    mov  s16, long [sp + OsContext_S16]
+    mov  s17, long [sp + OsContext_S17]
+    addi sp, sp, OsContext__SIZEOF
+
+    // Return into the new thread.
+
     ret
 
 // a0 - newthread
