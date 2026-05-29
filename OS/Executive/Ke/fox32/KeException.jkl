@@ -506,32 +506,6 @@ KepJumpIntoThread:
 
     jmp  LoadContext
 
-KepThreadTrampoline:
-
-    // This is where a new thread begins execution.
-    // s0 contains the start function, s1 and s2 contain context pointers.
-
-    // We're at KEP_IPL_DPC, so lower that now.
-
-    mov  a0, KEP_IPL_LOW
-    call KepLowerIpl
-
-    // Set FP to 0 so that stack traces terminate here.
-
-    mov  fp, 0
-
-    // Push a couple zeroes too for good measure.
-
-    push 0
-    push 0
-
-    // Jump to the start function.
-
-    mov  a0, s1
-    mov  a1, s2
-    jmp  s0
-
-
 // a0 - newthread
 // a1 - oldthread
 KepSwitchContext:
@@ -1049,31 +1023,6 @@ FN KepInitializeArchitecture (
 
         i += 1
     END
-END
-
-#SECTION "PAGEtext"
-FN KepInitializeContext (
-    IN thread : ^KeuThread,
-    IN kstack : ^VOID,
-    IN startfunc : KeStartThreadF,
-    IN context1 : UWORD,
-    IN context2 : UWORD,
-) : ^OsContext
-
-    // Initialize the context for a thread that is about to begin execution.
-
-    retaddr := CAST kstack - 8 TO ^ULONG
-
-    retaddr[1] = &KepThreadTrampoline
-    retaddr[0] = 0
-
-    context := CAST (retaddr - SIZEOF OsContext) TO ^OsContext
-
-    context^.S0 = CAST startfunc TO ULONG
-    context^.S1 = CAST context1 TO ULONG
-    context^.S2 = CAST context2 TO ULONG
-
-    RETURN context
 END
 
 #SECTION "PAGEtext"
