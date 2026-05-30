@@ -500,16 +500,251 @@ KepSwitchAddressSpace:
 KepJumpIntoThread:
 .global KepJumpIntoThread
 
-    mov  sp, [a0 + KeuThread_Context]
+    mov  sp, [a0 + KeuThread_KernelStackTop]
 
     call KepEnableInterrupts
 
-    jmp  LoadContext
+    jmp  KepMasterContinuation
 
 // a0 - newthread
 // a1 - oldthread
-KepSwitchContext:
-.global KepSwitchContext
+KepHandoffStack:
+.global KepHandoffStack
+
+    // Hand off the current thread's kernel stack to the new thread, and execute
+    // the new thread's continuation on it.
+
+    // First set the stack pointer to the top of the stack.
+
+    mov  sp, [a1 + KeuThread_KernelStackTop]
+
+    // Set thread to RUNNING.
+
+    mov.8 [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
+    // Indicate that the current thread no longer has a kernel stack.
+
+    movz.8 [a1 + KeuThread_KernelStackTop], 0
+
+    // Give it to the new thread.
+
+    mov  [a0 + KeuThread_KernelStackTop], sp
+
+    // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
+    // pending.
+
+    movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
+    cmp  t0, 0
+
+ifz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
+        1 << ((KEP_IPL_APC) - 1)
+    )
+
+    // Set FP to zero to terminate stack traces.
+    xor  fp, fp
+
+    // Jump to the master continuation.
+    jmp  KepMasterContinuation
+
+
+// a0 - continuation
+// a1 - waitstatus
+// a2 - thread
+KepExecuteContinuation:
+.global KepExecuteContinuation
+
+    // Reset the current thread's kernel stack to the top and execute the
+    // continuation.
+
+    mov  sp, [a2 + KeuThread_KernelStackTop]
+
+    // Set FP to zero to terminate stack traces and jump to the
+    // continuation.
+
+    xor  fp, fp
+    jmp  [a0 + KeContinuation_Function]
+
+// a0 - newthread
+// a1 - oldthread
+KepSwitchContinuationToContinuation:
+.global KepSwitchContinuationToContinuation
+
+    // Switch from an outgoing thread that is yielding with a continuation, to
+    // an incoming thread that yielded with a continuation. In this case, no
+    // saving or restoring of registers is needed, so it can be very speedy.
+    //
+    // The incoming thread has a kernel stack allocated earlier.
+    // The outgoing thread still has its kernel stack, which must be placed
+    // on the per-node cache list.
+
+    // First switch to incoming thread stack, so that we can put the outgoing
+    // thread stack on a list from which it may then be yoinked by another
+    // processor and reused.
+
+    mov  sp, [a0 + KeuThread_KernelStackTop]
+    mov  esp, sp
+
+    // Set thread to RUNNING.
+
+    mov.8 [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
+    // Save argument registers before calling routine to put the kernel stack
+    // on the queue.
+
+    mov  s0, a0
+    mov  s1, a1
+
+    mov  a0, a1
+    call KepCacheKernelStack
+
+    // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
+    // pending.
+
+    movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
+    cmp  t0, 0
+
+ifz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
+        1 << ((KEP_IPL_APC) - 1)
+    )
+
+    // Set FP to zero to terminate stack traces.
+    xor  fp, fp
+
+    // Jump to the master continuation.
+    jmp  KepMasterContinuation
+
+// a0 - newthread
+// a1 - oldthread
+KepSwitchNormalToContinuation:
+.global KepSwitchNormalToContinuation
+
+    // Switch from an outgoing thread that needs its full context saved, to an
+    // incoming thread that will execute a continuation.
+
+    push fp
+
+    sub  sp, 13 // Skip Eflags, BadAddr, Epc, Sp
+    push fp
+    push r31
+    push tp
+    push at
+    push s17
+    push s16
+    push s15
+    push s14
+    push s13
+    push s12
+    push s11
+    push s10
+    push s9
+    push s8
+    push s7
+    push s6
+    push s5
+    push s4
+    push s3
+    push s2
+    push s1
+    push s0
+    sub  sp, 48 // Skip volatile fields
+
+    mov  [a1 + KeuThread_Context], sp
+
+    // Load stack of new thread.
+
+    mov  sp, [a0 + KeuThread_KernelStackTop]
+    mov  esp, sp
+
+    // Set thread to RUNNING.
+
+    mov.8 [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
+    // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
+    // pending.
+
+    movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
+    cmp  t0, 0
+
+ifz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
+        1 << ((KEP_IPL_APC) - 1)
+    )
+
+    // Set FP to zero to terminate stack traces.
+    xor  fp, fp
+
+    // Jump to the master continuation.
+    jmp  KepMasterContinuation
+
+// a0 - newthread
+// a1 - oldthread
+KepSwitchContinuationToNormal:
+.global KepSwitchContinuationToNormal
+    
+    // Switch from an outgoing thread that is blocking on a continuation and
+    // does not need its context saved, to an incoming thread that will not
+    // execute a continuation and needs its context restored.
+
+    // First switch to incoming thread stack, so that we can put the outgoing
+    // thread stack on a list from which it may then be yoinked by another
+    // processor and reused.
+
+    mov  sp, [a0 + KeuThread_Context]
+    mov  esp, [a0 + KeuThread_KernelStackTop]
+
+    // Set thread to RUNNING.
+
+    mov.8 [a0 + KeuThread_Status], KE_THREAD_RUNNING
+
+    // Save argument registers before calling routine to put the kernel stack
+    // on the queue.
+
+    mov  s0, a0
+    mov  s1, a1
+
+    mov  a0, a1
+    call KepCacheKernelStack
+
+    // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
+    // pending.
+
+    movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
+    cmp  t0, 0
+
+ifz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
+        1 << ((KEP_IPL_APC) - 1)
+    )
+
+    add  sp, 48 // Skip volatile fields
+    pop  s0
+    pop  s1
+    pop  s2
+    pop  s3
+    pop  s4
+    pop  s5
+    pop  s6
+    pop  s7
+    pop  s8
+    pop  s9
+    pop  s10
+    pop  s11
+    pop  s12
+    pop  s13
+    pop  s14
+    pop  s15
+    pop  s16
+    pop  s17
+    pop  at
+    pop  tp
+    pop  r31
+    pop  fp
+    add  sp, 17 // Skip Eflags, BadAddr, Epc, Sp, Fp
+
+    ret
+
+// a0 - newthread
+// a1 - oldthread
+KepSwitchNormalToNormal:
+.global KepSwitchNormalToNormal
 
     // Save the current context and restore the new.
     // We only need to save the callee-saved registers as this has the same
@@ -546,11 +781,7 @@ KepSwitchContext:
 
     mov  [a1 + KeuThread_Context], sp
 
-    // Fall-through
-
     mov  sp, [a0 + KeuThread_Context]
-
-LoadContext:
 
     mov  esp, [a0 + KeuThread_KernelStackTop]
 
@@ -563,13 +794,10 @@ LoadContext:
 
     movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
     cmp  t0, 0
-    ifz  rjmp .none
 
-    or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
+ifz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
         1 << ((KEP_IPL_APC) - 1)
     )
-
-.none:
 
     add  sp, 48 // Skip volatile fields
     pop  s0

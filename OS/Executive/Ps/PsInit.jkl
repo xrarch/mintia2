@@ -347,19 +347,11 @@ FN PsuInitializeStage1 ()
                 &PsuReaperWorker, // routine
             )
 
-#IF BLD_MP
             KeuInitializeCustodyList (
                 &psnode^.StackAllocateCustodyList, // list
                 &KeuDeferActivateStackAllocation, // activateroutine
                 kenode, // context
             )
-#ELSE
-            KeuInitializeCustodyList (
-                &psnode^.StackAllocateCustodyList, // list
-                &PspActivateStackAllocation, // activateroutine
-                kenode, // context
-            )
-#END
 
             ExInitializeWorkItem (
                 &psnode^.StackAllocateWorkItem, // item

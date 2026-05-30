@@ -265,8 +265,6 @@ FN KepUpdateInteractivity (
     KepSoftInterruptSelf ( prb, KEP_IPL_DPC )
 END
 
-#IF BLD_MP
-
 FN (KeuCustodyListActivateF) KeuDeferActivateStackAllocation (
     IN list : ^KeuCustodyList,
 )
@@ -275,6 +273,11 @@ FN (KeuCustodyListActivateF) KeuDeferActivateStackAllocation (
     // enqueued to it. A work item must be enqueued to the stack allocating
     // thread, but this cannot occur under the spinlocks we currently hold
     // due to wrong ordering. So we defer it instead.
+
+    // We also defer on uniprocessor even though there are no spinlocks there
+    // because of the possibility that the stack-allocating worker thread will
+    // wake itself up and try to switch into itself while trying to switch
+    // away (this is the fix to a bug).
 
     prb := KEP_CURRENT_PRB_LOCAL
 
@@ -285,8 +288,6 @@ FN (KeuCustodyListActivateF) KeuDeferActivateStackAllocation (
         KEP_IPL_DPC, // ipl
     )
 END
-
-#END
 
 FN KeuFlushStackCache (
     IN kenode : ^KeuNode,
