@@ -1077,11 +1077,16 @@ FN OsSleepThread (
         RETURN status
     END
 
+    continuation := KeGetContinuation ()
+    continuation^.Function = &KeReturnToUserContinuation
+    continuation^.Parameter1 = NULLPTR
+    continuation^.Parameter2 = NULLPTR
+
     RETURN KeSleep (
         &sysinterval, // interval
         KE_USER_MODE, // waitmode
         alertable, // alertable
-        NULLPTR, // continuation
+        continuation, // continuation
     )
 END
 
