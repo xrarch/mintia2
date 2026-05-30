@@ -105,7 +105,7 @@ FN DbgTrace (
                 LEAVE
             END
 
-            IF NOT MmIsVirtualValid ( ctx + SIZEOF OsContext ) THEN
+            IF NOT MmIsVirtualValid ( ctx + SIZEOF OsContext - 1 ) THEN
                 RtlPrint ( "#\n" )
 
                 LEAVE
@@ -123,14 +123,19 @@ FN DbgTrace (
         ELSE
             frame := CAST fp TO ^^VOID
 
-            IF NOT MmIsVirtualValid ( frame + SIZEOF ^VOID * 2 ) THEN
+            fp = frame[0]
+
+            IF fp == 0 THEN
+                LEAVE
+            END
+
+            IF NOT MmIsVirtualValid ( frame + SIZEOF ^VOID * 2 - 1 ) THEN
                 RtlPrint ( "#\n" )
 
                 LEAVE
             END
 
             pc = frame[1]
-            fp = frame[0]
         END
 
         links += 1
@@ -211,7 +216,7 @@ FN DbgTraceThreadContext (
     fp := context + SIZEOF OsContext
 
     DbgTrace (
-        context + SIZEOF OsContext, // fp
+        fp, // fp
         (CAST fp TO ^^VOID)[1], // pc
     )
 END
