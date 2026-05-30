@@ -1220,7 +1220,6 @@ END
 #SECTION "PAGEtext"
 FN KepInterruptUsermode (
     IN dispatchfunc : ^VOID,
-    IN trapframe : ^OsContext,
     IN userfunc : UWORD,
     IN context : UWORD,
     IN thread : ^KeuThread,
@@ -1229,6 +1228,8 @@ FN KepInterruptUsermode (
     // Cause a usermode interrupt of the current thread by saving the context
     // on the user stack and redirecting the trapframe to the usermode
     // interrupt handler. This is used to implement signal and APC dispatch.
+
+    trapframe := thread^.UserFrame
 
     usp := trapframe^.Sp
 
