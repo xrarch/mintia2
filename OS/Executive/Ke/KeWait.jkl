@@ -921,6 +921,20 @@ EXPORT FN KeWaitForObjects (
         waitblock = &thread^.TimeoutWaitBlock
         timer = &thread^.Timeout
 
+        // Enqueue the timer.
+
+        IF NOT KeEnqueueTimer (
+            timer, // timer
+            &remainingtimeout, // interval
+            0, // context1
+            0, // context2
+        ) THEN
+
+            status = OS_STATUS_WAIT_TIMEOUT
+
+            GOTO Abort
+        END
+
         // Insert the wait block in the timer's list.
         // This is safe to do without a lock because only we ever mess with
         // this timer in the context of this thread.
@@ -931,15 +945,6 @@ EXPORT FN KeWaitForObjects (
         )
 
         timer^.Header.WaiterCount = 1
-
-        // Enqueue the timer.
-
-        KeEnqueueTimer (
-            timer, // timer
-            &remainingtimeout, // interval
-            0, // context1
-            0, // context2
-        )
     END
 
     // If we're associated with a balanced queue, we have to indicate that we
