@@ -536,7 +536,7 @@ KepHandoffStack:
     movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
     cmp  t0, 0
 
-ifz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
+ifnz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
         1 << ((KEP_IPL_APC) - 1)
     )
 
@@ -600,10 +600,10 @@ KepSwitchContinuationToContinuation:
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
     // pending.
 
-    movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
+    movz.8 t0, [s0 + KeuThread_PendingApcLevelInt]
     cmp  t0, 0
 
-ifz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
+ifnz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
         1 << ((KEP_IPL_APC) - 1)
     )
 
@@ -665,7 +665,7 @@ KepSwitchNormalToContinuation:
     movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
     cmp  t0, 0
 
-ifz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
+ifnz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
         1 << ((KEP_IPL_APC) - 1)
     )
 
@@ -707,10 +707,10 @@ KepSwitchContinuationToNormal:
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
     // pending.
 
-    movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
+    movz.8 t0, [s0 + KeuThread_PendingApcLevelInt]
     cmp  t0, 0
 
-ifz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
+ifnz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
         1 << ((KEP_IPL_APC) - 1)
     )
 
@@ -795,7 +795,7 @@ KepSwitchNormalToNormal:
     movz.8 t0, [a0 + KeuThread_PendingApcLevelInt]
     cmp  t0, 0
 
-ifz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
+ifnz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
         1 << ((KEP_IPL_APC) - 1)
     )
 
