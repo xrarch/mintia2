@@ -327,6 +327,10 @@ FN KeuReapStackCache (
     total := kepnode^.CachedStackCount
     kepnode^.CachedStackMinimum = total
 
+    IF reapamount > total THEN
+        reapamount = total
+    END
+
     IF total - reapamount < (kenode^.ProcessorCount + 1) THEN
         // Never want to go below a number of stacks that is equivalent to the
         // number of processors in the node plus one.
@@ -344,6 +348,9 @@ FN KeuReapStackCache (
 
     WHILE reapamount DO
         kstack := kepnode^.StackCacheListHead
+
+        KeAssert ( kstack != NULLPTR )
+
         kepnode^.StackCacheListHead = kstack^.Next
 
         kstack^.Next = kstacklisthead
