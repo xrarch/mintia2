@@ -304,6 +304,8 @@ FN (KeDpcF) KepTimerExpiration (
 
         timer := CONTAINEROF entry TO KeTimer.Entry
 
+        KeAssert ( timer^.EnqueuedTo == prb )
+
         IF RtlUquadGtUquad ( &timer^.ExpiryTime, &currentticks ) THEN
             // Expires later than the current time. No more timers to process.
 

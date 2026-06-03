@@ -247,18 +247,21 @@ FN KepMasterContinuation ()
         // lower IPL to deliver KAPCs below, it can be corrupted. So we have
         // to save the objects they point to now.
 
-        savedobjects : ^KepDispatchHeader[KE_THREAD_WAIT_BLOCKS]
-
-        i := 0
-
-        WHILE i < objectcount DO
-            savedobjects[i] = waitblocktable[i].Object
-
-            i += 1
-        END
-
-        objecttable = &savedobjects[0]
         waitblocktable = NULLPTR
+
+        IF objectcount != 0 THEN
+            savedobjects : ^KepDispatchHeader[KE_THREAD_WAIT_BLOCKS]
+
+            i := 0
+
+            WHILE i < objectcount DO
+                savedobjects[i] = waitblocktable[i].Object
+
+                i += 1
+            END
+
+            objecttable = &savedobjects[0]
+        END
     END
     
     remainingtimeout : RtlUquad

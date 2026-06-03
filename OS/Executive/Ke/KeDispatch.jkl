@@ -442,6 +442,7 @@ FN KepAllocateKernelStack (
     // Returns whether handoff was determined to succeed.
 
     KeAssert ( thread^.KernelStackTop == NULLPTR )
+    KeAssert ( thread^.Status == KE_THREAD_INFLIGHT )
 
     IF handoffallowed AND
         KeCurrentThread()^.Node == thread^.Node THEN
@@ -973,6 +974,10 @@ FN KepReadyThread (
 
     // Ready the thread by inserting it into an appropriate ready queue.
     // Thread lock is held.
+
+    KeAssert ( thread^.Status == KE_THREAD_INFLIGHT OR
+        thread^.Status == KE_THREAD_WAITING OR
+        thread^.Status == KE_THREAD_INITIALIZED )
 
     myprb := KEP_CURRENT_PRB
 
