@@ -22,7 +22,6 @@ FN PsuReallocateRemoteTurnstile ()
     // moment, so we can just reallocate it now.
 
     thread := KeCurrentThread ()
-    oldts := thread^.Turnstile
 
     // Replace the turnstile before freeing the old one.
 
@@ -36,6 +35,12 @@ FN PsuReallocateRemoteTurnstile ()
 
         LEAVE
     END
+
+    // Load the current thread's old turnstile *after* allocating the new one,
+    // because the allocation could block on a turnstile-backed lock and donate
+    // the one we had before it, making the pointer stale.
+
+    oldts := thread^.Turnstile
 
     thread^.Turnstile = newts
 
