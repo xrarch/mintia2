@@ -28,7 +28,8 @@ FN MmpInitializeAvailablePageList (
     i := 0
 
     WHILE i < MMP_COLOR_COUNT DO
-        RtlInitializeList ( &list^.Heads[i] )
+        RtlInitializeList ( &list^.Colors[i].Head )
+        KeInitializeLock ( &list^.Colors[i].Lock )
 
         i += 1
     END
@@ -42,8 +43,6 @@ FN MmpInitializeNodeStage1 (
     // Perform stage 1 (physical) initialization for a memory node.
 
     // Initialize the locks.
-
-    KeInitializeLock ( &mmnode^.ListLock )
 
     KeInitializeLock ( &mmnode^.CommitLock )
 
@@ -194,26 +193,37 @@ FN MmpInsertPageIntoList (
     IN list : ^MmpAvailablePageList,
     IN pfe : ^MmpPfe,
     IN head : UWORD,
-)
+) : UWORD
 
     // Insert the page into the specified list, into the correct color bucket.
+    // Return the count of page frames on the list before this one was added.
 
     pfn := MmpPfeToPfn ( pfe )
+    colorlist := &list^.Colors[MmpPfnColor ( pfn )]
 
-    list^.Count += 1
+    ipl := KeAcquireApcLockExclusive ( &colorlist^.Lock )
 
     IF head THEN
         RtlInsertAtHeadList (
-            &list^.Heads[MmpPfnColor ( pfn )], // head
+            &colorlist^.Head, // head
             &pfe^.Entry, // entry
         )
 
     ELSE
         RtlInsertAtTailList (
-            &list^.Heads[MmpPfnColor ( pfn )], // head
+            &colorlist^.Head, // head
             &pfe^.Entry, // entry
         )
     END
+
+    oldcount := KeIncrementPtr (
+        &list^.Count, // ptr
+        1, // inc
+    )
+
+    KeReleaseApcLock ( &colorlist^.Lock, ipl )
+
+    RETURN oldcount
 END
 
 FN MmpAllocatePageFromList (
@@ -222,42 +232,38 @@ FN MmpAllocatePageFromList (
 ) : ^MmpPfe
 
     // Allocate a page, preferably with the given color, from the list.
-    // The caller already ensured there's a page to remove from the list.
 
-    list^.Count -= 1
-
-#IF ( == MMP_COLOR_COUNT 1 )
-    KeAssert ( NOT RtlEmptyList ( &list^.Heads[0] ) )
-
-    entry := list^.Heads[0].Next
-
-    RtlRemoveEntryList ( entry )
-
-    RETURN CONTAINEROF entry TO MmpPfe.Entry
-
-#ELSE
     i := 0
 
     WHILE i < MMP_COLOR_COUNT DO
-        entry := list^.Heads[color].Next
+        colorlist := &list^.Colors[color]
 
-        IF entry != &list^.Heads[color] THEN
+        ipl := KeAcquireApcLockExclusive ( &colorlist^.Lock )
+
+        entry := colorlist^.Head.Next
+
+        IF entry != &colorlist^.Head THEN
             // Found one. Pop it from the head.
 
             RtlRemoveEntryList ( entry )
 
+            KeIncrementPtr (
+                &list^.Count, // ptr
+                -1, // inc
+            )
+
+            KeReleaseApcLock ( &colorlist^.Lock, ipl )
+
             RETURN CONTAINEROF entry TO MmpPfe.Entry
         END
+
+        KeReleaseApcLock ( &colorlist^.Lock, ipl )
 
         color = (color + 1) & (MMP_COLOR_COUNT - 1)
         i += 1
     END
 
-    // Shouldn't be reachable - caller saw there were items in this list.
-
-    KeAssert ( FALSE )
-#END
-
+    RETURN NULLPTR
 END
 
 FN MmpAllocatePageFromStandbyList (
@@ -267,81 +273,90 @@ FN MmpAllocatePageFromStandbyList (
 
     // Allocate a page from the given standby list.
 
-    pfe := MmpAllocatePageFromList (
-        &mmnode^.StandbyList, // list
-        color, // color
-    )
+    list := &mmnode^.StandbyList
 
-    // Disassociate it from its object.
-    // If this is paged pool, paged executive, or a page table, this is a "dummy
-    // object" used only for locking purposes.
+    pfe : ^MmpPfe
+    colorlist : ^MmpAvailablePageListColor
+    ipl : UWORD
+    object : ^MmuObject
 
-    object := pfe^.Object
+    i := 0
+
+    WHILE TRUE DO
+        IF i >= MMP_COLOR_COUNT THEN
+            RETURN NULLPTR
+        END
+
+        colorlist = &list^.Colors[color]
+
+        ipl = KeAcquireApcLockExclusive ( &colorlist^.Lock )
+
+        entry := colorlist^.Head.Next
+
+        IF entry != &colorlist^.Head THEN
+            pfe = CONTAINEROF entry TO MmpPfe.Entry
+
+            // Found a page on this list. Capture its object and disassociate it
+            // by clearing the object pointer. If a page lookup within the
+            // object finds this page before we lock the object below and fully
+            // clear the tracking PTE, it will find that the object pointer has
+            // been cleared and will know that we're executing this path and
+            // will clear the tracking PTE itself. It will also increment a
+            // refcount on the object so that we don't hold a stale pointer to
+            // it.
+
+            object = pfe^.Object
+            pfe^.Object = NULLPTR
+
+            RtlRemoveEntryList ( &pfe^.Entry )
+
+            KeIncrementPtr (
+                &list^.Count, // ptr
+                -1, // inc
+            )
+
+            KeReleaseLock ( &colorlist^.Lock )
+
+            BREAK
+        END
+
+        KeReleaseApcLock ( &colorlist^.Lock, ipl )
+
+        color = (color + 1) & (MMP_COLOR_COUNT - 1)
+        i += 1
+    END
+
+    unrefobject := FALSE
 
     // No need to call this as APC-safe since we're already blocking out APCs
-    // by holding the list lock.
+    // since we didn't lower IPL when we released the colorlist lock.
 
     KeAcquireLockExclusive ( &object^.StructureLock )
 
-    // Set object pointer to NULLPTR. This is important so that it notices that
-    // the owner of the page "changed" if there is a concurrent reference being
-    // taken out on this page.
+    KeAssert ( MmpGetPackedType ( pfe^.Packed ) == MMP_IN_USE_PFE_TYPE )
 
-    pfe^.Object = NULLPTR
+    IF pfe^.TrackingTableEntry == NULLPTR THEN
+        // A concurrent page lookup cleared the tracking table entry. We should
+        // not do anything here, except it added a reference to the object to
+        // avoid our pointer to it becoming stale.
 
-    KeAssert ( pfe^.Type == MMP_IN_USE_PFE_TYPE )
+        unrefobject = TRUE
 
-    // Reset the tracking table entry for this page.
-
-    entry := pfe^.TrackingTableEntry
-    entry^ = pfe^.Backing
-
-    // If this wasn't a page of paged pool or the paged executive, the
-    // tracking table entry resides in page tracking pool, and we can
-    // decrement the refcount on that page of tracking pool, which may
-    // allow it to be paged out if it gets trimmed from the system working
-    // set.
-    //
-    // Note that if it WAS paged pool or paged executive, the containing
-    // page for the tracking PTE was an actual system space page table -
-    // we never page those out!
-    //
-    // Note that *user* page tables can be reclaimed, but are *not*
-    // reclaimed here. Freeing them up when the last PTE has been trimmed
-    // out of a page table is the province of architecture-specific pmap
-    // code.
-
-    IF pfe^.Flags & MMP_PAGED_EXEC_PFE_FLAG == 0 THEN
-        poolpfe := MmpPfnToPfe (
-            MmpPfnFromPte (
-                (MmpPteAddress ( entry ))^
-            )
+    ELSE
+        MmpClearTrackingTableEntry (
+            object, // object
+            pfe, // pfe
         )
-
-        // Tracking pool should consist of anonymous pages.
-
-        KeAssert ( poolpfe^.Type == MMP_IN_USE_PFE_TYPE )
-
-        // This page of tracking pool should have at least 2
-        // references: one for being pinned (due to having this tracking
-        // entry resident), and another for being in the system working
-        // set.
-
-        KeAssert ( poolpfe^.References >= 2 )
-
-        poolpfe^.References -= 1
     END
 
-    IF pfe^.Backing == 0 THEN
-        // This must have been a file page or something else.
-        // Call into the object layer to tell it there is one fewer tracking
-        // table entry within this object at the offset recorded in the PFE.
+    KeReleaseApcLock ( &object^.StructureLock, ipl )
 
-        KeAssert ( FALSE )
-        KeCrash ( "NYI" )
+    IF unrefobject THEN
+        MmpUnreferenceObject (
+            object, // object
+            TRUE, // defer
+        )
     END
-
-    KeReleaseLock ( &object^.StructureLock )
 
     RETURN pfe
 END
@@ -368,29 +383,50 @@ FN MmpAllocatePage (
     // Allocate a page from the given node. If none available, return
     // NULLPTR.
 
-    pfe : ^MmpPfe = NULLPTR
-    mustzero := FALSE
     listentry : ^RtlListEntry
 
     // Ensure color within range.
 
     color &= MMP_COLOR_COUNT - 1
 
-    ipl := MmpAcquireListExclusive ( mmnode )
-
+    pfe : ^MmpPfe = NULLPTR
     avail := mmnode^.AvailablePageCount
 
-    IF avail == 0 THEN
-        // No pages.
+    WHILE TRUE DO
+        IF avail == 0 THEN
+            RETURN NULLPTR
+        END
 
-        GOTO Out
+        IF NOT low AND avail <= MMP_BLOCK_FOR_PAGES_THRESHOLD THEN
+            // Not enough pages.
+
+            RETURN NULLPTR
+        END
+
+        // Atomically claim a single page frame by a CAS loop.
+
+        new := KeCompareSwapPtr (
+            &mmnode^.AvailablePageCount, // ptr
+            avail - 1, // newvalue
+            avail, // expectedvalue
+        )
+
+        IF new == avail THEN
+            BREAK
+        END
+
+        avail = new
     END
 
-    IF NOT low AND avail <= MMP_BLOCK_FOR_PAGES_THRESHOLD THEN
-        // Not enough pages.
+    IF avail - 1 < mmnode^.LowPageCount THEN
+        // Too few pages. Try to make more, asynchronously.
 
-        GOTO Out
+        MmpMakeMorePages ( mmnode )
     END
+
+@Retry
+
+    mustzero := FALSE
 
     IF zeroed THEN
         IF mmnode^.ZeroList.Count THEN
@@ -438,18 +474,15 @@ FN MmpAllocatePage (
         )
     END
 
-    avail -= 1
-    mmnode^.AvailablePageCount = avail
+    IF NOT pfe THEN
+        // Because we do this outer part locklessly, we might have selected a
+        // list that eventually became empty before we could actually try to
+        // take a page frame off it, resulting in a null pfe here. Just retry.
+        // We're guaranteed to get one eventually because we claimed one off
+        // the available page count.
 
-    IF avail < mmnode^.LowPageCount THEN
-        // Too few pages. Try to make more, asynchronously.
-
-        MmpMakeMorePages ( mmnode )
+        GOTO Retry
     END
-
-@Out
-
-    MmpReleaseList ( mmnode, ipl )
 
     IF mustzero THEN
         KeAssert ( pfe != NULLPTR )
@@ -471,21 +504,26 @@ FN MmpFreePage (
 
     // Free the page to the specified node.
 
-    ipl := MmpAcquireListExclusive ( mmnode )
-
-    avail := mmnode^.AvailablePageCount + 1
-
-    mmnode^.AvailablePageCount = avail
-
     // Insert at the head so that we reuse it more quickly (hot in cache).
 
-    MmpInsertPageIntoList (
+    count := MmpInsertPageIntoList (
         &mmnode^.FreeList, // list
         pfe, // pfe
         TRUE, // head
     )
 
-    IF mmnode^.FreeList.Count > mmnode^.ZeroingThreshold AND
+    avail := KeIncrementPtr (
+        &mmnode^.AvailablePageCount, // ulong
+        1, // inc
+    )
+
+    avail += 1
+
+    // Wake waiters for available pages.
+
+    MmpNewAvailablePage ( mmnode, avail )
+
+    IF count > mmnode^.ZeroingThreshold AND
         mmnode^.ZeroPageEvent.Header.SignalCount == 0 THEN
 
         // Wake the zero page worker.
@@ -495,12 +533,6 @@ FN MmpFreePage (
             0, // priorityboost
         )
     END
-
-    MmpReleaseList ( mmnode, ipl )
-
-    // Wake waiters for available pages.
-
-    MmpNewAvailablePage ( mmnode, avail )
 END
 
 #DEFINE MMP_MIN_LOOPS_FOR_BACKOFF 2
@@ -552,13 +584,21 @@ FN MmpWaitForPages (
             LEAVE
         END
 
-        ipl := MmpAcquireListExclusive ( mmnode )
+        KeResetEvent ( event )
 
-        IF mmnode^.AvailablePageCount <= threshold THEN
-            KeResetEvent ( event )
+        IF mmnode^.AvailablePageCount > threshold THEN
+            // Inbetween checking the threshold and resetting the event, the
+            // available page count became sufficient again, so we should
+            // signal the event and return otherwise we may deadlock ourselves
+            // or other threads.
+
+            KeSignalEvent (
+                event, // event
+                0, // priorityboost
+            )
+
+            LEAVE
         END
-
-        MmpReleaseList ( mmnode, ipl )
 
         IF loops >= MMP_MIN_LOOPS_FOR_BACKOFF THEN
             // Perform exponential backoff.

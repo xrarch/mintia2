@@ -191,6 +191,7 @@ FN MmpReclaimMemoryFromNode (
     // Reclaim physical memory regions.
 
     mmnode := kenode^.Mmp
+    nodeid := kenode^.Id
 
     listhead := &kenode^.DescriptorListHead
     listentry := listhead^.Next
@@ -217,10 +218,11 @@ FN MmpReclaimMemoryFromNode (
             pfe := MmpPfnToPfe ( pfn )
 
             WHILE pages DO
-                pfe^.Type = MMP_FREE_PFE_TYPE
+                pfe^.Packed = MmpPackType ( 0, MMP_FREE_PFE_TYPE )
+                pfe^.Packed = MmpPackNodeId ( pfe^.Packed, nodeid )
 
                 RtlInsertAtTailList (
-                    &mmnode^.FreeList.Heads[MmpPfnColor(pfn)], // head
+                    &mmnode^.FreeList.Colors[MmpPfnColor(pfn)].Head, // head
                     &pfe^.Entry, // entry
                 )
 
@@ -436,10 +438,11 @@ FN MmuInitializeStage1 ()
                 pfe := MmpPfnToPfe ( pfn )
 
                 WHILE pages DO
-                    pfe^.Type = MMP_FREE_PFE_TYPE
+                    pfe^.Packed = MmpPackType ( 0, MMP_FREE_PFE_TYPE )
+                    pfe^.Packed = MmpPackNodeId ( pfe^.Packed, i )
 
                     RtlInsertAtTailList (
-                        &mmnode^.FreeList.Heads[MmpPfnColor(pfn)], // head
+                        &mmnode^.FreeList.Colors[MmpPfnColor(pfn)].Head, // head
                         &pfe^.Entry, // entry
                     )
 

@@ -19,32 +19,75 @@
     #ERROR "Unknown architecture"
 #END
 
+// Layout of the Packed field of MmpPfe:
+//
+// 0-3: Type code
+// 4-7: Various flags
+// 20-31: NUMA node ID
+
+#DEFINE MMP_PACKED_TYPE_MASK 0xF
+#DEFINE MMP_PACKED_TYPE_SHIFT 0
+
+#DEFINE MMP_PACKED_NODE_SHIFT 20
+#DEFINE MMP_PACKED_NODE_MASK 0xFFF00000
+
 #DEFINE MMP_UNINITIALIZED_PFE_TYPE 0
 #DEFINE MMP_FREE_PFE_TYPE 1
 #DEFINE MMP_IN_USE_PFE_TYPE 2
+
+#DEFINE MMP_PACKED_FLAG_FIRST_BIT 4
 
 #DEFINE MMP_MODIFIED_PFE_FLAG 1
 #DEFINE MMP_DELETED_PFE_FLAG 2
 #DEFINE MMP_PAGED_EXEC_PFE_FLAG 4
 
-STRUCT MmpFreePfe
-    Next : ^MmpPfe,
-END
+#MACRO MmpPackType ( packed, type ) [
+    // Compute a 32-bit Packed value containing the specified type code.
+    (((packed) & ~MMP_PACKED_TYPE_MASK) | (type << MMP_PACKED_TYPE_SHIFT))
+]
+
+#MACRO MmpGetPackedType ( packed ) [
+    (((packed) & MMP_PACKED_TYPE_MASK) >> MMP_PACKED_TYPE_SHIFT)
+]
+
+#MACRO MmpSetPackedFlag ( packed, flag ) [
+    ((packed) | ((flag) << MMP_PACKED_FLAG_FIRST_BIT))
+]
+
+#MACRO MmpClearPackedFlag ( packed, flag ) [
+    ((packed) & ~((flag) << MMP_PACKED_FLAG_FIRST_BIT))
+]
+
+#MACRO MmpGetPackedFlag ( packed, flag ) [
+    ((packed) & ((flag) << MMP_PACKED_FLAG_FIRST_BIT))
+]
+
+#MACRO MmpGetPackedNodeId ( packed ) [
+    ((packed) >> MMP_PACKED_NODE_SHIFT)
+]
+
+#MACRO MmpPackNodeId ( packed, nodeid ) [
+    (((packed) & ~MMP_PACKED_NODE_MASK) | ((nodeid) << MMP_PACKED_NODE_SHIFT))
+]
 
 STRUCT MmpPfe
     TrackingTableEntry : ^MmpPte,
     Object : ^MmuObject,
-    Entry : RtlListEntry,
-
     OffsetInObject : RtlUquad,
     Backing : MmpPte,
+
+    Entry : RtlListEntry,
     References : ULONG,
-    Type : UBYTE,
-    Flags : UBYTE,
+    Packed : ULONG,
+END
+
+STRUCT MmpAvailablePageListColor
+    Lock : KeLock,
+    Head : RtlListEntry,
 END
 
 STRUCT MmpAvailablePageList
-    Heads : RtlListEntry[MMP_COLOR_COUNT],
+    Colors : MmpAvailablePageListColor[MMP_COLOR_COUNT],
     Count : UWORD,
 END
 
@@ -231,19 +274,11 @@ EXTERN FN MmpInsertPageIntoList (
     IN list : ^MmpAvailablePageList,
     IN pfe : ^MmpPfe,
     IN head : UWORD,
-)
+) : UWORD
 
 EXTERN FN MmpWaitForSystemSpace (
     IN mmnode : ^MmpNode,
 )
-
-#MACRO MmpAcquireListExclusive ( mmnode ) [
-    KeAcquireApcLockExclusive ( &(mmnode)^.ListLock )
-]
-
-#MACRO MmpReleaseList ( mmnode, ipl ) [
-    KeReleaseApcLock ( &(mmnode)^.ListLock, ipl )
-]
 
 #MACRO MmpAcquireObjectExclusive ( object ) [
     KeAcquireApcLockExclusive ( &(object)^.Pushlock )
@@ -466,8 +501,6 @@ STRUCT MmpNode
     ModifiedPageMaximum : UWORD,
     ZeroingThreshold : UWORD,
 
-    ListLock : KeLock,
-
     LowMemoryEvent : KeEvent,
     PageAvailableEvent : KeEvent,
     LowPageAvailableEvent : KeEvent,
@@ -495,3 +528,13 @@ STRUCT MmpNode
     PgPoolCacheAdjustActive : UBYTE,
     CacheSpaceChunkPages : UBYTE,
 END
+
+EXTERN FN MmpClearTrackingTableEntry (
+    IN object : ^MmuObject,
+    IN pfe : ^MmpPfe,
+)
+
+EXTERN FN MmpUnreferenceObject (
+    IN object : ^MmuObject,
+    IN defer : UWORD,
+)

@@ -37,8 +37,12 @@ FN (KeContinuationF) MmuZeroPageWorker (
         TRUE, // setcurrentpriority
     )
 
+    KeAssert ( mmnode^.SufficientPageCount > MMP_ZERO_BATCH )
+
     WHILE TRUE DO
         // Wait for there to be more than a threshold of free pages.
+
+@Wait
 
         KeWaitForSingleObject (
             KE_KERNEL_MODE, // waitmode
@@ -54,25 +58,35 @@ FN (KeContinuationF) MmuZeroPageWorker (
         count : WORD = MMP_ZERO_MAXIMUM
 
         WHILE count > 0 DO
-            IF mmnode^.FreeList.Count < MMP_ZERO_BATCH THEN
-                BREAK
+            // Atomically claim the page frames we want to zero.
+
+            avail := mmnode^.AvailablePageCount
+
+            WHILE TRUE DO
+                IF avail < mmnode^.SufficientPageCount OR
+                    mmnode^.FreeList.Count < MMP_ZERO_BATCH THEN
+
+                    // Don't zero any pages if people are trying to make memory
+                    // right now. We'd only step on their toes by holding pages
+                    // hostage at idle priority.
+
+                    GOTO Wait
+                END
+
+                new := KeCompareSwapPtr (
+                    &mmnode^.AvailablePageCount, // ptr
+                    avail - MMP_ZERO_BATCH, // newvalue
+                    avail, // expectedvalue
+                )
+
+                IF new == avail THEN
+                    BREAK
+                END
+
+                avail = new
             END
 
             i := 0
-
-            ipl := MmpAcquireListExclusive ( mmnode )
-
-            IF mmnode^.AvailablePageCount < mmnode^.SufficientPageCount OR
-                mmnode^.FreeList.Count < MMP_ZERO_BATCH THEN
-
-                // Don't zero any pages if people are trying to make memory
-                // right now. We'd only step on their toes by holding pages
-                // hostage at idle priority.
-
-                MmpReleaseList ( mmnode, ipl )
-
-                BREAK
-            END
 
             WHILE i < MMP_ZERO_BATCH DO
                 zerobatch[i] = MmpAllocatePageFromList (
@@ -80,54 +94,50 @@ FN (KeContinuationF) MmuZeroPageWorker (
                     0, // color
                 )
 
+                IF NOT zerobatch[i] THEN
+                    BREAK
+                END
+
                 i += 1
             END
 
-            // Decrement available pages to reflect the ones we removed from
-            // the zero page list.
-
-            avail := mmnode^.AvailablePageCount - MMP_ZERO_BATCH
-            mmnode^.AvailablePageCount = avail
-
-            MmpReleaseList ( mmnode, ipl )
-
             // Zero the pages.
 
-            i = 0
+            j := 0
 
-            WHILE i < MMP_ZERO_BATCH DO
+            WHILE j < i DO
                 MmZeroPage (
-                    MmpPfeToPfn ( zerobatch[i] ), // pfn
+                    MmpPfeToPfn ( zerobatch[j] ), // pfn
                     0, // offset
                     RTL_PAGE_SIZE, // length
                 )
 
-                i += 1
+                j += 1
             END
 
             // Place on zeroed list.
 
-            i = 0
+            j = 0
 
-            ipl = MmpAcquireListExclusive ( mmnode )
-
-            WHILE i < MMP_ZERO_BATCH DO
+            WHILE j < i DO
                 MmpInsertPageIntoList (
                     &mmnode^.ZeroList, // list
-                    zerobatch[i], // pfe
+                    zerobatch[j], // pfe
                     TRUE, // head
                 )
 
-                i += 1
+                j += 1
             END
 
             // Increment available pages to reflect the ones added to the zero
             // page list.
 
-            avail = mmnode^.AvailablePageCount + MMP_ZERO_BATCH
-            mmnode^.AvailablePageCount = avail
+            avail = KeIncrementPtr (
+                &mmnode^.AvailablePageCount, // ptr
+                MMP_ZERO_BATCH, // inc
+            )
 
-            MmpReleaseList ( mmnode, ipl )
+            avail += MMP_ZERO_BATCH
 
             // Wake waiters for available pages.
 
