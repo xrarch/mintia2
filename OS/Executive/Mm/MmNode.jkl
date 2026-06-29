@@ -336,9 +336,10 @@ FN MmpAllocatePageFromStandbyList (
     KeAssert ( MmpGetPackedType ( pfe^.Packed ) == MMP_IN_USE_PFE_TYPE )
 
     IF pfe^.TrackingTableEntry == NULLPTR THEN
-        // A concurrent page lookup cleared the tracking table entry. We should
-        // not do anything here, except it added a reference to the object to
-        // avoid our pointer to it becoming stale.
+        // A concurrent page lookup cleared the tracking table entry after
+        // noticing that we were in the middle of stealing this page. It added a
+        // reference to the object to stop our pointer to it from becoming
+        // stale, which we will need to unreference below.
 
         unrefobject = TRUE
 
