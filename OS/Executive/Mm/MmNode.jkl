@@ -480,8 +480,9 @@ FN MmpAllocatePage (
         // the count, a standby page can be taken off the list by a page lookup
         // within an object, which can make all of the lists empty even after
         // we successfully allocated a count. The available page count can also
-        // become negative due to this. Rather than spin forever, give up after
-        // a single retry, release the count we took, and return NULLPTR.
+        // become negative due to this. We might spin forever if we don't break
+        // out here. Rather than do that, release the count we took, and return
+        // NULLPTR.
 
         MmpIncrementAvailablePages (
             mmnode, // mmnode
