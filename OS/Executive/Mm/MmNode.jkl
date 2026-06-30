@@ -384,17 +384,15 @@ FN MmpAllocatePage (
     // Allocate a page from the given node. If none available, return
     // NULLPTR.
 
-    listentry : ^RtlListEntry
-
-    // Ensure color within range.
-
-    color &= MMP_COLOR_COUNT - 1
-
-    pfe : ^MmpPfe = NULLPTR
     avail := mmnode^.AvailablePageCount
 
     WHILE TRUE DO
-        IF avail == 0 THEN
+        IF avail <= 0 THEN
+            // Note that the available page count can briefly become negative
+            // due to a race between standby page reclamation, and page lookup
+            // within an object. Any non-positive available page count means
+            // functionally that no pages are available.
+
             RETURN NULLPTR
         END
 
@@ -406,11 +404,11 @@ FN MmpAllocatePage (
 
         // Atomically claim a single page frame by a CAS loop.
 
-        new := KeCompareSwapPtr (
+        new := CAST KeCompareSwapPtr (
             &mmnode^.AvailablePageCount, // ptr
             avail - 1, // newvalue
             avail, // expectedvalue
-        )
+        ) TO WORD
 
         IF new == avail THEN
             BREAK
@@ -419,13 +417,15 @@ FN MmpAllocatePage (
         avail = new
     END
 
-    IF avail - 1 < mmnode^.LowPageCount THEN
+    IF avail <= mmnode^.LowPageCount THEN
         // Too few pages. Try to make more, asynchronously.
 
         MmpMakeMorePages ( mmnode )
     END
 
-@Retry
+    color &= MMP_COLOR_COUNT - 1
+
+    pfe : ^MmpPfe = NULLPTR
 
     mustzero := FALSE
 
@@ -476,13 +476,19 @@ FN MmpAllocatePage (
     END
 
     IF NOT pfe THEN
-        // Because we do this outer part locklessly, we might have selected a
-        // list that eventually became empty before we could actually try to
-        // take a page frame off it, resulting in a null pfe here. Just retry.
-        // We're guaranteed to get one eventually because we claimed one off
-        // the available page count.
+        // There is a race condition where after we claim an available page off
+        // the count, a standby page can be taken off the list by a page lookup
+        // within an object, which can make all of the lists empty even after
+        // we successfully allocated a count. The available page count can also
+        // become negative due to this. Rather than spin forever, give up after
+        // a single retry, release the count we took, and return NULLPTR.
 
-        GOTO Retry
+        MmpIncrementAvailablePages (
+            mmnode, // mmnode
+            1, // inc
+        )
+
+        RETURN NULLPTR
     END
 
     IF mustzero THEN
@@ -513,16 +519,10 @@ FN MmpFreePage (
         TRUE, // head
     )
 
-    avail := KeIncrementPtr (
-        &mmnode^.AvailablePageCount, // ulong
+    MmpIncrementAvailablePages (
+        mmnode, // mmnode
         1, // inc
     )
-
-    avail += 1
-
-    // Wake waiters for available pages.
-
-    MmpNewAvailablePage ( mmnode, avail )
 
     IF count > mmnode^.ZeroingThreshold AND
         mmnode^.ZeroPageEvent.Header.SignalCount == 0 THEN
@@ -534,6 +534,44 @@ FN MmpFreePage (
             0, // priorityboost
         )
     END
+END
+
+FN MmpIncrementAvailablePages (
+    IN mmnode : ^MmpNode,
+    IN increment : UWORD,
+) : WORD
+
+    // Increment the number of available pages and return the old count.
+    // If needed, signal page-available events to wake waiters.
+
+    old := CAST KeIncrementPtr (
+        &mmnode^.AvailablePageCount, // ulong
+        increment, // inc
+    ) TO WORD
+
+    IF old >= MMP_BLOCK_FOR_PAGES_THRESHOLD AND
+        mmnode^.PageAvailableEvent.Header.SignalCount == 0 THEN
+
+        // Signal the available page event.
+
+        KeSignalEvent (
+            &mmnode^.PageAvailableEvent, // event
+            0, // priorityboost
+        )
+    END
+
+    IF old >= 0 AND
+        mmnode^.LowPageAvailableEvent.Header.SignalCount == 0 THEN
+
+        // Signal the low page available event.
+
+        KeSignalEvent (
+            &mmnode^.LowPageAvailableEvent, // event
+            0, // priorityboost
+        )
+    END
+
+    RETURN old
 END
 
 #DEFINE MMP_MIN_LOOPS_FOR_BACKOFF 2

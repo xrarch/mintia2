@@ -91,27 +91,10 @@ STRUCT MmpAvailablePageList
     Count : UWORD,
 END
 
-#MACRO MmpNewAvailablePage ( mmnode, avail ) [
-    IF (avail) > MMP_BLOCK_FOR_PAGES_THRESHOLD AND
-        (mmnode)^.PageAvailableEvent.Header.SignalCount == 0 THEN
-
-        // Signal the available page event.
-
-        KeSignalEvent (
-            &(mmnode)^.PageAvailableEvent, // event
-            0, // priorityboost
-        )
-    END
-
-    IF (mmnode)^.LowPageAvailableEvent.Header.SignalCount == 0 THEN
-        // Signal the low page available event.
-
-        KeSignalEvent (
-            &(mmnode)^.LowPageAvailableEvent, // event
-            0, // priorityboost
-        )
-    END
-]
+EXTERN FN MmpIncrementAvailablePages (
+    IN mmnode : ^MmpNode,
+    IN increment : UWORD,
+) : WORD
 
 EXTERN MmpSystemSize : UWORD
 
@@ -486,7 +469,7 @@ STRUCT MmpNode
     StandbyList : MmpAvailablePageList,
     ModifiedListHead : RtlListEntry,
 
-    AvailablePageCount : UWORD,
+    AvailablePageCount : WORD,
     FluidPageCount : UWORD,
     ModifiedPageCount : UWORD,
 

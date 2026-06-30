@@ -73,11 +73,11 @@ FN (KeContinuationF) MmuZeroPageWorker (
                     GOTO Wait
                 END
 
-                new := KeCompareSwapPtr (
+                new := CAST KeCompareSwapPtr (
                     &mmnode^.AvailablePageCount, // ptr
                     avail - MMP_ZERO_BATCH, // newvalue
                     avail, // expectedvalue
-                )
+                ) TO WORD
 
                 IF new == avail THEN
                     BREAK
@@ -132,16 +132,10 @@ FN (KeContinuationF) MmuZeroPageWorker (
             // Increment available pages to reflect the ones added to the zero
             // page list.
 
-            avail = KeIncrementPtr (
-                &mmnode^.AvailablePageCount, // ptr
+            MmpIncrementAvailablePages (
+                mmnode, // mmnode
                 MMP_ZERO_BATCH, // inc
             )
-
-            avail += MMP_ZERO_BATCH
-
-            // Wake waiters for available pages.
-
-            MmpNewAvailablePage ( mmnode, avail )
 
             count -= MMP_ZERO_BATCH
         END
