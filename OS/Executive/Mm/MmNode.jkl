@@ -709,6 +709,10 @@ FN MmpAllocatePage (
         RETURN NULLPTR
     END
 
+#IF BLD_CHK
+    pfe^.Packed = MmpPackType ( pfe^.Packed, MMP_IN_USE_PFE_TYPE )
+#END
+
     IF mustzero THEN
         KeAssert ( pfe != NULLPTR )
 
@@ -728,6 +732,10 @@ FN MmpFreePage (
 )
 
     // Free the page to the specified node.
+
+#IF BLD_CHK
+    pfe^.Packed = MmpPackType ( pfe^.Packed, MMP_FREE_PFE_TYPE )
+#END
 
     // Insert at the head so that we reuse it more quickly (hot in cache).
 
