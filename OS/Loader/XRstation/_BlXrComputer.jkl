@@ -253,8 +253,10 @@ BxStartSystem:
     // Store console parameters.
 
     mov  t3, long [FwDeviceDatabase]
-    mov  t1, int [t3 + (FwDeviceDatabaseRecord_ConsoleBox + FwConsoleBoxRecord_CursorX)]
-    mov  t2, int [t3 + (FwDeviceDatabaseRecord_ConsoleBox + FwConsoleBoxRecord_CursorY)]
+    mov  t1, int [t3 + (FwDeviceDatabaseRecord_ConsoleBox +
+        FwConsoleBoxRecord_CursorX)]
+    mov  t2, int [t3 + (FwDeviceDatabaseRecord_ConsoleBox +
+        FwConsoleBoxRecord_CursorY)]
 
     la   t0, BlInfoBlock
     mov  int [t0 + (BlInfoRecord_U + BlInfoRecordXrStation_CursorX)], t1
@@ -706,8 +708,8 @@ FN BxInitializeMemory (
             FALSE, // noncached
         )
 
-        // Create a virtually linear mapping of the page table by inserting the page
-        // directory into one of its own PDEs.
+        // Create a virtually linear mapping of the page table by inserting the
+        // page directory into one of its own PDEs.
 
         pdeptr := &pgdir[0xB0000000 >> 22]
 
@@ -1562,8 +1564,8 @@ FN BxMirrorRangeOfPages (
 
     // Now map the remote node's page directory.
 
-    mappingpte^ = (blnode^.SystemPageDirectoryPfn << 5) | MMP_PTE_V | MMP_PTE_K |
-        MMP_PTE_W | MMP_PTE_G
+    mappingpte^ = (blnode^.SystemPageDirectoryPfn << 5) | MMP_PTE_V |
+        MMP_PTE_K | MMP_PTE_W | MMP_PTE_G
 
     BxFlushPage ( mappingpage )
 

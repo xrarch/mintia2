@@ -203,7 +203,7 @@ FN MmpInsertPageIntoList (
     pfn := MmpPfeToPfn ( pfe )
     colorlist := &list^.Colors[MmpPfnColor ( pfn )]
 
-    ipl := KeAcquireApcLockExclusive ( &colorlist^.Lock )
+    ipl := KeAcquireLockExclusiveRaise ( &colorlist^.Lock )
 
     IF head THEN
         RtlInsertAtHeadList (
@@ -223,7 +223,7 @@ FN MmpInsertPageIntoList (
         1, // inc
     )
 
-    KeReleaseApcLock ( &colorlist^.Lock, ipl )
+    KeReleaseLockLower ( &colorlist^.Lock, ipl )
 
     RETURN oldcount
 END
@@ -240,7 +240,7 @@ FN MmpAllocatePageFromList (
     WHILE i < MMP_COLOR_COUNT DO
         colorlist := &list^.Colors[color]
 
-        ipl := KeAcquireApcLockExclusive ( &colorlist^.Lock )
+        ipl := KeAcquireLockExclusiveRaise ( &colorlist^.Lock )
 
         entry := colorlist^.Head.Next
 
@@ -254,12 +254,12 @@ FN MmpAllocatePageFromList (
                 -1, // inc
             )
 
-            KeReleaseApcLock ( &colorlist^.Lock, ipl )
+            KeReleaseLockLower ( &colorlist^.Lock, ipl )
 
             RETURN CONTAINEROF entry TO MmpPfe.Entry
         END
 
-        KeReleaseApcLock ( &colorlist^.Lock, ipl )
+        KeReleaseLockLower ( &colorlist^.Lock, ipl )
 
         color = (color + 1) & (MMP_COLOR_COUNT - 1)
         i += 1
@@ -291,7 +291,7 @@ FN MmpAllocatePageFromStandbyList (
 
         colorlist = &list^.Colors[color]
 
-        ipl = KeAcquireApcLockExclusive ( &colorlist^.Lock )
+        ipl = KeAcquireLockExclusiveRaise ( &colorlist^.Lock )
 
         entry := colorlist^.Head.Next
 
@@ -322,7 +322,7 @@ FN MmpAllocatePageFromStandbyList (
             BREAK
         END
 
-        KeReleaseApcLock ( &colorlist^.Lock, ipl )
+        KeReleaseLockLower ( &colorlist^.Lock, ipl )
 
         color = (color + 1) & (MMP_COLOR_COUNT - 1)
         i += 1
@@ -352,7 +352,7 @@ FN MmpAllocatePageFromStandbyList (
         )
     END
 
-    KeReleaseApcLock ( &object^.StructureLock, ipl )
+    KeReleaseLockLower ( &object^.StructureLock, ipl )
 
     IF unrefobject THEN
         MmpUnreferenceObject (
@@ -429,7 +429,7 @@ FN MmpReferencePage (
 
     mmnode := KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
 
-    ipl := KeAcquireApcLockExclusive ( &mmnode^.ModifiedListLock )
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.ModifiedListLock )
 
     refcount = KeIncrementUlong (
         &pfe^.References, // ptr
@@ -445,7 +445,7 @@ FN MmpReferencePage (
         mmnode^.ModifiedPageCount -= 1
     END
 
-    KeReleaseApcLock ( &mmnode^.ModifiedListLock, ipl )
+    KeReleaseLockLower ( &mmnode^.ModifiedListLock, ipl )
 END
 
 FN MmpUnreferencePage (
@@ -484,7 +484,7 @@ FN MmpUnreferencePage (
     // Acquire the page lock to block out concurrent modifications of the packed
     // flags that may affect which list it is supposed to go to now.
 
-    ipl := KeAcquireApcLockExclusive ( &pfe^.Lock )
+    ipl := KeAcquireLockExclusiveRaise ( &pfe^.Lock )
 
     packed := pfe^.Packed
 
@@ -494,7 +494,7 @@ FN MmpUnreferencePage (
         // The page was deleted, so it must be freed now that the last reference
         // has gone away.
 
-        KeReleaseApcLock ( &pfe^.Lock, ipl )
+        KeReleaseLockLower ( &pfe^.Lock, ipl )
 
         MmpFreePage (
             mmnode, // mmnode
@@ -530,7 +530,7 @@ FN MmpUnreferencePage (
 
         KeReleaseLock ( &pfe^.Lock )
 
-        KeReleaseApcLock ( &mmnode^.ModifiedListLock, ipl )
+        KeReleaseLockLower ( &mmnode^.ModifiedListLock, ipl )
 
         IF mmnode^.ModifiedPageCount >= mmnode^.ModifiedPageMaximum AND
             mmnode^.ModifiedPageEvent.Header.SignalCount == 0 THEN
@@ -576,7 +576,7 @@ FN MmpUnreferencePage (
 
         KeReleaseLock ( &pfe^.Lock )
 
-        KeReleaseApcLock ( &colorlist^.Lock, ipl )
+        KeReleaseLockLower ( &colorlist^.Lock, ipl )
 
         MmpIncrementAvailablePages (
             mmnode, // mmnode
@@ -592,7 +592,7 @@ FN MmpUnreferencePage (
 
     KeReleaseLock ( &pfe^.Lock )
 
-    KeReleaseApcLock ( &colorlist^.Lock, ipl )
+    KeReleaseLockLower ( &colorlist^.Lock, ipl )
 END
 
 FN MmpAllocatePage (
@@ -1017,7 +1017,7 @@ FN MmuChargeCommit (
     // Acquire the commit lock to block out pagefile contraction that
     // might lower the commit limit and cause us to proceed erroneously.
 
-    ipl := KeAcquireApcLockExclusive ( &mmnode^.CommitLock )
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.CommitLock )
 
     IF mmnode^.CommitUsage + pages < pages THEN
         // Overflows the commit usage.
@@ -1048,7 +1048,7 @@ FN MmuChargeCommit (
     )
 
     WHILE mmnode^.CommitUsage > mmnode^.CommitLimit DO
-        KeReleaseApcLock ( &mmnode^.CommitLock, ipl )
+        KeReleaseLockLower ( &mmnode^.CommitLock, ipl )
 
         status = MmpExpandPageFiles (
             mmnode, // mmnode
@@ -1062,7 +1062,7 @@ FN MmuChargeCommit (
             RETURN status
         END
 
-        ipl = KeAcquireApcLockExclusive ( &mmnode^.CommitLock )
+        ipl = KeAcquireLockExclusiveRaise ( &mmnode^.CommitLock )
 
         IF OsError ( status ) THEN
             // Failed to increase commit limit.
@@ -1079,7 +1079,7 @@ FN MmuChargeCommit (
 
 @Exit
 
-    KeReleaseApcLock ( &mmnode^.CommitLock, ipl )
+    KeReleaseLockLower ( &mmnode^.CommitLock, ipl )
 
     RETURN status
 END

@@ -421,11 +421,11 @@ MmpEightBitLog : UBYTE[256] = {
 }
 
 #MACRO MmpAcquirePool ( pool ) [
-    KeAcquireApcLockExclusive ( &pool^.Lock )
+    KeAcquireLockExclusiveRaise ( &pool^.Lock )
 ]
 
 #MACRO MmpReleasePool ( pool, ipl ) [
-    KeReleaseApcLock ( &pool^.Lock, ipl )
+    KeReleaseLockLower ( &pool^.Lock, ipl )
 ]
 
 FN MmpAllocateFromPool (

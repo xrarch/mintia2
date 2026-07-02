@@ -79,8 +79,8 @@ KeAcquireLockShared:
 // a0 - lock
 // outputs:
 // a3 - oldipl
-KeAcquireApcLockShared:
-.export KeAcquireApcLockShared
+KeAcquireLockSharedRaise:
+.export KeAcquireLockSharedRaise
 
     subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
     mov  a3, byte [t0 + KepPrb_Ipl]  // Load old IPL.
@@ -124,8 +124,8 @@ KeAcquireLockExclusive:
 // a0 - lock
 // outputs:
 // a3 - oldipl
-KeAcquireApcLockExclusive:
-.export KeAcquireApcLockExclusive
+KeAcquireLockExclusiveRaise:
+.export KeAcquireLockExclusiveRaise
 
     subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
     mov  a3, byte [t0 + KepPrb_Ipl]  // Load old IPL.
@@ -189,8 +189,8 @@ KeReleaseLock:
 
 // a0 - lock
 // a1 - oldipl
-KeReleaseApcLock:
-.export KeReleaseApcLock
+KeReleaseLockLower:
+.export KeReleaseLockLower
 
     ReleaseLock ( x )
 

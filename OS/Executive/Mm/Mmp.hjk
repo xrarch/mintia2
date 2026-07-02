@@ -265,15 +265,15 @@ EXTERN FN MmpWaitForSystemSpace (
 )
 
 #MACRO MmpAcquireObjectExclusive ( object ) [
-    KeAcquireApcLockExclusive ( &(object)^.Pushlock )
+    KeAcquireLockExclusiveRaise ( &(object)^.Pushlock )
 ]
 
 #MACRO MmpAcquireObjectShared ( object ) [
-    KeAcquireApcLockShared ( &(object)^.Pushlock )
+    KeAcquireLockSharedRaise ( &(object)^.Pushlock )
 ]
 
 #MACRO MmpReleaseObject ( object, ipl ) [
-    KeReleaseApcLock ( &(object)^.Pushlock, ipl )
+    KeReleaseLockLower ( &(object)^.Pushlock, ipl )
 ]
 
 STRUCT MmpQuotaLimit

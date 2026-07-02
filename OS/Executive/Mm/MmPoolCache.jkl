@@ -25,11 +25,11 @@ STRUCT MmpSlabHeader
 END
 
 #MACRO MmpLockSlabCache ( scache ) [
-    KeAcquireApcLockExclusive ( &(scache)^.Lock )
+    KeAcquireLockExclusiveRaise ( &(scache)^.Lock )
 ]
 
 #MACRO MmpUnlockSlabCache ( scache, ipl ) [
-    KeReleaseApcLock ( &(scache)^.Lock, ipl )
+    KeReleaseLockLower ( &(scache)^.Lock, ipl )
 ]
 
 STRUCT MmpPoolCachePerCpu
@@ -100,19 +100,19 @@ END
 ]
 
 #MACRO MmpLockPoolCacheDepot ( cache ) [
-    KeAcquireApcLockExclusive ( &(cache)^.DepotLock )
+    KeAcquireLockExclusiveRaise ( &(cache)^.DepotLock )
 ]
 
 #MACRO MmpUnlockPoolCacheDepot ( cache, ipl ) [
-    KeReleaseApcLock ( &(cache)^.DepotLock, ipl )
+    KeReleaseLockLower ( &(cache)^.DepotLock, ipl )
 ]
 
 #MACRO MmpLockMagazineCache ( pcpcpu ) [
-    KeAcquireApcLockExclusive ( &(pcpcpu)^.MagLock )
+    KeAcquireLockExclusiveRaise ( &(pcpcpu)^.MagLock )
 ]
 
 #MACRO MmpUnlockMagazineCache ( pcpcpu, ipl ) [
-    KeReleaseApcLock ( &(pcpcpu)^.MagLock, ipl )
+    KeReleaseLockLower ( &(pcpcpu)^.MagLock, ipl )
 ]
 
 #MACRO MmpInitializeDepotList ( list ) [

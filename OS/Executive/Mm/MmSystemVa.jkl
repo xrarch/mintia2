@@ -101,13 +101,13 @@ FN MmpAllocateChunkSpace (
     // returned virtual address - this is the caller's responsibility.
     // Returns NULLPTR if no chunks remaining.
 
-    ipl := KeAcquireApcLockExclusive ( &chunkspace^.Lock )
+    ipl := KeAcquireLockExclusiveRaise ( &chunkspace^.Lock )
 
     chunk := chunkspace^.FreeListHead
 
     IF NOT chunk THEN
         IF NOT chunkspace^.PendingFlushCount THEN
-            KeReleaseApcLock ( &chunkspace^.Lock, ipl )
+            KeReleaseLockLower ( &chunkspace^.Lock, ipl )
 
             RETURN NULLPTR
         END
@@ -122,7 +122,7 @@ FN MmpAllocateChunkSpace (
 
     chunkspace^.FreeListHead = chunk^.Next
 
-    KeReleaseApcLock ( &chunkspace^.Lock, ipl )
+    KeReleaseLockLower ( &chunkspace^.Lock, ipl )
 
     RETURN MmpVirtualAddress ( chunk )
 END
@@ -135,7 +135,7 @@ FN MmpFreeChunkSpace (
 
     // Return a chunk to the given chunk space.
 
-    ipl := KeAcquireApcLockExclusive ( &chunkspace^.Lock )
+    ipl := KeAcquireLockExclusiveRaise ( &chunkspace^.Lock )
 
     IF flush THEN
         // Insert on the delayed flush table.
@@ -162,7 +162,7 @@ FN MmpFreeChunkSpace (
         chunkspace^.FreeListHead = chunk
     END
 
-    KeReleaseApcLock ( &chunkspace^.Lock, ipl )
+    KeReleaseLockLower ( &chunkspace^.Lock, ipl )
 END
 
 #ENTERSECTION "INITtext"
@@ -373,7 +373,7 @@ FN MmpFindDynamicSpaceNode (
     // policy that a shared lock is never taken subordinate to an exclusive
     // lock. There are many imaginable situations where that could occur here.
 
-    ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceTreeLock )
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceTreeLock )
 
     avlnode := mmnode^.DynamicSpaceRoot.Right
 
@@ -397,7 +397,7 @@ FN MmpFindDynamicSpaceNode (
         END
     END
 
-    KeReleaseApcLock ( &mmnode^.DynamicSpaceTreeLock, ipl )
+    KeReleaseLockLower ( &mmnode^.DynamicSpaceTreeLock, ipl )
 
     RETURN spacenode
 END
@@ -449,7 +449,7 @@ FN MmpAllocateDynamicPages (
         mmnode^.DynamicSpaceHint, // hint
     )
 
-    ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceLock )
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceLock )
 
     IF index == -1 THEN
         // Dynamic space has completely filled up.
@@ -471,7 +471,7 @@ FN MmpAllocateDynamicPages (
         IF index == -1 THEN
             // Yep, full.
 
-            KeReleaseApcLock ( &mmnode^.DynamicSpaceLock, ipl )
+            KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
 
             RETURN NULLPTR
         END
@@ -486,7 +486,7 @@ FN MmpAllocateDynamicPages (
         ) THEN
             // Someone else nabbed it, so retry.
 
-            KeReleaseApcLock ( &mmnode^.DynamicSpaceLock, ipl )
+            KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
 
             GOTO Retry
         END
@@ -504,7 +504,7 @@ FN MmpAllocateDynamicPages (
         pages, // runlength
     )
 
-    KeReleaseApcLock ( &mmnode^.DynamicSpaceLock, ipl )
+    KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
 
     RETURN CAST mmnode^.DynamicSpaceBase + (index << RTL_PAGE_SHIFT) TO ^VOID
 END
@@ -518,7 +518,7 @@ FN MmpReleaseDynamicPages (
 
     // Release a portion of dynamic space by pointer and page count.
 
-    ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceLock )
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceLock )
 
     IF flush THEN
         IF mmnode^.DeferredFlushIndex == MMP_DEFERRED_FLUSH_PAIRS THEN
@@ -551,7 +551,7 @@ FN MmpReleaseDynamicPages (
         )
     END
 
-    KeReleaseApcLock ( &mmnode^.DynamicSpaceLock, ipl )
+    KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
 END
 
 FN MmpAllocateDynamicSpace (
@@ -590,7 +590,7 @@ FN MmpAllocateDynamicSpace (
         RETURN NULLPTR
     END
 
-    ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceTreeLock )
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceTreeLock )
 
     // Insert the node in the AVL tree.
 
@@ -605,7 +605,7 @@ FN MmpAllocateDynamicSpace (
 
     // Unlock the tree and return the node.
 
-    KeReleaseApcLock ( &mmnode^.DynamicSpaceTreeLock, ipl )
+    KeReleaseLockLower ( &mmnode^.DynamicSpaceTreeLock, ipl )
 
     RETURN spacenode
 END
@@ -621,7 +621,7 @@ FN MmpReleaseDynamicSpace (
     ptr := spacenode^.StartVa
     pages := (spacenode^.EndVa - ptr) >> RTL_PAGE_SHIFT
 
-    ipl := KeAcquireApcLockExclusive ( &mmnode^.DynamicSpaceTreeLock )
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceTreeLock )
 
     // Remove the AVL node from the tree.
 
@@ -630,7 +630,7 @@ FN MmpReleaseDynamicSpace (
         &spacenode^.Entry, // node
     )
 
-    KeReleaseApcLock ( &mmnode^.DynamicSpaceTreeLock, ipl )
+    KeReleaseLockLower ( &mmnode^.DynamicSpaceTreeLock, ipl )
 
     // Free the node.
 

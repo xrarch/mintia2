@@ -137,8 +137,8 @@ KepCompareSwapUlongAbort:
 // a0 - lock
 // outputs:
 // a3 - oldipl
-KeAcquireApcLockShared:
-.export KeAcquireApcLockShared
+KeAcquireLockSharedRaise:
+.export KeAcquireLockSharedRaise
 
     movz.8 a3, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
     mov.8 [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)], KEP_IPL_APC
@@ -181,8 +181,8 @@ KepAcquireLockSharedSlow:
 // a0 - lock
 // outputs:
 // a3 - oldipl
-KeAcquireApcLockExclusive:
-.export KeAcquireApcLockExclusive
+KeAcquireLockExclusiveRaise:
+.export KeAcquireLockExclusiveRaise
 
     movz.8 a3, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
     mov.8 [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)], KEP_IPL_APC
@@ -305,8 +305,8 @@ KeReleaseLock:
 
 // a0 - lock
 // a1 - oldipl
-KeReleaseApcLock:
-.export KeReleaseApcLock
+KeReleaseLockLower:
+.export KeReleaseLockLower
 
     ReleaseLock (
         KepReleaseApcLockStart, KepReleaseApcLockEnd, KepReleaseApcLockSlow
@@ -318,11 +318,11 @@ KeReleaseApcLock:
 
     mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)]
     srl  t0, a1
-    ifnz rjmp KeReleaseApcLockDispatch
+    ifnz rjmp KeReleaseLockLowerDispatch
 
     ret
 
-KeReleaseApcLockDispatch:
+KeReleaseLockLowerDispatch:
 
     mov  a0, a1
     jmp  KepDispatchSoftwareInterrupts
@@ -344,7 +344,7 @@ KepReleaseApcLockSlow:
 
     mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)]
     srl  t0, a1
-    ifnz rjmp KeReleaseApcLockDispatch
+    ifnz rjmp KeReleaseLockLowerDispatch
 
     ret
 
