@@ -75,8 +75,9 @@ STRUCT MmpPfe
     Object : ^MmuObject,
     OffsetInObject : RtlUquad,
     Backing : MmpPte,
-
     Entry : RtlListEntry,
+    Lock : KeLock,
+
     References : ULONG,
     Packed : ULONG,
 END
@@ -101,9 +102,9 @@ EXTERN MmpSystemSize : UWORD
 // Keep this synchronized with Loader.hjk
 
 #IF ( == BLD_BITS 32 )
-    #DEFINE MMP_PFE_SIZE 36
+    #DEFINE MMP_PFE_SIZE 40
 #ELSE
-    #DEFINE MMP_PFE_SIZE 56
+    #DEFINE MMP_PFE_SIZE 64
 #END
 
 #MACRO MmpFindPfnDatabase () [
@@ -468,6 +469,7 @@ STRUCT MmpNode
     ZeroList : MmpAvailablePageList,
     StandbyList : MmpAvailablePageList,
     ModifiedListHead : RtlListEntry,
+    ModifiedListLock : KeLock,
 
     AvailablePageCount : WORD,
     FluidPageCount : UWORD,

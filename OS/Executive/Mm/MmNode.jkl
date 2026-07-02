@@ -46,6 +46,8 @@ FN MmpInitializeNodeStage1 (
 
     KeInitializeLock ( &mmnode^.CommitLock )
 
+    KeInitializeLock ( &mmnode^.ModifiedListLock )
+
     // Initialize the events.
 
     KeInitializeEvent (
@@ -372,6 +374,221 @@ FN MmpMakeMorePages (
         &mmnode^.LowMemoryEvent, // event
         0, // priorityboost
     )
+END
+
+FN MmpReferencePage (
+    IN pfe : ^MmpPfe,
+)
+
+    // Increment the reference count on the page. This must either be a page
+    // with a refcount that is already non-zero, or a page that is on the
+    // modified list.
+
+    KeAssert ( MmpGetPackedType ( pfe^.Packed ) == MMP_IN_USE_PFE_TYPE )
+
+    refcount := pfe^.References
+
+    WHILE TRUE DO
+        IF refcount == 0 THEN
+            // If the reference count is zero, then the page is on a list and
+            // needs special handling.
+
+            BREAK
+        END
+
+        new := KeCompareSwapUlong (
+            &pfe^.References, // ptr
+            refcount + 1, // newvalue
+            refcount, // expectedvalue
+        )
+
+        IF new == refcount THEN
+            LEAVE
+        END
+
+        refcount = new
+    END
+
+    // Reference count was zero, so we need to remove the page from a list.
+    //
+    // Only modified pages can be encountered in this state by this routine.
+    // Free pages are only taken off that list by MmpAllocatePage, and standby
+    // pages are only taken off that list by object lookups and
+    // MmpAllocatePageFromStandbyList, due to special synchronization
+    // requirements. It IS valid however to call this routine on a standby page
+    // whose refcount you already know for a fact to be greater than zero, and
+    // in fact it is the preferred method for doing so.
+
+    packed := pfe^.Packed
+
+    KeAssert ( MmpGetPackedFlag ( packed, MMP_MODIFIED_PFE_FLAG ) )
+
+    mmnode := KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
+
+    ipl := KeAcquireApcLockExclusive ( &mmnode^.ModifiedListLock )
+
+    refcount = KeIncrementUlong (
+        &pfe^.References, // ptr
+        1, // inc
+    )
+
+    IF refcount == 0 THEN
+        // Reference count was zero, so the page was on the modified page list,
+        // which needs to be removed from.
+
+        RtlRemoveEntryList ( &pfe^.Entry )
+
+        mmnode^.ModifiedPageCount -= 1
+    END
+
+    KeReleaseApcLock ( &mmnode^.ModifiedListLock, ipl )
+END
+
+FN MmpUnreferencePage (
+    IN pfe : ^MmpPfe,
+)
+
+    // Decrement the page's reference count.
+
+    KeAssert ( MmpGetPackedType ( pfe^.Packed ) == MMP_IN_USE_PFE_TYPE )
+
+    refcount := pfe^.References
+
+    KeAssert ( refcount != 0 )
+
+    WHILE TRUE DO
+        IF refcount == 1 THEN
+            // If this is the last reference, then special handling is required
+            // in order to place the page on a list.
+
+            BREAK
+        END
+
+        new := KeCompareSwapUlong (
+            &pfe^.References, // ptr
+            refcount - 1, // newvalue
+            refcount, // expectedvalue
+        )
+
+        IF new == refcount THEN
+            LEAVE
+        END
+
+        refcount = new
+    END
+
+    // Acquire the page lock to block out concurrent modifications of the packed
+    // flags that may affect which list it is supposed to go to now.
+
+    ipl := KeAcquireApcLockExclusive ( &pfe^.Lock )
+
+    packed := pfe^.Packed
+
+    mmnode := KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
+
+    IF MmpGetPackedFlag ( packed, MMP_DELETED_PFE_FLAG ) THEN
+        // The page was deleted, so it must be freed now that the last reference
+        // has gone away.
+
+        KeReleaseApcLock ( &pfe^.Lock, ipl )
+
+        MmpFreePage (
+            mmnode, // mmnode
+            pfe, // pfe
+        )
+
+        LEAVE
+    END
+
+    IF MmpGetPackedFlag ( packed, MMP_MODIFIED_PFE_FLAG ) THEN
+        // The page was modified, so it must be placed on the modified page
+        // list.
+
+        KeAcquireLockExclusive ( &mmnode^.ModifiedListLock )
+
+        refcount = KeIncrementUlong (
+            &pfe^.References, // ulong
+            0xFFFFFFFF, // inc
+        )
+
+        IF refcount == 1 THEN
+            RtlInsertAtTailList (
+                &mmnode^.ModifiedListHead, // listhead
+                &pfe^.Entry, // entry
+            )
+
+            mmnode^.ModifiedPageCount += 1
+        END
+
+        // The order of releasing the page lock and list lock is important
+        // because we dropped our refcount, so it is no longer safe to touch
+        // the page lock after we release the list lock.
+
+        KeReleaseLock ( &pfe^.Lock )
+
+        KeReleaseApcLock ( &mmnode^.ModifiedListLock, ipl )
+
+        IF mmnode^.ModifiedPageCount >= mmnode^.ModifiedPageMaximum AND
+            mmnode^.ModifiedPageEvent.Header.SignalCount == 0 THEN
+
+            // The modified page list is longer than the limit, so signal the
+            // modified page writer.
+
+            KeSignalEvent (
+                &mmnode^.ModifiedPageEvent, // event
+                0, // priorityboost
+            )
+        END
+
+        LEAVE
+    END
+
+    // The page was neither deleted nor modified, so put it on the standby list.
+
+    color := MmpPfnColor ( MmpPfeToPfn ( pfe ) )
+    colorlist := &mmnode^.StandbyList.Colors[color]
+
+    KeAcquireLockExclusive ( &colorlist^.Lock )
+
+    refcount = KeIncrementUlong (
+        &pfe^.References, // ulong
+        0xFFFFFFFF, // inc
+    )
+
+    IF refcount == 1 THEN
+        RtlInsertAtTailList (
+            &colorlist^.Head, // listhead
+            &pfe^.Entry, // listentry
+        )
+
+        KeIncrementPtr (
+            &mmnode^.StandbyList.Count, // ptr
+            1, // inc
+        )
+
+        // The order of releasing the page lock and list lock is important
+        // because we dropped our refcount, so it is no longer safe to touch
+        // the page lock after we release the list lock.
+
+        KeReleaseLock ( &pfe^.Lock )
+
+        KeReleaseApcLock ( &colorlist^.Lock, ipl )
+
+        MmpIncrementAvailablePages (
+            mmnode, // mmnode
+            1, // inc
+        )
+
+        LEAVE
+    END
+
+    // The order of releasing the page lock and list lock is important
+    // because we dropped our refcount, so it is no longer safe to touch
+    // the page lock after we release the list lock.
+
+    KeReleaseLock ( &pfe^.Lock )
+
+    KeReleaseApcLock ( &colorlist^.Lock, ipl )
 END
 
 FN MmpAllocatePage (

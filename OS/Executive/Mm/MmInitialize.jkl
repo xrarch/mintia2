@@ -221,6 +221,8 @@ FN MmpReclaimMemoryFromNode (
                 pfe^.Packed = MmpPackType ( 0, MMP_FREE_PFE_TYPE )
                 pfe^.Packed = MmpPackNodeId ( pfe^.Packed, nodeid )
 
+                KeInitializeLock ( &pfe^.Lock )
+
                 RtlInsertAtTailList (
                     &mmnode^.FreeList.Colors[MmpPfnColor(pfn)].Head, // head
                     &pfe^.Entry, // entry
@@ -440,6 +442,8 @@ FN MmuInitializeStage1 ()
                 WHILE pages DO
                     pfe^.Packed = MmpPackType ( 0, MMP_FREE_PFE_TYPE )
                     pfe^.Packed = MmpPackNodeId ( pfe^.Packed, i )
+
+                    KeInitializeLock ( &pfe^.Lock )
 
                     RtlInsertAtTailList (
                         &mmnode^.FreeList.Colors[MmpPfnColor(pfn)].Head, // head
