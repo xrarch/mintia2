@@ -176,11 +176,16 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
 
     // First charge commit for these pages.
 
-    MmuChargeCommit (
+    status := MmuChargeCommit (
         mmnode, // mmnode
         pages, // pages
-        FALSE, // wait
+        wait, // wait
+        low, // force
     )
+
+    IF OsError ( status ) THEN
+        RETURN FALSE
+    END
 
     i := 0
     pte := MmpPteAddress ( ptr )

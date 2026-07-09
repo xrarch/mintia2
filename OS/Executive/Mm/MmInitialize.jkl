@@ -469,6 +469,12 @@ FN MmuInitializeStage1 ()
         MmpSetNodeSize ( mmnode )
 
         IF kenode^.ProcessorCount != 0 THEN
+            // Initialize commit to something acceptable before creation of the
+            // pagefiles.
+
+            mmnode^.CommitLimit = CAST mmnode^.AvailablePageCount TO UWORD
+            mmnode^.TheoreticalCommitLimit = mmnode^.CommitLimit
+        
             // Initialize the system virtual address allocator.
 
             MmpInitializeSystemVa ( kenode )
@@ -489,12 +495,6 @@ FN MmuInitializeStage1 ()
             // lifetime of the system.
 
             MmpInitializeZeroedPage ( kenode )
-
-            // Initialize commit to something acceptable before creation of the
-            // pagefiles.
-
-            mmnode^.CommitLimit = CAST mmnode^.AvailablePageCount + 300 TO UWORD
-            mmnode^.TheoreticalCommitLimit = mmnode^.CommitLimit
 
             // Give the idle process a quota block. We stash this in the handle
             // table. Idle process has no real handle table.

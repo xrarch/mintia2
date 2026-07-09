@@ -1006,6 +1006,7 @@ FN MmuChargeCommit (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
     IN wait : UWORD,
+    IN force : UWORD,
 ) : OsStatus
 
     // Attempt to charge the specified commit to the memory node.
@@ -1027,7 +1028,9 @@ FN MmuChargeCommit (
         GOTO Exit
     END
 
-    IF mmnode^.CommitUsage + pages > mmnode^.TheoreticalCommitLimit THEN
+    IF NOT force AND
+        (mmnode^.CommitUsage + pages > mmnode^.TheoreticalCommitLimit) THEN
+
         // Don't even bother trying, there's no way to extend the pagefiles to
         // accommodate this because the theoretical commit limit represents what
         // we could theoretically increase the commit limit to if we were to
@@ -1050,16 +1053,20 @@ FN MmuChargeCommit (
     WHILE mmnode^.CommitUsage > mmnode^.CommitLimit DO
         KeReleaseLockLower ( &mmnode^.CommitLock, ipl )
 
+        IF force THEN
+            wait = FALSE
+        END
+
         status = MmpExpandPageFiles (
             mmnode, // mmnode
             wait, // wait
             FALSE, // full
         )
 
-        IF NOT wait THEN
-            // Proceed no matter what.
+        IF force THEN
+            // Proceed immediately with a successful status no matter what.
 
-            RETURN status
+            RETURN OS_STATUS_SUCCESS
         END
 
         ipl = KeAcquireLockExclusiveRaise ( &mmnode^.CommitLock )
