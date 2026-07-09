@@ -453,13 +453,14 @@ FN (DbgCommandF) DbgCommandReady ()
     RtlPrint ( "Current=%p Next=%p\n", prb^.CurrentThread, prb^.NextThread )
 
     RtlPrint (
-        "RT=%08x TS=%08x Idle=%d TSR=%d TSE=%d PEND=%02x", // fmt
+        "RT=%08x TS=%08x Idle=%d TSR=%d TSE=%d PEND=%02x STASH=%06x", // fmt
         prb^.RealTimeReady,
         prb^.CalendarReady,
         idleempty,
         prb^.CalendarRunIndex,
         prb^.CalendarEnqueueIndex,
         prb^.PendingSoftwareInterrupts,
+        prb^.StashedCurrentThreadInfo,
     )
 
 #IF BLD_MP
@@ -543,7 +544,7 @@ FN (DbgCommandF) DbgCommandReady ()
         i += 1
     END
 
-    RtlPrint ( "\nIdle Queue (thread is %08x)\n", &prb^.IdleThread )
+    RtlPrint ( "\nIdle Queue (idle thread is %08x)\n", &prb^.IdleThread )
 
     head = &prb^.IdleListHead
     listentry = head^.Next

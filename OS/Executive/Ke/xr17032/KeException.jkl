@@ -143,6 +143,10 @@ FN (KepHighLevelHandlerF) KepHandleInterrupt (
         KeMemoryBarrier ()
 
         IF prb^.IdleDeferredIpiEvents THEN
+            // Some events were atomically OR'd into our deferred event bit set
+            // rather than waking us with an IPI while we were idle. Do them
+            // now.
+        
             KepProcessIdleDeferredIpiEvents ()
         END
     END

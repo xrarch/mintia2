@@ -62,6 +62,12 @@
 
 #END
 
+#MACRO KepSetStashWithThread ( prb, thread ) [
+    prb^.StashedCurrentThreadInfo =
+        (thread^.Priority << KEP_STASHED_PRIORITY_SHIFT) |
+        (thread^.InteractiveBits << KEP_STASHED_INTERACTIVE_SHIFT)
+]
+
 #MACRO KepSetNextThread ( prb, next ) [
     prb^.NextThread = next
     next^.Status = KE_THREAD_STANDBY
@@ -70,9 +76,7 @@
     // Stash these in the Prb so that they can be examined locklessly by
     // remote processors.
 
-    prb^.StashedCurrentThreadInfo =
-        (next^.Priority << KEP_STASHED_PRIORITY_SHIFT) |
-        (next^.InteractiveBits << KEP_STASHED_INTERACTIVE_SHIFT)
+    KepSetStashWithThread ( prb, next )
 
     // Clear StealWork in case the processor is planning on doing that, since
     // that has become unnecessary now it isn't gonna become idle.
@@ -643,14 +647,7 @@ FN KepInsertThread (
     KepIncrementLoad ( prb )
 #END
 
-    current := prb^.CurrentThread
-    next := prb^.NextThread
-
-    compare := next
-
-    IF NOT compare THEN
-        compare = current
-    END
+    stash := prb^.StashedCurrentThreadInfo
 
     IF thread^.Priority >= OS_PRIORITY_LOW_REALTIME OR
         thread^.InteractiveBits THEN
@@ -659,9 +656,9 @@ FN KepInsertThread (
         // interactive. Either way it goes in the real time queue or preempts
         // the current thread.
 
-        IF (compare^.Priority >= OS_PRIORITY_LOW_REALTIME OR
-            compare^.InteractiveBits) AND
-            thread^.Priority <= compare^.Priority THEN
+        IF (KepCurrentThreadPriority ( stash ) >= OS_PRIORITY_LOW_REALTIME OR
+            KepCurrentThreadInteractivity ( stash )) AND
+            thread^.Priority <= KepCurrentThreadPriority ( stash ) THEN
 
             thread^.CurrentQueue = KEP_REAL_TIME_QUEUE
 
@@ -693,9 +690,9 @@ FN KepInsertThread (
         // idle priority thread. Idle priority threads can only preempt *the*
         // idle thread.
 
-        IF compare != &prb^.IdleThread AND
+        IF NOT KepCurrentThreadIdle ( stash ) AND
             (thread^.Priority == OS_PRIORITY_IDLE OR
-            compare^.Priority != OS_PRIORITY_IDLE) THEN
+            KepCurrentThreadPriority ( stash ) != OS_PRIORITY_IDLE) THEN
 
             // No preemption. Just place on the appropriate queue.
 
@@ -766,6 +763,8 @@ FN KepInsertThread (
     KepDecrementLoad ( prb )
 
     // Cause a preemption.
+
+    next := prb^.NextThread
 
     KepSetNextThread (
         prb, // prb
@@ -1537,9 +1536,19 @@ FN KepPreemptThread (
 #IF BLD_MP
         // No longer in the idle loop.
 
-        prb^.InIdleLoop = FALSE
+        IF prb^.InIdleLoop THEN
+            prb^.InIdleLoop = FALSE
 
-        KeWriteMemoryBarrier ()
+            KeMemoryBarrier ()
+
+            IF prb^.IdleDeferredIpiEvents THEN
+                // Some events were atomically OR'd into our deferred event bit
+                // set rather than waking us with an IPI while we were idle. Do
+                // them now.
+
+                KepProcessIdleDeferredIpiEvents ()
+            END
+        END
 #END
     END
 
@@ -1690,6 +1699,13 @@ FN KepSetPriorityThread (
         )
 
         IF NOT next THEN
+            // Nope, next thread stays this thread. Update the stashed priority.
+
+#IF BLD_MP
+            prb^.StashedCurrentThreadInfo =
+            KepSetPriorityInStash ( prb^.StashedCurrentThreadInfo, priority )
+#END
+
             LEAVE
         END
 
@@ -2007,6 +2023,25 @@ FN KepYield (
             FALSE, // exclusive
             FALSE, // migrate
         )
+
+#IF BLD_MP
+        IF NOT next THEN
+            // We're going to idle.
+
+            prb^.StealWork = TRUE
+            prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
+
+            prb^.InIdleLoop = TRUE
+
+            // No need for this barrier, it is implied by releasing the ready
+            // queue spinlock below.
+            //
+            // KeWriteMemoryBarrier ()
+
+        ELSE
+            KepSetStashWithThread ( prb, next )
+        END
+#END
     END
 
     KepReleaseReadyQueueElevated ( prb )
@@ -2046,15 +2081,6 @@ FN KepYield (
         )
 
     ELSE
-#IF BLD_MP
-        prb^.StealWork = TRUE
-        prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
-
-        prb^.InIdleLoop = TRUE
-
-        KeWriteMemoryBarrier ()
-#END
-
         // Switch to the idle thread. KepSwitchThread returns with the thread
         // lock released.
 
