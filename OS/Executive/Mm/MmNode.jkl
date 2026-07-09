@@ -99,9 +99,10 @@ FN MmpInitializeNodeStage1 (
 
     // Initialize commit.
 
-    mmnode^.CommitUsage = 0
+    mmnode^.CommitRemaining = 0
+    mmnode^.CommitRemainingMinimum = 0
     mmnode^.CommitLimit = 0
-    mmnode^.TheoreticalCommitLimit = 0
+    mmnode^.CommitLimitGrowthLeft = 0
 
     // Initialize thresholds.
 
@@ -1012,78 +1013,82 @@ FN MmuChargeCommit (
     // It would be unwise to page this routine as it can be called during
     // nonpaged pool allocation.
 
-    status := OS_STATUS_SUCCESS
-
     vmprivileged := PsCurrentThread()^.VmPrivileged
 
-    // Acquire the commit lock to block out pagefile contraction that
-    // might lower the commit limit and cause us to proceed erroneously.
+    IF pages > RTL_MACHINE_WORD_MAX_S THEN
+        // Page count overflows and is negative.
 
-    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.CommitLock )
+        KeAssert ( NOT vmprivileged )
 
-    IF mmnode^.CommitUsage + pages < pages THEN
-        // Overflows the commit usage.
-
-        status = OS_STATUS_COMMIT_EXCEEDED
-
-        GOTO Exit
+        RETURN OS_STATUS_COMMIT_EXCEEDED
     END
 
-    IF NOT vmprivileged AND
-        (mmnode^.CommitUsage + pages > mmnode^.TheoreticalCommitLimit) THEN
+    remaining := mmnode^.CommitRemaining
 
-        // Don't even bother trying, there's no way to extend the pagefiles to
-        // accommodate this because the theoretical commit limit represents what
-        // we could theoretically increase the commit limit to if we were to
-        // extend all of the pagefiles to their maximum size.
+    WHILE TRUE DO
+        IF remaining < RTL_MACHINE_WORD_MIN_S + pages THEN
+            // Underflow would result from this subtraction.
 
-        status = OS_STATUS_COMMIT_EXCEEDED
+            KeAssert ( NOT vmprivileged )
 
-        GOTO Exit
+            RETURN OS_STATUS_COMMIT_EXCEEDED
+        END
+
+        IF NOT vmprivileged AND
+            (remaining - pages < -mmnode^.CommitLimitGrowthLeft) THEN
+
+            // Don't even bother trying, there's no way to extend the pagefiles
+            // to accommodate this because the theoretical commit limit
+            // represents what we could theoretically increase the commit limit
+            // to if we were to extend all of the pagefiles to their maximum
+            // size.
+
+            RETURN OS_STATUS_COMMIT_EXCEEDED
+        END
+
+        new := CAST KeCompareSwapPtr (
+            &mmnode^.CommitRemaining, // ptr
+            remaining - pages, // newvalue
+            remaining, // expectedvalue
+        ) TO WORD
+
+        IF new == remaining THEN
+            BREAK
+        END
+
+        remaining = new
     END
 
-    // Increase the commit usage.
-    // If it goes over the limit, us and anyone else trying to charge commit
-    // will spin below until a pagefile expansion succeeds.
+    IF mmnode^.CommitRemaining >= mmnode^.CommitRemainingMinimum THEN
+        // Plenty of commit left after charging.
 
-    KeIncrementPtr (
-        &mmnode^.CommitUsage, // ptr
-        pages, // inc
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    // Not much commit left, so we're responsible for trying to extend the
+    // pagefiles.
+
+    status := MmpExpandPageFiles (
+        mmnode, // mmnode
+        wait AND NOT vmprivileged, // wait
+        FALSE, // full
     )
 
-    WHILE mmnode^.CommitUsage > mmnode^.CommitLimit DO
-        KeReleaseLockLower ( &mmnode^.CommitLock, ipl )
+    IF vmprivileged THEN
+        // Proceed immediately with a successful status no matter what.
 
-        status = MmpExpandPageFiles (
-            mmnode, // mmnode
-            wait AND NOT vmprivileged, // wait
-            FALSE, // full
-        )
-
-        IF vmprivileged THEN
-            // Proceed immediately with a successful status no matter what.
-
-            RETURN OS_STATUS_SUCCESS
-        END
-
-        ipl = KeAcquireLockExclusiveRaise ( &mmnode^.CommitLock )
-
-        IF OsError ( status ) THEN
-            // Failed to increase commit limit.
-            // Remove the commit charge.
-
-            KeIncrementPtr (
-                &mmnode^.CommitUsage, // ptr
-                -pages, // inc
-            )
-
-            GOTO Exit
-        END
+        RETURN OS_STATUS_SUCCESS
     END
 
-@Exit
+    IF OsError ( status ) THEN
+        // Failed to increase commit limit.
+        // Remove the commit charge.
 
-    KeReleaseLockLower ( &mmnode^.CommitLock, ipl )
+        KeIncrementPtr (
+            &mmnode^.CommitRemaining, // ptr
+            pages, // inc
+        )
+    END
 
     RETURN status
 END
@@ -1097,12 +1102,10 @@ FN MmuUnchargeCommit (
     // If pagefiles can now be contracted, that will be noticed at the next tick
     // of the responsible worker thread.
 
-    old := KeIncrementPtr (
-        &mmnode^.CommitUsage, // ptr
-        -pages, // inc
+    KeIncrementPtr (
+        &mmnode^.CommitRemaining, // ptr
+        pages, // inc
     )
-
-    KeAssert ( pages <= old )
 END
 
 EXPORT FN MmGetKeNodeSize (
