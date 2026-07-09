@@ -1006,7 +1006,6 @@ FN MmuChargeCommit (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
     IN wait : UWORD,
-    IN force : UWORD,
 ) : OsStatus
 
     // Attempt to charge the specified commit to the memory node.
@@ -1014,6 +1013,8 @@ FN MmuChargeCommit (
     // nonpaged pool allocation.
 
     status := OS_STATUS_SUCCESS
+
+    vmprivileged := PsCurrentThread()^.VmPrivileged
 
     // Acquire the commit lock to block out pagefile contraction that
     // might lower the commit limit and cause us to proceed erroneously.
@@ -1028,7 +1029,7 @@ FN MmuChargeCommit (
         GOTO Exit
     END
 
-    IF NOT force AND
+    IF NOT vmprivileged AND
         (mmnode^.CommitUsage + pages > mmnode^.TheoreticalCommitLimit) THEN
 
         // Don't even bother trying, there's no way to extend the pagefiles to
@@ -1053,17 +1054,13 @@ FN MmuChargeCommit (
     WHILE mmnode^.CommitUsage > mmnode^.CommitLimit DO
         KeReleaseLockLower ( &mmnode^.CommitLock, ipl )
 
-        IF force THEN
-            wait = FALSE
-        END
-
         status = MmpExpandPageFiles (
             mmnode, // mmnode
-            wait, // wait
+            wait AND NOT vmprivileged, // wait
             FALSE, // full
         )
 
-        IF force THEN
+        IF vmprivileged THEN
             // Proceed immediately with a successful status no matter what.
 
             RETURN OS_STATUS_SUCCESS
