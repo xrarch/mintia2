@@ -162,43 +162,47 @@ FN KepUpdateInteractivity (
         LEAVE
     END
 
-    sum := thread^.RunMs + thread^.SleepMs
+    IF deferupdate THEN
+        // Update history when called by the timer interrupt only.
 
-    IF sum < KEP_SLP_RUN_MAX THEN
-        // Not enough history.
+        sum := thread^.RunMs + thread^.SleepMs
 
-        GOTO SetInteractive
-    END
+        IF sum < KEP_SLP_RUN_MAX THEN
+            // Not enough history.
 
-    IF sum > KEP_SLP_RUN_MAX * 2 THEN
-        // There's an excessive amount of history.
-        // Reset the values to evade overflow.
-
-        IF thread^.RunMs > thread^.SleepMs THEN
-            thread^.RunMs = KEP_SLP_RUN_MAX
-            thread^.SleepMs = 1
-
-        ELSE
-            thread^.RunMs = 1
-            thread^.SleepMs = KEP_SLP_RUN_MAX
+            GOTO SetInteractive
         END
 
-        GOTO SetInteractive
+        IF sum > KEP_SLP_RUN_MAX * 2 THEN
+            // There's an excessive amount of history.
+            // Reset the values to evade overflow.
+
+            IF thread^.RunMs > thread^.SleepMs THEN
+                thread^.RunMs = KEP_SLP_RUN_MAX
+                thread^.SleepMs = 1
+
+            ELSE
+                thread^.RunMs = 1
+                thread^.SleepMs = KEP_SLP_RUN_MAX
+            END
+
+            GOTO SetInteractive
+        END
+
+        // If we have exceeded by more than 1/5 then the algorithm below will
+        // not bring us back into range. Dividing by two here forces us into the
+        // range of [4/5 * KEP_SLP_RUN_MAX, KEP_SLP_RUN_MAX].
+
+        IF sum > (KEP_SLP_RUN_MAX / 5) * 6 THEN
+            thread^.RunMs /= 2
+            thread^.SleepMs /= 2
+
+            GOTO SetInteractive
+        END
+
+        thread^.RunMs = (thread^.RunMs / 5) * 4
+        thread^.SleepMs = (thread^.SleepMs / 5) * 4
     END
-
-    // If we have exceeded by more than 1/5 then the algorithm below will not
-    // bring us back into range. Dividing by two here forces us into the range
-    // of [4/5 * KEP_SLP_RUN_MAX, KEP_SLP_RUN_MAX].
-
-    IF sum > (KEP_SLP_RUN_MAX / 5) * 6 THEN
-        thread^.RunMs /= 2
-        thread^.SleepMs /= 2
-
-        GOTO SetInteractive
-    END
-
-    thread^.RunMs = (thread^.RunMs / 5) * 4
-    thread^.SleepMs = (thread^.SleepMs / 5) * 4
 
 @SetInteractive
 
@@ -887,7 +891,7 @@ FN KepFindProcessor (
 
     IF prb^.Node != kenode THEN
         // The given preferred processor is not part of the thread's preferred
-        // node.
+        // node. Fall back to the affinity processor.
 
         prb = thread^.AffinityPrb
 
