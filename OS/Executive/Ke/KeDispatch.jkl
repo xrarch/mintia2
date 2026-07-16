@@ -72,12 +72,12 @@
     prb^.NextThread = next
     next^.Status = KE_THREAD_STANDBY
 
-#IF BLD_MP
     // Stash these in the Prb so that they can be examined locklessly by
     // remote processors.
 
     KepSetStashWithThread ( prb, next )
 
+#IF BLD_MP
     // Clear StealWork in case the processor is planning on doing that, since
     // that has become unnecessary now it isn't gonna become idle.
 
@@ -306,7 +306,7 @@ FN KeuFlushStackCache (
     kstack := kepnode^.StackCacheListHead
     kepnode^.StackCacheListHead = NULLPTR
 
-    kepnode^.CachedStackMinimum = kepnode^.CachedStackCount
+    kepnode^.CachedStackMinimum = 0
     kepnode^.CachedStackCount = 0
 
     KepReleaseStackCache ( kepnode, ipl )
@@ -829,13 +829,15 @@ FN KepWouldPreempt (
     pri2 := KepCurrentThreadPriority ( stash )
 
     IF thread1^.InteractiveBits THEN
-        IF NOT KepCurrentThreadInteractivity ( stash ) THEN
+        IF NOT KepCurrentThreadInteractivity ( stash ) AND
+            pri2 < OS_PRIORITY_LOW_REALTIME THEN
+
             // Interactive threads always preempt non-interactive threads.
 
             RETURN TRUE
         END
 
-        // Both are interactive. Compare priorities.
+        // Both are interactive or real time. Compare priorities.
 
         RETURN pri1 > pri2
     END
@@ -1318,6 +1320,7 @@ FN KepSelectThread (
     interactive := FALSE
 
     IF current THEN
+
         // We're selecting a thread whose priority is >= the 'current' thread.
 
         minimumpriority = current^.Priority
@@ -1347,7 +1350,11 @@ FN KepSelectThread (
 
     readybits := prb^.RealTimeReady
 
-    IF readybits >> minimumpriority THEN
+    IF (readybits >> minimumpriority) OR
+        (readybits AND
+        minimumpriority < OS_PRIORITY_LOW_REALTIME AND
+        NOT interactive) THEN
+
         // We're taking a thread off the real time queues.
 
         next = KepSelectRealTimeThread (
@@ -1473,6 +1480,12 @@ FN KepPreemptThread (
             TRUE, // exclusive
             FALSE, // migrate
         )
+
+        IF next THEN
+            KepSetStashWithThread ( prb, next )
+        ELSE
+            KepSetStashWithThread ( prb, current )
+        END
     END
 
     KepReleaseReadyQueueElevated ( prb )
@@ -1665,7 +1678,6 @@ FN KepSetPriorityThread (
         LEAVE
     END
 
-#IF BLD_MP
     IF thread^.Status == KE_THREAD_RUNNING AND
         NOT prb^.NextThread THEN
 
@@ -1674,7 +1686,6 @@ FN KepSetPriorityThread (
         prb^.StashedCurrentThreadInfo =
             KepSetPriorityInStash ( prb^.StashedCurrentThreadInfo, priority )
     END
-#END
 
     IF priority >= curpri THEN
         // We raised priority, so there's nothing left to do.
@@ -1701,10 +1712,8 @@ FN KepSetPriorityThread (
         IF NOT next THEN
             // Nope, next thread stays this thread. Update the stashed priority.
 
-#IF BLD_MP
             prb^.StashedCurrentThreadInfo =
             KepSetPriorityInStash ( prb^.StashedCurrentThreadInfo, priority )
-#END
 
             LEAVE
         END
@@ -1859,13 +1868,11 @@ FN KepCheckInteractivityInternal (
     // non-interactive. Ready queue is locked.
 
     IF NOT prb^.NextThread THEN
-#IF BLD_MP
         // Update the current interactivity stashed in the prb.
 
         prb^.StashedCurrentThreadInfo =
             KepSetInteractivityInStash ( prb^.StashedCurrentThreadInfo,
             newinteractivity )
-#END
 
         IF newinteractivity < oldinteractivity THEN
             // Try to find a thread to preempt this one with.
@@ -2024,14 +2031,15 @@ FN KepYield (
             FALSE, // migrate
         )
 
-#IF BLD_MP
         IF NOT next THEN
             // We're going to idle.
 
-            prb^.StealWork = TRUE
             prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
 
+#IF BLD_MP
             prb^.InIdleLoop = TRUE
+            prb^.StealWork = TRUE
+#END
 
             // No need for this barrier, it is implied by releasing the ready
             // queue spinlock below.
@@ -2041,7 +2049,6 @@ FN KepYield (
         ELSE
             KepSetStashWithThread ( prb, next )
         END
-#END
     END
 
     KepReleaseReadyQueueElevated ( prb )
@@ -2175,19 +2182,15 @@ FN KepRaisePriorityFloorThread (
                         prb != KEP_CURRENT_PRB, // other
                         thread^.Priority, // curpri
                     )
-                ELSE
-#IF BLD_MP
-                    IF thread^.Status == KE_THREAD_RUNNING AND
-                        NOT prb^.NextThread THEN
+                ELSEIF thread^.Status == KE_THREAD_RUNNING AND
+                    NOT prb^.NextThread THEN
 
-                        // Update stashed interactivity.
+                    // Update stashed interactivity.
 
-                        prb^.StashedCurrentThreadInfo =
-                            KepSetInteractivityInStash (
-                            prb^.StashedCurrentThreadInfo,
-                            thread^.InteractiveBits )
-                    END
-#END
+                    prb^.StashedCurrentThreadInfo = KepSetInteractivityInStash (
+                        prb^.StashedCurrentThreadInfo,
+                        thread^.InteractiveBits,
+                    )
                 END
             END
 
