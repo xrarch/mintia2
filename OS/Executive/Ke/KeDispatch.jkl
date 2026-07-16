@@ -2114,95 +2114,78 @@ FN KepRaisePriorityFloorThread (
     // to implement priority inheritance and is called by the turnstile
     // package. The thread lock is held.
 
+    KeAssert ( interactive OR priority >= OS_PRIORITY_LOW_REALTIME )
+
     boosted := FALSE
 
-    IF KepIsInteractiveForFloor ( thread ) OR
-        thread^.PriorityFloor >= OS_PRIORITY_LOW_REALTIME THEN
+#IF BLD_MP
+    // We need to grab the ready queue lock.
 
-        // This thread goes on the real time queues.
-        // I should only boost him if I do too.
+    prb := thread^.CurrentPrb
 
-        IF interactive OR priority >= OS_PRIORITY_LOW_REALTIME THEN
-            boosted = TRUE
+    KeAssert ( prb != NULLPTR )
+
+    KepAcquireReadyQueueElevated ( prb )
+#ELSE
+    prb := KEP_CURRENT_PRB
+#END
+
+    // XXX We must do it in the order of raising priority floor and then
+    //     raising interactivity floor, otherwise we run the risk of
+    //     calling KepInsertThread with an idle priority + interactive
+    //     thread which it doesn't know how to deal with.
+
+    IF thread^.PriorityFloor < priority THEN
+        // Raise the priority floor.
+
+        thread^.PriorityFloor = priority
+
+        IF thread^.Priority < thread^.PriorityFloor THEN
+            // Raise the priority.
+
+            KepSetPriorityThread (
+                prb, // prb
+                thread, // thread
+                thread^.PriorityFloor, // priority
+            )
         END
-
-    ELSE
-        // This thread goes on the timeshared queues.
 
         boosted = TRUE
     END
 
-    IF boosted THEN
-        boosted = FALSE
+    IF interactive AND NOT KepIsInteractiveForFloor ( thread ) THEN
+        // Raise the interactivity floor.
 
-#IF BLD_MP
-        // We need to grab the ready queue lock.
+        KepSetInteractiveForFloor ( thread )
 
-        prb := thread^.CurrentPrb
+        IF NOT KepIsInteractiveForOtherThanFloor ( thread ) THEN
+            // It wasn't interactive and we just raised the floor, so
+            // it's probably in the wrong queue now.
 
-        KeAssert ( prb != NULLPTR )
-
-        KepAcquireReadyQueueElevated ( prb )
-#ELSE
-        prb := KEP_CURRENT_PRB
-#END
-
-        // XXX We must do it in the order of raising priority floor and then
-        //     raising interactivity floor, otherwise we run the risk of
-        //     calling KepInsertThread with an idle priority + interactive
-        //     thread which it doesn't know how to deal with.
-
-        IF thread^.PriorityFloor < priority THEN
-            // Raise the priority floor.
-
-            thread^.PriorityFloor = priority
-
-            IF thread^.Priority < thread^.PriorityFloor THEN
-                // Raise the priority.
-
-                KepSetPriorityThread (
-                    prb, // prb
+            IF thread^.Status == KE_THREAD_READY THEN
+                KepReinsertThread (
                     thread, // thread
-                    thread^.PriorityFloor, // priority
+                    prb, // prb
+                    prb != KEP_CURRENT_PRB, // other
+                    thread^.Priority, // curpri
+                )
+
+            ELSEIF thread^.Status == KE_THREAD_RUNNING AND
+                NOT prb^.NextThread THEN
+
+                // Update stashed interactivity.
+
+                prb^.StashedCurrentThreadInfo = KepSetInteractivityInStash (
+                    prb^.StashedCurrentThreadInfo,
+                    thread^.InteractiveBits,
                 )
             END
-
-            boosted = TRUE
         END
 
-        IF interactive AND NOT KepIsInteractiveForFloor ( thread ) THEN
-            // Raise the interactivity floor.
-
-            KepSetInteractiveForFloor ( thread )
-
-            IF NOT KepIsInteractiveForOtherThanFloor ( thread ) THEN
-                // It wasn't interactive and we just raised the floor, so
-                // it's probably in the wrong queue now.
-
-                IF thread^.Status == KE_THREAD_READY THEN
-                    KepReinsertThread (
-                        thread, // thread
-                        prb, // prb
-                        prb != KEP_CURRENT_PRB, // other
-                        thread^.Priority, // curpri
-                    )
-                ELSEIF thread^.Status == KE_THREAD_RUNNING AND
-                    NOT prb^.NextThread THEN
-
-                    // Update stashed interactivity.
-
-                    prb^.StashedCurrentThreadInfo = KepSetInteractivityInStash (
-                        prb^.StashedCurrentThreadInfo,
-                        thread^.InteractiveBits,
-                    )
-                END
-            END
-
-            boosted = TRUE
-        END
-
-        KepReleaseReadyQueueElevated ( prb )
+        boosted = TRUE
     END
+
+    KepReleaseReadyQueueElevated ( prb )
 
     RETURN boosted
 END

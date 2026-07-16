@@ -113,46 +113,100 @@ FN (RtlLessThanF) KepCompareThreads (
     // turnstile's maxheap. Since it's a maxheap, we will return whether a>b so
     // that higher priority threads end up at the root.
 
-    // Interactive threads are always greater than noninteractive threads.
-    // If interactivity is the same, it's determined by the priority.
+    // Interactivity is ignored since all threads in the max-heap are either
+    // interactive or real time and are therefore bound for the real time
+    // queues, so only priority matters here.
 
     thread1 := CONTAINEROF a TO KeuThread.TurnstileEntry
     thread2 := CONTAINEROF b TO KeuThread.TurnstileEntry
 
-    IF thread1^.BestowedInteractivity OR
-        thread1^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME THEN
-
-        IF thread2^.BestowedInteractivity OR
-            thread2^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME THEN
-
-            RETURN thread1^.BestowedPriority > thread2^.BestowedPriority
-
-        ELSE
-            RETURN TRUE
-        END
-
-    ELSEIF thread2^.BestowedInteractivity OR
-        thread2^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME THEN
-
-        RETURN FALSE
-
-    ELSE
-        RETURN thread1^.BestowedPriority > thread2^.BestowedPriority
-    END
+    RETURN thread1^.BestowedPriority > thread2^.BestowedPriority
 END
 
 FN KepBoostPriority (
+    IN thread : ^KeuThread,
     IN owner : ^KeuThread,
-    IN interactive : UWORD,
-    IN priority : UWORD,
+    IN chain : ^KepTurnstileChain,
+    IN turnstile : ^KepTurnstile,
 ) : UWORD
 
-    // As required, boost the priority of the thread and all of the threads upon
-    // which it depends to make progress.
+    // As required, boost the priority of the owner thread and all of the
+    // threads upon which it depends to make progress.
+    //
+    // Entered at KEP_IPL_DPC with chain lock held, left at KEP_IPL_APC with no
+    // locks held.
+    //
+    // Returns whether a retry is required.
 
     original := owner
 
+    // Capture current priority as the BestowedPriority.
+    //
+    // NOTE: Currently no attempt is made to re-boost the waiter chain if
+    //       this thread's priority is increased after it did its own
+    //       boosting; boosting is done purely based on the priority we see
+    //       for ourselves right here. It's assumed to be sufficient to just
+    //       boost the waiter chain with whatever priority we had when we
+    //       blocked, but if that assumption turns out to be faulty, it
+    //       wouldn't be difficult to extend KepSetPriorityThread to unblock
+    //       a thread blocked on a turnstile if its priority was raised,
+    //       with an OS_STATUS_KERNEL_APC, which would cause the lock
+    //       acquisition to be performed again and the waiters re-boosted
+    //       (by this thread) to the new priority.
+
+    KepAcquireThreadElevated ( thread )
+
+    priority := thread^.Priority
+    thread^.BestowedPriority = priority
+
+    interactive := thread^.InteractiveBits
+    thread^.BestowedInteractivity = interactive
+
+    thread^.BlockedOnTurnstile = turnstile
+
+    IF priority < OS_PRIORITY_LOW_REALTIME AND
+        NOT interactive THEN
+
+        // Timeshared threads don't boost and don't reside in the max heap.
+
+        KepReleaseThreadElevated ( thread )
+
+        KepReleaseChain ( chain, KEP_IPL_APC )
+
+        RETURN FALSE
+    END
+
+    // Insert the thread into the turnstile's max heap.
+
+    KepAcquireTurnstileElevated ( turnstile )
+
+    RtlInsertIntoHeap (
+        &KepCompareThreads, // comparisonfunc
+        &turnstile^.WaiterHeapRoot, // rootptr
+        &thread^.TurnstileEntry, // entry
+    )
+
+    KepReleaseTurnstileElevated ( turnstile )
+
+    KepReleaseThreadElevated ( thread )
+
     WHILE TRUE DO
+        IF priority <= thread^.Priority AND
+            (KepIsInteractiveForFloor ( owner ) OR
+            NOT interactive) THEN
+
+            // We wouldn't actually raise the priority of this thread, so back
+            // out rather than wasting time trying.
+
+            KepReleaseChain ( chain, KEP_IPL_APC )
+
+            RETURN FALSE
+        END
+
+        KepAcquireThreadElevated ( owner )
+
+        KepReleaseChainElevated ( chain )
+
         // Boost the owner. His lock is held on entry, released on exit.
 
         boosted := KepRaisePriorityFloorThread (
@@ -170,7 +224,7 @@ FN KepBoostPriority (
         // being waited for, by owners of locks being waited for, etc, by this
         // thread.
 
-        turnstile := owner^.BlockedOnTurnstile
+        turnstile = owner^.BlockedOnTurnstile
 
         IF NOT turnstile THEN
             // Not blocked on a turnstile, return.
@@ -184,11 +238,18 @@ FN KepBoostPriority (
 
             KepAcquireTurnstileElevated ( turnstile )
 
-            RtlRemoveFromHeap (
-                &KepCompareThreads, // comparisonfunc
-                &turnstile^.WaiterHeapRoot, // rootptr
-                &owner^.TurnstileEntry, // entry
-            )
+            IF owner^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME OR
+                owner^.BestowedInteractivity THEN
+
+                // Its old priority was already in the real time range, so it
+                // was in the max-heap. Remove it now.
+
+                RtlRemoveFromHeap (
+                    &KepCompareThreads, // comparisonfunc
+                    &turnstile^.WaiterHeapRoot, // rootptr
+                    &owner^.TurnstileEntry, // entry
+                )
+            END
 
             // Set new bestowed.
 
@@ -230,7 +291,7 @@ FN KepBoostPriority (
 #IF BLD_MP
         kenode := KeNumaNodeFromArbitraryPointer ( turnstile^.Key )
 
-        chain := &kenode^.Kep^.TurnstileChains[KepTurnstileHash(turnstile^.Key)]
+        chain = &kenode^.Kep^.TurnstileChains[KepTurnstileHash(turnstile^.Key)]
 
         // Try to acquire the chain spinlock. Note that this is out of order
         // with respect to the thread lock, so we only try-acquire it and retry
@@ -272,10 +333,6 @@ FN KepBoostPriority (
 
             KeCrash ( "Turnstile waiter cycle (deadlock!)\n" )
         END
-
-        KepAcquireThreadElevated ( owner )
-
-        KepReleaseChainElevated ( chain )
     END
 
     KepReleaseThread ( owner, KEP_IPL_APC )
@@ -381,19 +438,19 @@ FN KepBlockOnLock (
             // Initialize it.
 
             turnstile^.Key = lock
-            turnstile^.Free = NULLPTR
             turnstile^.Owner = owner
 
 #IF BLD_MP
-            KepInitializeSpinlock ( &turnstile^.Spinlock )
+            KeAssert ( turnstile^.Spinlock == KEP_INITIAL_SPINLOCK )
 #END
+
+            KeAssert ( turnstile^.WaiterHeapRoot == NULLPTR )
+            KeAssert ( turnstile^.Free == NULLPTR )
 
             RtlInsertAtHeadList (
                 &chain^.Head, // head
                 &turnstile^.ChainEntry, // entry
             )
-
-            turnstile^.WaiterHeapRoot = NULLPTR
 
             KeInitializeEvent (
                 &turnstile^.Event, // event
@@ -483,76 +540,19 @@ FN KepBlockOnLock (
 #END
 
         // We're really going to wait, so do priority boosting.
+        // This function is called with the chain lock held. It returns at
+        // KEP_IPL_APC with all locks released.
 
-        KepAcquireThreadElevated ( thread )
+        IF KepBoostPriority (
+            thread, // thread
+            owner, // owner
+            chain, // chain
+            turnstile, // turnstile
+        ) THEN
 
-        // Capture current priority as the BestowedPriority.
-        //
-        // NOTE: Currently no attempt is made to re-boost the waiter chain if
-        //       this thread's priority is increased after it did its own
-        //       boosting; boosting is done purely based on the priority we see
-        //       for ourselves right here. It's assumed to be sufficient to just
-        //       boost the waiter chain with whatever priority we had when we
-        //       blocked, but if that assumption turns out to be faulty, it
-        //       wouldn't be difficult to extend KepSetPriorityThread to unblock
-        //       a thread blocked on a turnstile if its priority was raised,
-        //       with an OS_STATUS_KERNEL_APC, which would cause the lock
-        //       acquisition to be performed again and the waiters re-boosted
-        //       (by this thread) to the new priority.
+            // Failed to try-acquire a spinlock. Unwind everything and retry.
 
-        priority := thread^.Priority
-        thread^.BestowedPriority = priority
-
-        interactive := thread^.InteractiveBits
-        thread^.BestowedInteractivity = interactive
-
-        thread^.BlockedOnTurnstile = turnstile
-
-        // Insert the thread into the turnstile's max heap.
-
-        KepAcquireTurnstileElevated ( turnstile )
-
-        RtlInsertIntoHeap (
-            &KepCompareThreads, // comparisonfunc
-            &turnstile^.WaiterHeapRoot, // rootptr
-            &thread^.TurnstileEntry, // entry
-        )
-
-        KepReleaseTurnstileAndThreadElevated ( turnstile, thread )
-
-        // Acquire the owning thread's spinlock and release the chain.
-
-        KepAcquireThreadElevated ( owner )
-
-        KepReleaseChainElevated ( chain )
-
-        IF owner^.PriorityFloor < priority OR
-            (interactive AND NOT KepIsInteractiveForFloor ( owner )) THEN
-
-            // Raise the priority floor. Returns with the thread lock released.
-
-#IF BLD_MP
-            IF KepBoostPriority (
-                owner, // owner
-                interactive, // interactive
-                priority, // priority
-            ) THEN
-
-                // Failed to try-acquire a spinlock. Unwind and retry
-                // everything.
-
-                GOTO UnreferenceAndLeave
-            END
-#ELSE
-            KepBoostPriority (
-                owner, // owner
-                interactive, // interactive
-                priority, // priority
-            )
-#END
-
-        ELSE
-            KepReleaseThread ( owner, KEP_IPL_APC )
+            GOTO UnreferenceAndLeave
         END
     
     ELSE
@@ -595,15 +595,21 @@ FN KepBlockOnLock (
 
         thread^.BlockedOnTurnstile = NULLPTR
 
-        KepAcquireTurnstileElevated ( turnstile )
+        IF thread^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME OR
+            thread^.BestowedInteractivity THEN
 
-        RtlRemoveFromHeap (
-            &KepCompareThreads, // comparisonfunc
-            &turnstile^.WaiterHeapRoot, // rootptr
-            &thread^.TurnstileEntry, // entry
-        )
+            KepAcquireTurnstileElevated ( turnstile )
 
-        KepReleaseTurnstileAndThreadElevated ( turnstile, thread )
+            RtlRemoveFromHeap (
+                &KepCompareThreads, // comparisonfunc
+                &turnstile^.WaiterHeapRoot, // rootptr
+                &thread^.TurnstileEntry, // entry
+            )
+
+            KepReleaseTurnstileElevated ( turnstile )
+        END
+
+        KepReleaseThreadElevated ( thread )
     END
 
     // Make sure we didn't magically get a turnstile back.
@@ -683,7 +689,7 @@ FN KepComputeFloor (
 
     listentry := head^.Next
     floor := 0
-    interactivityfloor := FALSE
+    interactivityfloor := 0
 
     WHILE listentry != head DO
         turnstile := CONTAINEROF listentry TO KepTurnstile.PiEntry

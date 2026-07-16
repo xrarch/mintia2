@@ -25,10 +25,10 @@ FN PsuReallocateRemoteTurnstile ()
 
     // Replace the turnstile before freeing the old one.
 
-    newts := MmAllocateFromPoolCache (
+    newts := CAST MmAllocateFromPoolCache (
         KeNumaNodeFromSpacePointer ( thread )^.Psp^.TurnstileCache, // cache
         FALSE, // wait
-    )
+    ) TO ^KepTurnstile
 
     IF NOT newts THEN
         // Nevermind. Just leave it.
@@ -41,6 +41,8 @@ FN PsuReallocateRemoteTurnstile ()
     // the one we had before it, making the pointer stale.
 
     oldts := thread^.Turnstile
+
+    KeuInitializeTurnstile ( newts )
 
     thread^.Turnstile = newts
 
@@ -302,16 +304,18 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     // Allocate a turnstile.
 
-    turnstile := MmAllocateFromPoolCache (
+    turnstile := CAST MmAllocateFromPoolCache (
         kenode^.Psp^.TurnstileCache, // cache
         TRUE, // wait
-    )
+    ) TO ^KepTurnstile
 
     IF NOT turnstile THEN
         status = OS_STATUS_NO_MEMORY
 
         GOTO Error4
     END
+
+    KeuInitializeTurnstile ( turnstile )
 
     // Use the start function to determine whether this is a usermode or kernel
     // thread.

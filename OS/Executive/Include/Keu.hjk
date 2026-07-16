@@ -447,3 +447,11 @@ EXTERN FN KeuReaperBarrier (
 #MACRO KeGetContinuation () [
     (&KeCurrentThread()^.Continuation)
 ]
+
+#MACRO KeuInitializeTurnstile ( turnstile ) [
+#IF BLD_MP
+    NOTHING (turnstile)^.Spinlock = KEP_INITIAL_SPINLOCK
+#END
+    NOTHING (turnstile)^.Free = NULLPTR
+    NOTHING (turnstile)^.WaiterHeapRoot = NULLPTR
+]
