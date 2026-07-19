@@ -220,6 +220,7 @@ FN MmpReclaimMemoryFromNode (
             WHILE pages DO
                 pfe^.Packed = MmpPackType ( 0, MMP_FREE_PFE_TYPE )
                 pfe^.Packed = MmpPackNodeId ( pfe^.Packed, nodeid )
+                pfe^.Packed = MmpPackDnodeId ( pfe^.Packed, nodeid )
 
                 KeInitializeLock ( &pfe^.Lock )
 
@@ -442,6 +443,7 @@ FN MmuInitializeStage1 ()
                 WHILE pages DO
                     pfe^.Packed = MmpPackType ( 0, MMP_FREE_PFE_TYPE )
                     pfe^.Packed = MmpPackNodeId ( pfe^.Packed, i )
+                    pfe^.Packed = MmpPackDnodeId ( pfe^.Packed, i )
 
                     KeInitializeLock ( &pfe^.Lock )
 

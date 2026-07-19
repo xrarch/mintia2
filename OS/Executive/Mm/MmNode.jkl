@@ -507,7 +507,9 @@ FN MmpUnreferencePage (
 
     IF MmpGetPackedFlag ( packed, MMP_MODIFIED_PFE_FLAG ) THEN
         // The page was modified, so it must be placed on the modified page
-        // list.
+        // list for its destination node.
+
+        mmnode = KeNumaNodeById ( MmpGetPackedDnodeId ( packed ) )^.Mmp
 
         KeAcquireLockExclusive ( &mmnode^.ModifiedListLock )
 

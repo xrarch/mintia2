@@ -23,6 +23,7 @@
 //
 // 0-3: Type code
 // 4-7: Various flags
+// 8-19: Destination NUMA node ID
 // 20-31: NUMA node ID
 
 #DEFINE MMP_PACKED_TYPE_MASK 0xF
@@ -30,6 +31,9 @@
 
 #DEFINE MMP_PACKED_NODE_SHIFT 20
 #DEFINE MMP_PACKED_NODE_MASK 0xFFF00000
+
+#DEFINE MMP_PACKED_DNODE_SHIFT 8
+#DEFINE MMP_PACKED_DNODE_MASK 0x000FFF00
 
 #DEFINE MMP_UNINITIALIZED_PFE_TYPE 0
 #DEFINE MMP_FREE_PFE_TYPE 1
@@ -68,6 +72,14 @@
 
 #MACRO MmpPackNodeId ( packed, nodeid ) [
     (((packed) & ~MMP_PACKED_NODE_MASK) | ((nodeid) << MMP_PACKED_NODE_SHIFT))
+]
+
+#MACRO MmpGetPackedDnodeId ( packed ) [
+    (((packed) & MMP_PACKED_DNODE_MASK) >> MMP_PACKED_DNODE_SHIFT)
+]
+
+#MACRO MmpPackDnodeId ( packed, nodeid ) [
+    (((packed) & ~MMP_PACKED_DNODE_MASK) | ((nodeid) << MMP_PACKED_DNODE_SHIFT))
 ]
 
 STRUCT MmpPfe
