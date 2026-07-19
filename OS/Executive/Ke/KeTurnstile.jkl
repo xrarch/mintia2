@@ -113,14 +113,36 @@ FN (RtlLessThanF) KepCompareThreads (
     // turnstile's maxheap. Since it's a maxheap, we will return whether a>b so
     // that higher priority threads end up at the root.
 
-    // Interactivity is ignored since all threads in the max-heap are either
-    // interactive or real time and are therefore bound for the real time
-    // queues, so only priority matters here.
-
     thread1 := CONTAINEROF a TO KeuThread.TurnstileEntry
     thread2 := CONTAINEROF b TO KeuThread.TurnstileEntry
 
-    RETURN thread1^.BestowedPriority > thread2^.BestowedPriority
+    t1pri := thread1^.BestowedPriority
+    t2pri := thread2^.BestowedPriority
+
+    t1rt := thread1^.BestowedInteractivity OR t1pri >= OS_PRIORITY_LOW_REALTIME
+    t2rt := thread2^.BestowedInteractivity OR t2pri >= OS_PRIORITY_LOW_REALTIME
+
+    IF t1rt THEN
+        IF t2rt THEN
+            // Both are real-time so just compare priorities.
+
+            RETURN t1pri > t2pri
+        END
+
+        // Thread 1 is real time and thread 2 is not, so thread 1 is larger.
+
+        RETURN TRUE
+    END
+
+    IF t2rt THEN
+        // Thread 2 is real time and thread 1 is not, so thread 2 is larger.
+
+        RETURN FALSE
+    END
+
+    // Neither are real time, so compare priority.
+
+    RETURN t1pri > t2pri
 END
 
 FN KepBoostPriority (
@@ -163,18 +185,6 @@ FN KepBoostPriority (
     thread^.BestowedInteractivity = interactive
 
     thread^.BlockedOnTurnstile = turnstile
-
-    IF priority < OS_PRIORITY_LOW_REALTIME AND
-        NOT interactive THEN
-
-        // Timeshared threads don't boost and don't reside in the max heap.
-
-        KepReleaseThreadElevated ( thread )
-
-        KepReleaseChain ( chain, KEP_IPL_APC )
-
-        RETURN FALSE
-    END
 
     // Insert the thread into the turnstile's max heap.
 
@@ -238,18 +248,11 @@ FN KepBoostPriority (
 
             KepAcquireTurnstileElevated ( turnstile )
 
-            IF owner^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME OR
-                owner^.BestowedInteractivity THEN
-
-                // Its old priority was already in the real time range, so it
-                // was in the max-heap. Remove it now.
-
-                RtlRemoveFromHeap (
-                    &KepCompareThreads, // comparisonfunc
-                    &turnstile^.WaiterHeapRoot, // rootptr
-                    &owner^.TurnstileEntry, // entry
-                )
-            END
+            RtlRemoveFromHeap (
+                &KepCompareThreads, // comparisonfunc
+                &turnstile^.WaiterHeapRoot, // rootptr
+                &owner^.TurnstileEntry, // entry
+            )
 
             // Set new bestowed.
 
@@ -595,21 +598,15 @@ FN KepBlockOnLock (
 
         thread^.BlockedOnTurnstile = NULLPTR
 
-        IF thread^.BestowedPriority >= OS_PRIORITY_LOW_REALTIME OR
-            thread^.BestowedInteractivity THEN
+        KepAcquireTurnstileElevated ( turnstile )
 
-            KepAcquireTurnstileElevated ( turnstile )
+        RtlRemoveFromHeap (
+            &KepCompareThreads, // comparisonfunc
+            &turnstile^.WaiterHeapRoot, // rootptr
+            &thread^.TurnstileEntry, // entry
+        )
 
-            RtlRemoveFromHeap (
-                &KepCompareThreads, // comparisonfunc
-                &turnstile^.WaiterHeapRoot, // rootptr
-                &thread^.TurnstileEntry, // entry
-            )
-
-            KepReleaseTurnstileElevated ( turnstile )
-        END
-
-        KepReleaseThreadElevated ( thread )
+        KepReleaseTurnstileAndThreadElevated ( turnstile, thread )
     END
 
     // Make sure we didn't magically get a turnstile back.
@@ -701,11 +698,30 @@ FN KepComputeFloor (
                 CONTAINEROF turnstile^.WaiterHeapRoot
                 TO KeuThread.TurnstileEntry
 
-            IF booster^.BestowedPriority > floor THEN
-                floor = booster^.BestowedPriority
-            END
+            boosterpri := booster^.BestowedPriority
+            boosterint := booster^.BestowedInteractivity
+            boosterrt := boosterint OR boosterpri >= OS_PRIORITY_LOW_REALTIME
 
-            interactivityfloor |= booster^.BestowedInteractivity
+            IF (interactivityfloor OR floor >= OS_PRIORITY_LOW_REALTIME) THEN
+                // I'm real time, so I should only care about other real time
+                // threads.
+
+                IF boosterrt AND boosterpri > floor THEN
+                    floor = boosterpri
+                END
+
+            ELSE
+                IF boosterrt THEN
+                    // I wasn't real time but I'm about to be. I should take my
+                    // priority floor from the real time thread that boosts me.
+
+                    floor = boosterpri
+                    interactivityfloor = boosterrt
+                
+                ELSEIF boosterpri > floor THEN
+                    floor = boosterpri
+                END
+            END
         END
 
         KepReleaseTurnstileElevated ( turnstile )
