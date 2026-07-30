@@ -80,6 +80,19 @@ EXTERN FN KeFetchAndSetUlong (
     IN newvalue : ULONG,
 ) : ULONG
 
+#IF BLD_MP
+
+EXTERN FN KeOrUlongRelaxed (
+    IN ptr : ^ULONG,
+    IN bitset : ULONG,
+) : ULONG
+
+#ELSE
+
+#DEFINE KeOrUlongRelaxed [KeOrUlong]
+
+#END
+
 #IF ( == BLD_BITS 64 )
 
 #MACRO KeIncrementPtr ( ptr, inc ) [

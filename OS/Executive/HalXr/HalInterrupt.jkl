@@ -371,12 +371,27 @@ FN HaluBroadcastIpi (
     END
 END
 
-FN (KeInterruptF) HalpDismissInterrupt (
+FN (KeInterruptF) HalpAsynchronousIpi (
     IN interrupt : ^KeuInterrupt,
     IN context : ^OsContext,
 )
 
-    NOTHING
+    // Called when an asynchronous (non-blocking) IPI is sent to this
+    // processor.
+
+    prb := KEP_CURRENT_PRB_LOCAL
+
+    // Atomically yoink the remote pending interrupts set.
+
+    pend := KeFetchAndSetUlong (
+        &prb^.PendingSoftwareInterruptsRemote, // ptr
+        0, // ulong
+    )
+
+    // Interrupts are disabled right now, so we can just OR it in to the
+    // local copy.
+
+    prb^.PendingSoftwareInterrupts |= pend
 END
 
 #END

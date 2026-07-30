@@ -13,14 +13,7 @@ EXTERN FN (KeuCustodyListActivateF) PspActivateStackAllocation (
 #MACRO KepAcknowledgeSoftwareInterrupt ( prb, ipl ) [
     KeAssert ( ipl != KEP_IPL_LOW )
 
-#IF BLD_MP
-    KeMaskUlong (
-        &(prb)^.PendingSoftwareInterrupts, // ptr
-        ~(KepPendingIpl ( ipl )), // mask
-    )
-#ELSE
     NOTHING (prb)^.PendingSoftwareInterrupts &= ~(KepPendingIpl ( ipl ))
-#END
 ]
 
 FNPTR KepSoftwareInterruptHandlerF ()

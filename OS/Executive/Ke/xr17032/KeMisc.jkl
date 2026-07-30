@@ -295,6 +295,25 @@ KeMaskUlong:
 
     ret
 
+#IF BLD_MP
+
+// a0 - ptr
+// a1 - bitset
+// outputs:
+// a3 - origvalue
+KeOrUlongRelaxed:
+.export KeOrUlongRelaxed
+
+.retry:
+    ll   a3, a0                     // Load-locked the location.
+    or   t0, a3, a1                 // OR the value.
+    sc   t0, a0, t0                 // Conditionally store the new value.
+    beq  t0, .retry                 // If store failed, retry.
+
+    ret
+
+#END
+
 // a0 - ptr
 // a1 - bitset
 // outputs:

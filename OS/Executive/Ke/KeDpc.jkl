@@ -97,12 +97,9 @@ EXPORT FN KeEnqueueDpc (
     )
 
     // Set the DPC interrupt pending.
+    // Interrupts are disabled so we can just use a normal OR.
 
-#IF BLD_MP
-    KepSoftInterruptSelf ( prb, KEP_IPL_DPC )
-#ELSE
     prb^.PendingSoftwareInterrupts |= KepPendingIpl ( KEP_IPL_DPC )
-#END
 
     // Release the DPC queue lock.
     

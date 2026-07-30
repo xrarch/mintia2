@@ -185,9 +185,10 @@ STRUCT KepPrb
     TimerTreeLock : KepSpinlock,
     CacheAlign3 : UBYTE[KE_CACHE_ALIGN - SIZEOF KepSpinlock],
 
-    IpiFunction : KepIpiF,
+    PendingSoftwareInterruptsRemote : ULONG,
+    CacheAlign4 : UBYTE[KE_CACHE_ALIGN - SIZEOF ULONG],
 
-    IdlePrbListEntry : RtlListEntry,
+    IpiFunction : KepIpiF,
 
     IpiContext1 : UWORD,
     IpiContext2 : UWORD,
@@ -593,13 +594,8 @@ EXTERN FN KepDisassociateFromBalancedQueue (
 
 EXTERN KepUnexpectedInterruptObject : KeuInterrupt
 
-EXTERN FN KepSoftInterruptSelfSet (
-    IN prb : ^KepPrb,
-    IN set : UWORD,
-)
-
 #MACRO KepSoftInterruptSelf ( prb, ipl ) [
-    KeOrUlong (
+    KeOrUlongRelaxed (
         &(prb)^.PendingSoftwareInterrupts, // ptr
         KepPendingIpl ( ipl ), // ulong
     )
@@ -667,7 +663,7 @@ EXTERN FN KepExecuteOnEveryoneElse (
     // Cause a software interrupt on another processor.
 
     oldvalue := KeOrUlong (
-        &(targetprb)^.PendingSoftwareInterrupts, // ptr
+        &(targetprb)^.PendingSoftwareInterruptsRemote, // ptr
         KepPendingIpl ( ipl ), // bitset
     )
 
