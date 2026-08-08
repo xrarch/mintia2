@@ -270,6 +270,14 @@ FN DbgTraceContext (
     IN context : ^OsContext,
 )
 
+    IF NOT MmIsVirtualValid ( context ) OR
+        NOT MmIsVirtualValid ( context + SIZEOF OsContext - 1 ) THEN
+
+        RtlPrint ( "Context %p overlaps invalid page\n", context )
+
+        LEAVE
+    END
+
     DbgTrace (
         CAST context^.Sp TO ^VOID, // sp
         CAST context^.Epc TO ^VOID, // pc
@@ -280,6 +288,14 @@ END
 FN DbgTraceThreadContext (
     IN context : ^OsContext,
 )
+
+    IF NOT MmIsVirtualValid ( context ) OR
+        NOT MmIsVirtualValid ( context + SIZEOF OsContext - 1 ) THEN
+
+        RtlPrint ( "Context %p overlaps invalid page\n", context )
+
+        LEAVE
+    END
 
     DbgTrace (
         context + SIZEOF OsContext, // sp

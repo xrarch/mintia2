@@ -176,19 +176,13 @@ STRUCT KepPrb
 #IF BLD_MP
     // Give the spinlocks their own cache lines.
 
-    DpcQueueLock : KepSpinlock,
-    CacheAlign1 : UBYTE[KE_CACHE_ALIGN - SIZEOF KepSpinlock],
+    DpcQueueLock : ALIGN(KE_CACHE_ALIGN) KepSpinlock,
+    ReadyQueueLock : ALIGN(KE_CACHE_ALIGN) KepSpinlock,
+    TimerTreeLock : ALIGN(KE_CACHE_ALIGN) KepSpinlock,
 
-    ReadyQueueLock : KepSpinlock,
-    CacheAlign2 : UBYTE[KE_CACHE_ALIGN - SIZEOF KepSpinlock],
+    PendingSoftwareInterruptsRemote : ALIGN(KE_CACHE_ALIGN) ULONG,
 
-    TimerTreeLock : KepSpinlock,
-    CacheAlign3 : UBYTE[KE_CACHE_ALIGN - SIZEOF KepSpinlock],
-
-    PendingSoftwareInterruptsRemote : ULONG,
-    CacheAlign4 : UBYTE[KE_CACHE_ALIGN - SIZEOF ULONG],
-
-    IpiFunction : KepIpiF,
+    IpiFunction : ALIGN(KE_CACHE_ALIGN) KepIpiF,
 
     IpiContext1 : UWORD,
     IpiContext2 : UWORD,
