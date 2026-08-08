@@ -38,6 +38,14 @@ END
     NOTHING (lock)^.Ptr = 0
 ]
 
+#IF BLD_MP
+    #DEFINE KE_CACHE_LINE_END [ALIGN(KE_CACHE_ALIGN),]
+    #DEFINE KE_CACHE_LINE [ALIGN(KE_CACHE_ALIGN)]
+#ELSE
+    #DEFINE KE_CACHE_LINE_END []
+    #DEFINE KE_CACHE_LINE []
+#END
+
 EXTERN FN KeFindResource (
     IN name : ^UBYTE,
     OUT data : ^VOID,
@@ -232,13 +240,13 @@ FNPTR KeInterruptF (
 )
 
 STRUCT KepDispatchHeader
+#IF BLD_MP
+    Spinlock : KepSpinlock,
+#END
     WaitListHead : RtlListEntry,
     Name : ^UBYTE,
     SignalCount : ULONG,
     WaiterCount : ULONG,
-#IF BLD_MP
-    Spinlock : KepSpinlock,
-#END
     Type : UBYTE,
 END
 

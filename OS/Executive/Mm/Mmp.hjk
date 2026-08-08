@@ -95,7 +95,7 @@ STRUCT MmpPfe
 END
 
 STRUCT MmpAvailablePageListColor
-    Lock : KeLock,
+    Lock : KE_CACHE_LINE KeLock,
     Head : RtlListEntry,
 END
 
@@ -152,10 +152,13 @@ EXTERN FN MmpFreeChunkSpace (
 #DEFINE MMP_MAXIMUM_CHUNKS_PENDING_FLUSH 128
 
 STRUCT MmpChunkSpace
+    Lock : KE_CACHE_LINE KeLock,
+
+KE_CACHE_LINE_END
+
     EntryShift : UWORD,
     EntryCount : UWORD,
     FreeListHead : ^MmpChunkEntry,
-    Lock : KeLock,
 
     PendingFlush : ^VOID[MMP_MAXIMUM_CHUNKS_PENDING_FLUSH],
     PendingFlushCount : UBYTE,
@@ -425,10 +428,16 @@ FNPTR MmpPoolReturnMemoryF (
 STRUCT MmpPool
     Lock : KeLock,
 
+KE_CACHE_LINE_END
+
     MmNode : ^MmpNode,
 
     GetMemory : MmpPoolGetMemoryF,
     ReturnMemory : MmpPoolReturnMemoryF,
+
+    Flags : UBYTE,
+
+KE_CACHE_LINE_END
 
     BytesUsedInternally : UWORD,
     BytesUsedExternally : UWORD,
@@ -436,8 +445,6 @@ STRUCT MmpPool
 
     LogListHeads : RtlListEntry[MMP_BLOCK_LOG_BUCKETS],
     SizeListHeads : RtlListEntry[MMP_BLOCK_SIZE_BUCKETS],
-
-    Flags : UBYTE,
 END
 
 STRUCT MmpPoolCacheList
@@ -453,17 +460,54 @@ STRUCT MmpDeferredFlush
 END
 
 STRUCT MmpNode
-    PoolTable : ^MmpPool[MM_MAXIMUM_POOL],
+    DynamicSpaceLock : KeLock,
+
+KE_CACHE_LINE_END
+
+    DynamicSpaceTreeLock : KeLock,
+
+KE_CACHE_LINE_END
+
+    ModifiedListLock : KeLock,
+
+KE_CACHE_LINE_END
+
+    ModifiedListHead : RtlListEntry,
+    ModifiedPageCount : UWORD,
+
+KE_CACHE_LINE_END
+
+    FreeList : MmpAvailablePageList,
+    ZeroList : MmpAvailablePageList,
+    StandbyList : MmpAvailablePageList,
+
+    AvailablePageCount : WORD,
+    FluidPageCount : UWORD,
+
+KE_CACHE_LINE_END
 
     DynamicSpaceRoot : RtlAvlNode,
-    DynamicSpaceLock : KeLock,
-    DynamicSpaceTreeLock : KeLock,
+
     DynamicSpaceBitmap : RtlBitmapHeader,
     DynamicSpaceHint : UWORD,
     DynamicSpaceBase : ^VOID,
 
     DeferredFlushIndex : UWORD,
     DeferredFlushPages : UWORD,
+
+    PoolSpace : MmpChunkSpace,
+    CacheSpace : MmpChunkSpace,
+
+KE_CACHE_LINE_END
+
+    CommitRemainingMinimum : UWORD,
+    CommitRemaining : WORD,
+    CommitLimit : UWORD,
+    CommitLimitGrowthLeft : UWORD,
+
+KE_CACHE_LINE_END
+
+    PoolTable : ^MmpPool[MM_MAXIMUM_POOL],
 
     SpaceNodeCache : ^MmpPoolCache,
     MdlCache : ^MmpPoolCache,
@@ -474,24 +518,6 @@ STRUCT MmpNode
 
     KeNode : ^KeuNode,
 
-    PoolSpace : MmpChunkSpace,
-    CacheSpace : MmpChunkSpace,
-
-    FreeList : MmpAvailablePageList,
-    ZeroList : MmpAvailablePageList,
-    StandbyList : MmpAvailablePageList,
-    ModifiedListHead : RtlListEntry,
-    ModifiedListLock : KeLock,
-
-    AvailablePageCount : WORD,
-    FluidPageCount : UWORD,
-    ModifiedPageCount : UWORD,
-
-    CommitRemainingMinimum : UWORD,
-    CommitRemaining : WORD,
-    CommitLimit : UWORD,
-    CommitLimitGrowthLeft : UWORD,
-
     TotalPages : UWORD,
 
     LowPageCount : UWORD,
@@ -499,13 +525,37 @@ STRUCT MmpNode
     ModifiedPageMaximum : UWORD,
     ZeroingThreshold : UWORD,
 
+    SizeLevel : UBYTE,
+    Id : UBYTE,
+
+KE_CACHE_LINE_END
+
+    PgPoolCacheAdjustItem : ExWorkItem,
+
+    PgPoolCacheAdjustActive : UBYTE,
+    CacheSpaceChunkPages : UBYTE,
+
+KE_CACHE_LINE_END
+
     LowMemoryEvent : KeEvent,
+
+KE_CACHE_LINE_END
+
     PageAvailableEvent : KeEvent,
+
+KE_CACHE_LINE_END
+
     LowPageAvailableEvent : KeEvent,
+
+KE_CACHE_LINE_END
+
     ModifiedPageEvent : KeEvent,
+
+KE_CACHE_LINE_END
+
     ZeroPageEvent : KeEvent,
 
-    CommitLock : KeLock,
+KE_CACHE_LINE_END
 
     PoolRecords : MmpPool[MM_MAXIMUM_POOL],
 
@@ -517,14 +567,7 @@ STRUCT MmpNode
     NpPoolCacheList : MmpPoolCacheList,
     PgPoolCacheList : MmpPoolCacheList,
 
-    PgPoolCacheAdjustItem : ExWorkItem,
-
     DeferredFlushTable : MmpDeferredFlush[MMP_DEFERRED_FLUSH_PAIRS],
-
-    SizeLevel : UBYTE,
-    Id : UBYTE,
-    PgPoolCacheAdjustActive : UBYTE,
-    CacheSpaceChunkPages : UBYTE,
 END
 
 EXTERN FN MmpClearTrackingTableEntry (

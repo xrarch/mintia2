@@ -29,12 +29,12 @@ EXTERN FN ExpHash (
 #DEFINE EXP_NAME_BUCKETS 64
 
 STRUCT ExpNameBucket
-    TreeRoot : RtlAvlNode,
     Lock : KeLock,
+    TreeRoot : RtlAvlNode,
 END
 
 STRUCT ExpNode
-    WorkQueues : KeBalancedQueue[EX_MAX_WORK_PRIORITY],
-    NameBuckets : ExpNameBucket[EXP_NAME_BUCKETS],
-    EventCounterCache : ^MmpPoolCache,
+    WorkQueues : KE_CACHE_LINE KeBalancedQueue[EX_MAX_WORK_PRIORITY],
+    NameBuckets : KE_CACHE_LINE ExpNameBucket[EXP_NAME_BUCKETS],
+    EventCounterCache : KE_CACHE_LINE ^MmpPoolCache,
 END

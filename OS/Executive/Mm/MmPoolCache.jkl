@@ -33,7 +33,9 @@ END
 ]
 
 STRUCT MmpPoolCachePerCpu
-    MagLock : KeLock,
+    MagLock : KE_CACHE_LINE KeLock,
+
+KE_CACHE_LINE_END
 
     Loaded : ^^VOID,
     Previous : ^^VOID,
@@ -57,9 +59,9 @@ STRUCT MmpSlabBackedPoolCacheContext
 END
 
 STRUCT MmpPoolCache
-    Name : ^UBYTE,
+    DepotLock : KE_CACHE_LINE KeLock,
 
-    DepotLock : KeLock,
+KE_CACHE_LINE_END
 
     FullMagazineList : MmpDepotList,
     EmptyMagazineList : MmpDepotList,
@@ -67,6 +69,10 @@ STRUCT MmpPoolCache
     MasterListEntry : RtlListEntry,
 
     MagazineType : ^MmpMagazineType,
+
+KE_CACHE_LINE_END
+
+    Name : ^UBYTE,
 
     Allocate : MmPoolCacheAllocateF,
     Free : MmPoolCacheFreeF,
@@ -81,14 +87,9 @@ STRUCT MmpPoolCache
     Pageable : UBYTE,
 END
 
-#DEFINE MMP_PCPCPU_SIZE [((SIZEOF MmpPoolCachePerCpu + KE_CACHE_ALIGN - 1) &
-    ~(KE_CACHE_ALIGN - 1))]
-
-#DEFINE MMP_PC_SIZE [((SIZEOF MmpPoolCache + KE_CACHE_ALIGN - 1) &
-    ~(KE_CACHE_ALIGN - 1))]
-
 #MACRO MmpPoolCachePerCpuById ( cache, id ) [
-    (CAST cache + MMP_PC_SIZE + (id * MMP_PCPCPU_SIZE) TO ^MmpPoolCachePerCpu)
+    (CAST (cache + SIZEOF MmpPoolCache) +
+        (id * SIZEOF MmpPoolCachePerCpu) TO ^MmpPoolCachePerCpu)
 ]
 
 #MACRO MmpLockPoolCacheList ( list ) [
@@ -143,7 +144,7 @@ FN MmpInitializeSlabCache (
         size = SIZEOF RtlListEntry
     END
 
-    size = (size + SIZEOF ^VOID + RTL_ALIGN_BYTES - 1) & ~(RTL_ALIGN_BYTES - 1)
+    size = (size + SIZEOF ^VOID + KE_CACHE_ALIGN - 1) & ~(KE_CACHE_ALIGN - 1)
 
     scache^.Size = size
     scache^.PoolIndex = poolindex
@@ -517,7 +518,7 @@ EXPORT FN MmCreatePoolCacheEx (
         percpu^.MagazineSize = cache^.MagazineType^.Size
 
         i += 1
-        percpu += MMP_PCPCPU_SIZE
+        percpu += SIZEOF MmpPoolCachePerCpu
     END
 
     MmpUnlockPoolCacheList ( list )
@@ -822,7 +823,7 @@ FN MmpPurgeCpuMagazinesPoolCache (
         END
 
         i += 1
-        percpu += MMP_PCPCPU_SIZE
+        percpu += SIZEOF MmpPoolCachePerCpu
     END
 END
 
@@ -1255,8 +1256,8 @@ FN MmpInitializePoolCache (
     MmpInitializeSlabCache (
         mmnode, // mmnode
         &mmnode^.PoolCacheSlabs, // scache
-        MMP_PC_SIZE + KeQueryMostProcessorsInAnyNode () *
-            MMP_PCPCPU_SIZE, // size
+        SIZEOF MmpPoolCache +
+        KeQueryMostProcessorsInAnyNode () * SIZEOF MmpPoolCachePerCpu, // size
         MM_NONPAGED_POOL, // poolindex
         'PoCa', // tag
     )
