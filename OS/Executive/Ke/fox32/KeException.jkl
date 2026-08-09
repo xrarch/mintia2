@@ -326,11 +326,6 @@ KepSystemServiceVector:
 
     ise
 
-    // Make enough space in the kernel stack for the maximal number of stack
-    // allocated arguments, in case we need to copy them later.
-
-    sub  sp, (8 * 4)
-
     // Save callee-saved registers and hardware trap frame.
 
     mov  t1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
@@ -363,6 +358,11 @@ KepSystemServiceVector:
     mov  [t2 + OsContext_Epc], t5
 
     mov  [t1 + KeuThread_UserFrame], t2
+
+    // Make enough space in the kernel stack for the maximal number of stack
+    // allocated arguments, in case we need to copy them later.
+
+    sub  sp, (8 * 4)
 
     // Make sure the saved stack pointer is within userspace.
 
