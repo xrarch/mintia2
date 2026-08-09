@@ -50,7 +50,7 @@ EXPORT FN MmSafeCopyIn (
     // Safely copy a hunk of bytes from userspace.
     // The "src" pointer is supplied by usermode. The "dest" pointer is trusted.
 
-    IF src >= MMP_USER_SPACE_END THEN
+    IF src >= KE_USER_SPACE_END THEN
         RETURN OS_STATUS_READ_FAULT
     END
 
@@ -82,7 +82,7 @@ EXPORT FN MmSafeCopyOut (
     // Safely copy a hunk of bytes to userspace.
     // The "dest" pointer is supplied by usermode. The "src" pointer is trusted.
 
-    IF dest >= MMP_USER_SPACE_END THEN
+    IF dest >= KE_USER_SPACE_END THEN
         RETURN OS_STATUS_WRITE_FAULT
     END
 
@@ -118,7 +118,7 @@ FN (KeAbortableF) MmpSafeCaptureString (
 
     src := ctx^.Source
 
-    IF src >= MMP_USER_SPACE_END THEN
+    IF src >= KE_USER_SPACE_END THEN
         RETURN OS_STATUS_READ_FAULT
     END
 
@@ -127,7 +127,7 @@ FN (KeAbortableF) MmpSafeCaptureString (
 
     data := src^.Data
 
-    IF data >= MMP_USER_SPACE_END THEN
+    IF data >= KE_USER_SPACE_END THEN
         RETURN OS_STATUS_READ_FAULT
     END
 
