@@ -17,6 +17,14 @@ EXTERN FN HaluInterrupt (
 
 KepCurrentExceptionCode := 0
 
+// Temporary values
+#DEFINE KEP_SYSTEM_SERVICE_MAX 0
+STRUCT KepSystemService
+    Routine : ^VOID,
+    StackArguments : ULONG,
+END
+KepSystemServiceTable : KepSystemService[1]
+
 #ASM [
 
 #MACRO KepFox32Exception ( code ) [
@@ -302,6 +310,156 @@ KepFox32Exception ( 269 )
 KepFox32Exception ( 270 )
 KepFox32Exception ( 271 )
 
+KepSystemServiceVector:
+
+    // A system service was invoked.
+    //
+    // The system service number is provided in t0.
+    //
+    // No need to save temp registers: the caller-saved registers are saved by
+    // the user program, since this is a voluntary action. We do need to save
+    // the callee-saved registers just in case a signal occurs or the system
+    // service implementation waits with a continuation and discards the kernel
+    // stack.
+
+    // Enable interrupts now.
+
+    ise
+
+    // Make enough space in the kernel stack for the maximal number of stack
+    // allocated arguments, in case we need to copy them later.
+
+    sub  sp, (8 * 4)
+
+    // Save callee-saved registers and hardware trap frame.
+
+    mov  t1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+    mov  t2, t1
+    add  t2, KeuThread_UserContextArea
+
+    mov  [t2 + OsContext_S0], s0
+    mov  [t2 + OsContext_S1], s1
+    mov  [t2 + OsContext_S2], s2
+    mov  [t2 + OsContext_S3], s3
+    mov  [t2 + OsContext_S4], s4
+    mov  [t2 + OsContext_S5], s5
+    mov  [t2 + OsContext_S6], s6
+    mov  [t2 + OsContext_S7], s7
+    mov  [t2 + OsContext_S8], s8
+    mov  [t2 + OsContext_S9], s9
+    mov  [t2 + OsContext_S10], s10
+    mov  [t2 + OsContext_S11], s11
+    mov  [t2 + OsContext_S12], s12
+    mov  [t2 + OsContext_S13], s13
+    mov  [t2 + OsContext_S14], s14
+    mov  [t2 + OsContext_S15], s15
+    mov  [t2 + OsContext_S16], s16
+    mov  [t2 + OsContext_S17], s17
+    mov  t3, [sp + OsFoxHardwareTrapFrame_Sp]
+    movz.8 t4, [sp + OsFoxHardwareTrapFrame_Eflags]
+    mov  t5, [sp + OsFoxHardwareTrapFrame_Epc]
+    mov  [t2 + OsContext_Sp], t3
+    mov.8 [t2 + OsContext_Eflags], t4
+    mov  [t2 + OsContext_Epc], t5
+
+    mov  [t1 + KeuThread_UserFrame], t2
+
+    // Make sure the saved stack pointer is within userspace.
+
+    cmp  t3, KE_USER_SPACE_END
+    ifgteq rjmp BadSystemService
+
+    // Make sure the system service number is valid.
+
+    cmp  t0, KEP_SYSTEM_SERVICE_MAX
+    ifgteq rjmp BadSystemService
+
+    // Multiply system service number by 8 and index the system service table,
+    // which is an array of 8-byte records.
+
+    sla  t0, 3
+    mov  t1, KepSystemServiceTable
+    add  t1, t0
+
+    // Check if there are stack arguments.
+
+    cmp  [t1 + KepSystemService_StackArguments], 0
+    ifz  rjmp KepArgumentCopyEnd
+
+    // There are stack arguments, so copy the maximal number (8) from the user
+    // stack to the kernel stack. If we take a bad fault on the user stack, a
+    // return will be forced.
+
+KepArgumentCopyStart:
+
+    mov  t0, [t3 + 4]
+    mov  t2, [t3 + 8]
+    mov  t4, [t3 + 12]
+    mov  t5, [t3 + 16]
+    mov  [sp], t0
+    mov  [sp + 4], t2
+    mov  [sp + 8], t4
+    mov  [sp + 12], t5
+    mov  t0, [t3 + 20]
+    mov  t2, [t3 + 24]
+    mov  t4, [t3 + 28]
+    mov  t5, [t3 + 32]
+    mov  [sp + 16], t0
+    mov  [sp + 20], t2
+    mov  [sp + 24], t4
+    mov  [sp + 28], t5
+
+KepArgumentCopyEnd:
+
+    // Now actually call the system service.
+
+    call [t1 + KepSystemService_Routine]
+
+    // Disable interrupts and check if a usermode interrupt (i.e. signals, APCs)
+    // needs to be dispatched.
+
+    icl
+
+    mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+    cmp  [t0 + KeuThread_UserInterrupt], 0
+    ifnz rjmp DispatchUserInterrupt
+
+    // If no user interrupt occurred then we can return without restoring
+    // anything.
+
+    add  sp, (8 * 4)
+
+    reti
+
+BadSystemService:
+
+    rcall KepBadSystemServiceHelper
+
+    icl
+
+DispatchUserInterrupt:
+    
+    mov  [KepInterruptsDisabled], 1
+
+    call KepDispatchUserInterrupts
+
+    mov  a0, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+    add  a0, KeuThread_UserContextArea
+
+    // Fall through.
+
+// a0 - trapframe
+KepContinue:
+
+    icl
+
+    mov  [KepInterruptsDisabled], 0
+
+    mov  sp, a0
+    add  sp, 4 // Skip OldIpl
+
+    rjmp KepRestoreTrapFrame
+
 KepExceptionVector:
 .export KepExceptionVector
 
@@ -348,6 +506,9 @@ KepExceptionVector:
     call KepExceptionHandler
 
     add  sp, 7 // Alignment + OldIpl
+
+KepRestoreTrapFrame:
+
     pop  t0
     pop  t1
     pop  t2
@@ -383,7 +544,6 @@ KepExceptionVector:
     pop  fp
     add  sp, 4
     reti
-
 
 DbgExcEnd:
 .export DbgExcEnd
@@ -829,6 +989,24 @@ ifnz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
 
 ]
 
+EXTERN KepSystemServiceVector : UBYTE
+EXTERN KepArgumentCopyStart : UBYTE
+EXTERN KepArgumentCopyEnd : UBYTE
+
+EXTERN FN KepContinue (
+    IN trapframe : ^OsContext,
+)
+
+FN KepBadSystemServiceHelper ()
+
+    // Helper called when a bad system service is performed.
+
+    KeSignalThread (
+        KeCurrentThread (), // thread
+        OS_SIGNAL_SYS, // signal
+    )
+END
+
 KepCauseNames : ^UBYTE[16] = {
     [OS_FOX32_EXC_DIV_ZERO] = "DIVBYZERO",
     [OS_FOX32_EXC_ILLEGAL] = "ILLEGAL",
@@ -1123,6 +1301,20 @@ FN (KepExceptionHandlerF) KepPageFault (
                 OS_SIGNAL_ACV, // signal
             )
 
+        ELSEIF context^.Epc >= &KepArgumentCopyStart AND
+            context^.Epc < &KepArgumentCopyEnd THEN
+
+            // Bad fault on userspace while copying arguments to the kernel
+            // stack. Force a return with an error status.
+
+            context = thread^.UserFrame
+
+            context^.A3 = status
+
+            KepContinue ( context )
+
+            KeAssert ( FALSE )
+
         ELSE
             // Happened in kernel mode. Abort the current operation.
 
@@ -1252,6 +1444,8 @@ FN KepInitializeArchitecture (
 
         i += 1
     END
+
+    vec[OS_FOX32_EXC_SYSTEM_SERVICE] = &KepSystemServiceVector
 END
 
 #SECTION "PAGEtext"
@@ -1313,5 +1507,13 @@ EXPORT FN (KeContinuationF) KeReturnToUserContinuation (
     // Present the return value as being whatever is in waitstatus.
     // The second and third return values are in Parameter1 and Parameter2.
 
-    KeCrash ( "NYI" )
+    thread := KeCurrentThread ()
+
+    trapframe := thread^.UserFrame
+
+    trapframe^.A3 = waitstatus
+    trapframe^.A2 = continuation^.Parameter1
+    trapframe^.A1 = continuation^.Parameter2
+
+    KepContinue ( trapframe )
 END

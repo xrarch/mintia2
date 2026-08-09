@@ -200,6 +200,14 @@ FN KeuInitializeThread (
 
     thread^.LastFaultStatus = 0
 
+    // Fill the context area with zeroes to avoid leaking data to usermode.
+
+    RtlFillMemoryWithUlong (
+        &thread^.UserContextArea, // ptr
+        SIZEOFVALUE thread^.UserContextArea, // sz
+        0, // ulong
+    )
+
     // Add to the process's thread list.
 
     KeAcquireLockExclusive ( &process^.Lock )

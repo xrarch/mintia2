@@ -312,7 +312,7 @@ END
 KepHandlerTable : KepHighLevelHandlerF[16] = {
     [0] = &KepSpuriousException,
     [OS_XR_ECAUSE_INT] = &KepHandleInterrupt,
-    [2] = &KepSpuriousException,
+    [OS_XR_ECAUSE_SYS] = &KepSpuriousException,
     [3] = &KepSpuriousException,
     [OS_XR_ECAUSE_BUS] = &KepHandleError,
     [OS_XR_ECAUSE_NMI] = &KepHandleBreakpoint,
@@ -1123,7 +1123,9 @@ FN KepInitializeArchitecture (
 
             // Copy the syscall handler into the exception block.
             // This one is special because it doesn't need to save as much as
-            // the others do.
+            // the others do, and it saves context into a special per-thread
+            // block which is not discarded if the syscall implementation blocks
+            // with a continuation.
 
             // ... TODO ...
 
