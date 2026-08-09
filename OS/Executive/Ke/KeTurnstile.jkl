@@ -658,12 +658,12 @@ FN KepBlockOnLock (
         // allocation depends upon raise to KEP_IPL_APC, so we won't be holding
         // any such mutexes at that time.
 
+        thread^.PendingApcLevelInt = TRUE
+
         KepSoftInterruptSelf (
-            KEP_CURRENT_PRB, // targetprb
+            KEP_CURRENT_PRB_LOCAL, // targetprb
             KEP_IPL_APC, // ipl
         )
-
-        thread^.PendingApcLevelInt = TRUE
     END
 #END
 

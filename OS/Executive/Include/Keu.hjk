@@ -61,25 +61,25 @@ STRUCT KepWaitBlock
     Flags : ULONG,
 END
 
-STRUCT KepTurnstile
-    ChainEntry : RtlListEntry,
 
-    PiEntry : RtlListEntry,
+STRUCT KepTurnstile
+#IF BLD_MP
+    Spinlock : KepSpinlock,
+#END
 
     WaiterHeapRoot : ^RtlHeapEntry,
 
     Free : ^KepTurnstile,
 
-    Key : ^VOID,
+    ChainEntry : RtlListEntry,
 
-    Event : KeEvent,
+    PiEntry : RtlListEntry,
+
+    Key : ^VOID,
 
     Owner : ^KeuThread,
 
-#IF BLD_MP
-    Spinlock : KepSpinlock,
-#END
-
+    Event : KeEvent,
 END
 
 EXTERN FN KeuInitializeThread (
