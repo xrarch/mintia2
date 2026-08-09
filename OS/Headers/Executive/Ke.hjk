@@ -244,9 +244,9 @@ STRUCT KepDispatchHeader
     Spinlock : KepSpinlock,
 #END
     WaitListHead : RtlListEntry,
-    Name : ^UBYTE,
     SignalCount : ULONG,
     WaiterCount : ULONG,
+    Name : ^UBYTE,
     Type : UBYTE,
 END
 
@@ -605,14 +605,14 @@ UNION KepRequestHeads
 END
 
 STRUCT KeRequestQueue
+#IF BLD_MP
+    Spinlock : KepSpinlock,
+#END
+
     Head : KepRequestHeads,
     Pivot : UWORD,
     StartFunction : KeRequestStartF,
     CompleteFunction : KeRequestCompleteF,
-
-#IF BLD_MP
-    Spinlock : KepSpinlock,
-#END
 
     Current : UINT,
     Maximum : UINT,

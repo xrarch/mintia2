@@ -170,28 +170,77 @@ EXTERN KepMaximumBalanceIterations : ULONG
 
 // The per-processor block (Prb) is an architectural page size, but is at
 // minimum 4KB. It contains all per-processor information.
+//
+// It is carefully arranged into cache lines under the rules spelled out in
+// Documentation/Design/StructureLayout.txt.
 
 STRUCT KepPrb
 
 #IF BLD_MP
-    // Give the spinlocks their own cache lines.
-
     DpcQueueLock : KepSpinlock,
+#END
 
 KE_CACHE_LINE_END
 
-    ReadyQueueLock : KepSpinlock,
+    DpcListHead : RtlListEntry,
 
 KE_CACHE_LINE_END
 
+#IF BLD_MP
     TimerTreeLock : KepSpinlock,
+#END
 
 KE_CACHE_LINE_END
 
+    TimerTreeRoot : ^RtlHeapEntry,
+
+KE_CACHE_LINE_END
+
+#IF BLD_MP
+    ReadyQueueLock : KepSpinlock,
+#END
+
+KE_CACHE_LINE_END
+
+    KernelStackTop : ^VOID,
+    CurrentThread : ^KeuThread,
+    NextThread : ^KeuThread,
+
+    // Idle threads (priority 0) go on this list.
+
+    IdleListHead : RtlListEntry,
+
+    // 32-bit mask where a set bit indicates a real time queue that has at least
+    // one thread.
+
+    RealTimeReady : ULONG,
+
+    // 32-bit mask where a set bit indicates a timeshared queue that has at
+    // least one thread.
+
+    CalendarReady : ULONG,
+
+    CalendarRunIndex : UBYTE,
+    CalendarEnqueueIndex : UBYTE,
+
+KE_CACHE_LINE_END
+
+    StashedCurrentThreadInfo : ULONG,
+
+    // 32-bit count of threads enqueued ready on this processor.
+#IF BLD_MP
+    Load : ULONG,
+#END
+
+KE_CACHE_LINE_END
+
+#IF BLD_MP
     PendingSoftwareInterruptsRemote : ULONG,
+#END
 
 KE_CACHE_LINE_END
 
+#IF BLD_MP
     IpiFunction : KepIpiF,
 
     IpiContext1 : UWORD,
@@ -202,15 +251,6 @@ KE_CACHE_LINE_END
     IpiPendingSet : ULONG,
 
     IdleDeferredIpiEvents : ULONG,
-#END
-
-KE_CACHE_LINE_END
-
-    StashedCurrentThreadInfo : ULONG,
-
-    // 32-bit count of threads enqueued ready on this processor.
-#IF BLD_MP
-    Load : ULONG,
 #END
 
 KE_CACHE_LINE_END
@@ -231,34 +271,6 @@ KE_CACHE_LINE_END
     StealWork : UBYTE,
     InIdleLoop : UBYTE,
 #END
-
-KE_CACHE_LINE_END
-
-    KernelStackTop : ^VOID,
-    CurrentThread : ^KeuThread,
-    NextThread : ^KeuThread,
-
-    // 32-bit mask where a set bit indicates a real time queue that has at least
-    // one thread.
-
-    RealTimeReady : ULONG,
-
-    // 32-bit mask where a set bit indicates a timeshared queue that has at
-    // least one thread.
-
-    CalendarReady : ULONG,
-
-    CalendarRunIndex : UBYTE,
-    CalendarEnqueueIndex : UBYTE,
-
-KE_CACHE_LINE_END
-
-    TimerTreeRoot : ^RtlHeapEntry,
-
-KE_CACHE_LINE_END
-
-    DpcListHead : RtlListEntry,
-    TimerExpirationDpc : KeDpc,
 
 KE_CACHE_LINE_END
 
@@ -287,12 +299,7 @@ KE_CACHE_LINE_END
     // Put big stuff at the end to make sure the common fields are readily in
     // reach of immediate offset ranges on various architectures.
 
-    IdleThread : KeuThread,
-
-#IF BLD_MP
-    IpiInterrupt1 : KeuInterrupt,
-    IpiInterrupt2 : KeuInterrupt,
-#END
+    TimerExpirationDpc : KeDpc,
 
     ClockTicks : RtlUquad,
     DpcTimeMs : RtlUquad,
@@ -300,11 +307,16 @@ KE_CACHE_LINE_END
     SystemTimeMs : RtlUquad,
     EarliestTimerMs : RtlUquad,
 
+    IplTimes : RtlUquad[KEP_IPL_MAX],
+
+    IdleThread : KeuThread,
+
+#IF BLD_MP
+    IpiInterrupt1 : KeuInterrupt,
+    IpiInterrupt2 : KeuInterrupt,
+#END
+
 KE_CACHE_LINE_END
-
-    // Idle threads (priority 0) go on this list.
-
-    IdleListHead : RtlListEntry,
 
     // Inspired by ULE of FreeBSD:
     //
@@ -343,8 +355,6 @@ KE_CACHE_LINE_END
     // Threads on these lists are called "timeshared threads".
 
     CalendarListHeads : RtlListEntry[KEP_TIMESHARED_QUEUES],
-
-    IplTimes : RtlUquad[KEP_IPL_MAX],
 END
 
 #DEFINE KEP_DISPATCH_EVENT_NOTIF 1
@@ -394,33 +404,50 @@ END
 #DEFINE KEP_TURNSTILE_CHAINS 128
 
 STRUCT KepTurnstileChain
-    Head : RtlListEntry,
 #IF BLD_MP
     Spinlock : KepSpinlock,
 #END
+    Head : RtlListEntry,
 END
 
 STRUCT KepNode
-    BlNode : ^BlNodeInfo,
 
-    TurnstileChains : KepTurnstileChain[KEP_TURNSTILE_CHAINS],
+#IF BLD_MP
+    StackCacheLock : KepSpinlock,
+#END
+
+KE_CACHE_LINE_END
 
     StackCacheListHead : ^KeuCachedStack,
 
+    CachedStackCount : ULONG,
+    CachedStackMinimum : ULONG,
+
+KE_CACHE_LINE_END
+
+    BlNode : ^BlNodeInfo,
+
+KE_CACHE_LINE_END
+
+    // Only processor 0 in the node uses these fields, so put them in a
+    // cache line together.
+
 #IF BLD_MP
     WorkBalanceDpc : KeDpc,
-
-    QueueRemovalLocks : KepSpinlock[KEP_QUEUE_REMOVAL_LOCKS],
-
-    StackCacheLock : KepSpinlock,
 
     MaximumBalanceIterations : ULONG,
 
     NextWorkBalanceMs : LONG,
 #END
 
-    CachedStackCount : ULONG,
-    CachedStackMinimum : ULONG,
+KE_CACHE_LINE_END
+
+    TurnstileChains : KE_CACHE_LINE KepTurnstileChain[KEP_TURNSTILE_CHAINS],
+
+#IF BLD_MP
+    QueueRemovalLocks : KE_CACHE_LINE KepSpinlock[KEP_QUEUE_REMOVAL_LOCKS],
+#END
+
 END
 
 EXTERN FN KepLowerIpl (

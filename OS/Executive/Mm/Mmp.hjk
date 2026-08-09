@@ -152,7 +152,7 @@ EXTERN FN MmpFreeChunkSpace (
 #DEFINE MMP_MAXIMUM_CHUNKS_PENDING_FLUSH 128
 
 STRUCT MmpChunkSpace
-    Lock : KE_CACHE_LINE KeLock,
+    Lock : KeLock,
 
 KE_CACHE_LINE_END
 
@@ -464,7 +464,20 @@ STRUCT MmpNode
 
 KE_CACHE_LINE_END
 
+    DynamicSpaceBitmap : RtlBitmapHeader,
+    DynamicSpaceHint : UWORD,
+    DynamicSpaceBase : ^VOID,
+
+    DeferredFlushIndex : UWORD,
+    DeferredFlushPages : UWORD,
+
+KE_CACHE_LINE_END
+
     DynamicSpaceTreeLock : KeLock,
+
+KE_CACHE_LINE_END
+
+    DynamicSpaceRoot : RtlAvlNode,
 
 KE_CACHE_LINE_END
 
@@ -481,36 +494,24 @@ KE_CACHE_LINE_END
     ZeroList : MmpAvailablePageList,
     StandbyList : MmpAvailablePageList,
 
-    AvailablePageCount : WORD,
-    FluidPageCount : UWORD,
-
 KE_CACHE_LINE_END
 
-    DynamicSpaceRoot : RtlAvlNode,
-
-    DynamicSpaceBitmap : RtlBitmapHeader,
-    DynamicSpaceHint : UWORD,
-    DynamicSpaceBase : ^VOID,
-
-    DeferredFlushIndex : UWORD,
-    DeferredFlushPages : UWORD,
-
-    PoolSpace : MmpChunkSpace,
-    CacheSpace : MmpChunkSpace,
+    AvailablePageCount : WORD,
 
 KE_CACHE_LINE_END
 
     CommitRemainingMinimum : UWORD,
     CommitRemaining : WORD,
-    CommitLimit : UWORD,
-    CommitLimitGrowthLeft : UWORD,
 
 KE_CACHE_LINE_END
 
-    PoolTable : ^MmpPool[MM_MAXIMUM_POOL],
+    CommitLimit : UWORD,
+    CommitLimitGrowthLeft : UWORD,
 
     SpaceNodeCache : ^MmpPoolCache,
     MdlCache : ^MmpPoolCache,
+
+    PoolTable : ^MmpPool[MM_MAXIMUM_POOL],
 
     QuickPteBase : ^MmpPte,
 
@@ -525,6 +526,10 @@ KE_CACHE_LINE_END
     ModifiedPageMaximum : UWORD,
     ZeroingThreshold : UWORD,
 
+    FluidPageCount : UWORD,
+
+    MagazineTypeTable : MmpMagazineType[MMP_MAGAZINE_MAX],
+
     SizeLevel : UBYTE,
     Id : UBYTE,
 
@@ -537,29 +542,20 @@ KE_CACHE_LINE_END
 
 KE_CACHE_LINE_END
 
-    LowMemoryEvent : KeEvent,
+    LowMemoryEvent : KE_CACHE_LINE KeEvent,
+    PageAvailableEvent : KE_CACHE_LINE KeEvent,
+    LowPageAvailableEvent : KE_CACHE_LINE KeEvent,
+    ModifiedPageEvent : KE_CACHE_LINE KeEvent,
+    ZeroPageEvent : KE_CACHE_LINE KeEvent,
 
 KE_CACHE_LINE_END
 
-    PageAvailableEvent : KeEvent,
-
-KE_CACHE_LINE_END
-
-    LowPageAvailableEvent : KeEvent,
-
-KE_CACHE_LINE_END
-
-    ModifiedPageEvent : KeEvent,
-
-KE_CACHE_LINE_END
-
-    ZeroPageEvent : KeEvent,
+    PoolSpace : KE_CACHE_LINE MmpChunkSpace,
+    CacheSpace : KE_CACHE_LINE MmpChunkSpace,
 
 KE_CACHE_LINE_END
 
     PoolRecords : MmpPool[MM_MAXIMUM_POOL],
-
-    MagazineTypeTable : MmpMagazineType[MMP_MAGAZINE_MAX],
 
     PoolCacheSlabs : MmpSlabCache,
     SlabCacheSlabs : MmpSlabCache,

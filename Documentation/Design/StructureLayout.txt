@@ -1,0 +1,37 @@
+This document defines guidelines for data structure design in the MINTIA2
+kernel, and primarily applies to large high traffic structures that are accessed
+by multiple processors. These guidelines are intended to reduce cache traffic,
+and work primarily by splitting these structures up into cache lines which are
+each aware of the ways in which they are likely to move from processor to
+processor.
+
+The Jackal language provides an ALIGN() type modifier which can also be used to
+insert arbitrary alignment padding into a structure as a pseudo-field of that
+structure. A macro is provided in Ke.hjk that expands to an ALIGN keyword which
+yields cache line alignment on the target architecture of the kernel. This is
+used to delineate cache lines within structures and is:
+
+KE_CACHE_LINE_END
+
+Shared structures should be broken into cache line aligned sections based on the
+following guidelines:
+
+  o Spinlocks and mutexes should have their own cache lines, in order to
+    isolate the effects of contention.
+
+  o The cache line for a spinlock should usually be followed by another
+    cache line containing the data the spinlock guards. This prevents activity
+    on the lock from causing this cache line to bounce between the holder of the
+    lock and its waiters.
+
+    For very low contention memory items, this cache line can be merged into the
+    one containing the lock itself, if needed in order to save memory on the
+    alignment padding.
+
+  o All of the initialize-once, read-only data should be tightly packed into a
+    cache line aligned area. This allows maximum true sharing to occur between
+    multiple processors accessing the data.
+
+  o Other intuition should be used as needed. For example, it would be wise to
+    give an area that is written and read equally often but 99% of the time only
+    by the same core, as it can then reside in that core's L1 cache.
