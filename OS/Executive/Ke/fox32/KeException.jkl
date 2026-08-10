@@ -19,9 +19,13 @@ KepCurrentExceptionCode := 0
 
 // Temporary values
 #DEFINE KEP_SYSTEM_SERVICE_MAX 0
+#DEFINE KEP_MAX_STACK_ARGS 8
 STRUCT KepSystemService
     Routine : ^VOID,
-    StackArguments : ULONG,
+    HasStackArguments : UBYTE,
+    HasContinuation : UBYTE,
+    Reserved1 : UBYTE,
+    Reserved2 : UBYTE,
 END
 KepSystemServiceTable : KepSystemService[1]
 
@@ -310,6 +314,39 @@ KepFox32Exception ( 269 )
 KepFox32Exception ( 270 )
 KepFox32Exception ( 271 )
 
+#MACRO KepSaveCallee ( th, usp, sc ) [
+    mov  sc, th
+    add  sc, KeuThread_UserContextArea
+    mov  [th + KeuThread_UserFrame], sc
+
+    mov  [sc + OsContext_Sp], usp
+
+    mov  [sc + OsContext_S0], s0
+    mov  [sc + OsContext_S1], s1
+    mov  [sc + OsContext_S2], s2
+    mov  [sc + OsContext_S3], s3
+    mov  [sc + OsContext_S4], s4
+    mov  [sc + OsContext_S5], s5
+    mov  [sc + OsContext_S6], s6
+    mov  [sc + OsContext_S7], s7
+    mov  [sc + OsContext_S8], s8
+    mov  [sc + OsContext_S9], s9
+    mov  [sc + OsContext_S10], s10
+    mov  [sc + OsContext_S11], s11
+    mov  [sc + OsContext_S12], s12
+    mov  [sc + OsContext_S13], s13
+    mov  [sc + OsContext_S14], s14
+    mov  [sc + OsContext_S15], s15
+    mov  [sc + OsContext_S16], s16
+    mov  [sc + OsContext_S17], s17
+
+    movz.8 usp, [sp + ((KEP_MAX_STACK_ARGS * 4) + OsFoxHardwareTrapFrame_Eflags)]
+    mov  th, [sp + ((KEP_MAX_STACK_ARGS * 4) + OsFoxHardwareTrapFrame_Epc)]
+
+    mov.8 [sc + OsContext_Eflags], usp
+    mov  [sc + OsContext_Epc], th
+]
+
 KepSystemServiceVector:
 
     // A system service was invoked.
@@ -326,46 +363,14 @@ KepSystemServiceVector:
 
     ise
 
-    // Save callee-saved registers and hardware trap frame.
-
-    mov  t1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
-    mov  t2, t1
-    add  t2, KeuThread_UserContextArea
-
-    mov  [t2 + OsContext_S0], s0
-    mov  [t2 + OsContext_S1], s1
-    mov  [t2 + OsContext_S2], s2
-    mov  [t2 + OsContext_S3], s3
-    mov  [t2 + OsContext_S4], s4
-    mov  [t2 + OsContext_S5], s5
-    mov  [t2 + OsContext_S6], s6
-    mov  [t2 + OsContext_S7], s7
-    mov  [t2 + OsContext_S8], s8
-    mov  [t2 + OsContext_S9], s9
-    mov  [t2 + OsContext_S10], s10
-    mov  [t2 + OsContext_S11], s11
-    mov  [t2 + OsContext_S12], s12
-    mov  [t2 + OsContext_S13], s13
-    mov  [t2 + OsContext_S14], s14
-    mov  [t2 + OsContext_S15], s15
-    mov  [t2 + OsContext_S16], s16
-    mov  [t2 + OsContext_S17], s17
-    mov  t3, [sp + OsFoxHardwareTrapFrame_Sp]
-    movz.8 t4, [sp + OsFoxHardwareTrapFrame_Eflags]
-    mov  t5, [sp + OsFoxHardwareTrapFrame_Epc]
-    mov  [t2 + OsContext_Sp], t3
-    mov.8 [t2 + OsContext_Eflags], t4
-    mov  [t2 + OsContext_Epc], t5
-
-    mov  [t1 + KeuThread_UserFrame], t2
-
     // Make enough space in the kernel stack for the maximal number of stack
     // allocated arguments, in case we need to copy them later.
 
-    sub  sp, (8 * 4)
+    sub  sp, (KEP_MAX_STACK_ARGS * 4)
 
     // Make sure the saved stack pointer is within userspace.
 
+    mov  t3, [sp + (KEP_MAX_STACK_ARGS * 4 + OsFoxHardwareTrapFrame_Sp)]
     cmp  t3, KE_USER_SPACE_END
     ifgteq rjmp BadSystemService
 
@@ -381,9 +386,29 @@ KepSystemServiceVector:
     mov  t1, KepSystemServiceTable
     add  t1, t0
 
+    // Check if this system service can wait with a continuation.
+
+    mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+
+    cmp.8 [t1 + KepSystemService_HasContinuation], 0
+    ifz  mov [t0 + KeuThread_UserFrame], 0
+    ifz  rjmp CalleeSaveEnd
+
+    // It can wait with a continuation, so we have to save the callee-saved
+    // registers now, because this kernel stack can be discarded by the system
+    // service.
+
+    KepSaveCallee (
+        t0, // thread
+        t3, // usersp
+        t2, // scratch
+    )
+
+CalleeSaveEnd:
+
     // Check if there are stack arguments.
 
-    cmp  [t1 + KepSystemService_StackArguments], 0
+    cmp.8 [t1 + KepSystemService_HasStackArguments], 0
     ifz  rjmp KepArgumentCopyEnd
 
     // There are stack arguments, so copy the maximal number (8) from the user
@@ -415,6 +440,13 @@ KepArgumentCopyEnd:
 
     call [t1 + KepSystemService_Routine]
 
+    // Execution is directed to this label when a bad fault occurs on the user
+    // stack while copying arguments. A3 has been set to the correct error
+    // status and will magically be passed back to the caller when we RETI
+    // below.
+
+KepArgumentCopyError:
+
     // Disable interrupts and check if a usermode interrupt (i.e. signals, APCs)
     // needs to be dispatched.
 
@@ -427,8 +459,7 @@ KepArgumentCopyEnd:
     // If no user interrupt occurred then we can return without restoring
     // anything.
 
-    add  sp, (8 * 4)
-
+    add  sp, (KEP_MAX_STACK_ARGS * 4)
     reti
 
 BadSystemService:
@@ -440,6 +471,26 @@ BadSystemService:
 DispatchUserInterrupt:
     
     mov  [KepInterruptsDisabled], 1
+
+    // If the callee-saved registers were not saved earlier, we need to save
+    // them now so that the program has a context to return to after processing
+    // the signal or user APC that was dispatched.
+
+    mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+    cmp  [t0 + KeuThread_UserFrame], 0
+    ifnz rjmp AlreadySaved
+
+    // Didn't already save it, do it now.
+
+    mov  t3, [sp + (KEP_MAX_STACK_ARGS * 4 + OsFoxHardwareTrapFrame_Sp)]
+
+    KepSaveCallee (
+        t0, // thread
+        t3, // usersp
+        t2, // scratch
+    )
+
+AlreadySaved:
 
     call KepDispatchUserInterrupts
 
@@ -992,6 +1043,7 @@ ifnz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
 EXTERN KepSystemServiceVector : UBYTE
 EXTERN KepArgumentCopyStart : UBYTE
 EXTERN KepArgumentCopyEnd : UBYTE
+EXTERN KepArgumentCopyError : UBYTE
 
 EXTERN FN KepContinue (
     IN trapframe : ^OsContext,
@@ -1307,13 +1359,8 @@ FN (KepExceptionHandlerF) KepPageFault (
             // Bad fault on userspace while copying arguments to the kernel
             // stack. Force a return with an error status.
 
-            context = thread^.UserFrame
-
             context^.A3 = status
-
-            KepContinue ( context )
-
-            KeAssert ( FALSE )
+            context^.Epc = &KepArgumentCopyError
 
         ELSE
             // Happened in kernel mode. Abort the current operation.
@@ -1410,6 +1457,8 @@ FN KepExceptionHandler (
         // We interrupted usermode. See if any usermode interrupts are pending.
 
         KepDispatchUserInterrupts ()
+
+        current^.UserFrame = NULLPTR
     END
 
     KepInterruptsDisabled = dis
