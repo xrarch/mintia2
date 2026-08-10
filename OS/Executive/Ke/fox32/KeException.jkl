@@ -512,6 +512,8 @@ DispatchUserInterrupt:
 // a0 - trapframe
 KepContinue:
 
+    cli
+
     mov  [KepInterruptsDisabled], 0
 
     // Set the stack pointer to the bottom of the trapframe to restore and
@@ -1562,8 +1564,6 @@ EXPORT FN (KeContinuationF) KeReturnToUserContinuation (
     trapframe^.A3 = waitstatus
     trapframe^.A2 = continuation^.Parameter1
     trapframe^.A1 = continuation^.Parameter2
-
-    KepDisableInterrupts ()
 
     KepContinue ( trapframe )
 END
