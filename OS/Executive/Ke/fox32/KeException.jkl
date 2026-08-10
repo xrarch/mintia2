@@ -464,7 +464,11 @@ KepArgumentCopyError:
 
 BadSystemService:
 
-    rcall KepBadSystemServiceHelper
+    // Send the thread an OS_SIGNAL_SYS.
+
+    mov  a0, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
+    mov  a1, OS_SIGNAL_SYS
+    call KeSignalThread
 
     icl
 
@@ -478,7 +482,7 @@ DispatchUserInterrupt:
 
     mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
     cmp  [t0 + KeuThread_UserFrame], 0
-    ifnz rjmp AlreadySaved
+    ifnz rjmp .alreadysaved
 
     // Didn't already save it, do it now.
 
@@ -490,9 +494,15 @@ DispatchUserInterrupt:
         t2, // scratch
     )
 
-AlreadySaved:
+.alreadysaved:
+
+    // Dispatch user interrupts now. This will twiddle the UserFrame to effect
+    // an eventual return into a signal or APC handler.
 
     call KepDispatchUserInterrupts
+
+    // Set the argument for KepContinue to be the base of the saved user
+    // context.
 
     mov  a0, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
     add  a0, KeuThread_UserContextArea
@@ -505,6 +515,9 @@ KepContinue:
     icl
 
     mov  [KepInterruptsDisabled], 0
+
+    // Set the stack pointer to the bottom of the trapframe to restore and
+    // then join common code to pop the state and return.
 
     mov  sp, a0
     add  sp, 4 // Skip OldIpl
@@ -1048,16 +1061,6 @@ EXTERN KepArgumentCopyError : UBYTE
 EXTERN FN KepContinue (
     IN trapframe : ^OsContext,
 )
-
-FN KepBadSystemServiceHelper ()
-
-    // Helper called when a bad system service is performed.
-
-    KeSignalThread (
-        KeCurrentThread (), // thread
-        OS_SIGNAL_SYS, // signal
-    )
-END
 
 KepCauseNames : ^UBYTE[16] = {
     [OS_FOX32_EXC_DIV_ZERO] = "DIVBYZERO",
