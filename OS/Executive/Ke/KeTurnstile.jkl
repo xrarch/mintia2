@@ -98,10 +98,31 @@ FN KepInitializeTurnstiles (
     i := 0
 
     WHILE i < KEP_TURNSTILE_CHAINS DO
-        RtlInitializeList ( &kepnode^.TurnstileChains[i].Head )
+        RtlInitializeAvl ( &kepnode^.TurnstileChains[i].Root )
 
         i += 1
     END
+END
+
+FN (RtlAvlLessThanF) KepCompareTurnstiles (
+    IN a : ^RtlAvlNode,
+    IN b : ^RtlAvlNode,
+) : UWORD
+
+    // Compare two turnstiles for insertion into the turnstile chain (really
+    // a tree now).
+
+    turnstile1 := CONTAINEROF a TO KepTurnstile.ChainNode
+    turnstile2 := CONTAINEROF b TO KepTurnstile.ChainNode
+
+    key1 := turnstile1^.Key
+    key2 := turnstile2^.Key
+
+    IF key1 != key2 THEN
+        RETURN key1 < key2
+    END
+
+    RETURN turnstile1^.Owner < turnstile2^.Owner
 END
 
 FN (RtlLessThanF) KepCompareThreads (
@@ -424,12 +445,11 @@ FN KepBlockOnLock (
 
     // Scan the chain for the relevant turnstile.
 
-    listentry := chain^.Head.Next
+    avlnode := chain^.Root.Right
 
     WHILE TRUE DO
-        IF listentry == &chain^.Head THEN
-            // Reached the end of the chain and didn't find the right turnstile.
-            // We'll use our thread's turnstile.
+        IF NOT avlnode THEN
+            // Didn't find it, we'll need to create it.
 
             turnstile = thread^.Turnstile
 
@@ -450,9 +470,10 @@ FN KepBlockOnLock (
             KeAssert ( turnstile^.WaiterHeapRoot == NULLPTR )
             KeAssert ( turnstile^.Free == NULLPTR )
 
-            RtlInsertAtHeadList (
-                &chain^.Head, // head
-                &turnstile^.ChainEntry, // entry
+            RtlInsertAvl (
+                &chain^.Root, // root
+                &turnstile^.ChainNode, // node
+                &KepCompareTurnstiles, // comparisonfunc
             )
 
             KeInitializeEvent (
@@ -476,7 +497,7 @@ FN KepBlockOnLock (
             BREAK
         END
 
-        turnstile = CONTAINEROF listentry TO KepTurnstile.ChainEntry
+        turnstile = CONTAINEROF avlnode TO KepTurnstile.ChainNode
 
         IF turnstile^.Key == lock AND
             turnstile^.Owner == owner THEN
@@ -497,7 +518,18 @@ FN KepBlockOnLock (
             BREAK
         END
 
-        listentry = listentry^.Next
+        IF turnstile^.Key < lock THEN
+            avlnode = avlnode^.Right
+
+        ELSEIF turnstile^.Key > lock THEN
+            avlnode = avlnode^.Left
+
+        ELSEIF turnstile^.Owner < owner THEN
+            avlnode = avlnode^.Right
+
+        ELSE
+            avlnode = avlnode^.Left
+        END
     END
 
     IF owner THEN
@@ -635,7 +667,10 @@ FN KepBlockOnLock (
             // and no priority inheritance has been applied. Therefore we can
             // just remove the turnstile from the chain here.
 
-            RtlRemoveEntryList ( &turnstile^.ChainEntry )
+            RtlRemoveAvl (
+                &chain^.Root, // root
+                &turnstile^.ChainNode, // node
+            )
 
             IF owner THEN
                 KepAcquireThreadElevated ( owner )
@@ -754,14 +789,12 @@ FN KepWakeLock (
 
     turnstile : ^KepTurnstile
 
-    head := &chain^.Head
-
     ipl := KepAcquireChain ( chain )
 
-    listentry := head^.Next
+    avlnode := chain^.Root.Right
 
-    WHILE listentry != head DO
-        turnstile = CONTAINEROF listentry TO KepTurnstile.ChainEntry
+    WHILE avlnode DO
+        turnstile = CONTAINEROF avlnode TO KepTurnstile.ChainNode
 
         IF turnstile^.Key == lock AND
             turnstile^.Owner == owner THEN
@@ -770,7 +803,10 @@ FN KepWakeLock (
 
             // Remove it from the chain.
 
-            RtlRemoveEntryList ( &turnstile^.ChainEntry )
+            RtlRemoveAvl (
+                &chain^.Root, // root
+                &turnstile^.ChainNode, // node
+            )
 
             // Signal the event.
 
@@ -793,7 +829,18 @@ FN KepWakeLock (
             BREAK
         END
 
-        listentry = listentry^.Next
+        IF turnstile^.Key < lock THEN
+            avlnode = avlnode^.Right
+
+        ELSEIF turnstile^.Key > lock THEN
+            avlnode = avlnode^.Left
+
+        ELSEIF turnstile^.Owner < owner THEN
+            avlnode = avlnode^.Right
+
+        ELSE
+            avlnode = avlnode^.Left
+        END
     END
 
     KepReleaseChain ( chain, ipl )

@@ -401,13 +401,13 @@ END
 
 #DEFINE KEP_QUEUE_REMOVAL_LOCKS 32
 
-#DEFINE KEP_TURNSTILE_CHAINS 128
+#DEFINE KEP_TURNSTILE_CHAINS 64
 
 STRUCT KepTurnstileChain
 #IF BLD_MP
     Spinlock : KepSpinlock,
 #END
-    Head : RtlListEntry,
+    Root : RtlAvlNode,
 END
 
 STRUCT KepNode
