@@ -126,7 +126,10 @@ EXPORT FN ExFindName (
         IF res == 0 THEN
             // Found it! Unlock the bucket and return the node.
 
-            checknode^.References += 1
+            KeIncrementUlong (
+                &checknode^.References, // ptr
+                1, // inc
+            )
 
             KeReleaseLock ( &bucket^.Lock )
 
@@ -194,6 +197,30 @@ EXPORT FN ExUnreferenceName (
 
     // Unreference the name node.
 
+    refcount := name^.References
+
+    KeAssert ( refcount != 0 )
+
+    WHILE TRUE DO
+        IF refcount == 1 THEN
+            // If this is the last reference, then special handling is required.
+
+            BREAK
+        END
+
+        new := KeCompareSwapUlong (
+            &name^.References, // ptr
+            refcount - 1, // newvalue
+            refcount, // expectedvalue
+        )
+
+        IF new == refcount THEN
+            LEAVE
+        END
+
+        refcount = new
+    END
+
     expnode := KeNumaNodeFromSpacePointer ( name )^.Exp
 
     bucket := &expnode^.NameBuckets[name^.BucketIndex]
@@ -204,8 +231,10 @@ EXPORT FN ExUnreferenceName (
 
     // Decrement the reference count.
 
-    oldcount := name^.References
-    name^.References = oldcount - 1
+    oldcount := KeIncrementUlong (
+        &name^.References, // ptr
+        0xFFFFFFFF, // ulong
+    )
 
     IF oldcount == 1 THEN
         // Remove from tree.
@@ -239,21 +268,12 @@ EXPORT FN ExReferenceName (
 
     // Reference the name node.
 
-    expnode := KeNumaNodeFromSpacePointer ( name )^.Exp
+    KeAssert ( name^.References != 0 )
 
-    bucket := &expnode^.NameBuckets[name^.BucketIndex]
-
-    // Lock the bucket.
-
-    KeAcquireLockExclusive ( &bucket^.Lock )
-
-    // Increment the reference count.
-
-    name^.References += 1
-
-    // Unlock the bucket.
-
-    KeReleaseLock ( &bucket^.Lock )
+    KeIncrementUlong (
+        &name^.References, // ptr
+        1, // inc
+    )
 END
 
 #SECTION "PAGEtext"
