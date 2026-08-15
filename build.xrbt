@@ -52,6 +52,8 @@
 
 #DEFINE DISK_TOOL_PATH ( STRCAT SDK_BASE "/bin/xrdut.exe" )
 
+#DEFINE SRV_TOOL_PATH ( STRCAT SDK_BASE "/bin/gensrv.exe" )
+
 #DEFINE DISK_TOOL_UPDATE_PARTITION 0
 
 #IF BLD_SMALL
@@ -148,6 +150,34 @@ TARGET "updateimg"
     ACTION DISK_TOOL_UPDATE_STR
     ACTION DISK_TOOL_UPDATE_G_STR
     ACTION DISK_TOOL_UPDATE_P_STR
+
+    ALWAYS
+END
+
+#DEFINE SRV_TOOL_UPDATE (
+    STRCAT SRV_TOOL_PATH (
+        STRCAT " " (
+            STRCAT ARCHITECTURE (
+                STRCAT " ./OS/Headers/System/OsCalls.srv " (
+                    STRCAT "./OS/Executive/Ke/" (
+                        STRCAT ARCHITECTURE (
+                            STRCAT "/KeCallTable.jkl " (
+                                STRCAT "./OS/Uexec/" (
+                                    STRCAT ARCHITECTURE "/OsCallStubs.s"
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+)
+
+#DEFINE SRV_TOOL_UPDATE_STR ( STRCAT "\"" ( STRCAT SRV_TOOL_UPDATE "\"" ) )
+
+TARGET "updatesys"
+    ACTION SRV_TOOL_UPDATE_STR
 
     ALWAYS
 END

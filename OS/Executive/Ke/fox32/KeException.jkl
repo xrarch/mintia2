@@ -17,17 +17,7 @@ EXTERN FN HaluInterrupt (
 
 KepCurrentExceptionCode := 0
 
-// Temporary values
-#DEFINE KEP_SYSTEM_SERVICE_MAX 0
 #DEFINE KEP_MAX_STACK_ARGS 8
-STRUCT KepSystemService
-    Routine : ^VOID,
-    HasStackArguments : UBYTE,
-    HasContinuation : UBYTE,
-    Reserved1 : UBYTE,
-    Reserved2 : UBYTE,
-END
-KepSystemServiceTable : KepSystemService[1]
 
 #ASM [
 
@@ -376,7 +366,7 @@ KepSystemServiceVector:
 
     // Make sure the system service number is valid.
 
-    cmp  t0, KEP_SYSTEM_SERVICE_MAX
+    cmp  t0, [KepSystemServiceCount]
     ifgteq rjmp BadSystemService
 
     // Multiply system service number by 8 and index the system service table,
