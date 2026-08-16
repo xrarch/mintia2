@@ -52,7 +52,7 @@ EXPORT FN ExAppendSet (
         set^.PoolIndex, // poolindex
         newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
         set^.Tag, // tag
-        TRUE, // wait
+        MM_ALLOCATE_WAIT, // flags
     )
 
     IF NOT newbuffer THEN
@@ -166,7 +166,7 @@ EXPORT FN ExRemoveObjectFromSetByIndex (
             set^.PoolIndex, // poolindex
             newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
             set^.Tag, // tag
-            FALSE, // wait
+            0, // flags
         )
 
         IF NOT newbuffer THEN

@@ -388,6 +388,12 @@ FN KepInitializeNode (
     kepnode^.NextWorkBalanceMs = KEP_WORK_BALANCE_INTERVAL
 #END
 
+    // Initialize the distance list to point to a null pointer so that attempts
+    // to allocate from remote nodes during early boot simply fail rather than
+    // causing a null pointer exception.
+
+    kenode^.ListTerminator = NULLPTR
+    kenode^.DistanceList = &kenode^.ListTerminator
 END
 
 #SECTION "INITtext"

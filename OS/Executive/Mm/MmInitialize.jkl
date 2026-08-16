@@ -36,6 +36,14 @@ END
 
 #ENTERSECTION "INITtext"
 
+#MACRO MmpInitializeFreePfe ( pfe, nodeid ) [
+    pfe^.Packed = MmpPackType ( 0, MMP_FREE_PFE_TYPE )
+    pfe^.Packed = MmpPackNodeId ( pfe^.Packed, nodeid )
+    pfe^.Packed = MmpPackDnodeId ( pfe^.Packed, nodeid )
+
+    KeInitializeLock ( &pfe^.Lock )
+]
+
 FN MmuJettisonUnusedResources ()
 
     // We need to release the page frames taken up by any boot resources that
@@ -72,12 +80,13 @@ FN MmuJettisonUnusedResources ()
                 IF MmpIsPteValid ( ptecontents ) THEN
                     pte[i] = MMP_INVALID_KERNEL_PTE
 
+                    pfe := MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) )
+
+                    MmpInitializeFreePfe ( pfe, 0 )
+
                     // Free the page frame.
 
-                    MmpFreePage (
-                        bootnode, // mmnode
-                        MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ), // pfe
-                    )
+                    MmpFreePage ( pfe )
                 END
 
                 i += 1
@@ -159,7 +168,7 @@ FN MmpIdentifyUnwireableSections (
                 MM_NONPAGED_POOL, // poolindex
                 SIZEOF MmpUnwireableRegion, // bytes
                 'Unwi', // tag
-                FALSE, // wait
+                0, // flags
             ) TO ^MmpUnwireableRegion
 
             IF NOT region THEN
@@ -218,11 +227,7 @@ FN MmpReclaimMemoryFromNode (
             pfe := MmpPfnToPfe ( pfn )
 
             WHILE pages DO
-                pfe^.Packed = MmpPackType ( 0, MMP_FREE_PFE_TYPE )
-                pfe^.Packed = MmpPackNodeId ( pfe^.Packed, nodeid )
-                pfe^.Packed = MmpPackDnodeId ( pfe^.Packed, nodeid )
-
-                KeInitializeLock ( &pfe^.Lock )
+                MmpInitializeFreePfe ( pfe, nodeid )
 
                 RtlInsertAtTailList (
                     &mmnode^.FreeList.Colors[MmpPfnColor(pfn)].Head, // head
@@ -251,7 +256,7 @@ FN MmpReclaimMemory ()
         KeuLoaderBlock.ResourceCount * SIZEOF BlResource +
         KeuLoaderBlock.DllCount * SIZEOF BlDll, // bytes
         'Boot', // tag
-        FALSE, // wait
+        0, // flags
     )
 
     IF NOT loaderhunk THEN
@@ -352,8 +357,7 @@ FN MmpInitializeZeroedPage (
 
     pfe := MmpAllocatePage (
         kenode^.Mmp, // mmnode
-        TRUE, // zeroed
-        TRUE, // low
+        MM_ALLOCATE_ZERO | MM_ALLOCATE_LOW, // flags
         0, // color
     )
 
@@ -441,11 +445,7 @@ FN MmuInitializeStage1 ()
                 pfe := MmpPfnToPfe ( pfn )
 
                 WHILE pages DO
-                    pfe^.Packed = MmpPackType ( 0, MMP_FREE_PFE_TYPE )
-                    pfe^.Packed = MmpPackNodeId ( pfe^.Packed, i )
-                    pfe^.Packed = MmpPackDnodeId ( pfe^.Packed, i )
-
-                    KeInitializeLock ( &pfe^.Lock )
+                    MmpInitializeFreePfe ( pfe, i )
 
                     RtlInsertAtTailList (
                         &mmnode^.FreeList.Colors[MmpPfnColor(pfn)].Head, // head

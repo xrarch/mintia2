@@ -137,7 +137,7 @@ EXPORT FN IoCreateLocation (
 
             location = MmAllocateFromPoolCache (
                 IopLocationCache, // cache
-                TRUE, // wait
+                MM_ALLOCATE_WAIT, // flags
             )
 
             IF NOT location THEN
@@ -156,7 +156,7 @@ EXPORT FN IoCreateLocation (
             SIZEOF IoLocation + contextsize +
             (RTL_MACHINE_WORD_SIZE - 1), // bytes
             'IoLo', // tag
-            TRUE, // wait
+            MM_ALLOCATE_WAIT, // flags
         )
 
         IF NOT location THEN
@@ -200,7 +200,7 @@ EXPORT FN IoAllocatePacket (
 
     packet : ^IoPacket = MmAllocateFromPoolCache (
         IopPacketCaches[ioptype], // cache
-        TRUE, // wait
+        MM_ALLOCATE_WAIT, // flags
     )
 
     IF NOT packet THEN
@@ -573,7 +573,7 @@ EXPORT FN IoEnqueuePacket (
 
         trampoline = MmAllocateFromPoolCache (
             IopTrampolineCache, // cache
-            TRUE, // wait
+            MM_ALLOCATE_WAIT, // flags
         )
 
         IF NOT trampoline THEN

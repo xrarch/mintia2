@@ -167,7 +167,7 @@ FN MmuLookupQuotaBlock (
         MM_PAGED_POOL, // poolindex
         SIZEOF MmpQuotaBlock, // bytes
         'Quot', // tag
-        TRUE, // wait
+        MM_ALLOCATE_WAIT, // flags
     ) TO ^MmpQuotaBlock
 
     IF NOT quotablock THEN
@@ -330,7 +330,7 @@ FN MmuChargeVmQuota (
     status := MmuChargeCommit (
         mmnode, // mmnode
         pages, // pages
-        TRUE, // wait
+        MM_ALLOCATE_WAIT, // wait
     )
 
     IF OsError ( status ) THEN

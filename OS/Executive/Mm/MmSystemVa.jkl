@@ -402,10 +402,10 @@ FN MmpFindDynamicSpaceNode (
     RETURN spacenode
 END
 
-#MACRO MmpAllocateDynamicSpaceNode ( mmnode, wait ) [
+#MACRO MmpAllocateDynamicSpaceNode ( mmnode, flags ) [
     CAST MmAllocateFromPoolCache (
         (mmnode)^.SpaceNodeCache, // cache
-        wait, // wait
+        flags, // flags
     ) TO ^MmpDynamicSpaceNode
 ]
 
@@ -557,7 +557,7 @@ END
 FN MmpAllocateDynamicSpace (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^MmpDynamicSpaceNode
 
     // Allocate a region of dynamic space and create an AVL node for lookup.
@@ -573,7 +573,7 @@ FN MmpAllocateDynamicSpace (
 
     spacenode := MmpAllocateDynamicSpaceNode (
         mmnode, // mmnode
-        wait, // wait
+        flags, // flags
     )
 
     IF NOT spacenode THEN

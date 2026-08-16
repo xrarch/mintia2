@@ -475,7 +475,7 @@ FN MmpUnreferencePage (
 
     packed := pfe^.Packed
 
-    mmnode := KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
+    mmnode : ^MmpNode
 
     IF MmpGetPackedFlag ( packed, MMP_DELETED_PFE_FLAG ) THEN
         // The page was deleted, so it must be freed now that the last reference
@@ -483,10 +483,7 @@ FN MmpUnreferencePage (
 
         KeReleaseLockLower ( &pfe^.Lock, ipl )
 
-        MmpFreePage (
-            mmnode, // mmnode
-            pfe, // pfe
-        )
+        MmpFreePage ( pfe )
 
         LEAVE
     END
@@ -538,6 +535,8 @@ FN MmpUnreferencePage (
 
     // The page was neither deleted nor modified, so put it on the standby list.
 
+    mmnode = KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
+
     color := MmpPfnColor ( MmpPfeToPfn ( pfe ) )
     colorlist := &mmnode^.StandbyList.Colors[color]
 
@@ -586,28 +585,38 @@ END
 
 FN MmpAllocatePage (
     IN mmnode : ^MmpNode,
-    IN zeroed : UWORD,
-    IN low : UWORD,
+    IN flags : UWORD,
     IN color : UWORD,
 ) : ^MmpPfe
 
     // Allocate a page from the given node. If none available, return
     // NULLPTR.
 
+#IF BLD_NUMA
+    nodelist : ^^KeuNode = NULLPTR
+#END
+
+@Retry
+
     avail := mmnode^.AvailablePageCount
 
     WHILE TRUE DO
-        IF avail <= 0 THEN
+        IF avail <= 0 OR
+            (flags & MM_ALLOCATE_LOW == 0 AND
+            avail <= MMP_BLOCK_FOR_PAGES_THRESHOLD) THEN
+
+            // Not enough pages.
+
             // Note that the available page count can briefly become negative
             // due to a race between standby page reclamation, and page lookup
             // within an object. Any non-positive available page count means
             // functionally that no pages are available.
 
-            RETURN NULLPTR
-        END
-
-        IF NOT low AND avail <= MMP_BLOCK_FOR_PAGES_THRESHOLD THEN
-            // Not enough pages.
+#IF BLD_NUMA
+            IF flags & MM_ALLOCATE_BORROW THEN
+                GOTO TryNextNode
+            END
+#END
 
             RETURN NULLPTR
         END
@@ -639,7 +648,7 @@ FN MmpAllocatePage (
 
     mustzero := FALSE
 
-    IF zeroed THEN
+    IF flags & MM_ALLOCATE_ZERO THEN
         IF mmnode^.ZeroList.Count THEN
             pfe = MmpAllocatePageFromList (
                 &mmnode^.ZeroList, // list
@@ -699,6 +708,12 @@ FN MmpAllocatePage (
             1, // inc
         )
 
+#IF BLD_NUMA
+        IF flags & MM_ALLOCATE_BORROW THEN
+            GOTO TryNextNode
+        END
+#END
+
         RETURN NULLPTR
     END
 
@@ -717,18 +732,41 @@ FN MmpAllocatePage (
     END
 
     RETURN pfe
+
+#IF BLD_NUMA
+@TryNextNode
+
+    IF NOT nodelist THEN
+        nodelist = mmnode^.KeNode^.DistanceList
+    END
+
+    IF nodelist[0] == NULLPTR THEN
+        // No more nodes to look at. Give up.
+
+        RETURN NULLPTR
+    END
+
+    mmnode = nodelist[0]^.Mmp
+    nodelist += SIZEOF ^KeuNode
+
+    GOTO Retry
+#END
+
 END
 
 FN MmpFreePage (
-    IN mmnode : ^MmpNode,
     IN pfe : ^MmpPfe,
 )
 
-    // Free the page to the specified node.
+    // Free the page.
+
+    packed := pfe^.Packed
 
 #IF BLD_CHK
-    pfe^.Packed = MmpPackType ( pfe^.Packed, MMP_FREE_PFE_TYPE )
+    pfe^.Packed = MmpPackType ( packed, MMP_FREE_PFE_TYPE )
 #END
+
+    mmnode := KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
 
     // Insert at the head so that we reuse it more quickly (hot in cache).
 
@@ -946,8 +984,7 @@ END
 
 FN MmpAllocatePageWait (
     IN mmnode : ^MmpNode,
-    IN zeroed : UWORD,
-    IN low : UWORD,
+    IN flags : UWORD,
     IN color : UWORD,
 ) : ^MmpPfe
 
@@ -956,8 +993,7 @@ FN MmpAllocatePageWait (
     WHILE TRUE DO
         pfe := MmpAllocatePage (
             mmnode, // mmnode
-            zeroed, // zeroed
-            low, // low
+            flags, // flags
             color, // color
         )
 
@@ -967,7 +1003,7 @@ FN MmpAllocatePageWait (
 
         MmpWaitForPages (
             mmnode, // mmnode
-            low, // low
+            flags & MM_ALLOCATE_LOW, // low
         )
     END
 END
@@ -994,7 +1030,7 @@ END
 FN MmuChargeCommit (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : OsStatus
 
     // Attempt to charge the specified commit to the memory node.
@@ -1058,7 +1094,7 @@ FN MmuChargeCommit (
 
     status := MmpExpandPageFiles (
         mmnode, // mmnode
-        wait AND NOT vmprivileged, // wait
+        (flags & MM_ALLOCATE_WAIT) AND NOT vmprivileged, // wait
         FALSE, // full
     )
 

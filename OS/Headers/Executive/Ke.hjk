@@ -707,6 +707,8 @@ STRUCT KeuNode
     TotalNodeCount : ULONG, // Replicated global state
     PfnDatabase : ^MmpPfe, // Replicated global state
 
+    DistanceList : ^^KeuNode,
+
     Reserved : UWORD[20],
 
     Kep : ^KepNode,
@@ -716,6 +718,8 @@ STRUCT KeuNode
     Exp : ^ExpNode,
 
 // Remaining fields may be rearranged and must never be accessed by modules.
+
+    Id : UBYTE,
 
     SystemCred : ^ObCredentials,
 
@@ -741,9 +745,9 @@ STRUCT KeuNode
 
     DynamicSpaceBitmap : ^UBYTE,
 
-    Id : UBYTE,
-
     ObTypes : ^ObuType,
+
+    ListTerminator : ^KeuNode,
 END
 
 #MACRO KeQueryNodeCount () [

@@ -283,7 +283,7 @@ END
 
 FN (MmPoolCacheAllocateF) MmpAllocateFromSlabCache (
     IN context : ^VOID,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^VOID
 
     // Allocate a single entry from a slab cache.
@@ -314,7 +314,7 @@ FN (MmPoolCacheAllocateF) MmpAllocateFromSlabCache (
         scache^.PoolIndex, // poolindex
         scache^.SlabSize, // bytes
         scache^.Tag, // tag
-        FALSE, // wait
+        0, // flags
     )
 
     // RtlPrint ( "extend %p\n", slab )
@@ -322,7 +322,7 @@ FN (MmPoolCacheAllocateF) MmpAllocateFromSlabCache (
     IF NOT slab THEN
         // Failure.
 
-        IF NOT wait THEN
+        IF flags & MM_ALLOCATE_WAIT == 0 THEN
             // Caller specified not to wait, so break out.
 
             block = NULLPTR
@@ -908,7 +908,7 @@ END
 
 EXPORT FN MmAllocateFromPoolCache (
     IN cache : ^MmpPoolCache,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^VOID
 
     // Allocate a block from the pool cache.
@@ -998,7 +998,7 @@ EXPORT FN MmAllocateFromPoolCache (
 
     block = cache^.Allocate (
         cache^.Context, // context
-        wait, // wait
+        flags, // flags
     )
 
     IF block != MM_POOL_CACHE_RETRY_RETURN THEN
@@ -1112,7 +1112,7 @@ EXPORT FN MmFreeToPoolCache (
 
     magazine = MmAllocateFromPoolCache (
         magtype^.PoolCache, // cache
-        FALSE, // wait
+        0, // flags
     )
 
     ipl = MmpLockMagazineCache ( percpu )

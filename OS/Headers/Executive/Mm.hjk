@@ -26,13 +26,18 @@ EXTERN FN MmIsVirtualValid (
     IN vaddr : ^VOID,
 ) : UWORD
 
-#MACRO MmAllocatePool ( poolindex, bytes, tag, wait ) [
+#DEFINE MM_ALLOCATE_LOW 1
+#DEFINE MM_ALLOCATE_ZERO 2
+#DEFINE MM_ALLOCATE_WAIT 4
+#DEFINE MM_ALLOCATE_BORROW 8
+
+#MACRO MmAllocatePool ( poolindex, bytes, tag, flags ) [
     MmAllocatePoolEx (
         NULLPTR, // mmnode
         poolindex, // poolindex
         bytes, // bytes
         tag, // tag
-        wait, // wait
+        flags, // flags
     )
 ]
 
@@ -41,7 +46,7 @@ EXTERN FN MmAllocatePoolEx (
     IN poolindex : UWORD,
     IN bytes : UWORD,
     IN tag : ULONG,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^VOID
 
 EXTERN FN MmFreePool (
@@ -123,7 +128,7 @@ EXTERN FN MmWaitForPoolMemory ()
 
 EXTERN FN MmAllocateFromPoolCache (
     IN cache : ^MmpPoolCache,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^VOID
 
 EXTERN FN MmFreeToPoolCache (
@@ -133,7 +138,7 @@ EXTERN FN MmFreeToPoolCache (
 
 FNPTR MmPoolCacheAllocateF (
     IN context : ^VOID,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^VOID
 
 FNPTR MmPoolCacheFreeF (

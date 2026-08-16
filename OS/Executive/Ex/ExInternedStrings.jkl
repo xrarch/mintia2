@@ -148,7 +148,7 @@ EXPORT FN ExFindName (
         MM_PAGED_POOL, // poolindex
         SIZEOF ExuName + SIZEOF RtlString + len + 1, // bytes
         'Name', // tag
-        FALSE, // wait
+        0, // flags
     )
 
     IF NOT node THEN
@@ -296,7 +296,7 @@ EXPORT FN ExDuplicateString (
         poolindex, // poolindex
         inputstring^.Length + 1, // bytes
         tag, // tag
-        TRUE, // wait
+        MM_ALLOCATE_WAIT, // flags
     )
 
     IF NOT outputstring^.Data THEN

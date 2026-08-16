@@ -899,6 +899,35 @@ FN BlInitializeMemoryDescriptor (
     blnode^.TotalPages += pagecount
 END
 
+FN BlPopulateDistances (
+    IN blnode : ^BlNodeInfo,
+)
+
+    // Populate the distances array for the node.
+
+    dist : ^UINT = BlAllocateMemory ( BlNodeCount * SIZEOF UINT )
+
+    IF NOT dist THEN
+        BlCrash ( "BlPopulateDistances: failed to alloc dist array\n" )
+    END
+
+    blnode^.NodeDistances = dist
+
+    listhead := &BlInfoBlock.NodeListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        blnode2 := CONTAINEROF listentry TO BlNodeInfo.Entry
+
+        dist[blnode2^.Id] = BxGetDistance (
+            blnode, // fromnode
+            blnode2, // tonode
+        )
+
+        listentry = listentry^.Next
+    END
+END
+
 FN BlInitializeMemory ()
 
     // Initialize virtual memory into the basic shape it should take by the time
@@ -963,6 +992,8 @@ FN BlInitializeMemory ()
         blnode = CONTAINEROF listentry TO BlNodeInfo.Entry
 
         BlInitializeNodeMemory ( blnode )
+
+        BlPopulateDistances ( blnode )
 
         listentry = listentry^.Next
     END

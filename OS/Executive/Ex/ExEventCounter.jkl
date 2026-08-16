@@ -50,7 +50,7 @@ FN ExpInitializeEventCounters ()
 END
 
 EXPORT FN ExAllocateEventCounter (
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^ExuEventCounter
 
     // Allocate an event counter.
@@ -59,7 +59,7 @@ EXPORT FN ExAllocateEventCounter (
 
     counter : ^ExuEventCounter = MmAllocateFromPoolCache (
         expnode^.EventCounterCache, // cache
-        wait, // wait
+        flags, // flags
     )
 
     IF NOT counter THEN

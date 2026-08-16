@@ -228,7 +228,7 @@ FN NspCreateEntry (
         MM_PAGED_POOL, // poolindex
         SIZEOF NsuEntry, // bytes
         'NsEn', // tag
-        TRUE, // wait
+        MM_ALLOCATE_WAIT, // flags
     ) TO ^NsuEntry
 
     IF NOT entry THEN
@@ -966,7 +966,7 @@ FN NsuLookupEntryByPath (
         // Then the lock is reacquired and the transition entry is awoken and
         // destroyed.
 
-        event = ExAllocateEventCounter ( TRUE )
+        event = ExAllocateEventCounter ( MM_ALLOCATE_WAIT )
 
         IF NOT event THEN
             NspUnlockTree ()

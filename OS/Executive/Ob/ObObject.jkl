@@ -48,7 +48,7 @@ FN ObuInitializeType (
             MM_NONPAGED_POOL, // poolindex
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
-            TRUE, // wait
+            MM_ALLOCATE_WAIT, // flags
         )
 
         IF NOT npname THEN
@@ -71,7 +71,7 @@ FN ObuInitializeType (
             MM_NONPAGED_POOL, // poolindex
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
-            TRUE, // wait
+            MM_ALLOCATE_WAIT, // flags
         )
 
         IF NOT pgname THEN
@@ -218,7 +218,7 @@ FN ObuAllocateObject (
 
             nppart = MmAllocateFromPoolCache (
                 type^.NpPartCache, // cache
-                TRUE, // wait
+                MM_ALLOCATE_WAIT, // flags
             )
         
         ELSE
@@ -226,7 +226,7 @@ FN ObuAllocateObject (
                 MM_NONPAGED_POOL, // poolindex
                 npsize, // bytes
                 type^.Tag, // tag
-                TRUE, // wait
+                MM_ALLOCATE_WAIT, // flags
             )
         END
 

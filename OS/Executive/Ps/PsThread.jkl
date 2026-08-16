@@ -27,7 +27,7 @@ FN PsuReallocateRemoteTurnstile ()
 
     newts := CAST MmAllocateFromPoolCache (
         KeNumaNodeFromSpacePointer ( thread )^.Psp^.TurnstileCache, // cache
-        FALSE, // wait
+        0, // flags
     ) TO ^KepTurnstile
 
     IF NOT newts THEN
@@ -306,7 +306,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     turnstile := CAST MmAllocateFromPoolCache (
         kenode^.Psp^.TurnstileCache, // cache
-        TRUE, // wait
+        MM_ALLOCATE_WAIT, // flags
     ) TO ^KepTurnstile
 
     IF NOT turnstile THEN

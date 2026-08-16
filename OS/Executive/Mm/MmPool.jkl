@@ -35,8 +35,6 @@ STRUCT MmpPoolExtension
     References : ULONG,
 END
 
-#DEFINE MMP_POOL_FLAG_USE_PRIVILEGED_MEM 1
-
 FN MmpAllocateExtensionSpace (
     IN mmnode : ^MmpNode,
 ) : ^MmpPoolExtension
@@ -124,10 +122,7 @@ FN MmpFreeNonpagedPoolPages (
 
         pte[i] = MMP_INVALID_KERNEL_PTE
 
-        MmpFreePage (
-            mmnode, // mmnode
-            MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ), // pfe
-        )
+        MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
 
 #IF BLD_CHK
         KeuFlushMyTbAddress ( ptr )
@@ -166,8 +161,7 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
     IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
-    IN low : UWORD,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : UWORD
     
     // Allocate an extension for nonpaged pool. If the required page frame can't
@@ -179,7 +173,7 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
     status := MmuChargeCommit (
         mmnode, // mmnode
         pages, // pages
-        wait, // wait
+        flags, // flags
     )
 
     IF OsError ( status ) THEN
@@ -197,18 +191,17 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
 
         pfe := MmpAllocatePage (
             mmnode, // mmnode
-            FALSE, // zeroed
-            low, // low
+            flags, // flags
             MmpVirtualAddressColor ( colorptr ), // color
         )
 
         IF NOT pfe THEN
-            IF wait THEN
+            IF flags & MM_ALLOCATE_WAIT THEN
                 // Caller said we should wait here for more pages.
 
                 MmpWaitForPages (
                     mmnode, // mmnode
-                    low, // low
+                    flags & MM_ALLOCATE_LOW, // low
                 )
 
                 GOTO Retry
@@ -258,8 +251,7 @@ FN (MmpPoolGetMemoryF) MmpGetPagedMemory (
     IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
-    IN low : UWORD,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : UWORD
     
     // Allocate an extension for paged pool.
@@ -359,8 +351,7 @@ FN MmpInitializePools (
 
     // Allow privileged pool to use privileged memory.
 
-    mmnode^.PoolRecords[MM_PRIVILEGED_POOL].Flags |=
-        MMP_POOL_FLAG_USE_PRIVILEGED_MEM
+    mmnode^.PoolRecords[MM_PRIVILEGED_POOL].Flags |= MM_ALLOCATE_LOW
 
     // Set paged pool to point to nonpaged pool for now, since we don't have
     // enough initialized to deal with faults on paged pool yet.
@@ -436,7 +427,7 @@ FN MmpAllocateFromPool (
     IN pool : ^MmpPool,
     IN bytes : UWORD,
     IN tag : ULONG,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^VOID
 
     // Allocate a block of memory of at least the given number of bytes from the
@@ -523,8 +514,7 @@ FN MmpAllocateFromPool (
         pool^.MmNode, // mmnode
         ext, // ptr
         1, // pages
-        pool^.Flags & MMP_POOL_FLAG_USE_PRIVILEGED_MEM, // low
-        FALSE, // wait
+        pool^.Flags, // flags
     ) THEN
 
         // Failed to allocate a pool extension.
@@ -537,7 +527,7 @@ FN MmpAllocateFromPool (
 
         MmpReleasePool ( pool, ipl )
 
-        IF NOT wait THEN
+        IF flags & MM_ALLOCATE_WAIT == 0 THEN
             // Caller requested that we don't wait upon failure.
 
             RETURN NULLPTR
@@ -547,7 +537,7 @@ FN MmpAllocateFromPool (
 
         MmpWaitForPages (
             pool^.MmNode, // mmnode
-            pool^.Flags & MMP_POOL_FLAG_USE_PRIVILEGED_MEM, // low
+            pool^.Flags & MM_ALLOCATE_LOW, // low
         )
 
         GOTO Retry
@@ -916,7 +906,7 @@ FN MmpAllocatePageAligned (
     IN pool : ^MmpPool,
     IN bytes : UWORD,
     IN tag : ULONG,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^VOID
 
     // Perform a page-aligned allocation from the specified pool.
@@ -931,7 +921,7 @@ FN MmpAllocatePageAligned (
     spacenode := MmpAllocateDynamicSpace (
         pool^.MmNode, // mmnode
         bytes, // pages
-        wait, // wait
+        flags, // flags
     )
 
     IF NOT spacenode THEN
@@ -949,8 +939,7 @@ FN MmpAllocatePageAligned (
         pool^.MmNode, // mmnode
         spacenode^.StartVa, // ptr
         bytes, // pages
-        pool^.Flags & MMP_POOL_FLAG_USE_PRIVILEGED_MEM, // low
-        wait, // wait
+        pool^.Flags | flags, // flags
     ) THEN
         // Caller told us not to wait and we didn't get the page frames we
         // wanted, so just return.
@@ -1024,7 +1013,7 @@ EXPORT FN MmAllocatePoolEx (
     IN poolindex : UWORD,
     IN bytes : UWORD,
     IN tag : ULONG,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^VOID
 
     // Allocate a block of memory from the specified pool.
@@ -1035,21 +1024,17 @@ EXPORT FN MmAllocatePoolEx (
         mmnode = MmCurrentAffinityNode ()
     END
 
-    thread : ^PsuThread = NULLPTR
-    savewait := wait
+    saveflags := flags
 
-    IF poolindex == MM_NONPAGED_POOL THEN
-        thread = PsCurrentThread ()
+    IF poolindex == MM_NONPAGED_POOL AND
+        (flags & MM_ALLOCATE_LOW OR
+        PsCurrentThread()^.VmPrivileged) THEN
 
         // If this is a VM-privileged thread allocating nonpaged pool, override
         // the wait parameter to FALSE, so that we don't deadlock waiting for
         // page frames.
 
-        IF thread^.VmPrivileged THEN
-            wait = FALSE
-        ELSE
-            thread = NULLPTR
-        END
+        flags &= ~(MM_ALLOCATE_LOW | MM_ALLOCATE_WAIT)
     END
 
 @Retry
@@ -1065,7 +1050,7 @@ EXPORT FN MmAllocatePoolEx (
             pool, // pool
             bytes, // bytes
             tag, // tag
-            wait, // wait
+            flags, // flags
         )
 
     ELSE
@@ -1075,19 +1060,21 @@ EXPORT FN MmAllocatePoolEx (
             pool, // pool
             bytes, // bytes
             tag, // tag
-            wait, // wait
+            flags, // flags
         )
     END
 
-    IF NOT ptr AND thread THEN
+    IF NOT ptr AND
+        saveflags & MM_ALLOCATE_LOW THEN
+
         // This was a VM-privileged thread allocating nonpaged pool, and it
         // just failed to get a block from normal pool. Try again from
         // privileged pool (which will take from the reserved final page
         // frames if necessary).
 
         poolindex = MM_PRIVILEGED_POOL
-        thread = NULLPTR
-        wait = savewait
+        flags = saveflags
+        saveflags = 0
 
         GOTO Retry
     END

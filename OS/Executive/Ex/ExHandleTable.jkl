@@ -227,11 +227,17 @@ FN ExuCreateHandle (
 
     // Now allocate it.
 
+    flags := 0
+
+    IF NOT lock THEN
+        flags |= MM_ALLOCATE_WAIT
+    END
+
     newtable := MmAllocatePool (
         MM_PAGED_POOL, // poolindex
         newsize, // bytes
         'HnTb', // tag
-        lock == NULLPTR, // wait
+        flags, // flags
     )
 
     IF NOT newtable THEN

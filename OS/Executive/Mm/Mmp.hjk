@@ -231,7 +231,7 @@ EXTERN FN MmpReleaseDynamicPages (
 EXTERN FN MmpAllocateDynamicSpace (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : ^MmpDynamicSpaceNode
 
 EXTERN FN MmpReleaseDynamicSpace (
@@ -242,13 +242,11 @@ EXTERN FN MmpReleaseDynamicSpace (
 
 EXTERN FN MmpAllocatePage (
     IN mmnode : ^MmpNode,
-    IN zeroed : UWORD,
-    IN low : UWORD,
+    IN flags : UWORD,
     IN color : UWORD,
 ) : ^MmpPfe
 
 EXTERN FN MmpFreePage (
-    IN mmnode : ^MmpNode,
     IN pfe : ^MmpPfe,
 )
 
@@ -259,8 +257,7 @@ EXTERN FN MmpWaitForPages (
 
 EXTERN FN MmpAllocatePageWait (
     IN mmnode : ^MmpNode,
-    IN zeroed : UWORD,
-    IN low : UWORD,
+    IN flags : UWORD,
     IN color : UWORD,
 ) : ^MmpPfe
 
@@ -415,8 +412,7 @@ FNPTR MmpPoolGetMemoryF (
     IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
-    IN low : UWORD,
-    IN wait : UWORD,
+    IN flags : UWORD,
 ) : UWORD
 
 FNPTR MmpPoolReturnMemoryF (
