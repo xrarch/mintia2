@@ -125,9 +125,10 @@ EXTERN FN MmuInitializeStage2 ()
 
 EXTERN FN MmuJettisonUnusedResources ()
 
-// With three levels this can describe 4,311,810,312 pages, or about 18TB.
+// With four levels this can describe 34,630,287,496 pages, or about 142TB on a
+// system with 4K pages.
 
-#DEFINE MMP_LEVEL_ENTRIES 256
+#DEFINE MMP_LEVEL_ENTRIES 128
 
 #DEFINE MMP_EMBEDDED_PAGES 8
 #DEFINE MMP_DIRECT_PAGES [(MMP_EMBEDDED_PAGES + MMP_LEVEL_ENTRIES)]
@@ -142,6 +143,11 @@ EXTERN FN MmuJettisonUnusedResources ()
         MMP_LEVEL_ENTRIES * MMP_LEVEL_ENTRIES)
 )]
 
+#DEFINE MMP_QUAD_INDIRECT_PAGES [(
+    MMP_TPLY_INDIRECT + (MMP_LEVEL_ENTRIES * MMP_LEVEL_ENTRIES *
+        MMP_LEVEL_ENTRIES * MMP_LEVEL_ENTRIES * MMP_LEVEL_ENTRIES)
+)]
+
 STRUCT MmuObject
     SizeInBytes : RtlUquad,
 
@@ -150,6 +156,7 @@ STRUCT MmuObject
     IndirectArray : ^^UWORD,
     DoublyIndirectArray : ^^^UWORD,
     TriplyIndirectArray : ^^^^UWORD,
+    QuadruplyIndirectArray : ^^^^^UWORD,
 
     // The object lock is superior to the page list lock.
     // It guards against concurrent flushes and other high level operations.
