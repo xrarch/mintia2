@@ -740,16 +740,17 @@ FN MmpAllocatePage (
         nodelist = mmnode^.KeNode^.DistanceList
     END
 
-    IF nodelist[0] == NULLPTR THEN
-        // No more nodes to look at. Give up.
+    WHILE nodelist[0] DO
+        mmnode = nodelist[0]^.Mmp
 
-        RETURN NULLPTR
+        IF mmnode^.AvailablePageCount >= MMP_BORROW_PAGES_MINIMUM THEN
+            GOTO Retry
+        END
+
+        nodelist += SIZEOF ^KeuNode
     END
 
-    mmnode = nodelist[0]^.Mmp
-    nodelist += SIZEOF ^KeuNode
-
-    GOTO Retry
+    RETURN NULLPTR
 #END
 
 END
