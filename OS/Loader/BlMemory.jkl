@@ -899,6 +899,8 @@ FN BlInitializeMemoryDescriptor (
     blnode^.TotalPages += pagecount
 END
 
+#IF BLD_NUMA
+
 FN BlPopulateDistances (
     IN blnode : ^BlNodeInfo,
 )
@@ -927,6 +929,8 @@ FN BlPopulateDistances (
         listentry = listentry^.Next
     END
 END
+
+#END
 
 FN BlInitializeMemory ()
 
@@ -993,7 +997,9 @@ FN BlInitializeMemory ()
 
         BlInitializeNodeMemory ( blnode )
 
+#IF BLD_NUMA
         BlPopulateDistances ( blnode )
+#END
 
         listentry = listentry^.Next
     END

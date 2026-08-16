@@ -507,6 +507,14 @@ FN MmuInitializeStage1 ()
         i += 1
     END
 
+#IF BLD_NUMA
+    // We need to initialize the distance lists after initializing pools but
+    // before reclaiming boot time memory, which is why it's in here instead of
+    // ExInitialize.
+
+    ExuInitializeDistanceLists ()
+#END
+
     // Reclaim boot time memory. Nothing in "loader space" is safe to access
     // after this point.
 

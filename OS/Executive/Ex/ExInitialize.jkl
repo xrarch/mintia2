@@ -234,3 +234,90 @@ FN ExuStartExecutive ()
 
     // Return and become the idle loop for the boot processor.
 END
+
+#IF BLD_NUMA 
+
+FN (RtlLessThanSortF) ExpCompareNodeDistances (
+    IN a : ^VOID,
+    IN b : ^VOID,
+    IN context : ^VOID,
+) : UWORD
+
+    // Return whether node a is closer to the context node than node b is.
+
+    node1 := CAST a TO ^KeuNode
+    node2 := CAST b TO ^KeuNode
+    ref := CAST context TO ^KeuNode
+
+    dist := ref^.NodeDistances
+
+    RETURN dist[node1^.Id] < dist[node2^.Id]
+END
+
+FN ExuInitializeDistanceLists ()
+
+    // Initialize the per-node distance lists. These are arrays attached to each
+    // node, of pointers to all other nodes in order of increasing distance,
+    // terminated by a null pointer.
+
+    i := 0
+    nodes := KeQueryNodeCount ()
+
+    IF nodes == 1 THEN
+        LEAVE
+    END
+
+    WHILE i < nodes DO
+        kenode := KeNumaNodeById ( i )
+
+        // First allocate the list.
+
+        list : ^^KeuNode = MmAllocatePoolEx (
+            kenode^.Mmp, // mmnode
+            MM_NONPAGED_POOL, // poolindex
+            SIZEOF ^KeuNode * nodes, // bytes
+            'NdDl', // tag
+            0, // flags
+        )
+
+        IF NOT list THEN
+            KeCrash ( "ExuInitializeDistanceLists: failed to alloc list\n" )
+        END
+
+        // Now fill it with node pointers.
+
+        j := 0
+        index := 0
+
+        WHILE j < nodes DO
+            IF j != i THEN
+                list[index] = KeNumaNodeById ( j )
+                index += 1
+            END
+
+            j += 1
+        END
+
+        // Now sort it by distance.
+
+        RtlQuickSort (
+            list, // array
+            &ExpCompareNodeDistances, // lessthan
+            0, // low
+            CAST nodes - 2 TO WORD, // high
+            kenode, // context
+        )
+
+        // Make sure the final slot contains a null pointer.
+
+        list[nodes - 1] = NULLPTR
+
+        // Now publish it.
+
+        kenode^.DistanceList = list
+
+        i += 1
+    END
+END
+
+#END
