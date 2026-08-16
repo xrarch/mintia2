@@ -1,7 +1,19 @@
 //
 // All of the system services exposed to userspace by the MINTIA Executive.
-// Any system service definition edited in here should be kept in sync with its
-// record in OsCalls.srv.
+//
+// This file is used as input to the GenSrv tool, which parses it very
+// stupidly in order to generate usermode stubs and a table. Therefore its
+// format should be carefully maintained.
+//
+// System services have to be marked with certain annotation comments, of the
+// form:
+//
+//    //@...
+//
+// Where ... is replaced by a string of characters each representing a flag.
+// The flags are:
+//
+//    C  Can use a continuation.
 //
 
 // NOTE: A system service may have no more than twelve arguments, and may
@@ -125,6 +137,7 @@ EXTERN FN OsGetFaultStatusThread (
     IN handle : UWORD,
 ) : OsStatus
 
+//@C - Can use a continuation
 EXTERN FN OsSleepThread (
     IN interval : ^RtlUquad,
     IN alertable : UWORD,
@@ -148,6 +161,7 @@ EXTERN FN OsSignalActivationProcess (
     IN status : UWORD,
 )
 
+//@C - Can use a continuation
 EXTERN FN OsAwaitActivationProcess (
     IN handle : UWORD,
     IN timeout : ^RtlUquad,
@@ -209,7 +223,7 @@ EXTERN FN OsExitProcess (
     IN status : UWORD,
 )
 
-EXTERN FN OsQueryProcessCount () : UWORD
+EXTERN FN OsQueryProcessCount ( ) : UWORD
 
 EXTERN FN OsQueryProcesses (
     IN query : ^OsProcessQuery,
