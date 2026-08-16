@@ -1043,27 +1043,18 @@ EXPORT FN KeWaitForObjects (
     IF status != OS_STATUS_KERNEL_APC OR
         alertable == KE_CANCEL_ON_KAPC THEN
 
-        IF NOT continuation THEN
-            RETURN status
-        END
-
-        KepExecuteContinuation (
-            continuation, // continuation
-            status, // waitstatus
-            thread, // thread
-        )
-
-        KeAssert ( FALSE )
+        RETURN status
     END
+
+    // We received a KAPC and the caller didn't ask us to cancel upon KAPC, so
+    // we will adjust our timeout and go back to sleep.
 
     IF timeout AND KepKernelApcReceived (
         &remainingtimeout, // timeout
         &starttime, // starttime
     ) THEN
 
-        status = OS_STATUS_WAIT_TIMEOUT
-
-        GOTO Exit
+        RETURN OS_STATUS_WAIT_TIMEOUT
     END
 
     GOTO Retry

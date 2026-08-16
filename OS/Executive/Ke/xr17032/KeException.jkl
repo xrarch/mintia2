@@ -674,24 +674,6 @@ KepHandoffStack:
     // Jump to the master continuation.
     j    KepMasterContinuation
 
-// a0 - continuation
-// a1 - waitstatus
-// a2 - thread
-KepExecuteContinuation:
-.global KepExecuteContinuation
-
-    // Reset the current thread's kernel stack to the top and execute the
-    // continuation.
-
-    mov  sp, long [a2 + KeuThread_KernelStackTop]
-    mov  t0, long [a0 + KeContinuation_Function]
-
-    // Set link register to zero to terminate stack traces and jump to the
-    // continuation.
-
-    mov  lr, zero
-    jalr zero, t0, 0
-
 // a0 - newthread
 // a1 - oldthread
 KepSwitchContinuationToContinuation:

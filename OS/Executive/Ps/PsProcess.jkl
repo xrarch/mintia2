@@ -926,6 +926,16 @@ FN OsSignalActivationProcess (
     )
 END
 
+#MACRO PspAwaitActivationCommonFinish ( event, process, waitstatus ) [
+    ExUnreferenceEventCounter ( event )
+
+    ObUnreferenceObject ( process )
+
+    IF waitstatus == 0 THEN
+        waitstatus = OS_STATUS_SUCCESS
+    END
+]
+
 #SECTION "PAGEtext"
 FN (KeContinuationF) PspAwaitActivationFinish (
     IN continuation : ^KeContinuation,
@@ -937,13 +947,7 @@ FN (KeContinuationF) PspAwaitActivationFinish (
     event : ^ExuEventCounter = continuation^.Parameter1
     process : ^PsuProcess = continuation^.Parameter2
 
-    ExUnreferenceEventCounter ( event )
-
-    ObUnreferenceObject ( process )
-
-    IF waitstatus == 0 THEN
-        waitstatus = OS_STATUS_SUCCESS
-    END
+    PspAwaitActivationCommonFinish ( event, process, waitstatus )
 
     // KeReturnToUserContinuation will return whatever is in Parameter1 as the
     // second return value from the system service, so we can return the
@@ -1027,7 +1031,7 @@ FN OsAwaitActivationProcess (
     continuation^.Parameter1 = event
     continuation^.Parameter2 = process
 
-    KeWaitForSingleObject (
+    status = KeWaitForSingleObject (
         KE_USER_MODE, // waitmode
         KE_ALERTABLE, // alertable
         timeout, // timeout
@@ -1035,7 +1039,9 @@ FN OsAwaitActivationProcess (
         continuation, // continuation
     )
 
-    KeAssert ( FALSE )
+    PspAwaitActivationCommonFinish ( event, process, status )
+
+    RETURN status
 END
 
 #SECTION "INITtext"

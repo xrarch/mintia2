@@ -753,24 +753,6 @@ ifnz or   [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)], (
     // Jump to the master continuation.
     jmp  KepMasterContinuation
 
-
-// a0 - continuation
-// a1 - waitstatus
-// a2 - thread
-KepExecuteContinuation:
-.global KepExecuteContinuation
-
-    // Reset the current thread's kernel stack to the top and execute the
-    // continuation.
-
-    mov  sp, [a2 + KeuThread_KernelStackTop]
-
-    // Set FP to zero to terminate stack traces and jump to the
-    // continuation.
-
-    xor  fp, fp
-    jmp  [a0 + KeContinuation_Function]
-
 // a0 - newthread
 // a1 - oldthread
 KepSwitchContinuationToContinuation:
