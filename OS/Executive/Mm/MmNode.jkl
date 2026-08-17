@@ -176,6 +176,14 @@ FN MmpSetNodeSize (
         mmnode^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 100
         mmnode^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 500
     END
+
+#IF BLD_NUMA
+    // Only allow borrowing when the node has at least 60% of its pages free.
+
+    mmnode^.BorrowThreshold =
+        CAST (mmnode^.AvailablePageCount / 10) * 6 TO UWORD
+#END
+
 END
 
 FN MmpInsertPageIntoList (
@@ -743,7 +751,7 @@ FN MmpAllocatePage (
     WHILE nodelist[0] DO
         mmnode = nodelist[0]^.Mmp
 
-        IF mmnode^.AvailablePageCount >= MMP_BORROW_PAGES_MINIMUM THEN
+        IF mmnode^.AvailablePageCount >= mmnode^.BorrowThreshold THEN
             GOTO Retry
         END
 

@@ -183,7 +183,6 @@ EXTERN FN MmpInitializeQuickPages (
 )
 
 #DEFINE MMP_BLOCK_FOR_PAGES_THRESHOLD 4
-#DEFINE MMP_BORROW_PAGES_MINIMUM 200
 
 STRUCT MmpDynamicSpaceDemandNode
     MappedObject : ^MmuObject,
@@ -522,6 +521,9 @@ KE_CACHE_LINE_END
     SufficientPageCount : UWORD,
     ModifiedPageMaximum : UWORD,
     ZeroingThreshold : UWORD,
+#IF BLD_NUMA
+    BorrowThreshold : UWORD,
+#END
 
     FluidPageCount : UWORD,
 
