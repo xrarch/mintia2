@@ -1,0 +1,50 @@
+liam [BOC],  — 3:59PM
+k so im adding memory borrowing
+i didnt fully solve the issue of cross-node commit tracking
+when commit for a virtual page is charged to node A but then the physical page comes from node B
+the problem i solved was pagefile space
+i made a borrowed page have its destination node for write-out be changed to the node it was lended to
+but that doesnt solve the problem where these borrowed pages are effectively nonpaged pool as far as node B is concerned
+it needs a way to get them back when it runs low on phys mem itself 
+when a page's refcount drops to zero itll eventually go on the standby or free list for its home node, at that point it has been returned (it may spend time inbetween on the modified list for the node that borrowed it) 
+so node B needs to be able to kick node A to get it to start trimming working sets and writing pages to its pagefiles 
+ideally this is somewhat more targeted so node B knows which nodes it should ask for pages back from, and additionally hopefully node A would know where the borrowed pages are so that it doesnt have to just laser beam every working set
+also i think nonpaged pool is not going to be able to borrow from other nodes because theres no real way to return that loan
+it just breaks commit tracking
+it also sounds like a bad idea to use remote memory in a node's nonpaged pool because that could stick around indefinitely
+ultimately could cause performance degradation worse than just waiting for pages would have
+using it for paged pool and for other paged memory sounds like a very good idea though
+because it can easily be relocated back to its home node and replaced by local pages in the course of normal paging
+
+Abbix — 5:22PM
+how were you going to implement this
+maybe some N (N = number of nodes) lists of working sets
+
+liam [BOC],  — 5:23PM
+the proper solution to this is probably intertwined a lot with higher level vmm stuff like working set management that im not yet doing
+so im for now just adding a threshold where you can only borrow memory from a remote node if it has at least 60% of its phys mem available
+so that borrowing cant choke a node to death
+i think thats a good idea generally but i need to later add some kind of loan reclamation mechanism as well 
+
+liam [BOC],  — 5:25PM
+yeah node A could have an array of N (n = num nodes) listheads of working sets that belong to processes that are affinitized to node A 
+a working set is put on list[x] if it contains a borrowed page from node x 
+when node B is low on memory, it can request node A to aggressively scan working sets on A->list[B] for pages that were borrowed from node B and invalidate them 
+and then flush its modified page list to the pagefile or something
+this requires:
+keeping a 2D matrix of (x,y) which means node X borrowed something from node Y, and this is used to direct these requests
+keeping the above lists of working sets
+ 
+Abbix — 5:29PM
+I'm thinking perhaps u could do it for nonpaged pool for some cases as well no? like when the page is freed and memory is sufficient on that node you return it 
+
+liam [BOC],  — 5:30PM
+its that its hard to predict when all of the allocations inside of a page of nonpaged pool will be freed
+at once
+which is whats required for that page to be returnable
+
+Abbix — 5:30PM
+yeah, it may hold the page for an unbounded amount of time
+
+liam [BOC],  — 5:30PM
+that would break the loan reclamation
