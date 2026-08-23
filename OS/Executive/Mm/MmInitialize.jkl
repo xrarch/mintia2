@@ -164,14 +164,17 @@ FN MmpIdentifyUnwireableSections (
         IF type != MMP_WIRED_REGION THEN
             // Create an unwireable region record.
 
-            region := CAST MmAllocatePool (
+            region : ^MmpUnwireableRegion
+
+            status := MmAllocatePool (
                 MM_NONPAGED_POOL, // poolindex
                 SIZEOF MmpUnwireableRegion, // bytes
                 'Unwi', // tag
                 0, // flags
-            ) TO ^MmpUnwireableRegion
+                OUT region, // ptr
+            )
 
-            IF NOT region THEN
+            IF OsError ( status ) THEN
                 KeCrash ( "%sfailed to allocate unwire\n",
                     "MmpReclaimMemory: " )
             END
@@ -251,15 +254,18 @@ FN MmpReclaimMemory ()
 
     RtlInitializeList ( &MmpUnwireableList )
 
-    loaderhunk := MmAllocatePool (
+    loaderhunk : ^VOID
+
+    status := MmAllocatePool (
         MM_NONPAGED_POOL, // poolindex
         KeuLoaderBlock.ResourceCount * SIZEOF BlResource +
         KeuLoaderBlock.DllCount * SIZEOF BlDll, // bytes
         'Boot', // tag
         0, // flags
+        OUT loaderhunk, // ptr
     )
 
-    IF NOT loaderhunk THEN
+    IF OsError ( status ) THEN
         KeCrash ( "%sfailed to allocate loader hunk\n",
             "MmpReclaimMemory: " )
     END

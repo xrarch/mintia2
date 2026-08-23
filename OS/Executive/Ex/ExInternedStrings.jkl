@@ -143,16 +143,23 @@ EXPORT FN ExFindName (
         END
     END
 
-    node : ^ExuName = MmAllocatePoolEx (
+    node : ^ExuName
+
+    status := MmAllocatePoolEx (
         kenode^.Mmp, // mmnode
         MM_PAGED_POOL, // poolindex
         SIZEOF ExuName + SIZEOF RtlString + len + 1, // bytes
         'Name', // tag
         0, // flags
+        OUT node, // ptr
     )
 
-    IF NOT node THEN
+    IF OsError ( status ) THEN
         KeReleaseLock ( &bucket^.Lock )
+
+        IF status != OS_STATUS_NO_MEMORY THEN
+            RETURN NULLPTR
+        END
 
         MmWaitForPoolMemory ()
 
@@ -292,15 +299,16 @@ EXPORT FN ExDuplicateString (
 
     // Create a new string buffer (this is the important work).
 
-    outputstring^.Data = MmAllocatePool (
+    status := MmAllocatePool (
         poolindex, // poolindex
         inputstring^.Length + 1, // bytes
         tag, // tag
         MM_ALLOCATE_WAIT, // flags
+        OUT outputstring^.Data, // ptr
     )
 
-    IF NOT outputstring^.Data THEN
-        RETURN OS_STATUS_NO_MEMORY
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     // Copy the old string into the new one, including the null terminator.
@@ -311,7 +319,7 @@ EXPORT FN ExDuplicateString (
         inputstring^.Length + 1, // sz
     )
 
-    RETURN OS_STATUS_SUCCESS
+    RETURN status
 END
 
 // The following functions are defined as macros for speed purposes within the

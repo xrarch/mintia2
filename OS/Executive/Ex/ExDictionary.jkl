@@ -205,15 +205,16 @@ EXPORT FN ExInsertInDictionary (
 
     // The entry doesn't exist, so create it.
 
-    entry = MmAllocatePool (
+    status := MmAllocatePool (
         MM_PAGED_POOL, // poolindex
         SIZEOF ExpDictionaryEntry, // bytes
         'DcEn', // tag
         MM_ALLOCATE_WAIT, // flags
+        OUT entry, // ptr
     )
 
-    IF NOT entry THEN
-        RETURN OS_STATUS_NO_MEMORY
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     entry^.Key = ExFindName ( key )

@@ -163,14 +163,15 @@ FN MmuLookupQuotaBlock (
 
     // Allocate a quota block from paged pool.
 
-    quotablock = CAST MmAllocatePool (
+    status := MmAllocatePool (
         MM_PAGED_POOL, // poolindex
         SIZEOF MmpQuotaBlock, // bytes
         'Quot', // tag
         MM_ALLOCATE_WAIT, // flags
-    ) TO ^MmpQuotaBlock
+        OUT quotablock, // ptr
+    )
 
-    IF NOT quotablock THEN
+    IF OsError ( status ) THEN
         // Just return failure.
 
         GOTO Out

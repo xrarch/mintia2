@@ -22,16 +22,17 @@ FN MmpInitializeMdlCache (
         mdlsize * MMP_SMALL_MDLS + MMU_ZONE_OVERHEAD )
 #END
 
-    mmnode^.MdlCache = MmCreatePoolCache (
+    status := MmCreatePoolCache (
         mmnode, // mmnode
         "Mdls", // name
         mdlsize, // size
         MM_NONPAGED_POOL, // poolindex
         'MDLz', // tag
+        OUT mmnode^.MdlCache, // ptr
     )
 
 #ENTERSECTION "INITtext"
-    IF NOT mmnode^.MdlCache THEN
+    IF OsError ( status ) THEN
         KeCrash ( "MmpInitializeMdlCache: failed to create cache\n" )
     END
 #LEAVESECTION

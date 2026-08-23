@@ -362,17 +362,18 @@ FN PsuInitializeStage1 ()
 
     #LEAVESECTION
 
-            psnode^.TurnstileCache = MmCreatePoolCache (
+            status = MmCreatePoolCache (
                 kenode^.Mmp, // mmnode
                 "Turnstiles", // name
                 SIZEOF KepTurnstile, // size
                 MM_NONPAGED_POOL, // poolindex
                 'Turn', // tag
+                OUT psnode^.TurnstileCache, // ptr
             )
 
     #ENTERSECTION "INITtext"
 
-            IF NOT psnode^.TurnstileCache THEN
+            IF OsError ( status ) THEN
                 KeCrash ( "%sfailed to create turnstile cache\n",
                     "PsuInitializeStage1: " )
             END

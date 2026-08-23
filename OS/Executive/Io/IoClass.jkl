@@ -103,15 +103,16 @@ FN IouCreateClass (
     // Register a new IO class.
     // Returns NULLPTR upon failure.
 
-    class = MmAllocatePool (
+    status := MmAllocatePool (
         MM_NONPAGED_POOL, // poolindex
         SIZEOF IouClass + dispatchtablesize, // bytes
         'Clas', // tag
         MM_ALLOCATE_WAIT, // flags
+        OUT class, // ptr
     )
 
-    IF NOT class THEN
-        RETURN OS_STATUS_NO_MEMORY
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     class^.Name.Data = classname^.Data
@@ -200,7 +201,7 @@ FN IouCreateClass (
 
     ObReferenceObject ( superclass^.Module )
 
-    RETURN OS_STATUS_SUCCESS
+    RETURN status
 END
 
 #SECTION "PAGEtext"

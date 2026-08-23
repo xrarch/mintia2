@@ -31,13 +31,14 @@ EXTERN FN MmIsVirtualValid (
 #DEFINE MM_ALLOCATE_WAIT 4
 #DEFINE MM_ALLOCATE_BORROW 8
 
-#MACRO MmAllocatePool ( poolindex, bytes, tag, flags ) [
+#MACRO MmAllocatePool ( poolindex, bytes, tag, flags, ptr ) [
     MmAllocatePoolEx (
         NULLPTR, // mmnode
         poolindex, // poolindex
         bytes, // bytes
         tag, // tag
         flags, // flags
+        ptr, // ptr
     )
 ]
 
@@ -47,7 +48,8 @@ EXTERN FN MmAllocatePoolEx (
     IN bytes : UWORD,
     IN tag : ULONG,
     IN flags : UWORD,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
 EXTERN FN MmFreePool (
     IN ptr : ^VOID,
@@ -129,7 +131,8 @@ EXTERN FN MmWaitForPoolMemory ()
 EXTERN FN MmAllocateFromPoolCache (
     IN cache : ^MmpPoolCache,
     IN flags : UWORD,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
 EXTERN FN MmFreeToPoolCache (
     IN cache : ^MmpPoolCache,
@@ -139,7 +142,8 @@ EXTERN FN MmFreeToPoolCache (
 FNPTR MmPoolCacheAllocateF (
     IN context : ^VOID,
     IN flags : UWORD,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
 FNPTR MmPoolCacheFreeF (
     IN context : ^VOID,
@@ -150,8 +154,6 @@ FNPTR MmPoolCacheDeleteF (
     IN context : ^VOID,
 )
 
-#DEFINE MM_POOL_CACHE_RETRY_RETURN -1
-
 EXTERN FN MmCreatePoolCacheEx (
     IN mmnode : ^MmpNode,
     IN name : ^UBYTE,
@@ -161,7 +163,8 @@ EXTERN FN MmCreatePoolCacheEx (
     IN freefunc : MmPoolCacheFreeF,
     IN deletefunc : MmPoolCacheDeleteF,
     IN context : ^VOID,
-) : ^MmpPoolCache
+    OUT poolcache : ^MmpPoolCache,
+) : OsStatus
 
 EXTERN FN MmCreatePoolCache (
     IN mmnode : ^MmpNode,
@@ -169,7 +172,8 @@ EXTERN FN MmCreatePoolCache (
     IN size : UWORD,
     IN poolindex : UWORD,
     IN tag : UWORD,
-) : ^MmpPoolCache
+    OUT poolcache : ^MmpPoolCache,
+) : OsStatus
 
 EXTERN FN MmDeletePoolCache (
     IN cache : ^MmpPoolCache,

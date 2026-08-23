@@ -159,15 +159,18 @@ FN (KeAbortableF) MmpSafeCaptureString (
 
     // Allocate a buffer.
 
-    buf := CAST MmAllocatePool (
+    buf : ^UBYTE
+
+    status = MmAllocatePool (
         MM_PAGED_POOL, // poolindex
         len + 1, // bytes
         'CpSt', // tag
         MM_ALLOCATE_WAIT, // flags
-    ) TO ^UBYTE
+        OUT buf, // ptr
+    )
 
-    IF NOT buf THEN
-        RETURN OS_STATUS_NO_MEMORY
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     // Set the buffer field of the context so it gets freed if the copy throws
@@ -295,26 +298,25 @@ EXPORT FN MmAllocateAndChargeSysBuffer (
         RETURN status
     END
 
-    ptr = MmAllocatePool (
+    status = MmAllocatePool (
         poolindex, // poolindex
         bytes, // bytes
         tag, // tag
         MM_ALLOCATE_WAIT, // flags
+        OUT ptr, // ptr
     )
 
-    IF ptr THEN
-        RETURN OS_STATUS_SUCCESS
+    IF OsError ( status ) THEN
+        // Failed.
+
+        MmuUnchargePoolQuota (
+            PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
+            quota, // charge
+            poolindex, // poolindex
+        )
     END
 
-    // Failed.
-
-    MmuUnchargePoolQuota (
-        PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
-        quota, // charge
-        poolindex, // poolindex
-    )
-
-    RETURN OS_STATUS_NO_MEMORY
+    RETURN status
 END
 
 #SECTION "PAGEtext"

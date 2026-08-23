@@ -24,16 +24,17 @@ FN IopInitPacketCache (
 
     // Initialize a packet cache.
 
-    cache^ = MmCreatePoolCache (
+    status := MmCreatePoolCache (
         MmCurrentAffinityNode (), // mmnode
         name, // name
         packetsize, // size
         MM_NONPAGED_POOL, // poolindex
         'IOPz', // tag
+        OUT cache^, // ptr
     )
 
 #ENTERSECTION "INITtext"
-    IF NOT cache^ THEN
+    IF OsError ( status ) THEN
         KeCrash ( "IopInitPacketCache: failed to create caches\n" )
     END
 #LEAVESECTION
@@ -112,12 +113,13 @@ END
 EXPORT FN IoCreateLocation (
     IN packet : ^IoPacket,
     IN contextsize : UWORD,
-) : ^IoLocation
+    OUT location : ^IoLocation,
+) : OsStatus
 
     // Allocate a packet location with the given context size and append it to
     // the provided packet.
 
-    location : ^IoLocation = NULLPTR
+    status : OsStatus
 
     IF contextsize <= IO_LOCATION_AVERAGE_CONTEXT THEN
         // The context size is less or equal to the expected average so we can
@@ -135,13 +137,14 @@ EXPORT FN IoCreateLocation (
         ELSE
             // Try to allocate from the location zone.
 
-            location = MmAllocateFromPoolCache (
+            status = MmAllocateFromPoolCache (
                 IopLocationCache, // cache
                 MM_ALLOCATE_WAIT, // flags
+                OUT location, // ptr
             )
 
-            IF NOT location THEN
-                RETURN NULLPTR
+            IF OsError ( status ) THEN
+                RETURN status
             END
 
             location^.InternalFlags = IOP_LOCATION_FROM_ZONE
@@ -151,16 +154,17 @@ EXPORT FN IoCreateLocation (
     IF NOT location THEN
         // Still don't have a location so try to pool-allocate one.
 
-        location = MmAllocatePool (
+        status = MmAllocatePool (
             MM_NONPAGED_POOL, // poolindex
             SIZEOF IoLocation + contextsize +
             (RTL_MACHINE_WORD_SIZE - 1), // bytes
             'IoLo', // tag
             MM_ALLOCATE_WAIT, // flags
+            OUT location, // ptr
         )
 
-        IF NOT location THEN
-            RETURN NULLPTR
+        IF OsError ( status ) THEN
+            RETURN status
         END
 
         location^.InternalFlags = 0
@@ -179,7 +183,7 @@ EXPORT FN IoCreateLocation (
 
     location^.Context = location + SIZEOF IoLocation
 
-    RETURN location
+    RETURN OS_STATUS_SUCCESS
 END
 
 EXPORT FN IoAllocatePacket (
@@ -191,20 +195,22 @@ EXPORT FN IoAllocatePacket (
     IN event : ^KeEvent,
     IN completionroutine : IoPacketCompletionF,
     IN timeout : ^RtlUquad,
-) : ^IoPacket
+    OUT packet : ^IoPacket,
+) : OsStatus
 
     // Allocate a packet.
 
     // We acquire this lock APC-safe because it can also be taken by async IO
     // completion APCs when they finally free the packet.
 
-    packet : ^IoPacket = MmAllocateFromPoolCache (
+    status := MmAllocateFromPoolCache (
         IopPacketCaches[ioptype], // cache
         MM_ALLOCATE_WAIT, // flags
+        OUT packet, // ptr
     )
 
-    IF NOT packet THEN
-        RETURN NULLPTR
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     // Initialize the packet.
@@ -233,7 +239,7 @@ EXPORT FN IoAllocatePacket (
 
     RtlInitializeList ( &packet^.LocationListHead )
 
-    RETURN packet
+    RETURN OS_STATUS_SUCCESS
 END
 
 EXPORT FN IoAllocateFragmentPacket (
@@ -243,7 +249,8 @@ EXPORT FN IoAllocateFragmentPacket (
     IN event : ^KeEvent,
     IN completionroutine : IoPacketCompletionF,
     IN timeout : ^RtlUquad,
-) : ^IoPacket
+    OUT packet : ^IoPacket,
+) : OsStatus
 
     // Helper routine for allocating a fragment packet.
 
@@ -256,6 +263,7 @@ EXPORT FN IoAllocateFragmentPacket (
         event, // event
         completionroutine, // completionroutine
         timeout, // timeout
+        OUT packet, // packet
     )
 END
 
@@ -571,13 +579,14 @@ EXPORT FN IoEnqueuePacket (
         // Nested I/O request.
         // Have to allocate a trampoline out of line.
 
-        trampoline = MmAllocateFromPoolCache (
+        status = MmAllocateFromPoolCache (
             IopTrampolineCache, // cache
             MM_ALLOCATE_WAIT, // flags
+            OUT trampoline, // ptr
         )
 
-        IF NOT trampoline THEN
-            RETURN OS_STATUS_NO_MEMORY
+        IF OsError ( status ) THEN
+            RETURN status
         END
     END
 

@@ -269,15 +269,18 @@ FN ExuInitializeDistanceLists ()
         IF kenode^.ProcessorCount != 0 THEN
             // First allocate the list.
 
-            list : ^^KeuNode = MmAllocatePoolEx (
+            list : ^^KeuNode
+
+            status := MmAllocatePoolEx (
                 kenode^.Mmp, // mmnode
                 MM_NONPAGED_POOL, // poolindex
                 SIZEOF ^KeuNode * nodes, // bytes
                 'NdDl', // tag
                 0, // flags
+                OUT list, // ptr
             )
 
-            IF NOT list THEN
+            IF OsError ( status ) THEN
                 KeCrash ( "ExuInitializeDistanceLists: failed to alloc list\n" )
             END
 

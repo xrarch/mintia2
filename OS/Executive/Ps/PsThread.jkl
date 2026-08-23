@@ -25,12 +25,15 @@ FN PsuReallocateRemoteTurnstile ()
 
     // Replace the turnstile before freeing the old one.
 
-    newts := CAST MmAllocateFromPoolCache (
+    newts : ^KepTurnstile
+
+    status := MmAllocateFromPoolCache (
         KeNumaNodeFromSpacePointer ( thread )^.Psp^.TurnstileCache, // cache
         0, // flags
-    ) TO ^KepTurnstile
+        OUT newts, // ptr
+    )
 
-    IF NOT newts THEN
+    IF OsError ( status ) THEN
         // Nevermind. Just leave it.
 
         LEAVE
@@ -304,14 +307,15 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     // Allocate a turnstile.
 
-    turnstile := CAST MmAllocateFromPoolCache (
+    turnstile : ^KepTurnstile
+
+    status = MmAllocateFromPoolCache (
         kenode^.Psp^.TurnstileCache, // cache
         MM_ALLOCATE_WAIT, // flags
-    ) TO ^KepTurnstile
+        OUT turnstile, // ptr
+    )
 
-    IF NOT turnstile THEN
-        status = OS_STATUS_NO_MEMORY
-
+    IF OsError ( status ) THEN
         GOTO Error4
     END
 

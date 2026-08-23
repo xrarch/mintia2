@@ -35,45 +35,6 @@ STRUCT MmpPoolExtension
     References : ULONG,
 END
 
-FN MmpAllocateExtensionSpace (
-    IN mmnode : ^MmpNode,
-) : ^MmpPoolExtension
-
-    // Allocate space for a pool extension.
-
-    printed := FALSE
-
-    WHILE TRUE DO
-        ext := CAST MmpAllocateChunkSpace (
-            &mmnode^.PoolSpace, // chunkspace
-        ) TO ^MmpPoolExtension
-
-        IF ext THEN
-            RETURN ext
-        END
-
-        // Uh-oh! If we're out of pool space there isn't much good to be done.
-        // Sleep for 500ms and retry.
-
-        IF NOT printed THEN
-            RtlPrint ( "Out of pool space!\n" )
-
-            printed = TRUE
-        END
-
-        interval : RtlUquad
-        
-        RtlSetUquadToUlong ( &interval, 500 )
-
-        KeSleep (
-            &interval, // interval
-            KE_KERNEL_MODE, // waitmode
-            KE_UNALERTABLE, // alertable
-            NULLPTR, // continuation
-        )
-    END
-END
-
 FN MmpFreeExtensionSpace (
     IN mmnode : ^MmpNode,
     IN ext : ^MmpPoolExtension,
@@ -162,7 +123,7 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN flags : UWORD,
-) : UWORD
+) : OsStatus
     
     // Allocate an extension for nonpaged pool. If the required page frame can't
     // be immediately allocated, return NULLPTR. Caller will decide whether to
@@ -177,7 +138,7 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
     )
 
     IF OsError ( status ) THEN
-        RETURN FALSE
+        RETURN status
     END
 
     i := 0
@@ -220,7 +181,7 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
                 pages, // pages
             )
 
-            RETURN FALSE
+            RETURN OS_STATUS_NO_MEMORY
         END
 
         // Map the page frame.
@@ -233,7 +194,7 @@ FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
         colorptr += RTL_PAGE_SIZE
     END
 
-    RETURN TRUE
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN (MmpPoolReturnMemoryF) MmpFreePagedMemory (
@@ -252,7 +213,7 @@ FN (MmpPoolGetMemoryF) MmpGetPagedMemory (
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN flags : UWORD,
-) : UWORD
+) : OsStatus
     
     // Allocate an extension for paged pool.
 
@@ -428,7 +389,8 @@ FN MmpAllocateFromPool (
     IN bytes : UWORD,
     IN tag : ULONG,
     IN flags : UWORD,
-) : ^VOID
+    OUT block : ^MmpFreeBlock,
+) : OsStatus
 
     // Allocate a block of memory of at least the given number of bytes from the
     // specified pool.
@@ -462,8 +424,6 @@ FN MmpAllocateFromPool (
     listhead := &pool^.SizeListHeads[bytes]
     i := bytes
     max := 1 << bucketindex
-
-    block : ^MmpFreeBlock
 
     // Lock the pool.
 
@@ -508,15 +468,27 @@ FN MmpAllocateFromPool (
 
     // No sufficient block. We need to allocate a new pool extension.
 
-    ext := MmpAllocateExtensionSpace ( pool^.MmNode )
+    ext : ^MmpPoolExtension
 
-    IF NOT pool^.GetMemory (
+    status := MmpAllocateChunkSpace (
+        &pool^.MmNode^.PoolSpace, // chunkspace
+        OUT ext, // ptr
+    )
+
+    IF OsError ( status ) THEN
+        MmpReleasePool ( pool, ipl )
+
+        RETURN status
+    END
+
+    status = pool^.GetMemory (
         pool^.MmNode, // mmnode
         ext, // ptr
         1, // pages
         pool^.Flags, // flags
-    ) THEN
+    )
 
+    IF OsError ( status ) THEN
         // Failed to allocate a pool extension.
 
         MmpFreeExtensionSpace (
@@ -530,7 +502,7 @@ FN MmpAllocateFromPool (
         IF flags & MM_ALLOCATE_WAIT == 0 THEN
             // Caller requested that we don't wait upon failure.
 
-            RETURN NULLPTR
+            RETURN status
         END
 
         // Wait for free memory and retry.
@@ -615,7 +587,7 @@ FN MmpAllocateFromPool (
 
     // Return the block.
 
-    RETURN block + SIZEOF MmpBlock
+    RETURN OS_STATUS_SUCCESS
 
 @FoundBlock
 
@@ -715,7 +687,7 @@ FN MmpAllocateFromPool (
 
     // Return the block.
 
-    RETURN block + SIZEOF MmpBlock
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN MmpFreeToPool (
@@ -907,7 +879,8 @@ FN MmpAllocatePageAligned (
     IN bytes : UWORD,
     IN tag : ULONG,
     IN flags : UWORD,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
     // Perform a page-aligned allocation from the specified pool.
 
@@ -918,14 +891,17 @@ FN MmpAllocatePageAligned (
 
     // First acquire some room in dynamic space.
 
-    spacenode := MmpAllocateDynamicSpace (
+    spacenode : ^MmpDynamicSpaceNode
+
+    status := MmpAllocateDynamicSpace (
         pool^.MmNode, // mmnode
         bytes, // pages
         flags, // flags
+        OUT spacenode, // spacenode
     )
 
-    IF NOT spacenode THEN
-        RETURN NULLPTR
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     // Initialize the node as a page aligned pool node.
@@ -935,12 +911,16 @@ FN MmpAllocatePageAligned (
 
     // Call the pool callback to initialize the allocation.
 
-    IF NOT pool^.GetMemory (
+    ptr = spacenode^.StartVa
+
+    status = pool^.GetMemory (
         pool^.MmNode, // mmnode
-        spacenode^.StartVa, // ptr
+        ptr, // ptr
         bytes, // pages
         pool^.Flags | flags, // flags
-    ) THEN
+    )
+
+    IF OsError ( status ) THEN
         // Caller told us not to wait and we didn't get the page frames we
         // wanted, so just return.
 
@@ -952,11 +932,9 @@ FN MmpAllocatePageAligned (
             spacenode, // spacenode
             FALSE, // flush
         )
-
-        RETURN NULLPTR
     END
 
-    RETURN spacenode^.StartVa
+    RETURN status
 END
 
 FN MmpFreePageAligned (
@@ -1014,7 +992,8 @@ EXPORT FN MmAllocatePoolEx (
     IN bytes : UWORD,
     IN tag : ULONG,
     IN flags : UWORD,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
     // Allocate a block of memory from the specified pool.
 
@@ -1025,6 +1004,7 @@ EXPORT FN MmAllocatePoolEx (
     END
 
     saveflags := flags
+    status : OsStatus
 
     IF poolindex == MM_NONPAGED_POOL AND
         (flags & MM_ALLOCATE_LOW OR
@@ -1041,30 +1021,32 @@ EXPORT FN MmAllocatePoolEx (
 
     pool := mmnode^.PoolTable[poolindex]
 
-    ptr : ^VOID
-
     IF bytes < MMP_BLOCK_MAX_REQUEST_SIZE THEN
         // Allocate from the small block pool.
 
-        ptr = MmpAllocateFromPool (
+        status = MmpAllocateFromPool (
             pool, // pool
             bytes, // bytes
             tag, // tag
             flags, // flags
+            OUT ptr, // ptr
         )
+
+        ptr += SIZEOF MmpBlock
 
     ELSE
         // Allocate from page aligned pool.
 
-        ptr = MmpAllocatePageAligned (
+        status = MmpAllocatePageAligned (
             pool, // pool
             bytes, // bytes
             tag, // tag
             flags, // flags
+            OUT ptr, // ptr
         )
     END
 
-    IF NOT ptr AND
+    IF status == OS_STATUS_NO_MEMORY AND
         saveflags & MM_ALLOCATE_LOW THEN
 
         // This was a VM-privileged thread allocating nonpaged pool, and it
@@ -1080,8 +1062,8 @@ EXPORT FN MmAllocatePoolEx (
     END
 
 #IF BLD_CHK
-    IF NOT ptr THEN
-        RETURN NULLPTR
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     // Make sure it gets initialized by filling it with garbage.
@@ -1094,7 +1076,7 @@ EXPORT FN MmAllocatePoolEx (
     )
 #END
 
-    RETURN ptr
+    RETURN status
 END
 
 EXPORT FN MmFreePool (

@@ -48,17 +48,20 @@ EXPORT FN ExAppendSet (
 
     newcapacity := set^.Capacity + EXP_ARRAY_EXTENSION
 
-    newbuffer := MmAllocatePool (
+    newbuffer : ^VOID
+
+    status := MmAllocatePool (
         set^.PoolIndex, // poolindex
         newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
         set^.Tag, // tag
         MM_ALLOCATE_WAIT, // flags
+        OUT newbuffer, // ptr
     )
 
-    IF NOT newbuffer THEN
+    IF OsError ( status ) THEN
         // Failed.
 
-        RETURN OS_STATUS_NO_MEMORY
+        RETURN status
     END
 
     // Copy the old buffer into the new.
@@ -162,14 +165,15 @@ EXPORT FN ExRemoveObjectFromSetByIndex (
     ELSE
         // Allocate a smaller buffer.
 
-        newbuffer = MmAllocatePool (
+        status := MmAllocatePool (
             set^.PoolIndex, // poolindex
             newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
             set^.Tag, // tag
             0, // flags
+            OUT newbuffer, // ptr
         )
 
-        IF NOT newbuffer THEN
+        IF OsError ( status ) THEN
             // Nevermind.
 
             LEAVE

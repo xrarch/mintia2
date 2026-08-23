@@ -27,15 +27,16 @@ FN MmpInitializeQuickPages (
 
     mmnode := kenode^.Mmp
 
-    mmnode^.QuickPteBlocks = MmAllocatePoolEx (
+    status := MmAllocatePoolEx (
         kenode^.Mmp, // mmnode
         MM_NONPAGED_POOL, // poolindex
         MMP_QUICK_PTE_BLOCK_SIZE * procs, // bytes
         'Quic', // tag
         0, // flags
+        OUT mmnode^.QuickPteBlocks, // ptr
     )
 
-    IF NOT mmnode^.QuickPteBlocks THEN
+    IF OsError ( status ) THEN
         KeCrash ( "Failed to allocate quick PTE blocks\n" )
     END
 

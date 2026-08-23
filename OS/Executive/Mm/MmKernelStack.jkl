@@ -49,6 +49,7 @@ FN MmuAllocateKernelStack (
 ) : ^VOID
     
     // Allocate a new kernel stack.
+    // This should be infallible, it was charged for earlier.
 
 @Retry
 
@@ -62,12 +63,13 @@ FN MmuAllocateKernelStack (
 
     // Allocate the required system space.
 
-    kstack = MmpAllocateDynamicPages (
+    status := MmpAllocateDynamicPages (
         mmnode, // mmnode
         KEU_STACK_PAGES + 1, // pages
+        OUT kstack, // ptr
     )
 
-    IF NOT kstack THEN
+    IF OsError ( status ) THEN
         // Couldn't allocate system space.
 
         MmpWaitForSystemSpace ( mmnode )

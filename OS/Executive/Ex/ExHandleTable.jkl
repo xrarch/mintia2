@@ -233,14 +233,17 @@ FN ExuCreateHandle (
         flags |= MM_ALLOCATE_WAIT
     END
 
-    newtable := MmAllocatePool (
+    newtable : ^VOID
+
+    status = MmAllocatePool (
         MM_PAGED_POOL, // poolindex
         newsize, // bytes
         'HnTb', // tag
         flags, // flags
+        OUT newtable, // ptr
     )
 
-    IF NOT newtable THEN
+    IF OsError ( status ) THEN
         MmuUnchargePoolQuota (
             handletable^.QuotaBlock, // quotablock
             newsize, // charge
@@ -253,6 +256,10 @@ FN ExuCreateHandle (
             // allocation first, and upon failure, we wait for free pages
             // without locks and then retry everything.
 
+            IF status != OS_STATUS_NO_MEMORY THEN
+                RETURN status
+            END
+
             KeReleaseLock ( lock )
 
             MmWaitForPoolMemory ()
@@ -264,7 +271,7 @@ FN ExuCreateHandle (
 
         // No lock trick we're just out of memory.
 
-        RETURN OS_STATUS_NO_MEMORY
+        RETURN status
     END
 
     IF table THEN

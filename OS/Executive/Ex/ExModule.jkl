@@ -88,20 +88,21 @@ FN ExuLookupKnownModule (
         GOTO Exit
     END
 
-    knownmodule = MmAllocatePool (
+    status := MmAllocatePool (
         MM_PAGED_POOL, // poolindex
         SIZEOF ExuKnownModule, // bytes
         'KnMo', // tag
         MM_ALLOCATE_WAIT, // flags
+        OUT knownmodule, // ptr
     )
 
-    IF NOT knownmodule THEN
+    IF OsError ( status ) THEN
         GOTO Exit
     END
 
     // Initialize the name.
 
-    status := ExDuplicateString (
+    status = ExDuplicateString (
         &knownmodule^.Name, // outputstring
         name, // inputstring
         MM_PAGED_POOL, // poolindex

@@ -284,7 +284,8 @@ END
 FN (MmPoolCacheAllocateF) MmpAllocateFromSlabCache (
     IN context : ^VOID,
     IN flags : UWORD,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
     // Allocate a single entry from a slab cache.
     // Return NULLPTR upon failure.
@@ -293,42 +294,37 @@ FN (MmPoolCacheAllocateF) MmpAllocateFromSlabCache (
 
     ipl := MmpLockSlabCache ( scache )
 
-    block := scache^.FreeListHead.Next
+    ptr = scache^.FreeListHead.Next
 
-    IF block != &scache^.FreeListHead THEN
+    IF ptr != &scache^.FreeListHead THEN
         // Increment the reference count on the slab header.
 
-        (CAST (block - SIZEOF ^VOID) TO ^^MmpSlabHeader)^^.References += 1
+        (CAST (ptr - SIZEOF ^VOID) TO ^^MmpSlabHeader)^^.References += 1
 
         // Pop the block from the free list.
 
-        RtlRemoveEntryList ( CAST block TO ^RtlListEntry )
+        RtlRemoveEntryList ( CAST ptr TO ^RtlListEntry )
 
         GOTO Exit
     END
 
     // There are no entries so we need to make more.
 
-    slab := MmAllocatePoolEx (
+    slab : ^VOID
+
+    status := MmAllocatePoolEx (
         scache^.MmNode, // mmnode
         scache^.PoolIndex, // poolindex
         scache^.SlabSize, // bytes
         scache^.Tag, // tag
         0, // flags
+        OUT slab, // ptr
     )
 
     // RtlPrint ( "extend %p\n", slab )
 
-    IF NOT slab THEN
+    IF OsError ( status ) THEN
         // Failure.
-
-        IF flags & MM_ALLOCATE_WAIT == 0 THEN
-            // Caller specified not to wait, so break out.
-
-            block = NULLPTR
-
-            GOTO Exit
-        END
 
         // We can't wait for pages with a slab cache lock held or we'll deadlock
         // memory management so instead we first try with wait=FALSE, and
@@ -336,12 +332,20 @@ FN (MmPoolCacheAllocateF) MmpAllocateFromSlabCache (
 
         MmpUnlockSlabCache ( scache, ipl )
 
+        IF (flags & MM_ALLOCATE_WAIT == 0)
+            OR (status != OS_STATUS_NO_MEMORY) THEN
+
+            // Caller specified not to wait, so break out.
+
+            RETURN status
+        END
+
         MmpWaitForPages (
             scache^.MmNode, // mmnode
             PsCurrentThread()^.VmPrivileged, // low
         )
 
-        RETURN MM_POOL_CACHE_RETRY_RETURN
+        RETURN OS_STATUS_TRY_AGAIN
     END
 
     scache^.ActiveSlabCount += 1
@@ -353,17 +357,17 @@ FN (MmPoolCacheAllocateF) MmpAllocateFromSlabCache (
 
     // Initialize each block in the slab.
 
-    block = (
+    ptr = (
         slab + SIZEOF MmpSlabHeader + SIZEOF ^VOID + (RTL_ALIGN_BYTES - 1)
     ) & ~(RTL_ALIGN_BYTES - 1)
 
     // Set back pointer to header.
 
-    NOTHING (CAST (block - SIZEOF ^VOID) TO ^^MmpSlabHeader)^ = slabheader
+    NOTHING (CAST (ptr - SIZEOF ^VOID) TO ^^MmpSlabHeader)^ = slabheader
 
     blocksize := scache^.Size
 
-    initblock := block + blocksize
+    initblock := ptr + blocksize
 
     i := 1
     count := scache^.BlocksPerSlab
@@ -388,7 +392,7 @@ FN (MmPoolCacheAllocateF) MmpAllocateFromSlabCache (
 
     MmpUnlockSlabCache ( scache, ipl )
 
-    RETURN block
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN (MmPoolCacheFreeF) MmpFreeToSlabCache (
@@ -437,17 +441,19 @@ EXPORT FN MmCreatePoolCacheEx (
     IN freefunc : MmPoolCacheFreeF,
     IN deletefunc : MmPoolCacheDeleteF,
     IN context : ^VOID,
-) : ^MmpPoolCache
+    OUT poolcache : ^MmpPoolCache,
+) : OsStatus
 
     // Allocate and return a new pool cache structure.
 
-    cache : ^MmpPoolCache = MmpAllocateFromSlabCache (
+    status := MmpAllocateFromSlabCache (
         &mmnode^.PoolCacheSlabs, // scache
         TRUE, // wait
+        OUT poolcache, // poolcache
     )
 
-    IF NOT cache THEN
-        RETURN NULLPTR
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     // Determine the magazine size based on whether the size of each cached
@@ -455,29 +461,29 @@ EXPORT FN MmCreatePoolCacheEx (
     // pool block.
 
     IF size < MMP_SMALL_POOL_BLOCK THEN
-        cache^.MagazineType = &mmnode^.MagazineTypeTable[MMP_MAGAZINE_SMALL]
+        poolcache^.MagazineType = &mmnode^.MagazineTypeTable[MMP_MAGAZINE_SMALL]
     ELSE
-        cache^.MagazineType = &mmnode^.MagazineTypeTable[MMP_MAGAZINE_LARGE]
+        poolcache^.MagazineType = &mmnode^.MagazineTypeTable[MMP_MAGAZINE_LARGE]
     END
 
     // Save the name of the cache.
 
-    cache^.Name = name
+    poolcache^.Name = name
 
-    cache^.Allocate = allocfunc
-    cache^.Free = freefunc
-    cache^.Delete = deletefunc
-    cache^.Context = context
+    poolcache^.Allocate = allocfunc
+    poolcache^.Free = freefunc
+    poolcache^.Delete = deletefunc
+    poolcache^.Context = context
 
-    cache^.MmNode = mmnode
-    cache^.ProcessorCount = mmnode^.KeNode^.ProcessorCount
+    poolcache^.MmNode = mmnode
+    poolcache^.ProcessorCount = mmnode^.KeNode^.ProcessorCount
 
-    KeInitializeLock ( &cache^.DepotLock )
+    KeInitializeLock ( &poolcache^.DepotLock )
 
     // Set the depot lists to empty.
 
-    MmpInitializeDepotList ( &cache^.FullMagazineList )
-    MmpInitializeDepotList ( &cache^.EmptyMagazineList )
+    MmpInitializeDepotList ( &poolcache^.FullMagazineList )
+    MmpInitializeDepotList ( &poolcache^.EmptyMagazineList )
 
     // Insert on global list.
 
@@ -493,7 +499,7 @@ EXPORT FN MmCreatePoolCacheEx (
 
     RtlInsertAtTailList (
         &list^.Head, // head
-        &cache^.MasterListEntry, // entry
+        &poolcache^.MasterListEntry, // entry
     )
 
     // Initialize the per-CPU caches with the global list lock still held to
@@ -504,7 +510,7 @@ EXPORT FN MmCreatePoolCacheEx (
     i := 0
 
     percpu := MmpPoolCachePerCpuById (
-        cache, // cache
+        poolcache, // cache
         0, // id
     )
 
@@ -515,7 +521,7 @@ EXPORT FN MmCreatePoolCacheEx (
         percpu^.Previous = NULLPTR
         percpu^.Rounds = -1
         percpu^.PreviousRounds = -1
-        percpu^.MagazineSize = cache^.MagazineType^.Size
+        percpu^.MagazineSize = poolcache^.MagazineType^.Size
 
         i += 1
         percpu += SIZEOF MmpPoolCachePerCpu
@@ -523,7 +529,7 @@ EXPORT FN MmCreatePoolCacheEx (
 
     MmpUnlockPoolCacheList ( list )
 
-    RETURN cache
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN (MmPoolCacheDeleteF) MmpDeleteSlabBackedCache (
@@ -551,17 +557,21 @@ EXPORT FN MmCreatePoolCache (
     IN size : UWORD,
     IN poolindex : UWORD,
     IN tag : UWORD,
-) : ^MmpPoolCache
+    OUT poolcache : ^MmpPoolCache,
+) : OsStatus
 
     // Create a slab-backed pool cache.
 
-    scache : ^MmpSlabCache = MmpAllocateFromSlabCache (
+    scache : ^MmpSlabCache
+
+    status := MmpAllocateFromSlabCache (
         &mmnode^.SlabCacheSlabs, // scache
         TRUE, // wait
+        OUT scache, // ptr
     )
 
-    IF NOT scache THEN
-        RETURN NULLPTR
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     // Initialize the slab cache used for allocating cached blocks.
@@ -576,7 +586,7 @@ EXPORT FN MmCreatePoolCache (
 
     // Create the pool cache with the appropriate slab callbacks.
 
-    cache := MmCreatePoolCacheEx (
+    status = MmCreatePoolCacheEx (
         mmnode, // mmnode
         name, // name
         size, // size
@@ -585,9 +595,10 @@ EXPORT FN MmCreatePoolCache (
         &MmpFreeToSlabCache, // freefunc
         &MmpDeleteSlabBackedCache, // deletefunc
         scache, // context
+        OUT poolcache, // poolcache
     )
 
-    IF NOT cache THEN
+    IF OsError ( status ) THEN
         // Failed to allocate the pool cache, so release the slab cache.
 
         MmpFreeToSlabCache (
@@ -596,7 +607,7 @@ EXPORT FN MmCreatePoolCache (
         )
     END
 
-    RETURN cache
+    RETURN status
 END
 
 FN MmpDestroyAndFreeMagazine (
@@ -909,11 +920,11 @@ END
 EXPORT FN MmAllocateFromPoolCache (
     IN cache : ^MmpPoolCache,
     IN flags : UWORD,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
     // Allocate a block from the pool cache.
 
-    block : ^VOID
     rounds : WORD
 
 @RetryTakeLock
@@ -938,12 +949,12 @@ EXPORT FN MmAllocateFromPoolCache (
         //       skipped in a subtle way here that shouldn't be confused with an
         //       off-by-one bug.
 
-        block = percpu^.Loaded[rounds]
+        ptr = percpu^.Loaded[rounds]
         percpu^.Rounds = rounds - 1
 
         MmpUnlockMagazineCache ( percpu, ipl )
 
-        RETURN block
+        RETURN OS_STATUS_SUCCESS
     END
 
     // Loaded magazine was empty, try to reload.
@@ -996,16 +1007,17 @@ EXPORT FN MmAllocateFromPoolCache (
     // Magazine layer wasn't of any help so we need to drop through to the slab
     // layer of this cache.
 
-    block = cache^.Allocate (
+    status := cache^.Allocate (
         cache^.Context, // context
         flags, // flags
+        OUT ptr, // ptr
     )
 
-    IF block != MM_POOL_CACHE_RETRY_RETURN THEN
-        RETURN block
+    IF status == OS_STATUS_TRY_AGAIN THEN
+        GOTO RetryTakeLock
     END
 
-    GOTO RetryTakeLock
+    RETURN status
 END
 
 EXPORT FN MmFreeToPoolCache (
@@ -1110,14 +1122,15 @@ EXPORT FN MmFreeToPoolCache (
 
     MmpUnlockMagazineCache ( percpu, ipl )
 
-    magazine = MmAllocateFromPoolCache (
+    status := MmAllocateFromPoolCache (
         magtype^.PoolCache, // cache
         0, // flags
+        OUT magazine, // ptr
     )
 
     ipl = MmpLockMagazineCache ( percpu )
 
-    IF magazine THEN
+    IF NOT OsError ( status ) THEN
         // Got a magazine.
 
         IF percpu^.MagazineSize != magtype^.Size THEN
@@ -1172,16 +1185,17 @@ FN MmpInitializeMagazineType (
 
     magtype^.Size = size
 
-    magtype^.PoolCache = MmCreatePoolCache (
+    status := MmCreatePoolCache (
         mmnode, // mmnode
         name, // name
         (size + 1) * SIZEOF ^VOID, // size
         MM_NONPAGED_POOL, // poolindex
         'Magz', // tag
+        OUT magtype^.PoolCache, // ptr
     )
 
 #ENTERSECTION "INITtext"
-    IF NOT magtype^.PoolCache THEN
+    IF OsError ( status ) THEN
         KeCrash ( "MmpInitializeMagazineType: failed to create pool cache\n" )
     END
 #LEAVESECTION

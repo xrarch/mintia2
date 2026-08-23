@@ -210,12 +210,15 @@ FN (KeContinuationF) FwtExplodeableThread (
     WHILE i < count DO
         i += 1
         
-        data : ^FwtData = MmAllocateFromPoolCache (
+        data : ^FwtData
+
+        status := MmAllocateFromPoolCache (
             FwtDataCache, // cache
             0, // flags
+            OUT data, // ptr
         )
         
-        IF NOT data THEN
+        IF OsError ( status ) THEN
             RtlPrint ( "[FWT]No memory " )
 
             BREAK

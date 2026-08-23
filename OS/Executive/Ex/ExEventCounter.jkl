@@ -16,16 +16,17 @@ FN ExpInitializeEventCountersForNode (
         LEAVE
     END
 
-    kenode^.Exp^.EventCounterCache = MmCreatePoolCache (
+    status := MmCreatePoolCache (
         kenode^.Mmp, // mmnode
         "Event Counters", // name
         SIZEOF ExuEventCounter, // size
         MM_NONPAGED_POOL, // poolindex
         'EvCn', // tag
+        OUT kenode^.Exp^.EventCounterCache, // ptr
     )
 
 #ENTERSECTION "INITtext"
-    IF NOT kenode^.Exp^.EventCounterCache THEN
+    IF OsError ( status ) THEN
         KeCrash ( "ExpInitializeEventCounters: failed to create cache\n" )
     END
 #LEAVESECTION
@@ -51,19 +52,21 @@ END
 
 EXPORT FN ExAllocateEventCounter (
     IN flags : UWORD,
-) : ^ExuEventCounter
+    OUT counter : ^ExuEventCounter,
+) : OsStatus
 
     // Allocate an event counter.
 
     expnode := KeCurrentVolatileNode ()^.Exp
 
-    counter : ^ExuEventCounter = MmAllocateFromPoolCache (
+    status := MmAllocateFromPoolCache (
         expnode^.EventCounterCache, // cache
         flags, // flags
+        OUT counter, // ptr
     )
 
-    IF NOT counter THEN
-        RETURN NULLPTR
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     KeInitializeEvent (
@@ -75,7 +78,7 @@ EXPORT FN ExAllocateEventCounter (
 
     counter^.References = 1
 
-    RETURN counter
+    RETURN status
 END
 
 EXPORT FN ExReferenceEventCounter (

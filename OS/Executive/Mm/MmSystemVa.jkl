@@ -94,7 +94,8 @@ END
 
 FN MmpAllocateChunkSpace (
     IN chunkspace : ^MmpChunkSpace,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
     // Allocate a chunk from the given chunk space.
     // Returns the virtual address of the chunk. Nothing is mapped into the
@@ -109,7 +110,7 @@ FN MmpAllocateChunkSpace (
         IF NOT chunkspace^.PendingFlushCount THEN
             KeReleaseLockLower ( &chunkspace^.Lock, ipl )
 
-            RETURN NULLPTR
+            RETURN OS_STATUS_EXHAUSTED_SYSTEM_VA
         END
 
         // There are chunks pending flush.
@@ -124,7 +125,9 @@ FN MmpAllocateChunkSpace (
 
     KeReleaseLockLower ( &chunkspace^.Lock, ipl )
 
-    RETURN MmpVirtualAddress ( chunk )
+    ptr = MmpVirtualAddress ( chunk )
+
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN MmpFreeChunkSpace (
@@ -309,16 +312,17 @@ FN MmpInitializeSpaceNodeAllocation (
 
     mmnode := kenode^.Mmp
 
-    mmnode^.SpaceNodeCache = MmCreatePoolCache (
+    status := MmCreatePoolCache (
         mmnode, // mmnode
         "Space Nodes", // name
         SIZEOF MmpDynamicSpaceNode, // size
         MM_NONPAGED_POOL, // poolindex
         'Dyna', // tag
+        OUT mmnode^.SpaceNodeCache, // ptr
     )
 
 #ENTERSECTION "INITtext"
-    IF NOT mmnode^.SpaceNodeCache THEN
+    IF OsError ( status ) THEN
         KeCrash ( "Failed to create space node cache\n" )
     END
 #LEAVESECTION "INITtext"
@@ -402,11 +406,12 @@ FN MmpFindDynamicSpaceNode (
     RETURN spacenode
 END
 
-#MACRO MmpAllocateDynamicSpaceNode ( mmnode, flags ) [
-    CAST MmAllocateFromPoolCache (
+#MACRO MmpAllocateDynamicSpaceNode ( mmnode, flags, spacenode ) [
+    MmAllocateFromPoolCache (
         (mmnode)^.SpaceNodeCache, // cache
         flags, // flags
-    ) TO ^MmpDynamicSpaceNode
+        spacenode, // ptr
+    )
 ]
 
 #MACRO MmpFreeDynamicSpaceNode ( mmnode, spacenode ) [
@@ -432,7 +437,8 @@ END
 FN MmpAllocateDynamicPages (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
     // Allocate a page aligned region of dynamic space.
     // Returns NULLPTR if none available.
@@ -473,7 +479,7 @@ FN MmpAllocateDynamicPages (
 
             KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
 
-            RETURN NULLPTR
+            RETURN OS_STATUS_EXHAUSTED_SYSTEM_VA
         END
     
     ELSE
@@ -506,7 +512,9 @@ FN MmpAllocateDynamicPages (
 
     KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
 
-    RETURN CAST mmnode^.DynamicSpaceBase + (index << RTL_PAGE_SHIFT) TO ^VOID
+    ptr = CAST mmnode^.DynamicSpaceBase + (index << RTL_PAGE_SHIFT) TO ^VOID
+
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN MmpReleaseDynamicPages (
@@ -558,25 +566,30 @@ FN MmpAllocateDynamicSpace (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
     IN flags : UWORD,
-) : ^MmpDynamicSpaceNode
+    OUT spacenode : ^MmpDynamicSpaceNode,
+) : OsStatus
 
     // Allocate a region of dynamic space and create an AVL node for lookup.
 
-    ptr := MmpAllocateDynamicPages (
+    ptr : ^VOID
+
+    status := MmpAllocateDynamicPages (
         mmnode, // mmnode
         pages, // pages
+        OUT ptr, // ptr
     )
 
-    IF NOT ptr THEN
-        RETURN NULLPTR
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
-    spacenode := MmpAllocateDynamicSpaceNode (
+    status = MmpAllocateDynamicSpaceNode (
         mmnode, // mmnode
         flags, // flags
+        OUT spacenode, // spacenode
     )
 
-    IF NOT spacenode THEN
+    IF OsError ( status ) THEN
         // Failed to allocate a node instantly and caller told us not to
         // wait.
 
@@ -587,7 +600,7 @@ FN MmpAllocateDynamicSpace (
             FALSE, // flush
         )
 
-        RETURN NULLPTR
+        RETURN status
     END
 
     ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceTreeLock )
@@ -607,7 +620,7 @@ FN MmpAllocateDynamicSpace (
 
     KeReleaseLockLower ( &mmnode^.DynamicSpaceTreeLock, ipl )
 
-    RETURN spacenode
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN MmpReleaseDynamicSpace (

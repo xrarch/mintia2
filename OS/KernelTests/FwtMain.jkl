@@ -52,20 +52,27 @@ FN FwtMain ()
 
     thread : ^PsuThread
     
-    FwtDataCache = MmCreatePoolCache (
+    status := MmCreatePoolCache (
         MmCurrentAffinityNode (), // mmnode
         "Fireworks Data", // name
         SIZEOF FwtData, // size
         MM_NONPAGED_POOL, // poolindex
         'FwtD', // tag
+        OUT FwtDataCache, // ptr
     )
+
+    IF OsError ( status ) THEN
+        RtlPrint ( "FwtMain: Could not create poolcache\n" )
+
+        LEAVE
+    END
 
     FwtFillScreen ( FWT_BACKGROUND_COLOR )
 
     name : RtlString
     RtlInitializeString ( &name, "FireworksMain" )
     
-    status := PsCreateExecutiveThread (
+    status = PsCreateExecutiveThread (
         KeCurrentAffinityNode (), // kenode
         &name, // name
         &FwtMainThread, // function

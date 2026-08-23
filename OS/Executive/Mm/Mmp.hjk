@@ -141,7 +141,8 @@ EXTERN FN MmpSetNodeSize (
 
 EXTERN FN MmpAllocateChunkSpace (
     IN chunkspace : ^MmpChunkSpace,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
 EXTERN FN MmpFreeChunkSpace (
     IN chunkspace : ^MmpChunkSpace,
@@ -219,7 +220,8 @@ EXTERN FN MmpFindDynamicSpaceNode (
 EXTERN FN MmpAllocateDynamicPages (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : OsStatus
 
 EXTERN FN MmpReleaseDynamicPages (
     IN mmnode : ^MmpNode,
@@ -232,7 +234,8 @@ EXTERN FN MmpAllocateDynamicSpace (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
     IN flags : UWORD,
-) : ^MmpDynamicSpaceNode
+    OUT spacenode : ^MmpDynamicSpaceNode,
+) : OsStatus
 
 EXTERN FN MmpReleaseDynamicSpace (
     IN mmnode : ^MmpNode,
@@ -413,7 +416,7 @@ FNPTR MmpPoolGetMemoryF (
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN flags : UWORD,
-) : UWORD
+) : OsStatus
 
 FNPTR MmpPoolReturnMemoryF (
     IN mmnode : ^MmpNode,

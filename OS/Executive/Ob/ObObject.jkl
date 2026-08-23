@@ -23,6 +23,8 @@ FN ObuInitializeType (
 
     // Initialize an object type.
 
+    status := OS_STATUS_SUCCESS
+
     error := "ObuInitializeType: %s: %s"
 
     npsize : UWORD
@@ -44,14 +46,15 @@ FN ObuInitializeType (
     pgname : ^UBYTE
 
     IF npsize THEN
-        npname = MmAllocatePool (
+        status = MmAllocatePool (
             MM_NONPAGED_POOL, // poolindex
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
             MM_ALLOCATE_WAIT, // flags
+            OUT npname, // ptr
         )
 
-        IF NOT npname THEN
+        IF OsError ( status ) THEN
             KeCrash ( error, type^.Name, "failed to allocate np name\n" )
         END
 
@@ -67,14 +70,15 @@ FN ObuInitializeType (
     END
 
     IF psize THEN
-        pgname = MmAllocatePool (
+        status = MmAllocatePool (
             MM_NONPAGED_POOL, // poolindex
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
             MM_ALLOCATE_WAIT, // flags
+            OUT pgname, // ptr
         )
 
-        IF NOT pgname THEN
+        IF OsError ( status ) THEN
             KeCrash ( error, type^.Name, "failed to allocate pg name\n" )
         END
 
@@ -110,29 +114,31 @@ FN ObuInitializeType (
             pernodetype^.CachedNpBodySize = npsize
 
             IF npsize THEN
-                pernodetype^.NpPartCache = MmCreatePoolCache (
+                status = MmCreatePoolCache (
                     kenode^.Mmp, // mmnode
                     npname, // name
                     npsize, // size
                     MM_NONPAGED_POOL, // poolindex
                     type^.Tag, // tag
+                    OUT pernodetype^.NpPartCache, // ptr
                 )
 
-                IF NOT pernodetype^.NpPartCache THEN
+                IF OsError ( status ) THEN
                     KeCrash ( error, type^.Name, "failed to alloc np cache\n" )
                 END
             END
 
             IF psize THEN
-                pernodetype^.PgPartCache = MmCreatePoolCache (
+                status = MmCreatePoolCache (
                     kenode^.Mmp, // mmnode
                     pgname, // name
                     psize, // size
                     MM_PAGED_POOL, // poolindex
                     type^.Tag, // tag
+                    OUT pernodetype^.PgPartCache, // ptr
                 )
 
-                IF NOT pernodetype^.PgPartCache THEN
+                IF OsError ( status ) THEN
                     KeCrash ( error, type^.Name, "failed to alloc pg cache\n" )
                 END
             END
@@ -141,7 +147,7 @@ FN ObuInitializeType (
         i += 1
     END
 
-    RETURN OS_STATUS_SUCCESS
+    RETURN status
 END
 #LEAVESECTION
 
@@ -216,23 +222,23 @@ FN ObuAllocateObject (
 
             internalflags |= OBP_NP_FROM_CACHE
 
-            nppart = MmAllocateFromPoolCache (
+            status = MmAllocateFromPoolCache (
                 type^.NpPartCache, // cache
                 MM_ALLOCATE_WAIT, // flags
+                OUT nppart, // ptr
             )
         
         ELSE
-            nppart = MmAllocatePool (
+            status = MmAllocatePool (
                 MM_NONPAGED_POOL, // poolindex
                 npsize, // bytes
                 type^.Tag, // tag
                 MM_ALLOCATE_WAIT, // flags
+                OUT nppart, // ptr
             )
         END
 
-        IF NOT nppart THEN
-            status = OS_STATUS_NO_MEMORY
-
+        IF OsError ( status ) THEN
             GOTO Error2
         END
     END
@@ -245,23 +251,23 @@ FN ObuAllocateObject (
 
             internalflags |= OBP_PG_FROM_CACHE
 
-            pgpart = MmAllocateFromPoolCache (
+            status = MmAllocateFromPoolCache (
                 type^.PgPartCache, // cache
-                TRUE, // wait
+                MM_ALLOCATE_WAIT, // flags
+                OUT pgpart, // ptr
             )
         
         ELSE
-            pgpart = MmAllocatePool (
+            status = MmAllocatePool (
                 MM_PAGED_POOL, // poolindex
                 psize, // bytes
                 type^.Tag, // tag
-                TRUE, // wait
+                MM_ALLOCATE_WAIT, // flags
+                OUT pgpart, // ptr
             )
         END
 
-        IF NOT pgpart THEN
-            status = OS_STATUS_NO_MEMORY
-
+        IF OsError ( status ) THEN
             GOTO Error3
         END
     END

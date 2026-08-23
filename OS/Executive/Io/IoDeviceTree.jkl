@@ -121,14 +121,17 @@ FN IopFindPlaneEntry (
 
     // Create a new one.
 
-    node := CAST MmAllocatePool (
+    node : ^IouPlaneEntry
+
+    status := MmAllocatePool (
         MM_PAGED_POOL, // poolindex
         SIZEOF IouPlaneEntry, // bytes
         'PlNd', // tag
         MM_ALLOCATE_WAIT, // flags
-    ) TO ^IouPlaneEntry
+        OUT node, // ptr
+    )
 
-    IF NOT node THEN
+    IF OsError ( status ) THEN
         RETURN NULLPTR
     END
 

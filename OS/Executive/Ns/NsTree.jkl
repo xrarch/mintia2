@@ -224,14 +224,17 @@ FN NspCreateEntry (
     // Create a new namespace entry and link it as a child of the parent.
     // Tree lock must be held exclusive.
 
-    entry := CAST MmAllocatePool (
+    entry : ^NsuEntry
+
+    status := MmAllocatePool (
         MM_PAGED_POOL, // poolindex
         SIZEOF NsuEntry, // bytes
         'NsEn', // tag
         MM_ALLOCATE_WAIT, // flags
-    ) TO ^NsuEntry
+        OUT entry, // ptr
+    )
 
-    IF NOT entry THEN
+    IF OsError ( status ) THEN
         RETURN NULLPTR
     END
 
@@ -966,12 +969,13 @@ FN NsuLookupEntryByPath (
         // Then the lock is reacquired and the transition entry is awoken and
         // destroyed.
 
-        event = ExAllocateEventCounter ( MM_ALLOCATE_WAIT )
+        status = ExAllocateEventCounter (
+            MM_ALLOCATE_WAIT, // flags
+            OUT event, // ptr
+        )
 
-        IF NOT event THEN
+        IF OsError ( status ) THEN
             NspUnlockTree ()
-
-            status = OS_STATUS_NO_MEMORY
 
             GOTO Exit
         END
