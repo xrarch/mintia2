@@ -1,0 +1,221 @@
+//
+// Multithreaded mandelbrot set test.
+// Contributed by DreamingWarlord
+//
+
+#INCLUDE "Fwt.hjk"
+#INCLUDE "<ll>/Rtl.hjk"
+#INCLUDE "<ll>/Executive/Ex.hjk"
+#INCLUDE "<ll>/Executive/Ps.hjk"
+#INCLUDE "<ll>/Executive/Ob.hjk"
+#INCLUDE "<ll>/Executive/Mm.hjk"
+#INCLUDE "<ll>/Executive/Hal.hjk"
+
+#DEFINE CELL_SIZE 4
+#DEFINE GRID_SIZE 64
+#DEFINE MAX_CELLS 4096
+#DEFINE MAX_WIDTH 256
+
+cellcounter : ULONG
+cycles : UWORD
+beginflag : ULONG
+
+FN SleepOne (
+    IN time : ULONG,
+)
+
+    // Sleep helper.
+
+    interval : RtlUquad
+
+    RtlSetUquadToUlong (
+        &interval, // uquad
+        time, // ulong
+    )
+
+    KeSleep (
+        &interval, // interval
+        KE_KERNEL_MODE, // waitmode
+        FALSE, // alertable
+        NULLPTR, // continuation
+    )
+END
+
+FN MandelbrotCalc (
+    IN x0 : WORD,
+    IN y0 : WORD,
+) : UWORD
+
+    // Calculate the intensity of a pixel.
+
+    zoom : WORD = 200 + (CAST cycles TO WORD) * 50
+    x0 = (x0 * zoom) / MAX_WIDTH - zoom / 2 - 7000
+    y0 = (y0 * zoom) / MAX_WIDTH - zoom / 2 - 2929
+
+    iterations : UWORD = 0
+    x : WORD = 0
+    y : WORD = 0
+    x2 : WORD = 0
+    y2 : WORD = 0
+
+    WHILE (x2 + y2 <= 40000 AND iterations < 300) DO
+        x2 = (x * x) / 10000
+        y2 = (y * y) / 10000
+        y = 2 * ((x * y) / 10000) + y0
+        x = x2 - y2 + x0
+        iterations += 1
+    END
+
+    RETURN iterations
+END
+
+FN (KeContinuationF) MandelbrotCellMain (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
+)
+
+    // Cell drawing thread.
+
+    WHILE beginflag == 0 DO
+        BARRIER
+        SleepOne ( 100 )
+    END
+
+    context1 := CAST continuation^.Parameter1 TO UWORD
+    context2 := CAST continuation^.Parameter2 TO UWORD
+
+    x : UWORD = 0
+
+    WHILE x < CELL_SIZE DO
+        y : UWORD = 0
+
+        WHILE y < CELL_SIZE DO
+            real_x : UWORD = x + (context1 * CELL_SIZE)
+            real_y : UWORD = y + (context2 * CELL_SIZE)
+
+            FwtSetPixel (
+                MandelbrotCalc ( CAST real_x TO WORD, CAST real_y TO WORD ) +
+                cycles * 13,
+                CAST real_x TO WORD,
+                CAST real_y TO WORD,
+            )
+
+            y += 1
+        END
+
+        x += 1
+    END
+
+    KeIncrementUlong ( &cellcounter, 1 )
+    PsExitThread ( 0 )
+END
+
+FN MandelbrotSpawnCell (
+    IN gridx : UWORD,
+    IN gridy : UWORD,
+) : OsStatus
+
+    // Spawn a cell drawing thread.
+
+    thread : ^PsuThread
+
+    name : RtlString
+    RtlInitializeString ( &name, "MandelbrotCell" )
+
+    status := PsCreateExecutiveThread (
+        PsGenerateNode (),
+        &name,
+        &MandelbrotCellMain,
+        CAST gridx TO ^VOID,
+        CAST gridy TO ^VOID,
+        0,
+        OUT thread,
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    ObUnreferenceObject ( thread )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+
+FN Compact (
+    IN i : UWORD
+) : UWORD
+    i &= 0x55555555
+    i = (i $ (i >> 1)) & 0x33333333
+    i = (i $ (i >> 2)) & 0x0F0F0F0F
+    i = (i $ (i >> 4)) & 0x00FF00FF
+    i = (i $ (i >> 8)) & 0x0000FFFF
+    RETURN i
+END
+
+FN (KeContinuationF) MandelbrotTMain (
+    IN continuation : ^KeContinuation,
+    IN waitstatus : OsStatus,
+)
+
+    // Mandelbrot test main loop.
+    // This spawns one thread per cell which increments cellcounter after it's
+    // finished. When cellcounter reaches max cells, it's reset and the process
+    // is looped.
+
+    RtlPrint( "MandelbrotTMain: started\n" )
+
+    WHILE TRUE DO
+        beginflag = 0
+        cellcounter = 0
+        cycles += 1
+        i := 0
+        spawned := 0
+
+        WHILE i < MAX_CELLS DO
+            x : UWORD = Compact( i )
+            y : UWORD = Compact( i >> 1 )
+            IF NOT OsError ( MandelbrotSpawnCell ( x, y ) ) THEN
+                spawned += 1
+            END
+            i += 1
+        END
+
+        KeIncrementUlong ( &beginflag, 1 )
+
+        WHILE cellcounter < spawned DO
+            BARRIER // idk if this works
+            SleepOne (10)
+        END
+    END
+END
+
+FN MbtMain ()
+
+    // Start the Mandelbrot test.
+
+    IF NOT FwtInitGraphics () THEN
+        LEAVE
+    END
+
+    name : RtlString
+    thread : ^PsuThread
+    RtlInitializeString ( &name, "MandelbrotMain" )
+
+    status := PsCreateExecutiveThread (
+        KeCurrentAffinityNode (), // kenode
+        &name, // name
+        &MandelbrotTMain, // startfunc
+        NULLPTR, // context1
+        NULLPTR, // context2
+        0, // flags
+        OUT thread // thread
+    )
+
+    IF OsError ( status ) THEN
+        RtlPrint ( "KtMain: Could not create MandelbrotMain" )
+        LEAVE
+    END
+
+    ObUnreferenceObject(thread)
+END
