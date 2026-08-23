@@ -100,6 +100,8 @@ FN (KeInterruptF) KepClockTick (
         LEAVE
     END
 
+    kenode := prb^.Node
+
     previpl := context^.OldIpl
 
     // Increment count of clock ticks on this processor.
@@ -154,7 +156,7 @@ FN (KeInterruptF) KepClockTick (
 
         // If we're processor zero, then update the time.
 
-        KepUpdateTime ( prb^.Node, prb )
+        KepUpdateTime ( kenode, prb )
 
         RtlMoveUquad (
             &currentticks, // dest
@@ -167,9 +169,17 @@ FN (KeInterruptF) KepClockTick (
         kepnode^.NextWorkBalanceMs -= HALU_TIMER_INTERVAL
 
         IF kepnode^.NextWorkBalanceMs <= 0 THEN
-            // Enqueue the work balance DPC.
+            // Enqueue the work balance DPC, with a +-200ms jitter.
 
-            kepnode^.NextWorkBalanceMs = KEP_WORK_BALANCE_INTERVAL
+            rtlow :=
+#IF ( == BLD_BITS 32 )
+                CAST kenode^.SharedUserPage^.RealTime.Low TO WORD
+#ELSE
+                CAST kenode^.SharedUserPage^.RealTime.Quad TO WORD
+#END
+
+            kepnode^.NextWorkBalanceMs = KEP_WORK_BALANCE_INTERVAL +
+                ((rtlow % 400) - 200)
 
             KeEnqueueDpc (
                 &kepnode^.WorkBalanceDpc, // dpc
