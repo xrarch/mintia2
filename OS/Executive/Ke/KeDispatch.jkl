@@ -993,8 +993,8 @@ FN KepReadyThread (
     // Select a processor to insert the thread into in the following order:
     //
     // 1. Affinity processor if would preempt.
-    // 2. Any other idle processor.
-    // 3. Any other preemptible processor.
+    // 2. Any other idle processor in the affinity node.
+    // 3. Any other preemptible processor in the affinity node.
     // 4. Current processor.
 
     prb := thread^.AffinityPrb
@@ -2240,7 +2240,8 @@ END
 
 #IF BLD_MP
 
-#DEFINE KEP_MAX_THREAD_MOVES 16
+#DEFINE KEP_MAX_THREAD_MOVES 64
+#DEFINE KEP_MAX_THREAD_MOVE_ITERATIONS 2
 
 FN KepMoveThreads (
     IN destprb : ^KepPrb,
@@ -2252,6 +2253,11 @@ FN KepMoveThreads (
     // Move threads from the source to the destination, so long as it would not
     // worsen an imbalance.
 
+    k := 0
+
+@Again
+
+    again := FALSE
     threads : ^KeuThread[KEP_MAX_THREAD_MOVES]
     skippedthreads : ^KeuThread[KEP_MAX_THREAD_MOVES]
     thread : ^KeuThread
@@ -2300,6 +2306,7 @@ FN KepMoveThreads (
 
     IF count > KEP_MAX_THREAD_MOVES THEN
         count = KEP_MAX_THREAD_MOVES
+        again = TRUE
     END
 
     WHILE i < count DO
@@ -2396,6 +2403,11 @@ FN KepMoveThreads (
         KepReleaseReadyQueueAndThreadElevated ( destprb, thread )
 
         j += 1
+    END
+
+    IF again AND k < KEP_MAX_THREAD_MOVE_ITERATIONS THEN
+        k += 1
+        GOTO Again
     END
 END
 
