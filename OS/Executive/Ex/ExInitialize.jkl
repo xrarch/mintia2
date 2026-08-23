@@ -12,7 +12,8 @@ FNPTR KtMainF ()
 
 ExuBootFlags : ULONG = 0
 
-#SECTION "INITtext"
+#ENTERSECTION "INITtext"
+
 FN ExpGetExistenceArg (
     IN str : ^UBYTE,
 ) : UWORD
@@ -35,7 +36,6 @@ FN ExpGetExistenceArg (
     RETURN FALSE
 END
 
-#SECTION "INITtext"
 FN ExpGetValueArg (
     IN key : ^UBYTE,
 ) : ^UBYTE
@@ -81,7 +81,6 @@ FN ExpGetValueArg (
     RETURN NULLPTR
 END
 
-#SECTION "INITtext"
 FN ExpInitializeBootFlags ()
 
     // Initialize all of the boot flags.
@@ -106,8 +105,6 @@ FN ExpInitializeBootFlags ()
         ExuBootFlags |= OS_BOOT_NONPAGED_POOL
     END
 END
-
-#SECTION "INITtext"
 FN (KeContinuationF) ExuStartSystemProcess (
     IN continuation : ^KeContinuation,
     IN waitstatus : OsStatus,
@@ -168,7 +165,6 @@ FN (KeContinuationF) ExuStartSystemProcess (
     MmuBalanceManager ( 0, 0 )
 END
 
-#SECTION "INITtext"
 FN ExuStartExecutive ()
 
     // Called by the Kernel (Ke) after it finishes its own self-initialization.
@@ -270,54 +266,58 @@ FN ExuInitializeDistanceLists ()
     WHILE i < nodes DO
         kenode := KeNumaNodeById ( i )
 
-        // First allocate the list.
+        IF kenode^.ProcessorCount != 0 THEN
+            // First allocate the list.
 
-        list : ^^KeuNode = MmAllocatePoolEx (
-            kenode^.Mmp, // mmnode
-            MM_NONPAGED_POOL, // poolindex
-            SIZEOF ^KeuNode * nodes, // bytes
-            'NdDl', // tag
-            0, // flags
-        )
+            list : ^^KeuNode = MmAllocatePoolEx (
+                kenode^.Mmp, // mmnode
+                MM_NONPAGED_POOL, // poolindex
+                SIZEOF ^KeuNode * nodes, // bytes
+                'NdDl', // tag
+                0, // flags
+            )
 
-        IF NOT list THEN
-            KeCrash ( "ExuInitializeDistanceLists: failed to alloc list\n" )
-        END
-
-        // Now fill it with node pointers.
-
-        j := 0
-        index := 0
-
-        WHILE j < nodes DO
-            IF j != i THEN
-                list[index] = KeNumaNodeById ( j )
-                index += 1
+            IF NOT list THEN
+                KeCrash ( "ExuInitializeDistanceLists: failed to alloc list\n" )
             END
 
-            j += 1
+            // Now fill it with node pointers.
+
+            j := 0
+            index := 0
+
+            WHILE j < nodes DO
+                IF j != i THEN
+                    list[index] = KeNumaNodeById ( j )
+                    index += 1
+                END
+
+                j += 1
+            END
+
+            // Now sort it by distance.
+
+            RtlQuickSort (
+                list, // array
+                &ExpCompareNodeDistances, // lessthan
+                0, // low
+                CAST nodes - 2 TO WORD, // high
+                kenode, // context
+            )
+
+            // Make sure the final slot contains a null pointer.
+
+            list[nodes - 1] = NULLPTR
+
+            // Now publish it.
+
+            kenode^.DistanceList = list
         END
-
-        // Now sort it by distance.
-
-        RtlQuickSort (
-            list, // array
-            &ExpCompareNodeDistances, // lessthan
-            0, // low
-            CAST nodes - 2 TO WORD, // high
-            kenode, // context
-        )
-
-        // Make sure the final slot contains a null pointer.
-
-        list[nodes - 1] = NULLPTR
-
-        // Now publish it.
-
-        kenode^.DistanceList = list
 
         i += 1
     END
 END
 
 #END
+
+#LEAVESECTION
