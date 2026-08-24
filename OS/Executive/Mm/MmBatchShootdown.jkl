@@ -34,24 +34,17 @@ FN MmpFlushShootdowns (
     table := mmnode^.BatchedShootdowns
     alttable := mmnode^.AlternateBatchedShootdowns
 
+    mmnode^.BatchedShootdowns = alttable
+    mmnode^.AlternateBatchedShootdowns = table
+
     // Acquire all per-cpu locks in order to serialize behind all ongoing
-    // enqueues.
+    // enqueues to this table.
 
     i := 0
     procs := KeQueryMostProcessorsInAnyNode ()
 
     WHILE i < procs DO
         KeAcquireLockExclusive ( &table[i].Lock )
-
-        i += 1
-    END
-
-    mmnode^.BatchedShootdowns = alttable
-    mmnode^.AlternateBatchedShootdowns = table
-
-    i = 0
-
-    WHILE i < procs DO
         KeReleaseLock ( &table[i].Lock )
 
         i += 1
