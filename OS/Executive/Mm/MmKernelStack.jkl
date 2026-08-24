@@ -76,6 +76,9 @@ FN MmuUnchargeKernelStack (
 
     mmnode := kenode^.Mmp
 
+    // Decrement the number of needed kernel stack areas.
+    // This may result in needing to free one.
+
     kstack := NULLPTR
 
     KeAcquireLockExclusive ( &mmnode^.KernelStackPteListLock )
@@ -100,6 +103,8 @@ FN MmuUnchargeKernelStack (
     END
 
     KeReleaseLock ( &mmnode^.KernelStackPteListLock )
+
+    // Free it outside the lock.
 
     IF kstack THEN
         MmpReleaseDynamicPages (
@@ -147,13 +152,17 @@ FN MmpAllocateKernelStackVa (
     KeAssert ( pte != NULLPTR )
 #END
 
+    KeAssert ( mmnode^.KernelStacksOnList != 0 )
+
+    // Decrememt number of stack areas on the list.
+
+    mmnode^.KernelStacksOnList -= 1
+
+    // Pop the stack area.
+
     mmnode^.KernelStackPteListHead = CAST pte[0] TO ^VOID
 
     kstack := MmpVirtualAddress ( pte )
-
-    KeAssert ( mmnode^.KernelStacksOnList != 0 )
-
-    mmnode^.KernelStacksOnList -= 1
 
     KeReleaseLock ( &mmnode^.KernelStackPteListLock )
 
@@ -167,7 +176,7 @@ FN (MmpAfterShootdownF) MmpFreeKernelStackVa (
     IN pages : UWORD,
 )
 
-    // Free virtual space for a kernel stack.
+    // Free the virtual space for a kernel stack.
 
     WHILE pages DO
         KeAcquireLockExclusive ( &mmnode^.KernelStackPteListLock )
@@ -176,7 +185,8 @@ FN (MmpAfterShootdownF) MmpFreeKernelStackVa (
 
         IF onlist == mmnode^.KernelStacksNeeded THEN
             // We already have all the kernel stacks we need on the list, so
-            // just free this one.
+            // just free this one. This can occur primarily when stacks were
+            // uncharged while this stack was on the batched shootdown queue.
 
             KeReleaseLock ( &mmnode^.KernelStackPteListLock )
 
@@ -188,6 +198,9 @@ FN (MmpAfterShootdownF) MmpFreeKernelStackVa (
             )
         
         ELSE
+            // We have fewer than the needed number of kernel stack areas, so
+            // add this one to the list.
+
             pte := MmpPteAddress ( ptr )
 
             pte[0] = CAST mmnode^.KernelStackPteListHead TO UWORD
