@@ -14,6 +14,7 @@ END
 #SECTION "INITtext"
 FN MmpInitializeChunkSpace (
     IN chunkspace : ^MmpChunkSpace,
+    IN mmnode : ^MmpNode,
     IN base : ^VOID,
     IN entryshift : UWORD,
     IN pages : UWORD,
@@ -28,8 +29,7 @@ FN MmpInitializeChunkSpace (
     chunkspace^.EntryShift = entryshift
     chunkspace^.EntryCount = entrycount
     chunkspace^.FreeListHead = NULLPTR
-
-    chunkspace^.PendingFlushCount = 0
+    chunkspace^.Node = mmnode
 
     KeInitializeLock ( &chunkspace^.Lock )
 
@@ -48,50 +48,6 @@ FN MmpInitializeChunkSpace (
     END
 END
 
-FN MmpFlushChunkSpace (
-    IN chunkspace : ^MmpChunkSpace,
-)
-
-    // Flush TB entries across all processors for the delayed chunks.
-
-    // Insert these entries into the free list.
-
-    i := 0
-    max := chunkspace^.PendingFlushCount
-
-    WHILE i < max DO
-        chunk := CAST MmpPteAddress ( chunkspace^.PendingFlush[i] )
-            TO ^MmpChunkEntry
-
-        chunk^.Next = chunkspace^.FreeListHead
-        chunkspace^.FreeListHead = chunk
-
-        i += 1
-    END
-
-    chunkspace^.PendingFlushCount = 0
-
-    // Flush the TB.
-
-    IF chunkspace^.EntryShift == RTL_PAGE_SHIFT AND
-        max < 16 THEN
-
-        // Chunks are pages, and there's fewer than 16.
-        // Flush them individually.
-
-        KeuFlushMultipleTb (
-            &chunkspace^.PendingFlush[0], // vaddrtable
-            max, // pagecount
-        )
-
-    ELSE
-        // Chunks are multiple pages, or there's more than 16.
-        // Flush everyone's entire TB. Don't keep global pages.
-
-        KeuSweepTb ( FALSE )
-    END
-END
-
 FN MmpAllocateChunkSpace (
     IN chunkspace : ^MmpChunkSpace,
     OUT ptr : ^VOID,
@@ -102,23 +58,25 @@ FN MmpAllocateChunkSpace (
     // returned virtual address - this is the caller's responsibility.
     // Returns NULLPTR if no chunks remaining.
 
+@Retry
+
     ipl := KeAcquireLockExclusiveRaise ( &chunkspace^.Lock )
 
     chunk := chunkspace^.FreeListHead
 
     IF NOT chunk THEN
-        IF NOT chunkspace^.PendingFlushCount THEN
-            KeReleaseLockLower ( &chunkspace^.Lock, ipl )
-
-            RETURN OS_STATUS_EXHAUSTED_SYSTEM_VA
-        END
+        KeReleaseLockLower ( &chunkspace^.Lock, ipl )
 
         // There are chunks pending flush.
         // We can flush them and grab the first freed one.
 
-        MmpFlushChunkSpace ( chunkspace )
+        MmpFlushShootdowns ( chunkspace^.Node )
 
-        chunk = chunkspace^.FreeListHead
+        IF chunkspace^.FreeListHead THEN
+            GOTO Retry
+        END
+
+        RETURN OS_STATUS_EXHAUSTED_SYSTEM_VA
     END
 
     chunkspace^.FreeListHead = chunk^.Next
@@ -130,6 +88,35 @@ FN MmpAllocateChunkSpace (
     RETURN OS_STATUS_SUCCESS
 END
 
+FN (MmpAfterShootdownF) MmpChunkSpaceCallback (
+    IN mmnode : ^MmpNode,
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
+
+    // A batched shootdown occurred and we can now free this chunk space for
+    // real.
+
+    chunkspace := CAST context TO ^MmpChunkSpace
+
+    // Insert directly into the free chunk list.
+
+    ipl := KeAcquireLockExclusiveRaise ( &chunkspace^.Lock )
+
+    WHILE pages DO
+        chunk := CAST MmpPteAddress ( ptr ) TO ^MmpChunkEntry
+
+        chunk^.Next = chunkspace^.FreeListHead
+        chunkspace^.FreeListHead = chunk
+
+        pages -= 1
+        ptr += RTL_PAGE_SIZE
+    END
+
+    KeReleaseLockLower ( &chunkspace^.Lock, ipl )
+END
+
 FN MmpFreeChunkSpace (
     IN chunkspace : ^MmpChunkSpace,
     IN ptr : ^VOID,
@@ -138,32 +125,28 @@ FN MmpFreeChunkSpace (
 
     // Return a chunk to the given chunk space.
 
+    IF flush THEN
+        // Defer the flush.
+
+        MmpBatchShootdown (
+            chunkspace^.Node, // mmnode
+            chunkspace, // context
+            ptr, // ptr
+            1, // pages
+            &MmpChunkSpaceCallback, // callback
+        )
+
+        LEAVE
+    END
+
+    // Insert directly into the free chunk list.
+
     ipl := KeAcquireLockExclusiveRaise ( &chunkspace^.Lock )
 
-    IF flush THEN
-        // Insert on the delayed flush table.
+    chunk := CAST MmpPteAddress ( ptr ) TO ^MmpChunkEntry
 
-        count := chunkspace^.PendingFlushCount
-
-        IF count == MMP_MAXIMUM_CHUNKS_PENDING_FLUSH THEN
-            // Full. Flush it.
-
-            MmpFlushChunkSpace ( chunkspace )
-
-            count = 0
-        END
-
-        chunkspace^.PendingFlush[count] = ptr
-        chunkspace^.PendingFlushCount = count + 1
-
-    ELSE
-        // Insert directly into the free chunk list.
-
-        chunk := CAST MmpPteAddress ( ptr ) TO ^MmpChunkEntry
-
-        chunk^.Next = chunkspace^.FreeListHead
-        chunkspace^.FreeListHead = chunk
-    END
+    chunk^.Next = chunkspace^.FreeListHead
+    chunkspace^.FreeListHead = chunk
 
     KeReleaseLockLower ( &chunkspace^.Lock, ipl )
 END
@@ -228,6 +211,7 @@ FN MmpInitializeSystemVa (
 
     MmpInitializeChunkSpace (
         &mmnode^.PoolSpace, // chunkspace
+        mmnode, // mmnode
         base, // base
         RTL_PAGE_SHIFT, // entryshift
         kenode^.PoolSpaceSize, // pages
@@ -253,6 +237,7 @@ FN MmpInitializeSystemVa (
 
     MmpInitializeChunkSpace (
         &mmnode^.CacheSpace, // chunkspace
+        mmnode, // mmnode
         base, // base
         entryshift, // entryshift
         kenode^.CacheSpaceSize, // pages
@@ -329,37 +314,24 @@ FN MmpInitializeSpaceNodeAllocation (
 
 END
 
-FN MmpFlushDynamicSpace (
+FN (MmpAfterShootdownF) MmpDynamicSpaceCallback (
     IN mmnode : ^MmpNode,
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
 )
 
-    // Perform the deferred flushes for dynamic space. Assumes the dynamic space
-    // lock is held.
+    // Perform the deferred flush for dynamic space.
 
-    // First free the regions.
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceLock )
 
-    i := 0
-    max := mmnode^.DeferredFlushIndex
-    flush := &mmnode^.DeferredFlushTable[0]
-    base := mmnode^.DynamicSpaceBase
+    RtlClearBitsBitmap (
+        &mmnode^.DynamicSpaceBitmap, // header
+        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // index
+        pages, // runlength
+    )
 
-    WHILE i < max DO
-        RtlClearBitsBitmap (
-            &mmnode^.DynamicSpaceBitmap, // header
-            (flush^.Ptr - base) >> RTL_PAGE_SHIFT, // index
-            flush^.Pages, // runlength
-        )
-
-        flush += SIZEOF MmpDeferredFlush
-        i += 1
-    END
-
-    mmnode^.DeferredFlushIndex = 0
-    mmnode^.DeferredFlushPages = 0
-
-    // Now do a global TB flush.
-
-    KeuSweepTb ( FALSE )
+    KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
 END
 
 FN MmpFindDynamicSpaceNode (
@@ -455,18 +427,14 @@ FN MmpAllocateDynamicPages (
         mmnode^.DynamicSpaceHint, // hint
     )
 
-    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceLock )
-
     IF index == -1 THEN
         // Dynamic space has completely filled up.
 
-        IF mmnode^.DeferredFlushIndex THEN
-            // Try freeing the deferred regions and trying again.
+        // Try freeing the deferred regions and trying again.
 
-            MmpFlushDynamicSpace ( mmnode )
-        END
+        MmpFlushShootdowns ( mmnode )
 
-        // Search again with the lock held, to be absolutely sure it's full.
+        // Search again, to be absolutely sure it's full.
 
         index = RtlFindRunBitmap (
             &mmnode^.DynamicSpaceBitmap, // header
@@ -477,25 +445,24 @@ FN MmpAllocateDynamicPages (
         IF index == -1 THEN
             // Yep, full.
 
-            KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
-
             RETURN OS_STATUS_EXHAUSTED_SYSTEM_VA
         END
+    END
     
-    ELSE
-        // Check that the range is still free with the lock held.
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceLock )
 
-        IF NOT RtlCheckClearBitsBitmap (
-            &mmnode^.DynamicSpaceBitmap, // header
-            index, // index
-            pages, // runlength
-        ) THEN
-            // Someone else nabbed it, so retry.
+    // Check that the range is still free with the lock held.
 
-            KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
+    IF NOT RtlCheckClearBitsBitmap (
+        &mmnode^.DynamicSpaceBitmap, // header
+        index, // index
+        pages, // runlength
+    ) THEN
+        // Someone else nabbed it, so retry.
 
-            GOTO Retry
-        END
+        KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
+
+        GOTO Retry
     END
 
     // Set the hint.
@@ -526,38 +493,27 @@ FN MmpReleaseDynamicPages (
 
     // Release a portion of dynamic space by pointer and page count.
 
-    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceLock )
-
     IF flush THEN
-        IF mmnode^.DeferredFlushIndex == MMP_DEFERRED_FLUSH_PAIRS THEN
-            // This exceeds the maximum number of regions pending flush.
-
-            MmpFlushDynamicSpace ( mmnode )
-        END
-
         // Add this region to the list of pairs pending flush.
 
-        entry := &mmnode^.DeferredFlushTable[mmnode^.DeferredFlushIndex]
-
-        entry^.Ptr = ptr
-        entry^.Pages = pages
-
-        mmnode^.DeferredFlushIndex += 1
-        mmnode^.DeferredFlushPages += pages
-
-        IF mmnode^.DeferredFlushPages >= MMP_DEFERRED_FLUSH_PAGES THEN
-            // Too many pages pending flush.
-
-            MmpFlushDynamicSpace ( mmnode )
-        END
-
-    ELSE
-        RtlClearBitsBitmap (
-            &mmnode^.DynamicSpaceBitmap, // header
-            (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // index
-            pages, // runlength
+        MmpBatchShootdown (
+            mmnode, // mmnode
+            NULLPTR, // context
+            ptr, // ptr
+            pages, // pages
+            &MmpDynamicSpaceCallback, // callback
         )
+
+        LEAVE
     END
+
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceLock )
+
+    RtlClearBitsBitmap (
+        &mmnode^.DynamicSpaceBitmap, // header
+        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // index
+        pages, // runlength
+    )
 
     KeReleaseLockLower ( &mmnode^.DynamicSpaceLock, ipl )
 END

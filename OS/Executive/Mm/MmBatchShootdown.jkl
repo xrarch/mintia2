@@ -1,0 +1,165 @@
+//
+// Batch TB shootdowns.
+//
+
+#IF BLD_MP
+
+#INCLUDE "Mmp.hjk"
+
+FN MmpFlushShootdowns (
+    IN mmnode : ^MmpNode,
+)
+
+    // Flush all of the pending batched shootdowns on this node.
+
+    // Take the shootdown lock to avoid others redundantly doing the same work.
+    // We take it unconditionally even if there are no pending flushes so that
+    // if we are a high priority thread depending on a low priority thread to
+    // do flushes, it inherits our priority, and we wait for it to finish.
+
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.FlushShootdownLock )
+
+    IF NOT mmnode^.HasPendingFlushes THEN
+        KeReleaseLockLower ( &mmnode^.FlushShootdownLock, ipl )
+
+        LEAVE
+    END
+
+    mmnode^.HasPendingFlushes = FALSE
+
+    // Before doing the shootdown, swap the active shootdown table and the
+    // alternate shootdown table. This will give us a copy that is guaranteed
+    // not to have any new shootdowns enqueued to it in the future.
+
+    table := mmnode^.BatchedShootdowns
+    alttable := mmnode^.AlternateBatchedShootdowns
+
+    // Acquire all per-cpu locks in order to serialize behind all ongoing
+    // enqueues.
+
+    i := 0
+    procs := KeQueryMostProcessorsInAnyNode ()
+
+    WHILE i < procs DO
+        KeAcquireLockExclusive ( &table[i].Lock )
+
+        i += 1
+    END
+
+    mmnode^.BatchedShootdowns = alttable
+    mmnode^.AlternateBatchedShootdowns = table
+
+    i = 0
+
+    WHILE i < procs DO
+        KeReleaseLock ( &table[i].Lock )
+
+        i += 1
+    END
+
+    // Do a global synchronous TB shootdown.
+
+    KeuSweepTb ( FALSE )
+
+    // Process all of the batched ranges.
+
+    i = 0
+
+    WHILE i < procs DO
+        percpu := &table[i]
+
+        index := percpu^.Index
+
+        IF index THEN
+            percpu^.Index = 0
+            j := 0
+
+            WHILE j < index DO
+                percpu^.Table[j].Callback (
+                    mmnode, // mmnode
+                    percpu^.Table[j].Context, // context
+                    percpu^.Table[j].Ptr, // ptr
+                    percpu^.Table[j].Pages, // pages
+                )
+
+                j += 1
+            END
+        END
+
+        i += 1
+    END
+
+    KeReleaseLockLower ( &mmnode^.FlushShootdownLock, ipl )
+END
+
+FN MmpBatchShootdown (
+    IN mmnode : ^MmpNode,
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+    IN callback : MmpAfterShootdownF,
+)
+
+    // Add the callback to the next batch.
+
+@Retry
+
+    cpuid := KeCurrentNodeLocalProcessorId ()
+
+    shootdownstate := mmnode^.BatchedShootdowns
+    percpu := &shootdownstate[cpuid]
+
+    ipl := KeAcquireLockExclusiveRaise ( &percpu^.Lock )
+
+    IF shootdownstate != mmnode^.BatchedShootdowns THEN
+        // We raced with a flush which swapped the shootdown states. Reload the
+        // pointer, since we shouldn't enqueue anything new to this one.
+
+        KeReleaseLockLower ( &percpu^.Lock, ipl )
+
+        GOTO Retry
+    END
+
+    // Nope, add a new entry.
+
+    index := percpu^.Index
+
+    IF index >= MMP_MAXIMUM_SHOOTDOWN_BATCH THEN
+        // The batch is full, do it immediately.
+
+        KeReleaseLockLower ( &percpu^.Lock, ipl )
+
+        MmpFlushShootdowns ( mmnode )
+
+        callback (
+            mmnode, // mmnode
+            context, // context
+            ptr, // ptr
+            pages, // pages
+        )
+
+        LEAVE
+    END
+
+    entry := &percpu^.Table[index]
+
+    entry^.Ptr = ptr
+    entry^.Pages = pages
+    entry^.Callback = callback
+    entry^.Context = context
+
+    percpu^.Index = index + 1
+
+    IF NOT mmnode^.HasPendingFlushes THEN
+        // Indicate that something productive is to be gained by doing a flush.
+        // We don't just unconditionally set this to TRUE because it would
+        // cause its cache line to aggressively migrate around, so we check
+        // if it's FALSE first.
+
+        mmnode^.HasPendingFlushes = TRUE
+    END
+
+    KeReleaseLockLower ( &percpu^.Lock, ipl )
+END
+
+#END

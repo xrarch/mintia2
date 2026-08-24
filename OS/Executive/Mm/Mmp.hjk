@@ -150,19 +150,15 @@ EXTERN FN MmpFreeChunkSpace (
     IN flush : UWORD,
 )
 
-#DEFINE MMP_MAXIMUM_CHUNKS_PENDING_FLUSH 128
-
 STRUCT MmpChunkSpace
     Lock : KeLock,
 
 KE_CACHE_LINE_END
 
+    Node : ^MmpNode,
     EntryShift : UWORD,
     EntryCount : UWORD,
     FreeListHead : ^MmpChunkEntry,
-
-    PendingFlush : ^VOID[MMP_MAXIMUM_CHUNKS_PENDING_FLUSH],
-    PendingFlushCount : UBYTE,
 END
 
 EXTERN FN MmpInitializeSystemVa (
@@ -451,12 +447,45 @@ STRUCT MmpPoolCacheList
     MasterListLock : KeLock,
 END
 
-#DEFINE MMP_DEFERRED_FLUSH_PAIRS 64
+// Maximum number of shootdowns that can be batched on a per-cpu table at a
+// time.
 
-STRUCT MmpDeferredFlush
+#DEFINE MMP_MAXIMUM_SHOOTDOWN_BATCH 32
+
+FNPTR MmpAfterShootdownF (
+    IN mmnode : ^MmpNode,
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
+
+STRUCT MmpBatchedShootdown
     Ptr : ^VOID,
     Pages : UWORD,
+    Callback : MmpAfterShootdownF,
+    Context : ^VOID,
 END
+
+STRUCT MmpBatchedShootdownTable
+    Table : MmpBatchedShootdown[MMP_MAXIMUM_SHOOTDOWN_BATCH],
+    Index : UWORD,
+
+KE_CACHE_LINE_END
+
+    Lock : KeLock,
+END
+
+EXTERN FN MmpFlushShootdowns (
+    IN mmnode : ^MmpNode,
+)
+
+EXTERN FN MmpBatchShootdown (
+    IN mmnode : ^MmpNode,
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+    IN callback : MmpAfterShootdownF,
+)
 
 STRUCT MmpNode
     DynamicSpaceLock : KeLock,
@@ -466,9 +495,6 @@ KE_CACHE_LINE_END
     DynamicSpaceBitmap : RtlBitmapHeader,
     DynamicSpaceHint : UWORD,
     DynamicSpaceBase : ^VOID,
-
-    DeferredFlushIndex : UWORD,
-    DeferredFlushPages : UWORD,
 
 KE_CACHE_LINE_END
 
@@ -565,7 +591,13 @@ KE_CACHE_LINE_END
     NpPoolCacheList : MmpPoolCacheList,
     PgPoolCacheList : MmpPoolCacheList,
 
-    DeferredFlushTable : MmpDeferredFlush[MMP_DEFERRED_FLUSH_PAIRS],
+#IF BLD_MP
+    BatchedShootdowns : ^MmpBatchedShootdownTable,
+    AlternateBatchedShootdowns : ^MmpBatchedShootdownTable,
+    FlushShootdownLock : KeLock,
+    HasPendingFlushes : UBYTE,
+#END
+
 END
 
 EXTERN FN MmpClearTrackingTableEntry (

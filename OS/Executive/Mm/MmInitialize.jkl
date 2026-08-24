@@ -421,6 +421,22 @@ FN MmuInitializeStage1 ()
 
         mmnode^.KeNode = kenode
 
+        mmnode^.BatchedShootdowns = KeuAllocateNodeSpace (
+            kenode, // kenode
+            KeQueryMostProcessorsInAnyNode () *
+            SIZEOF MmpBatchedShootdownTable, // bytes
+        )
+
+        KeAssert ( mmnode^.BatchedShootdowns != NULLPTR )
+
+        mmnode^.AlternateBatchedShootdowns = KeuAllocateNodeSpace (
+            kenode, // kenode
+            KeQueryMostProcessorsInAnyNode () *
+            SIZEOF MmpBatchedShootdownTable, // bytes
+        )
+
+        KeAssert ( mmnode^.AlternateBatchedShootdowns != NULLPTR )
+
         // Initialize the integral data structures of the system node.
 
         MmpInitializeNodeStage1 ( mmnode )
