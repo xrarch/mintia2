@@ -4,13 +4,13 @@
 
 #INCLUDE "Mmp.hjk"
 
-#SECTION "PAGEtext"
 FN MmuChargeKernelStack (
     IN kenode : ^KeuNode,
     IN process : ^PsuProcess,
 ) : OsStatus
 
     // Charge for a kernel stack.
+    // Nonpaged because we take the KernelStackPteListLock.
 
     mmnode := kenode^.Mmp
 
@@ -18,22 +18,97 @@ FN MmuChargeKernelStack (
 
     // Charge the process's virtual memory quota for the kernel stack.
 
-    RETURN MmuChargeVmQuota (
+    status := MmuChargeVmQuota (
         mmnode, // mmnode
         quotablock, // quotablock
         KEU_STACK_PAGES, // pages
     )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Pre-allocate virtual space for the kernel stack to ensure it is
+    // infallible.
+
+    kstack : ^VOID
+
+    status = MmpAllocateDynamicPages (
+        mmnode, // mmnode
+        KEU_STACK_PAGES + 1, // pages
+        OUT kstack, // ptr
+    )
+
+    IF OsError ( status ) THEN
+        // Couldn't allocate system space.
+
+        MmuUnchargeVmQuota (
+            mmnode, // mmnode
+            quotablock, // quotablock
+            KEU_STACK_PAGES, // pages
+        )
+
+        RETURN status
+    END
+
+    KeAcquireLockExclusive ( &mmnode^.KernelStackPteListLock )
+
+    pte := MmpPteAddress ( kstack )
+
+    pte[0] = CAST mmnode^.KernelStackPteListHead TO UWORD
+    mmnode^.KernelStackPteListHead = pte
+
+    mmnode^.KernelStacksOnList += 1
+    mmnode^.KernelStacksNeeded += 1
+
+    KeReleaseLock ( &mmnode^.KernelStackPteListLock )
+
+    RETURN OS_STATUS_SUCCESS
 END
 
-#SECTION "PAGEtext"
 FN MmuUnchargeKernelStack (
     IN kenode : ^KeuNode,
     IN process : ^PsuProcess,
 )
 
     // Uncharge for a kernel stack.
+    // Nonpaged because we take the KernelStackPteListLock.
 
     mmnode := kenode^.Mmp
+
+    kstack := NULLPTR
+
+    KeAcquireLockExclusive ( &mmnode^.KernelStackPteListLock )
+
+    KeAssert ( mmnode^.KernelStacksNeeded != 0 )
+
+    needed := mmnode^.KernelStacksNeeded - 1
+    mmnode^.KernelStacksNeeded = needed
+
+    IF needed < mmnode^.KernelStacksOnList THEN
+        // We now need fewer kernel stack virtual areas than are on the list,
+        // so free one.
+
+        KeAssert ( needed == mmnode^.KernelStacksOnList - 1 )
+
+        pte := mmnode^.KernelStackPteListHead
+        mmnode^.KernelStackPteListHead = CAST pte[0] TO ^VOID
+
+        kstack = MmpVirtualAddress ( pte )
+
+        mmnode^.KernelStacksOnList -= 1
+    END
+
+    KeReleaseLock ( &mmnode^.KernelStackPteListLock )
+
+    IF kstack THEN
+        MmpReleaseDynamicPages (
+            mmnode, // mmnode
+            kstack, // ptr
+            KEU_STACK_PAGES + 1, // pages
+            FALSE, // flush
+        )
+    END
 
     // Uncharge the virtual memory quota consumed by the kernel stack.
 
@@ -42,6 +117,90 @@ FN MmuUnchargeKernelStack (
         PsuQuotaBlock ( process ), // quotablock
         KEU_STACK_PAGES, // pages
     )
+END
+
+FN MmpAllocateKernelStackVa (
+    IN mmnode : ^MmpNode,
+) : ^VOID
+
+    // Allocate virtual space for a kernel stack. This should be (eventually)
+    // infallible since we pre-allocated them.
+
+    KeAcquireLockExclusive ( &mmnode^.KernelStackPteListLock )
+
+    pte := mmnode^.KernelStackPteListHead
+
+#IF BLD_MP
+    IF NOT pte THEN
+        // This can happen if the pre-allocated kernel stacks are all on the
+        // batched shootdown queue, so flush it and allow the caller to do a
+        // full retry.
+
+        KeReleaseLock ( &mmnode^.KernelStackPteListLock )
+
+        MmpFlushShootdowns ( mmnode )
+
+        RETURN NULLPTR
+    END
+
+#ELSE
+    KeAssert ( pte != NULLPTR )
+#END
+
+    mmnode^.KernelStackPteListHead = CAST pte[0] TO ^VOID
+
+    kstack := MmpVirtualAddress ( pte )
+
+    KeAssert ( mmnode^.KernelStacksOnList != 0 )
+
+    mmnode^.KernelStacksOnList -= 1
+
+    KeReleaseLock ( &mmnode^.KernelStackPteListLock )
+
+    RETURN kstack
+END
+
+FN (MmpAfterShootdownF) MmpFreeKernelStackVa (
+    IN mmnode : ^MmpNode,
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
+
+    // Free virtual space for a kernel stack.
+
+    WHILE pages DO
+        KeAcquireLockExclusive ( &mmnode^.KernelStackPteListLock )
+
+        onlist := mmnode^.KernelStacksOnList
+
+        IF onlist == mmnode^.KernelStacksNeeded THEN
+            // We already have all the kernel stacks we need on the list, so
+            // just free this one.
+
+            KeReleaseLock ( &mmnode^.KernelStackPteListLock )
+
+            MmpReleaseDynamicPages (
+                mmnode, // mmnode
+                ptr, // ptr
+                KEU_STACK_PAGES + 1, // pages
+                FALSE, // flush
+            )
+        
+        ELSE
+            pte := MmpPteAddress ( ptr )
+
+            pte[0] = CAST mmnode^.KernelStackPteListHead TO UWORD
+            mmnode^.KernelStackPteListHead = pte
+
+            mmnode^.KernelStacksOnList = onlist + 1
+
+            KeReleaseLock ( &mmnode^.KernelStackPteListLock )
+        END
+
+        pages -= KEU_STACK_PAGES + 1
+        ptr += (KEU_STACK_PAGES + 1) * RTL_PAGE_SIZE
+    END
 END
 
 FN MmuAllocateKernelStack (
@@ -63,19 +222,16 @@ FN MmuAllocateKernelStack (
 
     // Allocate the required system space.
 
-    status := MmpAllocateDynamicPages (
-        mmnode, // mmnode
-        KEU_STACK_PAGES + 1, // pages
-        OUT kstack, // ptr
-    )
+    kstack = MmpAllocateKernelStackVa ( mmnode )
 
-    IF OsError ( status ) THEN
-        // Couldn't allocate system space.
-
-        MmpWaitForSystemSpace ( mmnode )
-
+#IF BLD_MP
+    IF NOT kstack THEN
         GOTO Retry
     END
+
+#ELSE
+    KeAssert ( kstack != NULLPTR )
+#END
 
     pfes : ^MmpPfe[KEU_STACK_PAGES]
 
@@ -96,11 +252,11 @@ FN MmuAllocateKernelStack (
             // Deallocate the ones we did allocate and return the appropriate
             // status.
 
-            MmpReleaseDynamicPages (
+            MmpFreeKernelStackVa (
                 mmnode, // mmnode
+                NULLPTR, // context
                 kstack, // ptr
                 KEU_STACK_PAGES + 1, // pages
-                FALSE, // flush
             )
 
             // Wait for a page frame BEFORE releasing the ones we already
@@ -190,10 +346,28 @@ FN MmuDeleteKernelStack (
 
     // Release the system space containing the stack.
 
-    MmpReleaseDynamicPages (
+#IF BLD_MP
+    MmpBatchShootdown (
         mmnode, // mmnode
-        kstack - RTL_PAGE_SIZE, // ptr
+        NULLPTR, // context
+        kstack, // ptr
         KEU_STACK_PAGES + 1, // pages
-        TRUE, // flush
+        &MmpFreeKernelStackVa, // callback
     )
+
+#ELSE
+    KeuFlushRangeTb (
+        kstack, // ptr
+        KEU_STACK_PAGES + 1, // pagecount
+        FALSE, // keepglobal
+    )
+
+    MmpFreeKernelStackVa (
+        mmnode, // mmnode
+        NULLPTR, // context
+        kstack, // ptr
+        KEU_STACK_PAGES + 1, // pages
+    )
+#END
+
 END

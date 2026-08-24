@@ -421,6 +421,7 @@ FN MmuInitializeStage1 ()
 
         mmnode^.KeNode = kenode
 
+#IF BLD_MP
         mmnode^.BatchedShootdowns = KeuAllocateNodeSpace (
             kenode, // kenode
             KeQueryMostProcessorsInAnyNode () *
@@ -436,6 +437,7 @@ FN MmuInitializeStage1 ()
         )
 
         KeAssert ( mmnode^.AlternateBatchedShootdowns != NULLPTR )
+#END
 
         // Initialize the integral data structures of the system node.
 

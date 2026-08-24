@@ -288,3 +288,25 @@ FN KeuFlushMultipleTb (
         pagecount -= 1
     END
 END
+
+FN KeuFlushRangeTb (
+    IN vaddr : ^VOID,
+    IN pagecount : UWORD,
+    IN keepglobal : UWORD,
+)
+
+    // Flush a range of the TB on all processors.
+
+    IF pagecount >= 32 THEN
+        KeuSweepMyTb ( keepglobal )
+
+        LEAVE
+    END
+
+    WHILE pagecount DO
+        KeuFlushMyTbAddress ( vaddr )
+
+        pagecount -= 1
+        vaddr += RTL_PAGE_SIZE
+    END
+END

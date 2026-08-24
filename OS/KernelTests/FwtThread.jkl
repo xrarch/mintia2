@@ -9,7 +9,7 @@ FN FwtCreateThread (
     IN kenode : ^KeuNode,
     IN function : KeContinuationF,
     IN fwd : ^FwtData,
-) : UWORD
+) : OsStatus
 
     // Private helper routine for creating fireworks threads..
 
@@ -30,7 +30,7 @@ FN FwtCreateThread (
     )
     
     IF OsError ( status ) THEN
-        RETURN 0
+        RETURN status
     END
 
     // Set priority to something random-ish to exercise priority inherited
@@ -45,5 +45,5 @@ FN FwtCreateThread (
     
     ObUnreferenceObject ( thread )
 
-    RETURN 1
+    RETURN OS_STATUS_SUCCESS
 END

@@ -561,6 +561,23 @@ FN (KepIpiF) KepFlushMultipleIcache (
     END
 END
 
+FN (KepIpiF) KepFlushRangeTb (
+    IN context1 : UWORD,
+    IN context2 : UWORD,
+)
+
+    // Executes on the target processor of a TB range shootdown.
+
+    vaddr := CAST context1 TO ^VOID
+
+    WHILE context2 DO
+        KeuFlushMyTbAddress ( vaddr )
+
+        vaddr += RTL_PAGE_SIZE
+        context2 -= 1
+    END
+END
+
 #END
 
 FN KeuSweepTb (
@@ -728,5 +745,40 @@ FN KeuFlushIcachePages (
 
         pfntable += SIZEOF ^VOID
         pagecount -= 1
+    END
+END
+
+FN KeuFlushRangeTb (
+    IN vaddr : ^VOID,
+    IN pagecount : UWORD,
+    IN keepglobal : UWORD,
+)
+
+    // Flush a range of the TB on all processors.
+
+    IF pagecount >= 32 THEN
+        KeuSweepTb ( keepglobal )
+
+        LEAVE
+    END
+
+#IF BLD_MP
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+
+    KepExecuteOnEveryoneElse (
+        &KepFlushRangeTb, // function
+        vaddr, // context1
+        pagecount, // context2
+        KEP_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
+    )
+
+    KepLowerIpl ( ipl )
+#END
+
+    WHILE pagecount DO
+        KeuFlushMyTbAddress ( vaddr )
+
+        pagecount -= 1
+        vaddr += RTL_PAGE_SIZE
     END
 END

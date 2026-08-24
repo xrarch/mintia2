@@ -219,7 +219,7 @@ FN (KeContinuationF) FwtExplodeableThread (
         )
         
         IF OsError ( status ) THEN
-            RtlPrint ( "[FWT]No memory " )
+            RtlPrint ( "[FWT %x]No data ", status )
 
             BREAK
         END
@@ -230,13 +230,14 @@ FN (KeContinuationF) FwtExplodeableThread (
         data^.Y = y
         data^.ExplosionRange = explosionrange
 
-        IF NOT FwtCreateThread (
+        status = FwtCreateThread (
             PsGenerateNode (), // kenode
             &FwtParticleThread, // startroutine
             data, // fwd
-        ) THEN
+        )
 
-            RtlPrint ( "[FWT]No resources " )
+        IF OsError ( status ) THEN
+            RtlPrint ( "[FWT %x]No particle ", status )
 
             MmFreeToPoolCache (
                 FwtDataCache, // cache
@@ -252,11 +253,13 @@ END
 
 FN FwtSpawnExplodeable ()
 
-    IF NOT FwtCreateThread (
+    status := FwtCreateThread (
         PsGenerateNode (), // kenode
         &FwtExplodeableThread, // startroutine
         NULLPTR, // fwd
-    ) THEN
-        RtlPrint ( "[FWT]No fireworks " )
+    )
+
+    IF OsError ( status ) THEN
+        RtlPrint ( "[FWT %x]No fireworks ", status )
     END
 END

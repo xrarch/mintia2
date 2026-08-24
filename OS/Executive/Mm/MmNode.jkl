@@ -99,6 +99,8 @@ FN MmpInitializeNodeStage1 (
 
     mmnode^.SizeLevel = MM_UNINITIALIZED_SYSTEM
 
+    KeInitializeLock ( &mmnode^.KernelStackPteListLock )
+
 #IF BLD_MP
     i := 0
     procs := KeQueryMostProcessorsInAnyNode ()
@@ -1039,25 +1041,6 @@ FN MmpAllocatePageWait (
             flags & MM_ALLOCATE_LOW, // low
         )
     END
-END
-
-FN MmpWaitForSystemSpace (
-    IN mmnode : ^MmpNode,
-)
-
-    // Uh-oh! If we're out of pool space there isn't much good to be done.
-    // Sleep for 500ms and retry.
-
-    interval : RtlUquad
-    
-    RtlSetUquadToUlong ( &interval, 500 )
-
-    KeSleep (
-        &interval, // interval
-        KE_KERNEL_MODE, // waitmode
-        KE_UNALERTABLE, // alertable
-        NULLPTR, // continuation
-    )
 END
 
 FN MmuChargeCommit (

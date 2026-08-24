@@ -271,10 +271,6 @@ EXTERN FN MmpInsertPageIntoList (
     IN head : UWORD,
 ) : UWORD
 
-EXTERN FN MmpWaitForSystemSpace (
-    IN mmnode : ^MmpNode,
-)
-
 #MACRO MmpAcquireObjectExclusive ( object ) [
     KeAcquireLockExclusiveRaise ( &(object)^.Pushlock )
 ]
@@ -475,6 +471,8 @@ KE_CACHE_LINE_END
     Lock : KeLock,
 END
 
+#IF BLD_MP
+
 EXTERN FN MmpFlushShootdowns (
     IN mmnode : ^MmpNode,
 )
@@ -486,6 +484,8 @@ EXTERN FN MmpBatchShootdown (
     IN pages : UWORD,
     IN callback : MmpAfterShootdownF,
 )
+
+#END
 
 STRUCT MmpNode
     DynamicSpaceLock : KeLock,
@@ -580,6 +580,13 @@ KE_CACHE_LINE_END
 
     PoolSpace : KE_CACHE_LINE MmpChunkSpace,
     CacheSpace : KE_CACHE_LINE MmpChunkSpace,
+
+KE_CACHE_LINE_END
+
+    KernelStackPteListHead : ^MmpPte,
+    KernelStackPteListLock : KeLock,
+    KernelStacksOnList : ULONG,
+    KernelStacksNeeded : ULONG,
 
 KE_CACHE_LINE_END
 
