@@ -9,8 +9,12 @@ FN MmuChargeKernelStack (
     IN process : ^PsuProcess,
 ) : OsStatus
 
-    // Charge for a kernel stack.
-    // Nonpaged because we take the KernelStackPteListLock.
+    // Charge commit for a kernel stack. This guarantees that a physical page
+    // will be acquirable for this kernel stack. We also pre-allocate virtual
+    // space for the kernel stack here.
+    //
+    // Nonpaged because we take the KernelStackPteListLock, also taken from a
+    // batched shootdown callback.
 
     mmnode := kenode^.Mmp
 
@@ -28,8 +32,8 @@ FN MmuChargeKernelStack (
         RETURN status
     END
 
-    // Pre-allocate virtual space for the kernel stack to ensure it is
-    // infallible.
+    // Pre-allocate virtual space for the kernel stack to ensure
+    // infallibility of the kernel stack allocation worker.
 
     kstack : ^VOID
 
@@ -72,7 +76,9 @@ FN MmuUnchargeKernelStack (
 )
 
     // Uncharge for a kernel stack.
-    // Nonpaged because we take the KernelStackPteListLock.
+    //
+    // Nonpaged because we take the KernelStackPteListLock, also taken from a
+    // batched shootdown callback.
 
     mmnode := kenode^.Mmp
 

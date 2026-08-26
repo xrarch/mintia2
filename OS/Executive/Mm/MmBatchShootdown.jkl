@@ -149,6 +149,10 @@ FN MmpBatchShootdown (
         // cause its cache line to aggressively migrate around, so we check
         // if it's FALSE first.
 
+        // Setting this to TRUE is intentionally not guarded by any lock in
+        // particular, but we place it before the release below in order to get
+        // caught by its release barrier.
+
         mmnode^.HasPendingFlushes = TRUE
     END
 
