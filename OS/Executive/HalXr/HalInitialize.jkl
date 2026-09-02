@@ -11,10 +11,10 @@ FN HalpConfigureTimer ()
 
     timer := CAST KeuLoaderBlock.U.Xr.CitronBase + 0x80 TO ^HalpTimer
 
-    timer^.DataPort = HALU_TIMER_INTERVAL
+    VOLATILE timer^.DataPort = HALU_TIMER_INTERVAL
     BARRIER
 
-    timer^.CmdPort = 1
+    VOLATILE timer^.CmdPort = 1
     BARRIER
 END
 
@@ -36,19 +36,19 @@ FN HalpInitializeLsic (
 
     // Reset the pending registers.
 
-    lsic^.Pendings[0] = 0
-    lsic^.Pendings[1] = 0
+    VOLATILE lsic^.Pendings[0] = 0
+    VOLATILE lsic^.Pendings[1] = 0
     BARRIER
 
     // Initially set the IPL to 63 to enable all.
 
-    lsic^.Ipl = 63
+    VOLATILE lsic^.Ipl = 63
     BARRIER
 
     // Configure the mask to enable IPIs and the timer.
 
-    lsic^.Masks[0] = 0xFFFFFFF9
-    lsic^.Masks[1] = 0x7FFFFFFF
+    VOLATILE lsic^.Masks[0] = 0xFFFFFFF9
+    VOLATILE lsic^.Masks[1] = 0x7FFFFFFF
     BARRIER
 
     // Initialize the timer interrupt object.

@@ -136,7 +136,7 @@ FN (KeInterruptF) HaluHandleDeviceInterrupt (
 
     // Set the LSIC IPL.
 
-    lsic^.Ipl = HalpIplToLsicIpl[interrupt^.Ipl]
+    VOLATILE lsic^.Ipl = HalpIplToLsicIpl[interrupt^.Ipl]
     BARRIER
 
     // Capture old IPL and set new in Prb.
@@ -175,7 +175,7 @@ FN (KeInterruptF) HaluHandleDeviceInterrupt (
 
     // Reset the LSIC IPL.
 
-    lsic^.Ipl = HalpIplToLsicIpl[oldipl]
+    VOLATILE lsic^.Ipl = HalpIplToLsicIpl[oldipl]
     BARRIER
 
     // Reset the Prb IPL.
@@ -200,7 +200,7 @@ FN (KeInterruptF) HalpHandlePerCpuInterrupt (
 
     // Set the LSIC IPL.
 
-    lsic^.Ipl = HalpIplToLsicIpl[interrupt^.Ipl]
+    VOLATILE lsic^.Ipl = HalpIplToLsicIpl[interrupt^.Ipl]
     BARRIER
 
     // Capture old IPL and set new in Prb.
@@ -227,7 +227,7 @@ FN (KeInterruptF) HalpHandlePerCpuInterrupt (
 
     // Reset the LSIC IPL.
 
-    lsic^.Ipl = HalpIplToLsicIpl[oldipl]
+    VOLATILE lsic^.Ipl = HalpIplToLsicIpl[oldipl]
     BARRIER
 
     // Reset the Prb IPL.
@@ -247,12 +247,12 @@ FN HaluInterrupt (
 
     lsic := CAST prb^.LsicBase TO ^HalpLsic
 
-    vector := lsic^.ClaimComplete
+    vector := VOLATILE lsic^.ClaimComplete
     BARRIER
 
     // Immediately complete the interrupt.
 
-    lsic^.ClaimComplete = vector
+    VOLATILE lsic^.ClaimComplete = vector
     BARRIER
 
     int := prb^.IrqDispatchTable[vector]
@@ -275,7 +275,7 @@ FN HaluEnableInterrupt (
 
     mask := &(CAST prb^.LsicBase TO ^HalpLsic)^.Masks[vector / 32]
 
-    oldmask := mask^
+    oldmask := VOLATILE mask^
 
     // Compiler BARRIER to ensure no optimization-induced bugs.
 
@@ -283,7 +283,7 @@ FN HaluEnableInterrupt (
 
     // Clear bit in mask (enabling the interrupt).
 
-    mask^ = oldmask & ~(1 << (vector & 31))
+    VOLATILE mask^ = oldmask & ~(1 << (vector & 31))
 END
 
 FN HaluDisableInterrupt (
@@ -296,7 +296,7 @@ FN HaluDisableInterrupt (
 
     mask := &(CAST prb^.LsicBase TO ^HalpLsic)^.Masks[vector / 32]
 
-    oldmask := mask^
+    oldmask := VOLATILE mask^
 
     // Compiler BARRIER to ensure no optimization-induced bugs.
 
@@ -304,7 +304,7 @@ FN HaluDisableInterrupt (
 
     // Set bit in mask (disabling the interrupt).
 
-    mask^ = oldmask | (1 << (vector & 31))
+    VOLATILE mask^ = oldmask | (1 << (vector & 31))
 END
 
 #IF BLD_MP

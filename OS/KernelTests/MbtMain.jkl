@@ -76,7 +76,7 @@ FN (KeContinuationF) MandelbrotCellMain (
 
     // Cell drawing thread.
 
-    WHILE beginflag == 0 DO
+    WHILE VOLATILE beginflag == 0 DO
         BARRIER
         SleepOne ( 100 )
     END
@@ -183,7 +183,7 @@ FN (KeContinuationF) MandelbrotTMain (
 
         KeIncrementUlong ( &beginflag, 1 )
 
-        WHILE cellcounter < spawned DO
+        WHILE VOLATILE cellcounter < spawned DO
             BARRIER // idk if this works
             SleepOne (10)
         END

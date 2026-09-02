@@ -429,13 +429,13 @@ EXTERN FN KeuReaperBarrier (
     // from other contexts while the thread is on a ready queue, and if it's the
     // currently running thread, it ain't on a ready queue.
 
-    NOTHING (thread)^.Pinned
+    NOTHING VOLATILE (thread)^.Pinned
 
     BARRIER
 
     KeAssert ( (thread) == KeCurrentThread () )
 
-    NOTHING (thread)^.Pinned = pinned
+    NOTHING VOLATILE (thread)^.Pinned = pinned
 
     BARRIER
 ]

@@ -29,7 +29,7 @@
 #MACRO KepWaitForSwitch ( thread ) [
     // Wait for the next thread to no longer be switching off his stack.
 
-    WHILE (thread)^.Switching DO
+    WHILE VOLATILE (thread)^.Switching DO
         // Compiler BARRIER to ensure this loop isn't optimized out.
 
         BARRIER
