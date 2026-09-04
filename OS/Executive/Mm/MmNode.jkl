@@ -246,26 +246,28 @@ FN MmpAllocatePageFromList (
     WHILE i < MMP_COLOR_COUNT DO
         colorlist := &list^.Colors[color]
 
-        ipl := KeAcquireLockExclusiveRaise ( &colorlist^.Lock )
+        IF NOT RtlEmptyList ( &colorlist^.Head ) THEN
+            ipl := KeAcquireLockExclusiveRaise ( &colorlist^.Lock )
 
-        entry := colorlist^.Head.Next
+            entry := colorlist^.Head.Next
 
-        IF entry != &colorlist^.Head THEN
-            // Found one. Pop it from the head.
+            IF entry != &colorlist^.Head THEN
+                // Found one. Pop it from the head.
 
-            RtlRemoveEntryList ( entry )
+                RtlRemoveEntryList ( entry )
 
-            KeIncrementPtr (
-                &list^.Count, // ptr
-                -1, // inc
-            )
+                KeIncrementPtr (
+                    &list^.Count, // ptr
+                    -1, // inc
+                )
+
+                KeReleaseLockLower ( &colorlist^.Lock, ipl )
+
+                RETURN CONTAINEROF entry TO MmpPfe.Entry
+            END
 
             KeReleaseLockLower ( &colorlist^.Lock, ipl )
-
-            RETURN CONTAINEROF entry TO MmpPfe.Entry
         END
-
-        KeReleaseLockLower ( &colorlist^.Lock, ipl )
 
         color = (color + 1) & (MMP_COLOR_COUNT - 1)
         i += 1
