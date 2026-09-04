@@ -293,38 +293,40 @@ FN MmpAllocatePageFromStandbyList (
     WHILE TRUE DO
         colorlist = &list^.Colors[color]
 
-        ipl = KeAcquireLockExclusiveRaise ( &colorlist^.Lock )
+        IF NOT RtlEmptyList ( &colorlist^.Head ) THEN
+            ipl = KeAcquireLockExclusiveRaise ( &colorlist^.Lock )
 
-        entry := colorlist^.Head.Next
+            entry := colorlist^.Head.Next
 
-        IF entry != &colorlist^.Head THEN
-            pfe = CONTAINEROF entry TO MmpPfe.Entry
+            IF entry != &colorlist^.Head THEN
+                pfe = CONTAINEROF entry TO MmpPfe.Entry
 
-            // Found a page on this list. Capture its object and disassociate it
-            // by clearing the object pointer. If a page lookup within the
-            // object finds this page before we lock the object below and fully
-            // clear the tracking PTE, it will find that the object pointer has
-            // been cleared and will know that we're executing this path and
-            // will clear the tracking PTE itself. It will also increment a
-            // refcount on the object so that we don't hold a stale pointer to
-            // it.
+                // Found a page on this list. Capture its object and
+                // disassociate it by clearing the object pointer. If a page
+                // lookup within the object finds this page before we lock the
+                // object below and fully clear the tracking PTE, it will find
+                // that the object pointer has been cleared and will know that
+                // we're executing this path and will clear the tracking PTE
+                // itself. It will also increment a refcount on the object so
+                // that we don't hold a stale pointer to it.
 
-            object = pfe^.Object
-            pfe^.Object = NULLPTR
+                object = pfe^.Object
+                pfe^.Object = NULLPTR
 
-            RtlRemoveEntryList ( &pfe^.Entry )
+                RtlRemoveEntryList ( &pfe^.Entry )
 
-            KeIncrementPtr (
-                &list^.Count, // ptr
-                -1, // inc
-            )
+                KeIncrementPtr (
+                    &list^.Count, // ptr
+                    -1, // inc
+                )
 
-            KeReleaseLock ( &colorlist^.Lock )
+                KeReleaseLock ( &colorlist^.Lock )
 
-            BREAK
+                BREAK
+            END
+
+            KeReleaseLockLower ( &colorlist^.Lock, ipl )
         END
-
-        KeReleaseLockLower ( &colorlist^.Lock, ipl )
 
         color = (color + 1) & (MMP_COLOR_COUNT - 1)
         i += 1
@@ -678,7 +680,28 @@ FN MmpAllocatePage (
 
 #IF BLD_NUMA
             IF flags & MM_ALLOCATE_NO_BORROW == 0 THEN
-                GOTO TryNextNode
+                // Look at the next most distant node from this one.
+
+                IF NOT nodelist THEN
+                    nodelist = mmnode^.KeNode^.DistanceList
+                END
+
+                WHILE nodelist[0] DO
+                    IF nodelist[0]^.Mmp^.PagefileState ==
+                        mmnode^.PagefileState THEN
+
+                        // This node has the same pagefile pool and commit
+                        // tracking so we can borrow from it.
+
+                        mmnode = nodelist[0]^.Mmp
+
+                        nodelist += SIZEOF ^KeuNode
+
+                        GOTO Retry
+                    END
+
+                    nodelist += SIZEOF ^KeuNode
+                END
             END
 #END
 
@@ -757,22 +780,14 @@ FN MmpAllocatePage (
         // the count, a standby page can be taken off the list by a page lookup
         // within an object, which can make all of the lists empty even after
         // we successfully allocated a count. The available page count can also
-        // become negative due to this. We might spin forever if we don't break
-        // out here. Rather than do that, release the count we took, and return
-        // NULLPTR.
+        // become negative due to this.
 
         MmpIncrementAvailablePages (
             mmnode, // mmnode
             1, // inc
         )
 
-#IF BLD_NUMA
-        IF flags & MM_ALLOCATE_NO_BORROW == 0 THEN
-            GOTO TryNextNode
-        END
-#END
-
-        RETURN NULLPTR
+        GOTO Retry
     END
 
 #IF BLD_CHK
@@ -804,34 +819,6 @@ FN MmpAllocatePage (
 #END
 
     RETURN pfe
-
-#IF BLD_NUMA
-@TryNextNode
-
-    // Look at the next most distant node from this one.
-
-    IF NOT nodelist THEN
-        nodelist = mmnode^.KeNode^.DistanceList
-    END
-
-    WHILE nodelist[0] DO
-        IF nodelist[0]^.Mmp^.PagefileState == mmnode^.PagefileState THEN
-            // This node has the same pagefile pool and commit tracking so we
-            // can borrow from it.
-
-            mmnode = nodelist[0]^.Mmp
-
-            nodelist += SIZEOF ^KeuNode
-
-            GOTO Retry
-        END
-
-        nodelist += SIZEOF ^KeuNode
-    END
-
-    RETURN NULLPTR
-#END
-
 END
 
 FN MmpFreePage (
