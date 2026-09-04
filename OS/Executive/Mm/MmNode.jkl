@@ -751,16 +751,25 @@ FN MmpAllocatePage (
 #IF BLD_NUMA
 @TryNextNode
 
+    // Look at the next most distant node from this one.
+
     IF NOT nodelist THEN
         nodelist = mmnode^.KeNode^.DistanceList
     END
 
-    IF nodelist[0] THEN
-        mmnode = nodelist[0]^.Mmp
+    WHILE nodelist[0] DO
+        IF nodelist[0]^.Mmp^.PagefileState == mmnode^.PagefileState THEN
+            // This node has the same pagefile pool and commit tracking so we
+            // can borrow from it.
+
+            mmnode = nodelist[0]^.Mmp
+
+            nodelist += SIZEOF ^KeuNode
+
+            GOTO Retry
+        END
 
         nodelist += SIZEOF ^KeuNode
-
-        GOTO Retry
     END
 
     RETURN NULLPTR
