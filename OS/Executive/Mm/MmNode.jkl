@@ -376,10 +376,44 @@ FN MmpMakeMorePages (
 
     // Try to make free pages, asynchronously.
 
-    KeSignalEvent (
-        &mmnode^.LowMemoryEvent, // event
-        0, // priorityboost
-    )
+    IF mmnode^.LowMemoryEvent.Header.SignalCount == 0 THEN
+        // Signal my own low memory event.
+
+        KeSignalEvent (
+            &mmnode^.LowMemoryEvent, // event
+            0, // priorityboost
+        )
+    END
+
+#IF BLD_NUMA
+    // Scan neighboring nodes to see if any of them borrowed a substantial
+    // number of page frames from me. If so, signal them too.
+
+    nodelist := mmnode^.KeNode^.DistanceList
+
+    WHILE nodelist[0] DO
+        othernode := nodelist[0]^.Mmp
+
+        IF othernode^.BorrowCounts[mmnode^.Id] >= MMP_SIGNIFICANT_BORROWS THEN
+            // Set its borrow count from us to zero to avoid uselessly doing
+            // this again and again. Intentionally don't use an atomic here.
+
+            othernode^.BorrowCounts[mmnode^.Id] = 0
+
+            IF othernode^.LowMemoryEvent.Header.SignalCount == 0 THEN
+                // Signal its low memory event to get our page frames back.
+
+                KeSignalEvent (
+                    &othernode^.LowMemoryEvent, // event
+                    0, // priorityboost
+                )
+            END
+        END
+
+        nodelist += SIZEOF ^KeuNode
+    END
+#END
+
 END
 
 FN MmpReferencePage (
@@ -609,11 +643,26 @@ FN MmpAllocatePage (
 
 #IF BLD_NUMA
     nodelist : ^^KeuNode = NULLPTR
+    originalnode := mmnode
+
+    KeAssert ( originalnode^.KeNode^.ProcessorCount != 0 )
 #END
 
 @Retry
 
     avail := mmnode^.AvailablePageCount
+    new : UWORD
+
+    IF avail <= mmnode^.LowPageCount
+#IF BLD_NUMA
+        AND mmnode == originalnode
+#END
+        THEN
+
+        // Too few pages. Try to make more, asynchronously.
+
+        MmpMakeMorePages ( mmnode )
+    END
 
     WHILE TRUE DO
         IF avail <= 0 OR
@@ -638,23 +687,17 @@ FN MmpAllocatePage (
 
         // Atomically claim a single page frame by a CAS loop.
 
-        new := CAST KeCompareSwapPtr (
+        new = KeCompareSwapPtr (
             &mmnode^.AvailablePageCount, // ptr
             avail - 1, // newvalue
             avail, // expectedvalue
-        ) TO WORD
+        )
 
         IF new == avail THEN
             BREAK
         END
 
-        avail = new
-    END
-
-    IF avail <= mmnode^.LowPageCount THEN
-        // Too few pages. Try to make more, asynchronously.
-
-        MmpMakeMorePages ( mmnode )
+        avail = CAST new TO WORD
     END
 
     color &= MMP_COLOR_COUNT - 1
@@ -745,6 +788,20 @@ FN MmpAllocatePage (
             RTL_PAGE_SIZE, // length
         )
     END
+
+#IF BLD_NUMA
+    IF originalnode != mmnode THEN
+        // We're borrowing the page frame, so record that with a saturating
+        // 16-bit counter. This does not need atomics since its a hint, so a
+        // lost count isn't a big deal.
+
+        oldvalue := originalnode^.BorrowCounts[mmnode^.Id]
+
+        IF oldvalue != 0xFFFF THEN
+            originalnode^.BorrowCounts[mmnode^.Id] = oldvalue + 1
+        END
+    END
+#END
 
     RETURN pfe
 

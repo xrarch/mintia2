@@ -19,6 +19,11 @@
     #ERROR "Unknown architecture"
 #END
 
+// Number of times node A borrows page frames from node B that is significant
+// enough to justify node B signaling node A to free up pages when it runs low.
+
+#DEFINE MMP_SIGNIFICANT_BORROWS 300
+
 // Layout of the Packed field of MmpPfe:
 //
 // 0-3: Type code
@@ -522,6 +527,8 @@ KE_CACHE_LINE_END
     AvailablePageCount : WORD,
 
 KE_CACHE_LINE_END
+
+    BorrowCounts : ^UINT,
 
     PagefileState : ^MmpPagefileState,
     SpaceNodeCache : ^MmpPoolCache,

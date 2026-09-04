@@ -442,6 +442,15 @@ FN MmuInitializeStage1 ()
         KeAssert ( mmnode^.AlternateBatchedShootdowns != NULLPTR )
 #END
 
+#IF BLD_NUMA
+        mmnode^.BorrowCounts = KeuAllocateNodeSpace (
+            kenode, // kenode
+            SIZEOF UINT * KeuLoaderBlock.NodeCount, // bytes
+        )
+
+        KeAssert ( mmnode^.BorrowCounts != NULLPTR )
+#END
+
         // Initialize the integral data structures of the system node.
 
         MmpInitializeNodeStage1 ( mmnode )
