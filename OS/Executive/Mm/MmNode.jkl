@@ -202,14 +202,6 @@ FN MmpSetNodeSize (
         mmnode^.LowPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 100
         mmnode^.SufficientPageCount = MMP_BLOCK_FOR_PAGES_THRESHOLD + 500
     END
-
-#IF BLD_NUMA
-    // Only allow borrowing when the node has at least 60% of its pages free.
-
-    mmnode^.BorrowThreshold =
-        CAST (mmnode^.AvailablePageCount / 10) * 6 TO UWORD
-#END
-
 END
 
 FN MmpInsertPageIntoList (
@@ -509,8 +501,6 @@ FN MmpUnreferencePage (
 
     packed := pfe^.Packed
 
-    mmnode : ^MmpNode
-
     IF MmpGetPackedFlag ( packed, MMP_DELETED_PFE_FLAG ) THEN
         // The page was deleted, so it must be freed now that the last reference
         // has gone away.
@@ -522,11 +512,11 @@ FN MmpUnreferencePage (
         LEAVE
     END
 
+    mmnode := KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
+
     IF MmpGetPackedFlag ( packed, MMP_MODIFIED_PFE_FLAG ) THEN
         // The page was modified, so it must be placed on the modified page
-        // list for its destination node.
-
-        mmnode = KeNumaNodeById ( MmpGetPackedDnodeId ( packed ) )^.Mmp
+        // list for its home node.
 
         KeAcquireLockExclusive ( &mmnode^.ModifiedListLock )
 
@@ -568,8 +558,6 @@ FN MmpUnreferencePage (
     END
 
     // The page was neither deleted nor modified, so put it on the standby list.
-
-    mmnode = KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
 
     color := MmpPfnColor ( MmpPfeToPfn ( pfe ) )
     colorlist := &mmnode^.StandbyList.Colors[color]
@@ -647,7 +635,7 @@ FN MmpAllocatePage (
             // functionally that no pages are available.
 
 #IF BLD_NUMA
-            IF flags & MM_ALLOCATE_BORROW THEN
+            IF flags & MM_ALLOCATE_NO_BORROW == 0 THEN
                 GOTO TryNextNode
             END
 #END
@@ -743,7 +731,7 @@ FN MmpAllocatePage (
         )
 
 #IF BLD_NUMA
-        IF flags & MM_ALLOCATE_BORROW THEN
+        IF flags & MM_ALLOCATE_NO_BORROW == 0 THEN
             GOTO TryNextNode
         END
 #END
@@ -774,14 +762,12 @@ FN MmpAllocatePage (
         nodelist = mmnode^.KeNode^.DistanceList
     END
 
-    WHILE nodelist[0] DO
+    IF nodelist[0] THEN
         mmnode = nodelist[0]^.Mmp
 
-        IF mmnode^.AvailablePageCount >= mmnode^.BorrowThreshold THEN
-            GOTO Retry
-        END
-
         nodelist += SIZEOF ^KeuNode
+
+        GOTO Retry
     END
 
     RETURN NULLPTR
