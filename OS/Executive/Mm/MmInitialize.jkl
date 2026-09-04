@@ -8,6 +8,8 @@
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 #INCLUDE "<ll>/Xlo.hjk"
 
+MmpGlobalPagefileState : MmpPagefileState
+
 PUBLIC MmpTotalPages := 0
 
 MmpWiredPages := 0
@@ -418,6 +420,8 @@ FN MmuInitializeStage1 ()
 
         mmnode := kenode^.Mmp
 
+        mmnode^.PagefileState = &MmpGlobalPagefileState
+
         mmnode^.KeNode = kenode
 
 #IF BLD_MP
@@ -493,13 +497,12 @@ FN MmuInitializeStage1 ()
 
         MmpSetNodeSize ( mmnode )
 
+        // Increment commit.
+
+        mmnode^.PagefileState^.CommitLimit += mmnode^.AvailablePageCount
+        mmnode^.PagefileState^.CommitRemaining += mmnode^.AvailablePageCount
+
         IF kenode^.ProcessorCount != 0 THEN
-            // Initialize commit to something acceptable before creation of the
-            // pagefiles.
-
-            mmnode^.CommitLimit = CAST mmnode^.AvailablePageCount TO UWORD
-            mmnode^.CommitRemaining = mmnode^.AvailablePageCount
-
             // Initialize the system virtual address allocator.
 
             MmpInitializeSystemVa ( kenode )

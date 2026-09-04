@@ -83,13 +83,6 @@ FN MmpInitializeNodeStage1 (
     mmnode^.AvailablePageCount = 0
     mmnode^.FluidPageCount = 0
 
-    // Initialize commit.
-
-    mmnode^.CommitRemaining = 0
-    mmnode^.CommitRemainingMinimum = 0
-    mmnode^.CommitLimit = 0
-    mmnode^.CommitLimitGrowthLeft = 0
-
     // Initialize thresholds.
 
     mmnode^.LowPageCount = 0
@@ -1049,7 +1042,9 @@ FN MmuChargeCommit (
         RETURN OS_STATUS_COMMIT_EXCEEDED
     END
 
-    remaining := mmnode^.CommitRemaining
+    pfs := mmnode^.PagefileState
+
+    remaining := pfs^.CommitRemaining
 
     WHILE TRUE DO
         IF remaining < RTL_MACHINE_WORD_MIN_S + pages THEN
@@ -1061,7 +1056,7 @@ FN MmuChargeCommit (
         END
 
         IF NOT vmprivileged AND
-            (remaining - pages < -mmnode^.CommitLimitGrowthLeft) THEN
+            (remaining - pages < -pfs^.CommitLimitGrowthLeft) THEN
 
             // Don't even bother trying, there's no way to extend the pagefiles
             // to accommodate this because the theoretical commit limit
@@ -1073,7 +1068,7 @@ FN MmuChargeCommit (
         END
 
         new := CAST KeCompareSwapPtr (
-            &mmnode^.CommitRemaining, // ptr
+            &pfs^.CommitRemaining, // ptr
             remaining - pages, // newvalue
             remaining, // expectedvalue
         ) TO WORD
@@ -1085,7 +1080,7 @@ FN MmuChargeCommit (
         remaining = new
     END
 
-    IF mmnode^.CommitRemaining >= mmnode^.CommitRemainingMinimum THEN
+    IF pfs^.CommitRemaining >= pfs^.CommitRemainingMinimum THEN
         // Plenty of commit left after charging.
 
         RETURN OS_STATUS_SUCCESS
@@ -1094,8 +1089,8 @@ FN MmuChargeCommit (
     // Not much commit left, so we're responsible for signaling pagefile
     // expansion.
 
-    status := MmpExpandPageFiles (
-        mmnode, // mmnode
+    status := MmpExpandPagefiles (
+        pfs, // pagefilestate
         (flags & MM_ALLOCATE_WAIT) AND NOT vmprivileged, // wait
         FALSE, // full
     )
@@ -1111,7 +1106,7 @@ FN MmuChargeCommit (
         // Remove the commit charge.
 
         KeIncrementPtr (
-            &mmnode^.CommitRemaining, // ptr
+            &pfs^.CommitRemaining, // ptr
             pages, // inc
         )
     END
@@ -1128,8 +1123,10 @@ FN MmuUnchargeCommit (
     // If pagefiles can now be contracted, that will be noticed at the next tick
     // of the responsible worker thread.
 
+    pfs := mmnode^.PagefileState
+
     KeIncrementPtr (
-        &mmnode^.CommitRemaining, // ptr
+        &pfs^.CommitRemaining, // ptr
         pages, // inc
     )
 END

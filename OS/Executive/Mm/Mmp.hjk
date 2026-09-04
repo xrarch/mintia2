@@ -298,8 +298,8 @@ EXTERN FN MmpInitializeQuotaBlock (
     IN uid : UWORD,
 )
 
-EXTERN FN MmpExpandPageFiles (
-    IN mmnode : ^MmpNode,
+EXTERN FN MmpExpandPagefiles (
+    IN pagefilestate : ^MmpPagefileState,
     IN wait : UWORD,
     IN full : UWORD,
 ) : OsStatus
@@ -523,14 +523,7 @@ KE_CACHE_LINE_END
 
 KE_CACHE_LINE_END
 
-    CommitRemainingMinimum : UWORD,
-    CommitRemaining : WORD,
-
-KE_CACHE_LINE_END
-
-    CommitLimit : UWORD,
-    CommitLimitGrowthLeft : UWORD,
-
+    PagefileState : ^MmpPagefileState,
     SpaceNodeCache : ^MmpPoolCache,
     MdlCache : ^MmpPoolCache,
 
@@ -548,9 +541,6 @@ KE_CACHE_LINE_END
     SufficientPageCount : UWORD,
     ModifiedPageMaximum : UWORD,
     ZeroingThreshold : UWORD,
-#IF BLD_NUMA
-    BorrowThreshold : UWORD,
-#END
 
     FluidPageCount : UWORD,
 
