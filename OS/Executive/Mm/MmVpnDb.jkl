@@ -294,17 +294,6 @@ FN MmpGarbageCollectVpnDb (
 
         ptes[i] = MMP_PENDING_FLUSH_PTE
 
-#ELSE
-        // Clear the PTE.
-
-        ptes[i] = MMP_INVALID_KERNEL_PTE
-#END
-
-        // Free the page frame.
-
-        MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
-
-#IF BLD_MP
         MmpBatchShootdown (
             mmnode, // mmnode
             NULLPTR, // context
@@ -313,10 +302,18 @@ FN MmpGarbageCollectVpnDb (
             &MmpFlushVpnDb, // callback
         )
 #ELSE
+        // Clear the PTE and flush the virtual page.
+
+        ptes[i] = MMP_INVALID_KERNEL_PTE
+
         KeuFlushMyTbAddress ( base + (i << RTL_PAGE_SHIFT) )
 #END
 
         KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+
+        // Free the page frame.
+
+        MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
 
         i += 1
     END
