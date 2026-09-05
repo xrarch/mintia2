@@ -9,6 +9,8 @@
 #INCLUDE "<inc>/Obu.hjk"
 #INCLUDE "<inc>/Psu.hjk"
 
+#INCLUDE "<ll>/Executive/MmSizes.hjk"
+
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     #INCLUDE "xr17032/Mmp.hjk"
 
@@ -103,14 +105,6 @@ EXTERN FN MmpIncrementAvailablePages (
 ) : WORD
 
 EXTERN MmpSystemSize : UWORD
-
-// Keep this synchronized with Loader.hjk
-
-#IF ( == BLD_BITS 32 )
-    #DEFINE MMP_PFE_SIZE 40
-#ELSE
-    #DEFINE MMP_PFE_SIZE 64
-#END
 
 #MACRO MmpFindPfnDatabase () [
     (KeCurrentVolatileNode ()^.PfnDatabase)

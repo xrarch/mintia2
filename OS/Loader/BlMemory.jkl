@@ -453,9 +453,9 @@ FN BlCreatePfnDatabase (
     // Calculate the offset into the PFN database of the first page frame of the
     // region.
 
-    vaddr := BlInfoBlock.PfnDatabase + (desc^.StartPfn * BL_PFE_SIZE)
+    vaddr := BlInfoBlock.PfnDatabase + (desc^.StartPfn * MMP_PFE_SIZE)
 
-    endaddr := vaddr + (desc^.PageCount * BL_PFE_SIZE)
+    endaddr := vaddr + (desc^.PageCount * MMP_PFE_SIZE)
 
     // Round vaddr down.
     
@@ -559,7 +559,7 @@ FN BlInitializePfnDatabase ()
 
     vaddr := BlAllocateKernelSpace (
         BlInfoBlock.BootNode, // blnode
-        ((maxpfn * BL_PFE_SIZE) + (RTL_PAGE_SIZE - 1))
+        ((maxpfn * MMP_PFE_SIZE) + (RTL_PAGE_SIZE - 1))
         >> RTL_PAGE_SHIFT, // pages
         BL_KERNEL_STRUCTURES, // preferredva
         FALSE, // fixed
@@ -794,6 +794,15 @@ FN BlInitializeNodeMemory (
         blnode, // blnode
         blnode^.NodeSpaceBase + KE_DYNAMIC_SPACE_OFFSET, // base
         pages, // pages
+    )
+
+    // MMP_VPN_DB is sized with as many VPEs as pages in dynamic space.
+
+    BxCreateVirtualSpace (
+        blnode, // blnode
+        blnode^.NodeSpaceBase + KE_VPN_DB_OFFSET, // base
+        (blnode^.DynamicSpaceSize * MMP_VPE_SIZE + RTL_PAGE_SIZE - 1) >>
+        RTL_PAGE_SHIFT, // pages
     )
 
     // Allocate a bitmap for dynamic space.
