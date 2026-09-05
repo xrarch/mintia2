@@ -11,6 +11,8 @@
 #DEFINE MMP_POOL_ADJUSTMENT_SHORT_INTERVAL_MS 1000
 #DEFINE MMP_POOL_ADJUSTMENT_INTERVAL_MS 5000
 
+#DEFINE MMP_VPN_DB_SCAN_INTERVAL_MS 7000
+
 FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
@@ -131,6 +133,7 @@ FN (KeContinuationF) MmuBalanceManager (
 
     ms := 0
     mssinceadjust := 0
+    mssincevpndbcollect := 0
 
     timer : KeTimer
 
@@ -197,6 +200,14 @@ FN (KeContinuationF) MmuBalanceManager (
                     mmnode^.AvailablePageCount <
                         mmnode^.LowPageCount, // empty
                 )
+            END
+
+            IF (ms - mssincevpndbcollect) >= MMP_VPN_DB_SCAN_INTERVAL_MS THEN
+                // Garbage collect the VPN DB.
+
+                mssincevpndbcollect = ms
+
+                MmpGarbageCollectVpnDb ( mmnode )
             END
 
         ELSEIF status == 1 THEN

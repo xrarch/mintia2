@@ -152,6 +152,10 @@ EXTERN FN MmpInitializeSystemVa (
     IN kenode : ^KeuNode,
 )
 
+EXTERN FN MmpInitializeVpnDb (
+    IN kenode : ^KeuNode,
+)
+
 EXTERN FN MmpInitializeSpaceNodeAllocation (
     IN kenode : ^KeuNode,
 )
@@ -299,7 +303,7 @@ EXTERN FN MmpInitializeQuotaBlock (
 
 EXTERN FN MmpExpandPagefiles (
     IN pagefilestate : ^MmpPagefileState,
-    IN wait : UWORD,
+    IN flags : UWORD,
     IN full : UWORD,
 ) : OsStatus
 
@@ -495,6 +499,16 @@ KE_CACHE_LINE_END
 
 KE_CACHE_LINE_END
 
+    VpnDbLock : KeLock,
+
+KE_CACHE_LINE_END
+
+    VpnDbBase : ^VOID,
+    VpnDbCounters : ^ULONG,
+    VpnDbPages : UWORD,
+
+KE_CACHE_LINE_END
+
     DynamicSpaceTreeLock : KeLock,
 
 KE_CACHE_LINE_END
@@ -604,4 +618,12 @@ EXTERN FN MmpClearTrackingTableEntry (
 EXTERN FN MmpUnreferenceObject (
     IN object : ^MmuObject,
     IN defer : UWORD,
+)
+
+#MACRO MmpFindVpe ( mmnode, vpn ) [
+    ((mmnode)^.VpnDbBase + ((vpn) * MMP_VPE_SIZE))
+]
+
+EXTERN FN MmpGarbageCollectVpnDb (
+    IN mmnode : ^MmpNode,
 )

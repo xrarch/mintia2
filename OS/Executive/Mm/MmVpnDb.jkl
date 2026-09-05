@@ -9,3 +9,303 @@
 //
 
 #INCLUDE "Mmp.hjk"
+
+#SECTION "INITtext"
+FN MmpInitializeVpnDb (
+    IN kenode : ^KeuNode,
+)
+
+    // Initialize the virtual page number database.
+
+    mmnode := kenode^.Mmp
+
+    KeInitializeLock ( &mmnode^.VpnDbLock )
+
+    mmnode^.VpnDbBase = kenode + KE_VPN_DB_OFFSET
+    mmnode^.VpnDbCounters = kenode^.VpnDbCounters
+END
+
+FN MmpCreateVpe (
+    IN mmnode : ^MmpNode,
+    IN vpn : UWORD,
+    IN flags : UWORD,
+    OUT vpe : ^MmpVpe,
+) : OsStatus
+
+    // Return a pointer to the VPE for the given VPN within the given node's
+    // dynamic space.
+
+    KeAssert ( vpn < (KE_DYNAMIC_SPACE_SIZE >> RTL_PAGE_SHIFT) )
+
+    vpe = MmpFindVpe ( mmnode, vpn )
+
+    counter := &mmnode^.VpnDbCounters[vpn]
+
+    refcount := counter^
+
+@Retry
+
+    WHILE TRUE DO
+        IF refcount == 0 THEN
+            // A reference count of 0 means there is no physical page backing
+            // this VPNDB page. We need to break out and create one under a
+            // lock.
+
+            BREAK
+        END
+
+        // Try to atomically increment the refcount.
+
+        new := KeCompareSwapUlong (
+            counter, // ptr
+            refcount + 1, // newvalue
+            refcount, // expectedvalue
+        )
+
+        IF new == refcount THEN
+            RETURN OS_STATUS_SUCCESS
+        END
+
+        refcount = new
+    END
+
+    // Charge commit for the new VPNDB page.
+
+    status := MmuChargeCommit (
+        mmnode, // mmnode
+        1, // pages
+        flags, // flags
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+@RetryCharged
+
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.VpnDbLock )
+
+    IF counter^ != 0 THEN
+        // The value of the counter changed, so retry.
+
+        KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+
+        MmuUnchargeCommit (
+            mmnode, // mmnode
+            1, // pages
+        )
+
+        GOTO Retry
+    END
+
+    // We are really responsible for allocating a page frame.
+
+    pfe := MmpAllocatePage (
+        mmnode, // mmnode
+        flags, // flags
+        MmpVirtualAddressColor ( vpe ), // color
+    )
+
+    IF NOT pfe THEN
+        // Failed to immediately allocate a page frame.
+
+        KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+
+        IF flags & MM_ALLOCATE_WAIT == 0 THEN
+            // Caller did not ask us to wait for a page.
+
+            MmuUnchargeCommit (
+                mmnode, // mmnode
+                1, // pages
+            )
+
+            RETURN OS_STATUS_NO_MEMORY
+        END
+
+        MmpWaitForPages (
+            mmnode, // mmnode
+            flags & MM_ALLOCATE_LOW, // low
+        )
+
+        GOTO RetryCharged
+    END
+
+    pteaddr := MmpPteAddress ( vpe )
+
+#IF BLD_MP
+    IF pteaddr^ == MMP_PENDING_FLUSH_PTE THEN
+        // The PTE is still pending flush, so flush it now.
+
+        MmpFlushShootdowns ( mmnode )
+
+        // Should be set to an invalid kernel PTE now.
+
+        KeAssert ( pteaddr^ == MMP_INVALID_KERNEL_PTE )
+    END
+#END
+
+    pteaddr^ = MmpBuildPoolPte ( MmpPfeToPfn ( pfe ) )
+
+    // Write memory barrier to ensure that the VPN DB page mapping is visible
+    // to other processors before we publish it by setting the counter to 2.
+
+    KeWriteMemoryBarrier ()
+
+    // Set the refcount to 2.
+    // 1 for existence of the physical page, plus 1 for existence of our VPE.
+
+    counter^ = 2
+
+    KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+FN MmpReferenceVpe (
+    IN vpe : ^MmpVpe,
+)
+
+    // Increment the refcount of a VPE known to exist.
+
+    mmnode := KeNumaNodeFromSpacePointer ( vpe )^.Mmp
+
+    oldcount := KeIncrementUlong (
+        &mmnode^.VpnDbCounters[(vpe - mmnode^.VpnDbBase) >> RTL_PAGE_SHIFT],
+        1, // inc
+    )
+
+    KeAssert ( oldcount >= 2 )
+END
+
+FN MmpUnreferenceVpe (
+    IN vpe : ^MmpVpe,
+)
+
+    // Decrement the refcount of a VPE known to exist.
+
+    // If this drops the refcount of the containing VPNDB page to 1, then it is
+    // eligible for garbage collection on the next scan.
+
+    mmnode := KeNumaNodeFromSpacePointer ( vpe )^.Mmp
+
+    oldcount := KeIncrementUlong (
+        &mmnode^.VpnDbCounters[(vpe - mmnode^.VpnDbBase) >> RTL_PAGE_SHIFT],
+        0xFFFFFFFF, // inc
+    )
+
+    KeAssert ( oldcount >= 2 )
+END
+
+#IF BLD_MP
+
+FN (MmpAfterShootdownF) MmpFlushVpnDb (
+    IN mmnode : ^MmpNode,
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
+
+    // Perform work required after a batched shootdown occurred that shot down
+    // a range of VPN DB pages.
+
+    pteaddr := MmpPteAddress ( ptr )
+    i := 0
+
+    WHILE i < pages DO
+        ptecontents := pteaddr[i]
+
+        KeAssert ( ptecontents == MMP_PENDING_FLUSH_PTE )
+
+        pteaddr[i] = MMP_INVALID_KERNEL_PTE
+
+        i += 1
+    END
+END
+
+#END
+
+FN MmpGarbageCollectVpnDb (
+    IN mmnode : ^MmpNode,
+)
+
+    // Garbage collect unused pages in the VPN DB. This is done lazily rather
+    // than reclaiming the pages eagerly in order to minimize TB shootdowns
+    // and avoid excessive contention on the VpnDbLock.
+
+    // XXX On 64 bit we will want to use a counting bloom filter to accelerate
+    //     this, since there will be many more pages of VPN DB to scan over.
+
+    KeAssert ( BLD_BITS == 32 )
+
+    kenode := mmnode^.KeNode
+
+    counters := mmnode^.VpnDbCounters
+
+    base := mmnode^.VpnDbBase
+
+    ptes := MmpPteAddress ( base )
+
+    i := 0
+    pages := ((kenode^.DynamicSpaceSize * MMP_VPE_SIZE) + RTL_PAGE_SIZE - 1) >>
+        RTL_PAGE_SHIFT
+
+    WHILE i < pages DO
+        IF counters[i] != 1 THEN
+            // Not reclaimable.
+
+            i += 1
+
+            CONTINUE
+        END
+
+        // This page of VPN DB is reclaimable.
+
+        ipl := KeAcquireLockExclusiveRaise ( &mmnode^.VpnDbLock )
+
+        value := KeCompareSwapUlong (
+            &counters[i], // ptr
+            0, // newvalue
+            1, // expectedvalue
+        )
+
+        IF value == 1 THEN
+            // Decremented the count to zero, so now we can reclaim.
+
+            ptecontents := ptes[i]
+
+            KeAssert ( MmpIsPteValid ( ptecontents ) )
+
+#IF BLD_MP
+            // Set the PTE to indicate the flushing of this VPN from the TB
+            // is currently in a deferred batch.
+
+            ptes[i] = MMP_PENDING_FLUSH_PTE
+
+#ELSE
+            // Clear the PTE.
+
+            ptes[i] = MMP_INVALID_KERNEL_PTE
+#END
+
+            // Free the page frame.
+
+            MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
+
+#IF BLD_MP
+            MmpBatchShootdown (
+                mmnode, // mmnode
+                NULLPTR, // context
+                base + (i << RTL_PAGE_SHIFT), // ptr
+                1, // pages
+                &MmpFlushVpnDb, // callback
+            )
+#ELSE
+            KeuFlushMyTbAddress ( base + (i << RTL_PAGE_SHIFT) )
+#END
+        END
+
+        KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+
+        i += 1
+    END
+END

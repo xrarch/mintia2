@@ -1087,12 +1087,10 @@ FN MmuChargeCommit (
     // It would be unwise to page this routine as it can be called during
     // nonpaged pool allocation.
 
-    vmprivileged := PsCurrentThread()^.VmPrivileged
-
     IF pages > RTL_MACHINE_WORD_MAX_S THEN
         // Page count overflows and is negative.
 
-        KeAssert ( NOT vmprivileged )
+        KeAssert ( flags & MM_ALLOCATE_FORCE_COMMIT == 0 )
 
         RETURN OS_STATUS_COMMIT_EXCEEDED
     END
@@ -1105,12 +1103,12 @@ FN MmuChargeCommit (
         IF remaining < RTL_MACHINE_WORD_MIN_S + pages THEN
             // Underflow would result from this subtraction.
 
-            KeAssert ( NOT vmprivileged )
+            KeAssert ( flags & MM_ALLOCATE_FORCE_COMMIT == 0 )
 
             RETURN OS_STATUS_COMMIT_EXCEEDED
         END
 
-        IF NOT vmprivileged AND
+        IF flags & MM_ALLOCATE_FORCE_COMMIT == 0 AND
             (remaining - pages < -pfs^.CommitLimitGrowthLeft) THEN
 
             // Don't even bother trying, there's no way to extend the pagefiles
@@ -1146,11 +1144,11 @@ FN MmuChargeCommit (
 
     status := MmpExpandPagefiles (
         pfs, // pagefilestate
-        (flags & MM_ALLOCATE_WAIT) AND NOT vmprivileged, // wait
+        flags, // flags
         FALSE, // full
     )
 
-    IF vmprivileged THEN
+    IF flags & MM_ALLOCATE_FORCE_COMMIT THEN
         // Proceed immediately with a successful status no matter what.
 
         RETURN OS_STATUS_SUCCESS
