@@ -83,23 +83,6 @@ FN MmpCreateVpe (
 
 @RetryCharged
 
-    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.VpnDbLock )
-
-    IF counter^ != 0 THEN
-        // The value of the counter changed, so retry.
-
-        KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
-
-        MmuUnchargeCommit (
-            mmnode, // mmnode
-            1, // pages
-        )
-
-        GOTO Retry
-    END
-
-    // We are really responsible for allocating a page frame.
-
     pfe := MmpAllocatePage (
         mmnode, // mmnode
         flags, // flags
@@ -109,25 +92,42 @@ FN MmpCreateVpe (
     IF NOT pfe THEN
         // Failed to immediately allocate a page frame.
 
-        KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+        IF flags & MM_ALLOCATE_WAIT THEN
+            // Caller asked us to wait for a page if needed.
 
-        IF flags & MM_ALLOCATE_WAIT == 0 THEN
-            // Caller did not ask us to wait for a page.
-
-            MmuUnchargeCommit (
+            MmpWaitForPages (
                 mmnode, // mmnode
-                1, // pages
+                flags & MM_ALLOCATE_LOW, // low
             )
 
-            RETURN OS_STATUS_NO_MEMORY
+            GOTO RetryCharged
         END
 
-        MmpWaitForPages (
+        MmuUnchargeCommit (
             mmnode, // mmnode
-            flags & MM_ALLOCATE_LOW, // low
+            1, // pages
         )
 
-        GOTO RetryCharged
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+@RetryAcquire
+
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.VpnDbLock )
+
+    IF counter^ != 0 THEN
+        // The value of the counter changed, so retry.
+
+        KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+
+        MmpFreePage ( pfe )
+
+        MmuUnchargeCommit (
+            mmnode, // mmnode
+            1, // pages
+        )
+
+        GOTO Retry
     END
 
     pteaddr := MmpPteAddress ( vpe )
@@ -136,11 +136,15 @@ FN MmpCreateVpe (
     IF pteaddr^ == MMP_PENDING_FLUSH_PTE THEN
         // The PTE is still pending flush, so flush it now.
 
+        KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+
         MmpFlushShootdowns ( mmnode )
 
         // Should be set to an invalid kernel PTE now.
 
         KeAssert ( pteaddr^ == MMP_INVALID_KERNEL_PTE )
+
+        GOTO RetryAcquire
     END
 #END
 
