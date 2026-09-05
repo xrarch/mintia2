@@ -84,8 +84,7 @@ KeCompareSwapUlong:
     
     mov  a3, [a0]
     cmp  a3, a2
-    ifnz rjmp KepCompareSwapUlongEnd
-    mov  [a0], a1
+    ifz  mov [a0], a1
 
 KepCompareSwapUlongEnd:
 .global KepCompareSwapUlongEnd
@@ -103,8 +102,7 @@ KeCompareSwapUlongAbortOnFault:
     
     mov  a3, [a0]
     cmp  a3, a2
-    ifnz rjmp KepCompareSwapUlongAbortEnd
-    mov  [a0], a1
+    ifz  mov [a0], a1
 
 KepCompareSwapUlongAbortEnd:
 .global KepCompareSwapUlongAbortEnd
@@ -277,14 +275,11 @@ startlabel:
 
     mov  t1, t0
     and  t1, KEP_LOCK_WRITE_LOCKED
-    ifnz rjmp .notshared
 
-    // We're a shared holder, so decrement the share count.
+    // If we're a shared holder, decrement the share count.
 
-    mov  t2, t0
-    sub  t2, KEP_LOCK_SHARE_INC
-
-.notshared:
+    ifz  mov t2, t0
+    ifz  sub t2, KEP_LOCK_SHARE_INC
 
     // Store the new lock word.
 
@@ -318,9 +313,7 @@ KeReleaseLockLower:
 
     mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)]
     srl  t0, a1
-    ifnz rjmp KeReleaseLockLowerDispatch
-
-    ret
+    ifz  ret
 
 KeReleaseLockLowerDispatch:
 
