@@ -272,41 +272,49 @@ FN MmpGarbageCollectVpnDb (
             1, // expectedvalue
         )
 
-        IF value == 1 THEN
-            // Decremented the count to zero, so now we can reclaim.
+        IF value != 1 THEN
+            // Something changed, so just ignore this page.
 
-            ptecontents := ptes[i]
+            KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
 
-            KeAssert ( MmpIsPteValid ( ptecontents ) )
+            i += 1
 
-#IF BLD_MP
-            // Set the PTE to indicate the flushing of this VPN from the TB
-            // is currently in a deferred batch.
-
-            ptes[i] = MMP_PENDING_FLUSH_PTE
-
-#ELSE
-            // Clear the PTE.
-
-            ptes[i] = MMP_INVALID_KERNEL_PTE
-#END
-
-            // Free the page frame.
-
-            MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
-
-#IF BLD_MP
-            MmpBatchShootdown (
-                mmnode, // mmnode
-                NULLPTR, // context
-                base + (i << RTL_PAGE_SHIFT), // ptr
-                1, // pages
-                &MmpFlushVpnDb, // callback
-            )
-#ELSE
-            KeuFlushMyTbAddress ( base + (i << RTL_PAGE_SHIFT) )
-#END
+            CONTINUE
         END
+
+        // Decremented the count to zero, so now we can reclaim.
+
+        ptecontents := ptes[i]
+
+        KeAssert ( MmpIsPteValid ( ptecontents ) )
+
+#IF BLD_MP
+        // Set the PTE to indicate the flushing of this VPN from the TB
+        // is currently in a deferred batch.
+
+        ptes[i] = MMP_PENDING_FLUSH_PTE
+
+#ELSE
+        // Clear the PTE.
+
+        ptes[i] = MMP_INVALID_KERNEL_PTE
+#END
+
+        // Free the page frame.
+
+        MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
+
+#IF BLD_MP
+        MmpBatchShootdown (
+            mmnode, // mmnode
+            NULLPTR, // context
+            base + (i << RTL_PAGE_SHIFT), // ptr
+            1, // pages
+            &MmpFlushVpnDb, // callback
+        )
+#ELSE
+        KeuFlushMyTbAddress ( base + (i << RTL_PAGE_SHIFT) )
+#END
 
         KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
 
