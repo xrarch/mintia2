@@ -122,30 +122,23 @@ FN MmpBatchShootdown (
         entry = &percpu^.Table[index - 1]
 
         IF entry^.Callback == callback AND
-            entry^.Context == context THEN
+            entry^.Context == context AND
+            ((entry^.Ptr + (entry^.Pages << RTL_PAGE_SHIFT) == ptr) OR
+            (ptr + (pages << RTL_PAGE_SHIFT) == entry^.Ptr)) THEN
 
-            IF entry^.Ptr + (entry^.Pages << RTL_PAGE_SHIFT) == ptr THEN
-                // This shootdown is directly contiguous with the last one that
-                // was inserted and has the same callback and context. So we
-                // can just extend the last one.
+            // This shootdown is directly contiguous with the last one that
+            // was inserted and has the same callback and context. So we
+            // can just extend the last one.
 
-                entry^.Pages += pages
+            entry^.Pages += pages
 
-                KeReleaseLockLower ( &percpu^.Lock, ipl )
-
-                LEAVE
-            END
-
-            IF ptr + (pages << RTL_PAGE_SHIFT) == entry^.Ptr THEN
-                // May as well check the other way too.
-
+            IF ptr < entry^.Ptr THEN
                 entry^.Ptr = ptr
-                entry^.Pages += pages
-
-                KeReleaseLockLower ( &percpu^.Lock, ipl )
-
-                LEAVE
             END
+
+            KeReleaseLockLower ( &percpu^.Lock, ipl )
+
+            LEAVE
         END
     END
 
