@@ -91,7 +91,8 @@ FN MmpBatchShootdown (
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN callback : MmpAfterShootdownF,
-)
+    IN canflush : UWORD,
+) : UWORD
 
     // Add the callback to the next batch.
 
@@ -138,7 +139,7 @@ FN MmpBatchShootdown (
 
             KeReleaseLockLower ( &percpu^.Lock, ipl )
 
-            LEAVE
+            RETURN TRUE
         END
     END
 
@@ -149,16 +150,18 @@ FN MmpBatchShootdown (
 
         KeReleaseLockLower ( &percpu^.Lock, ipl )
 
-        MmpFlushShootdowns ( mmnode )
+        IF canflush THEN
+            MmpFlushShootdowns ( mmnode )
 
-        callback (
-            mmnode, // mmnode
-            context, // context
-            ptr, // ptr
-            pages, // pages
-        )
+            callback (
+                mmnode, // mmnode
+                context, // context
+                ptr, // ptr
+                pages, // pages
+            )
+        END
 
-        LEAVE
+        RETURN canflush
     END
 
     entry = &percpu^.Table[index]
@@ -184,6 +187,8 @@ FN MmpBatchShootdown (
     END
 
     KeReleaseLockLower ( &percpu^.Lock, ipl )
+
+    RETURN TRUE
 END
 
 #END

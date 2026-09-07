@@ -23,8 +23,7 @@ FN MmpInitializeVpnDb (
 
     mmnode^.VpnDbBase = kenode + KE_VPN_DB_OFFSET
     mmnode^.VpnDbCounters = kenode^.VpnDbCounters
-    mmnode^.VpnDbBloomFilter = kenode^.VpnDbBloomFilter
-    mmnode^.VpnDbHighestUsed = 0
+    mmnode^.VpnDbFilter = kenode^.VpnDbFilter
 END
 
 FN MmpCreateVpe (
@@ -39,42 +38,16 @@ FN MmpCreateVpe (
 
     KeAssert ( vpn < (KE_DYNAMIC_SPACE_SIZE >> RTL_PAGE_SHIFT) )
 
-    new : UWORD
-    old : UWORD
-
-    // See if this is the highest page of VPN DB that we've ever used.
-    // Do an atomic max if so.
-
-    old = mmnode^.VpnDbHighestUsed
-
-    WHILE TRUE DO
-        IF old > (vpn * MMP_VPE_SIZE) >> RTL_PAGE_SHIFT THEN
-            BREAK
-        END
-
-        new = KeCompareSwapUlong (
-            &mmnode^.VpnDbHighestUsed, // ptr
-            (vpn * MMP_VPE_SIZE) >> RTL_PAGE_SHIFT + 1, // newvalue
-            old, // expectedvalue
-        )
-
-        IF new == old THEN
-            BREAK
-        END
-
-        old = new
-    END
-
     vpe = MmpFindVpe ( mmnode, vpn )
 
     counter := &mmnode^.VpnDbCounters[vpn]
 
-    old = counter^
+    refcount := counter^
 
 @Retry
 
     WHILE TRUE DO
-        IF old == 0 THEN
+        IF refcount == 0 THEN
             // A reference count of 0 means there is no physical page backing
             // this VPNDB page. We need to break out and create one under a
             // lock.
@@ -84,30 +57,29 @@ FN MmpCreateVpe (
 
         // Try to atomically increment the refcount.
 
-        new = KeCompareSwapUlong (
+        new: = KeCompareSwapUlong (
             counter, // ptr
-            old + 1, // newvalue
-            old, // expectedvalue
+            refcount + 1, // newvalue
+            refcount, // expectedvalue
         )
 
-        IF new != old THEN
+        IF new != refcount THEN
             // Something changed, so retry.
 
-            old = new
+            refcount = new
 
             CONTINUE
         END
 
-        IF old == 1 THEN
+        IF refcount == 1 THEN
             // Old refcount was 1, and now its 2, so we are responsible for
-            // decrementing the count in the bloom filter. Note that this can
-            // race and make the count underflow or otherwise be goofy but this
-            // is self-correcting as the racing threads leave, and not a
-            // functional hazard as the bloom filter is only used as a hint by
-            // the garbage collection process.
+            // decrementing the count in the filter. Note that this can
+            // race but this is self-correcting as the racing threads leave,
+            // and not a functional hazard as the filter is only used as
+            // a hint by the garbage collection process.
 
             KeIncrementUlong (
-                &mmnode^.VpnDbBloomFilter[vpn / MMP_VPNDB_PER_FILTER], // ptr
+                &mmnode^.VpnDbFilter[vpn / MMP_VPNDB_PER_FILTER], // ptr
                 0xFFFFFFFF, // inc
             )
         END
@@ -186,10 +158,6 @@ FN MmpCreateVpe (
 
         MmpFlushShootdowns ( mmnode )
 
-        // Should be set to an invalid kernel PTE now.
-
-        KeAssert ( pteaddr^ == MMP_INVALID_KERNEL_PTE )
-
         GOTO RetryAcquire
     END
 #END
@@ -215,7 +183,7 @@ FN MmpReferenceVpe (
     IN vpe : ^MmpVpe,
 )
 
-    // Increment the refcount of a VPE known to exist.
+    // Increment the refcount of a VPE whose containing page is known to exist.
 
     mmnode := KeNumaNodeFromSpacePointer ( vpe )^.Mmp
 
@@ -231,7 +199,7 @@ FN MmpUnreferenceVpe (
     IN vpe : ^MmpVpe,
 )
 
-    // Decrement the refcount of a VPE known to exist.
+    // Decrement the refcount of a VPE whose containing page is known to exist.
 
     // If this drops the refcount of the containing VPNDB page to 1, then it is
     // eligible for garbage collection on the next scan.
@@ -248,14 +216,14 @@ FN MmpUnreferenceVpe (
 
     IF oldcount == 2 THEN
         // Old refcount was 2, and now its 1, so we are responsible for
-        // incrementing the count in the bloom filter. Note that this can
+        // incrementing the count in the filter. Note that this can
         // race and make the count underflow or otherwise be goofy but this
         // is self-correcting as the racing threads leave, and not a
-        // functional hazard as the bloom filter is only used as a hint by
+        // functional hazard as the filter is only used as a hint by
         // the garbage collection process.
 
         KeIncrementUlong (
-            &mmnode^.VpnDbBloomFilter[vpn / MMP_VPNDB_PER_FILTER], // ptr
+            &mmnode^.VpnDbFilter[vpn / MMP_VPNDB_PER_FILTER], // ptr
             1, // inc
         )
     END
@@ -297,26 +265,24 @@ FN MmpGarbageCollectVpnDb (
     // than reclaiming the pages eagerly in order to minimize TB shootdowns
     // and avoid excessive contention on the VpnDbLock.
 
-    // This process involves scanning and is optimized by scanning a bloom
-    // filter as the first level. The bloom filter consists of an array of
+    // This process involves scanning and is optimized by scanning a
+    // filter as the first level. The filter consists of an array of
     // 32-bit counts of VPN DB pages that lie within a particular range, which
     // are reclaimable (refcount==1).
 
-    kenode := mmnode^.KeNode
-
     counters := mmnode^.VpnDbCounters
-    filter := mmnode^.VpnDbBloomFilter
+    filter := mmnode^.VpnDbFilter
 
     base := mmnode^.VpnDbBase
 
     ptes := MmpPteAddress ( base )
 
     i := 0
-    pages := mmnode^.VpnDbHighestUsed
+    pages := mmnode^.KeNode^.DynamicSpaceSize
 
     WHILE i < pages DO
         IF filter[i / MMP_VPNDB_PER_FILTER] == 0 THEN
-            // No reclaimable in this range.
+            // No reclaimable pages in this range.
 
             i += MMP_VPNDB_PER_FILTER
 
@@ -340,7 +306,11 @@ FN MmpGarbageCollectVpnDb (
                 CONTINUE
             END
 
+@Retry
+
             // This page of VPN DB is reclaimable.
+            // Try to atomically change the refcount to 0 to represent that we
+            // have reclaimed the underlying physical page.
 
             ipl := KeAcquireLockExclusiveRaise ( &mmnode^.VpnDbLock )
 
@@ -360,11 +330,6 @@ FN MmpGarbageCollectVpnDb (
                 CONTINUE
             END
 
-            KeIncrementUlong (
-                &filter[i / MMP_VPNDB_PER_FILTER], // ptr
-                0xFFFFFFFF, // inc
-            )
-
             // Decremented the count to zero, so now we can reclaim.
 
             ptecontents := ptes[i]
@@ -377,13 +342,32 @@ FN MmpGarbageCollectVpnDb (
 
             ptes[i] = MMP_PENDING_FLUSH_PTE
 
-            MmpBatchShootdown (
+            IF NOT MmpBatchShootdown (
                 mmnode, // mmnode
                 NULLPTR, // context
                 base + (i << RTL_PAGE_SHIFT), // ptr
                 1, // pages
                 &MmpFlushVpnDb, // callback
-            )
+                FALSE, // canflush
+            ) THEN
+
+                // Oops, nevermind. We ran out of batched shootdown slots and
+                // don't want to flush them while holding the VpnDbLock, so we
+                // have to undo what we just did and then flush manually
+                // while outside of it.
+
+                ptes[i] = ptecontents
+
+                KeWriteMemoryBarrier ()
+
+                counters[i] = 1
+
+                KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+
+                MmpFlushShootdowns ( mmnode )
+
+                GOTO Retry
+            END
 #ELSE
             // Clear the PTE and flush the virtual page.
 
@@ -393,6 +377,14 @@ FN MmpGarbageCollectVpnDb (
 #END
 
             KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+
+            // Decrement the number of VPN DB pages in this range that have a
+            // refcount of 1, since we just changed one to 0.
+
+            KeIncrementUlong (
+                &filter[i / MMP_VPNDB_PER_FILTER], // ptr
+                0xFFFFFFFF, // inc
+            )
 
             // Free the page frame.
 

@@ -859,7 +859,7 @@ FN BlInitializeNodeMemory (
 
     blnode^.VpnDbCounters = counters
 
-    // Allocate a counting bloom filter for VPNDB garbage collection.
+    // Allocate a counting filter for VPNDB garbage collection.
     // 64 pages are tracked per ULONG.
 
     // Check if it will fit in the slack space between the reference counters
@@ -873,14 +873,14 @@ FN BlInitializeNodeMemory (
 
         // Yes.
 
-        blnode^.VpnDbBloomFilter = counters + (pages * SIZEOF ULONG)
+        blnode^.VpnDbFilter = counters + (pages * SIZEOF ULONG)
 
     ELSE
         // Nope.
 
         pages = (filtersize + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
 
-        blnode^.VpnDbBloomFilter = BlAllocateMappedRange (
+        blnode^.VpnDbFilter = BlAllocateMappedRange (
             blnode, // blnode
             pages, // pages
             BL_KERNEL_STRUCTURES, // prefva
@@ -889,12 +889,12 @@ FN BlInitializeNodeMemory (
             OUT desc, // desc
         )
 
-        IF NOT blnode^.VpnDbBloomFilter THEN
+        IF NOT blnode^.VpnDbFilter THEN
             BlCrash ( "Failed to allocate vpndb filter\n" )
         END
 
         RtlFillMemoryWithUlong (
-            blnode^.VpnDbBloomFilter, // ptr
+            blnode^.VpnDbFilter, // ptr
             pages << RTL_PAGE_SHIFT, // sz
             0, // ulong
         )
