@@ -17,10 +17,6 @@ KeTryAcquireLockExclusive:
     mov  t1, long [tp + KepPrb_CurrentThread]
     ori  t1, t1, KEP_LOCK_WRITE_LOCKED
 
-#IF BLD_MP
-    mb                              // Ensure coherence with other processors.
-#END
-
 .retry:
 
     ll   t0, a0                     // Load-locked the lock word.
@@ -29,7 +25,7 @@ KeTryAcquireLockExclusive:
     beq  t2, .retry                 // If failed, retry.
 
 #IF BLD_MP
-    mb                              // Ensure coherence with other processors.
+    mb                              // Ensure reads don't see stale data.
 #END
 
     li   a3, 1                      // Report success.
@@ -55,10 +51,6 @@ KeAcquireLockSharedRaise:
 KeAcquireLockShared:
 .export KeAcquireLockShared
 
-#IF BLD_MP
-    mb                              // Ensure coherence with other processors.
-#END
-
 .retry:
 
     ll   t0, a0                     // Load-locked the lock word.
@@ -69,7 +61,7 @@ KeAcquireLockShared:
     beq  t2, .retry                 // If failed, retry.
 
 #IF BLD_MP
-    mb                              // Ensure coherence with other processors.
+    mb                              // Ensure reads don't see stale data.
 #END
 
     ret
@@ -97,10 +89,6 @@ KeAcquireLockExclusive:
     mov  t1, long [tp + KepPrb_CurrentThread]
     ori  t1, t1, KEP_LOCK_WRITE_LOCKED
 
-#IF BLD_MP
-    mb                              // Ensure coherence with other processors.
-#END
-
 .retry:
 
     ll   t0, a0                     // Load-locked the lock word.
@@ -109,7 +97,7 @@ KeAcquireLockExclusive:
     beq  t2, .retry                 // If failed, retry.
 
 #IF BLD_MP
-    mb                              // Ensure coherence with other processors.
+    mb                              // Ensure reads don't see stale data.
 #END
 
     ret
@@ -128,7 +116,7 @@ KeAcquireLockExclusive:
 #END
 
 #IF BLD_MP
-    mb                              // Ensure coherence with other processors.
+    wmb                             // Ensure earlier writes visible.
 #END
 
 .retry:
@@ -153,10 +141,6 @@ KeAcquireLockExclusive:
 
     sc   t4, a0, t2                 // Conditionally store the new word.
     beq  t4, .retry                 // If failed, retry.
-
-#IF BLD_MP
-    mb                              // Ensure coherence with other processors.
-#END
 
 ]
 
