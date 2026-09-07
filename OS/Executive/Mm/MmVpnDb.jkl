@@ -39,20 +39,42 @@ FN MmpCreateVpe (
 
     KeAssert ( vpn < (KE_DYNAMIC_SPACE_SIZE >> RTL_PAGE_SHIFT) )
 
-    IF vpn > mmnode^.VpnDbHighestUsed THEN
-        mmnode^.VpnDbHighestUsed = vpn + 1
+    new : UWORD
+    old : UWORD
+
+    // See if this is the highest page of VPN DB that we've ever used.
+    // Do an atomic max if so.
+
+    old = mmnode^.VpnDbHighestUsed
+
+    WHILE TRUE DO
+        IF old > (vpn * MMP_VPE_SIZE) >> RTL_PAGE_SHIFT THEN
+            BREAK
+        END
+
+        new = KeCompareSwapUlong (
+            &mmnode^.VpnDbHighestUsed, // ptr
+            (vpn * MMP_VPE_SIZE) >> RTL_PAGE_SHIFT + 1, // newvalue
+            old, // expectedvalue
+        )
+
+        IF new == old THEN
+            BREAK
+        END
+
+        old = new
     END
 
     vpe = MmpFindVpe ( mmnode, vpn )
 
     counter := &mmnode^.VpnDbCounters[vpn]
 
-    refcount := counter^
+    old = counter^
 
 @Retry
 
     WHILE TRUE DO
-        IF refcount == 0 THEN
+        IF old == 0 THEN
             // A reference count of 0 means there is no physical page backing
             // this VPNDB page. We need to break out and create one under a
             // lock.
@@ -62,21 +84,21 @@ FN MmpCreateVpe (
 
         // Try to atomically increment the refcount.
 
-        new := KeCompareSwapUlong (
+        new = KeCompareSwapUlong (
             counter, // ptr
-            refcount + 1, // newvalue
-            refcount, // expectedvalue
+            old + 1, // newvalue
+            old, // expectedvalue
         )
 
-        IF new != refcount THEN
+        IF new != old THEN
             // Something changed, so retry.
 
-            refcount = new
+            old = new
 
             CONTINUE
         END
 
-        IF refcount == 1 THEN
+        IF old == 1 THEN
             // Old refcount was 1, and now its 2, so we are responsible for
             // decrementing the count in the bloom filter. Note that this can
             // race and make the count underflow or otherwise be goofy but this
@@ -305,8 +327,8 @@ FN MmpGarbageCollectVpnDb (
 
         max := i + MMP_VPNDB_PER_FILTER
 
-        IF max >= pages THEN
-            max = pages - 1
+        IF max > pages THEN
+            max = pages
         END
 
         WHILE i < max DO
