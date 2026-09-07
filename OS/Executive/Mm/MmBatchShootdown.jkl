@@ -113,7 +113,7 @@ FN MmpBatchShootdown (
         GOTO Retry
     END
 
-    // Nope, add a new entry.
+    // Try to coalesce with the last entered shootdown.
 
     index := percpu^.Index
     entry : ^MmpBatchedShootdown
@@ -141,6 +141,8 @@ FN MmpBatchShootdown (
             LEAVE
         END
     END
+
+    // Nope, add a new entry.
 
     IF index >= MMP_MAXIMUM_SHOOTDOWN_BATCH THEN
         // The batch is full, do it immediately.
