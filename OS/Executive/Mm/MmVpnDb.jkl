@@ -36,7 +36,7 @@ FN MmpCreateVpe (
     // Return a pointer to the VPE for the given VPN within the given node's
     // dynamic space.
 
-    KeAssert ( vpn < (KE_DYNAMIC_SPACE_SIZE >> RTL_PAGE_SHIFT) )
+    KeAssert ( vpn < mmnode^.KeNode^.DynamicSpaceSize )
 
     vpe = MmpFindVpe ( mmnode, vpn )
 
@@ -57,7 +57,7 @@ FN MmpCreateVpe (
 
         // Try to atomically increment the refcount.
 
-        new: = KeCompareSwapUlong (
+        new := KeCompareSwapUlong (
             counter, // ptr
             refcount + 1, // newvalue
             refcount, // expectedvalue
@@ -217,9 +217,8 @@ FN MmpUnreferenceVpe (
     IF oldcount == 2 THEN
         // Old refcount was 2, and now its 1, so we are responsible for
         // incrementing the count in the filter. Note that this can
-        // race and make the count underflow or otherwise be goofy but this
-        // is self-correcting as the racing threads leave, and not a
-        // functional hazard as the filter is only used as a hint by
+        // race but this is self-correcting as the racing threads leave, and
+        // not a functional hazard as the filter is only used as a hint by
         // the garbage collection process.
 
         KeIncrementUlong (
