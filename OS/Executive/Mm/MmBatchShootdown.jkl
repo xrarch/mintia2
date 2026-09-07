@@ -116,6 +116,38 @@ FN MmpBatchShootdown (
     // Nope, add a new entry.
 
     index := percpu^.Index
+    entry : ^MmpBatchedShootdown
+
+    IF index != 0 THEN
+        entry = &percpu^.Table[index - 1]
+
+        IF entry^.Callback == callback AND
+            entry^.Context == context THEN
+
+            IF entry^.Ptr + (entry^.Pages << RTL_PAGE_SHIFT) == ptr THEN
+                // This shootdown is directly contiguous with the last one that
+                // was inserted and has the same callback and context. So we
+                // can just extend the last one.
+
+                entry^.Pages += pages
+
+                KeReleaseLockLower ( &percpu^.Lock, ipl )
+
+                LEAVE
+            END
+
+            IF ptr + (pages << RTL_PAGE_SHIFT) == entry^.Ptr THEN
+                // May as well check the other way too.
+
+                entry^.Ptr = ptr
+                entry^.Pages += pages
+
+                KeReleaseLockLower ( &percpu^.Lock, ipl )
+
+                LEAVE
+            END
+        END
+    END
 
     IF index >= MMP_MAXIMUM_SHOOTDOWN_BATCH THEN
         // The batch is full, do it immediately.
@@ -134,7 +166,7 @@ FN MmpBatchShootdown (
         LEAVE
     END
 
-    entry := &percpu^.Table[index]
+    entry = &percpu^.Table[index]
 
     entry^.Ptr = ptr
     entry^.Pages = pages
