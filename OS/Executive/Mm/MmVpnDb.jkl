@@ -292,11 +292,7 @@ FN MmpGarbageCollectVpnDb (
     i := 0
     pages := mmnode^.VpnDbHighestUsed
 
-    iters := 0
-
     WHILE i < pages DO
-        iters += 1
-
         IF filter[i / MMP_VPNDB_PER_FILTER] == 0 THEN
             // No reclaimable in this range.
 
@@ -314,8 +310,6 @@ FN MmpGarbageCollectVpnDb (
         END
 
         WHILE i < max DO
-            iters += 1
-
             IF counters[i] != 1 THEN
                 // Not reclaimable.
 
@@ -380,6 +374,4 @@ FN MmpGarbageCollectVpnDb (
             i += 1
         END
     END
-
-    RtlPrint ( "%d\n", iters )
 END
