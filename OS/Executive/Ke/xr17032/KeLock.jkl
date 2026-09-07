@@ -41,14 +41,19 @@ KeTryAcquireLockExclusive:
     ret
 
 // a0 - lock
-KeAcquireLockShared:
-.export KeAcquireLockShared
+// outputs:
+// a3 - oldipl
+KeAcquireLockSharedRaise:
+.export KeAcquireLockSharedRaise
 
     mov  a3, byte [tp + KepPrb_Ipl]  // Load old IPL.
+    mov  byte [tp + KepPrb_Ipl], KEP_IPL_APC
 
-.acquire:
+    // Fall through
 
-    // Load the value we'll store into the lock on success.
+// a0 - lock
+KeAcquireLockShared:
+.export KeAcquireLockShared
 
 #IF BLD_MP
     mb                              // Ensure coherence with other processors.
@@ -77,21 +82,17 @@ KeAcquireLockShared:
 // a0 - lock
 // outputs:
 // a3 - oldipl
-KeAcquireLockSharedRaise:
-.export KeAcquireLockSharedRaise
+KeAcquireLockExclusiveRaise:
+.export KeAcquireLockExclusiveRaise
 
     mov  a3, byte [tp + KepPrb_Ipl]  // Load old IPL.
     mov  byte [tp + KepPrb_Ipl], KEP_IPL_APC
 
-    b    KeAcquireLockShared.acquire
+    // Fall through
 
 // a0 - lock
 KeAcquireLockExclusive:
 .export KeAcquireLockExclusive
-
-    mov  a3, byte [tp + KepPrb_Ipl]
-
-.acquire:
 
     mov  t1, long [tp + KepPrb_CurrentThread]
     ori  t1, t1, KEP_LOCK_WRITE_LOCKED
@@ -116,17 +117,6 @@ KeAcquireLockExclusive:
 .slow:
     mov  a1, a3
     j    KepAcquireLockExclusive
-
-// a0 - lock
-// outputs:
-// a3 - oldipl
-KeAcquireLockExclusiveRaise:
-.export KeAcquireLockExclusiveRaise
-
-    mov  a3, byte [tp + KepPrb_Ipl]  // Load old IPL.
-    mov  byte [tp + KepPrb_Ipl], KEP_IPL_APC
-
-    b    KeAcquireLockExclusive.acquire
 
 // Release
 

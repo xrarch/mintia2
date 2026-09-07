@@ -125,13 +125,6 @@ KepCompareSwapUlongAbort:
 
     ret
 
-#MACRO KepAcquireLockSharedLoop ( slow ) [
-    mov  t0, [a0]
-    and  t0, KEP_LOCK_C_BITS
-    ifnz rjmp slow
-    add  [a0], KEP_LOCK_SHARE_INC
-]
-
 // a0 - lock
 // outputs:
 // a3 - oldipl
@@ -141,25 +134,16 @@ KeAcquireLockSharedRaise:
     movz.8 a3, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
     mov.8 [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)], KEP_IPL_APC
 
-KepAcquireApcLockSharedStart:
-.global KepAcquireApcLockSharedStart
-
-    KepAcquireLockSharedLoop ( KepAcquireApcLockSharedSlow )
-
-KepAcquireApcLockSharedEnd:
-.global KepAcquireApcLockSharedEnd
-
-    ret
-
-KepAcquireApcLockSharedSlow:
-    mov  a1, a3
-    jmp  KepAcquireLockShared
+    // Fall through.
 
 // a0 - lock
 KeAcquireLockShared:
 .export KeAcquireLockShared
 
-    KepAcquireLockSharedLoop ( KepAcquireLockSharedSlow )
+    mov  t0, [a0]
+    and  t0, KEP_LOCK_C_BITS
+    ifnz rjmp KepAcquireLockSharedSlow
+    add  [a0], KEP_LOCK_SHARE_INC
 
 KepAcquireLockSharedEnd:
 .global KepAcquireLockSharedEnd
@@ -167,14 +151,8 @@ KepAcquireLockSharedEnd:
     ret
 
 KepAcquireLockSharedSlow:
-    movz.8 a1, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
+    mov  a1, a3
     jmp  KepAcquireLockShared
-
-#MACRO KepAcquireLockExclusiveLoop ( slow ) [
-    cmp  [a0], 0
-    ifnz rjmp slow
-    mov  [a0], t1
-]
 
 // a0 - lock
 // outputs:
@@ -185,20 +163,24 @@ KeAcquireLockExclusiveRaise:
     movz.8 a3, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
     mov.8 [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)], KEP_IPL_APC
 
+    // Fall through.
+
+KeAcquireLockExclusive:
+.export KeAcquireLockExclusive
+
     mov  t1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
     or   t1, KEP_LOCK_WRITE_LOCKED
 
-KepAcquireApcLockExclusiveStart:
-.global KepAcquireApcLockExclusiveStart
+    cmp  [a0], 0
+    ifnz rjmp KepAcquireLockExclusiveSlow
+    mov  [a0], t1
 
-    KepAcquireLockExclusiveLoop ( KepAcquireApcLockExclusiveSlow )
-
-KepAcquireApcLockExclusiveEnd:
-.global KepAcquireApcLockExclusiveEnd
+KepAcquireLockExclusiveEnd:
+.global KepAcquireLockExclusiveEnd
 
     ret
 
-KepAcquireApcLockExclusiveSlow:
+KepAcquireLockExclusiveSlow:
 
     mov  a1, a3
     jmp  KepAcquireLockExclusive
@@ -212,10 +194,9 @@ KeTryAcquireLockExclusive:
     mov  t1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
     or   t1, KEP_LOCK_WRITE_LOCKED
 
-KepTryAcquireLockExclusiveStart:
-.global KepTryAcquireLockExclusiveStart
-
-    KepAcquireLockExclusiveLoop ( KepTryAcquireLockFailure )
+    cmp  [a0], 0
+    ifnz rjmp KepTryAcquireLockFailure
+    mov  [a0], t1
 
 KepTryAcquireLockExclusiveEnd:
 .global KepTryAcquireLockExclusiveEnd
@@ -228,38 +209,14 @@ KepTryAcquireLockFailure:
     movz.8 a3, 0
     ret
 
-// a0 - lock
-KeAcquireLockExclusive:
-.export KeAcquireLockExclusive
-
-    mov  t1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
-    or   t1, KEP_LOCK_WRITE_LOCKED
-
-KepAcquireLockExclusiveStart:
-.global KepAcquireLockExclusiveStart
-
-    KepAcquireLockExclusiveLoop ( KepAcquireLockExclusiveSlow )
-
-KepAcquireLockExclusiveEnd:
-.global KepAcquireLockExclusiveEnd
-
-    ret
-
-KepAcquireLockExclusiveSlow:
-    movz.8 a1, [(KEP_CURRENT_PRB_ADDR + KepPrb_Ipl)]
-    jmp  KepAcquireLockExclusive
-
 // Release
 
-#MACRO ReleaseLock ( startlabel, endlabel, slow ) [
+#MACRO ReleaseLock ( slow ) [
 
 #IF BLD_CHK
     cmp  [a0], 0
     ifz  rjmp KepNotLocked
 #END
-
-startlabel:
-.global startlabel
 
     // Load the lock word.
 
@@ -285,16 +242,16 @@ startlabel:
 
     mov  [a0], t2
 
-endlabel:
-.global endlabel
-
 ]
 
 // a0 - lock
 KeReleaseLock:
 .export KeReleaseLock
 
-    ReleaseLock ( KepReleaseLockStart, KepReleaseLockEnd, KepReleaseLock )
+    ReleaseLock ( KepReleaseLock )
+
+KepReleaseLockEnd:
+.global KepReleaseLockEnd
 
     ret
 
@@ -303,9 +260,10 @@ KeReleaseLock:
 KeReleaseLockLower:
 .export KeReleaseLockLower
 
-    ReleaseLock (
-        KepReleaseApcLockStart, KepReleaseApcLockEnd, KepReleaseApcLockSlow
-    )
+    ReleaseLock ( KepReleaseLockLowerSlow )
+
+KepReleaseLockLowerEnd:
+.global KepReleaseLockLowerEnd
 
     // The lock is APC-safe, so lower IPL.
 
@@ -315,12 +273,12 @@ KeReleaseLockLower:
     srl  t0, a1
     ifz  ret
 
-KeReleaseLockLowerDispatch:
+KepReleaseLockLowerDispatch:
 
     mov  a0, a1
     jmp  KepDispatchSoftwareInterrupts
 
-KepReleaseApcLockSlow:
+KepReleaseLockLowerSlow:
 
     push fp
     mov  fp, sp
@@ -337,7 +295,7 @@ KepReleaseApcLockSlow:
 
     mov  t0, [(KEP_CURRENT_PRB_ADDR + KepPrb_PendingSoftwareInterrupts)]
     srl  t0, a1
-    ifnz rjmp KeReleaseLockLowerDispatch
+    ifnz rjmp KepReleaseLockLowerDispatch
 
     ret
 

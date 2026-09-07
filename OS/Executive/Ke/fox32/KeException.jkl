@@ -1103,22 +1103,12 @@ EXTERN KepCompareSwapUlongAbortEnd : UBYTE
 EXTERN KepCompareSwapUlongAbort : UBYTE
 
 EXTERN KepAcquireLockSharedEnd : UBYTE
-EXTERN KepAcquireLockExclusiveStart : UBYTE
 EXTERN KepAcquireLockExclusiveEnd : UBYTE
 
-EXTERN KepTryAcquireLockExclusiveStart : UBYTE
 EXTERN KepTryAcquireLockExclusiveEnd : UBYTE
 
-EXTERN KepAcquireApcLockSharedStart : UBYTE
-EXTERN KepAcquireApcLockSharedEnd : UBYTE
-EXTERN KepAcquireApcLockExclusiveStart : UBYTE
-EXTERN KepAcquireApcLockExclusiveEnd : UBYTE
-
-EXTERN KepReleaseLockStart : UBYTE
 EXTERN KepReleaseLockEnd : UBYTE
-
-EXTERN KepReleaseApcLockStart : UBYTE
-EXTERN KepReleaseApcLockEnd : UBYTE
+EXTERN KepReleaseLockLowerEnd : UBYTE
 
 FN KepResetPc (
     IN context : ^OsContext,
@@ -1177,22 +1167,6 @@ FN KepResetPc (
         LEAVE
     END
 
-    IF epc >= &KepAcquireApcLockSharedStart AND
-        epc < &KepAcquireApcLockSharedEnd THEN
-
-        context^.Epc = &KepAcquireApcLockSharedStart
-
-        LEAVE
-    END
-
-    IF epc >= &KepAcquireApcLockExclusiveStart AND
-        epc < &KepAcquireApcLockExclusiveEnd THEN
-
-        context^.Epc = &KepAcquireApcLockExclusiveStart
-
-        LEAVE
-    END
-
     IF epc >= &KeAcquireLockShared AND
         epc < &KepAcquireLockSharedEnd THEN
 
@@ -1201,34 +1175,34 @@ FN KepResetPc (
         LEAVE
     END
 
-    IF epc >= &KepAcquireLockExclusiveStart AND
+    IF epc >= &KeAcquireLockExclusive AND
         epc < &KepAcquireLockExclusiveEnd THEN
 
-        context^.Epc = &KepAcquireLockExclusiveStart
+        context^.Epc = &KeAcquireLockExclusive
 
         LEAVE
     END
 
-    IF epc >= &KepTryAcquireLockExclusiveStart AND
+    IF epc >= &KeTryAcquireLockExclusive AND
         epc < &KepTryAcquireLockExclusiveEnd THEN
 
-        context^.Epc = &KepTryAcquireLockExclusiveStart
+        context^.Epc = &KeTryAcquireLockExclusive
 
         LEAVE
     END
 
-    IF epc >= &KepReleaseLockStart AND
+    IF epc >= &KeReleaseLock AND
         epc < &KepReleaseLockEnd THEN
 
-        context^.Epc = &KepReleaseLockStart
+        context^.Epc = &KeReleaseLock
 
         LEAVE
     END
 
-    IF epc >= &KepReleaseApcLockStart AND
-        epc < &KepReleaseApcLockEnd THEN
+    IF epc >= &KeReleaseLockLower AND
+        epc < &KepReleaseLockLowerEnd THEN
 
-        context^.Epc = &KepReleaseApcLockStart
+        context^.Epc = &KeReleaseLockLower
 
         LEAVE
     END
