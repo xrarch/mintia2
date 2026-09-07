@@ -27,8 +27,7 @@ KeExceptionJacket:
 
     // Acquire a pointer to the current thread.
 
-    subi t0, zero, KEP_PRB_LESS_ZERO
-    mov  s1, long [t0 + KepPrb_CurrentThread]
+    mov  s1, long [tp + KepPrb_CurrentThread]
 
     // Bias the current thread pointer by 4 * ExecutingKapc.
     // This makes it so when we add the offset KeuThread_AbortListHead later,
@@ -169,8 +168,7 @@ KepWaitForInterrupt:
 KepCurrentIpl:
 .global KepCurrentIpl
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KepPrb_Ipl]  // Load IPL.
+    mov  a3, byte [tp + KepPrb_Ipl]  // Load IPL.
 
     ret
 

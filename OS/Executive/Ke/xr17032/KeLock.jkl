@@ -14,8 +14,7 @@
 KeTryAcquireLockExclusive:
 .export KeTryAcquireLockExclusive
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-    mov  t1, long [t0 + KepPrb_CurrentThread]
+    mov  t1, long [tp + KepPrb_CurrentThread]
     ori  t1, t1, KEP_LOCK_WRITE_LOCKED
 
 #IF BLD_MP
@@ -45,8 +44,7 @@ KeTryAcquireLockExclusive:
 KeAcquireLockShared:
 .export KeAcquireLockShared
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KepPrb_Ipl]  // Load old IPL.
+    mov  a3, byte [tp + KepPrb_Ipl]  // Load old IPL.
 
 .acquire:
 
@@ -82,9 +80,8 @@ KeAcquireLockShared:
 KeAcquireLockSharedRaise:
 .export KeAcquireLockSharedRaise
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KepPrb_Ipl]  // Load old IPL.
-    mov  byte [t0 + KepPrb_Ipl], KEP_IPL_APC
+    mov  a3, byte [tp + KepPrb_Ipl]  // Load old IPL.
+    mov  byte [tp + KepPrb_Ipl], KEP_IPL_APC
 
     b    KeAcquireLockShared.acquire
 
@@ -92,12 +89,11 @@ KeAcquireLockSharedRaise:
 KeAcquireLockExclusive:
 .export KeAcquireLockExclusive
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KepPrb_Ipl]
+    mov  a3, byte [tp + KepPrb_Ipl]
 
 .acquire:
 
-    mov  t1, long [t0 + KepPrb_CurrentThread]
+    mov  t1, long [tp + KepPrb_CurrentThread]
     ori  t1, t1, KEP_LOCK_WRITE_LOCKED
 
 #IF BLD_MP
@@ -127,9 +123,8 @@ KeAcquireLockExclusive:
 KeAcquireLockExclusiveRaise:
 .export KeAcquireLockExclusiveRaise
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KepPrb_Ipl]  // Load old IPL.
-    mov  byte [t0 + KepPrb_Ipl], KEP_IPL_APC
+    mov  a3, byte [tp + KepPrb_Ipl]  // Load old IPL.
+    mov  byte [tp + KepPrb_Ipl], KEP_IPL_APC
 
     b    KeAcquireLockExclusive.acquire
 
@@ -197,9 +192,8 @@ KeReleaseLockLower:
     // The lock is APC-safe, so restore the old IPL.
     // This is KepLowerIpl inlined.
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-    mov  byte [t0 + KepPrb_Ipl], a1  // Store the new IPL.
-    mov  t1, long [t0 + KepPrb_PendingSoftwareInterrupts]
+    mov  byte [tp + KepPrb_Ipl], a1  // Store the new IPL.
+    mov  t1, long [tp + KepPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a1                 // Right shift pending by new IPL.
     bne  t2, .dispatch              // If zero, none pending at new IPL.
 
@@ -225,9 +219,8 @@ KeReleaseLockLower:
     // The lock is APC-safe, so restore the old IPL.
     // This is KepLowerIpl inlined.
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-    mov  byte [t0 + KepPrb_Ipl], a1  // Store the new IPL.
-    mov  t1, long [t0 + KepPrb_PendingSoftwareInterrupts]
+    mov  byte [tp + KepPrb_Ipl], a1  // Store the new IPL.
+    mov  t1, long [tp + KepPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a1                 // Right shift pending by new IPL.
     bne  t2, .dispatch              // If zero, none pending at new IPL.
 

@@ -335,19 +335,19 @@ KepHandlerTable : KepHighLevelHandlerF[16] = {
 
 KepExceptionHandler:
 .export KepExceptionHandler
-    mtcr scratch0, t0               // Save T0 as a scratch register.
+    mtcr scratch0, tp               // Save TP as a scratch register.
     mtcr scratch1, sp               // Save the current stack pointer.
 
-    mfcr t0, rs                     // Read the status register.
-    andi t0, t0, OS_XR_RS_OLD_USER  // Isolate the old USER bit.
-    beq  t0, .waskernel             // If not set, we were already in kernel
+    mfcr tp, rs                     // Read the status register.
+    andi tp, tp, OS_XR_RS_OLD_USER  // Isolate the old USER bit.
+    beq  tp, .waskernel             // If not set, we were already in kernel
                                     // mode. If clear, we entered from usermode.
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
+    subi tp, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
 
     // Switch to the current thread's kernel stack.
 
-    mov  sp, long [t0 + KepPrb_KernelStackTop]
+    mov  sp, long [tp + KepPrb_KernelStackTop]
 
 .waskernel:
 
@@ -355,9 +355,9 @@ KepExceptionHandler:
 
     // Save the context of the processor in order to create a trapframe.
 
-    mfcr t0, scratch0
-    mov  long [sp + OsContext_T1], t1
+    mfcr tp, scratch0
     mov  long [sp + OsContext_T0], t0
+    mov  long [sp + OsContext_T1], t1
     mov  long [sp + OsContext_T2], t2
     mov  long [sp + OsContext_T3], t3
     mov  long [sp + OsContext_T4], t4
@@ -397,11 +397,9 @@ KepExceptionHandler:
     beq  s0, .waskernel2            // If not set, we were already in kernel
                                     // mode. If clear, we entered from usermode.
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-
     // Load the current thread.
 
-    mov  s1, long [t0 + KepPrb_CurrentThread]
+    mov  s1, long [tp + KepPrb_CurrentThread]
 
     // Store the user trapframe address.
 
@@ -511,9 +509,8 @@ KepRaiseIpl:
 
     // Note: This routine is inlined at KepAcquireSpinlockRaise.
     
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-    mov  a3, byte [t0 + KepPrb_Ipl]  // Load the old IPL.
-    mov  byte [t0 + KepPrb_Ipl], a0  // Store the new IPL.
+    mov  a3, byte [tp + KepPrb_Ipl]  // Load the old IPL.
+    mov  byte [tp + KepPrb_Ipl], a0  // Store the new IPL.
 
 #IF BLD_CHK
 
@@ -551,18 +548,16 @@ KepLowerIpl:
 
     // Note: This routine is inlined at KepReleaseSpinlockLower.
 
-    subi t0, zero, KEP_PRB_LESS_ZERO // Calculate Prb address.
-
 #IF BLD_CHK
 
-    mov  t1, byte [t0 + KepPrb_Ipl]  // Load old IPL.
+    mov  t1, byte [tp + KepPrb_Ipl]  // Load old IPL.
     slt  t1, t1, a0                 // Compare oldipl < newipl
     bne  t1, .badlower              // If lower, this is a bad request.
 
 #END
 
-    mov  byte [t0 + KepPrb_Ipl], a0  // Store the new IPL.
-    mov  t1, long [t0 + KepPrb_PendingSoftwareInterrupts]
+    mov  byte [tp + KepPrb_Ipl], a0  // Store the new IPL.
+    mov  t1, long [tp + KepPrb_PendingSoftwareInterrupts]
     rsh  t2, t1, a0                 // Right shift pending by new IPL.
     bne  t2, .dispatch              // If zero, none pending at new IPL.
 

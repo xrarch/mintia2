@@ -63,7 +63,6 @@ KepTryAcquireSpinlock:
 // a0 - offset
 // outputs:
 // a3 - oldipl
-// a2 - prb
 KepAcquireSpinlockInPrb:
 .global KepAcquireSpinlockInPrb
 
@@ -72,7 +71,7 @@ KepAcquireSpinlockInPrb:
     // raise IPL and that's safe, allowing us to order it with the following
     // fall-through.
     
-    subi a0, a0, KEP_PRB_LESS_ZERO   // Calculate the pointer of the spinlock
+    subi a0, a0, KEP_PRB_LESS_ZERO  // Calculate the pointer of the spinlock
                                     // within the Prb.
 
     // Fall through.
@@ -85,9 +84,8 @@ KepAcquireSpinlockRaise:
 
     // Inline KepRaiseIpl here.
 
-    subi a2, zero, KEP_PRB_LESS_ZERO // Acquire a pointer to the Prb.
-    mov  a3, byte [a2 + KepPrb_Ipl]  // Load the old IPL.
-    mov  byte [a2 + KepPrb_Ipl], 2   // Store the new IPL.
+    mov  a3, byte [tp + KepPrb_Ipl]  // Load the old IPL.
+    mov  byte [tp + KepPrb_Ipl], KEP_IPL_DPC // Store the new IPL.
 
     // Fall through.
 
