@@ -1095,6 +1095,8 @@ FN MmuChargeCommit (
         RETURN OS_STATUS_COMMIT_EXCEEDED
     END
 
+    status : OsStatus
+
     pfs := mmnode^.PagefileState
 
     remaining := pfs^.CommitRemaining
@@ -1108,16 +1110,51 @@ FN MmuChargeCommit (
             RETURN OS_STATUS_COMMIT_EXCEEDED
         END
 
-        IF flags & MM_ALLOCATE_FORCE_COMMIT == 0 AND
-            (remaining - pages < -pfs^.CommitLimitGrowthLeft) THEN
+        IF flags & MM_ALLOCATE_FORCE_COMMIT == 0 THEN
+            IF remaining - pages < -pfs^.CommitLimitGrowthLeft THEN
+                // Don't even bother trying, there's no way to extend the
+                // pagefiles to accommodate this because the theoretical commit
+                // limit represents what we could theoretically increase the
+                // commit limit to if we were to extend all of the pagefiles to
+                // their maximum size.
 
-            // Don't even bother trying, there's no way to extend the pagefiles
-            // to accommodate this because the theoretical commit limit
-            // represents what we could theoretically increase the commit limit
-            // to if we were to extend all of the pagefiles to their maximum
-            // size.
+                RETURN OS_STATUS_COMMIT_EXCEEDED
+            END
 
-            RETURN OS_STATUS_COMMIT_EXCEEDED
+            IF remaining - pages < pfs^.EmergencyCommitMinimum THEN
+                // This charge would bring the remaining commit below the
+                // emergency minimum, so try to add it to the pagefile
+                // expansion wish list first. Don't bother if we can't wait for
+                // this to complete though.
+
+                status = OS_STATUS_COMMIT_EXCEEDED
+
+                IF flags & MM_ALLOCATE_WAIT THEN
+                    KeIncrementPtr (
+                        &pfs^.CommitWishList, // ptr
+                        pages, // pages
+                    )
+
+                    status = MmpExpandPagefiles (
+                        pfs, // pagefilestate
+                        flags, // flags
+                        FALSE, // full
+                    )
+
+                    // No need to remove our requested charge from the wish list
+                    // counter, it has already been reset to zero by the
+                    // pagefile expansion worker.
+                END
+
+                IF OsError ( status ) AND
+                    remaining - pages < 0 THEN
+
+                    // Expanding the pagefiles failed and this charge would make
+                    // commit actually go negative, so bail out.
+
+                    RETURN OS_STATUS_COMMIT_EXCEEDED
+                END
+            END
         END
 
         new := CAST KeCompareSwapPtr (
@@ -1133,7 +1170,7 @@ FN MmuChargeCommit (
         remaining = new
     END
 
-    IF pfs^.CommitRemaining >= pfs^.CommitRemainingMinimum THEN
+    IF remaining - pages >= pfs^.CommitRemainingMinimum THEN
         // Plenty of commit left after charging.
 
         RETURN OS_STATUS_SUCCESS
@@ -1142,7 +1179,7 @@ FN MmuChargeCommit (
     // Not much commit left, so we're responsible for signaling pagefile
     // expansion.
 
-    status := MmpExpandPagefiles (
+    status = MmpExpandPagefiles (
         pfs, // pagefilestate
         flags, // flags
         FALSE, // full
@@ -1154,7 +1191,9 @@ FN MmuChargeCommit (
         RETURN OS_STATUS_SUCCESS
     END
 
-    IF OsError ( status ) THEN
+    IF OsError ( status ) AND
+        remaining - pages < pfs^.EmergencyCommitMinimum THEN
+
         // Failed to increase commit limit.
         // Remove the commit charge.
 
@@ -1162,9 +1201,11 @@ FN MmuChargeCommit (
             &pfs^.CommitRemaining, // ptr
             pages, // inc
         )
+
+        RETURN status
     END
 
-    RETURN status
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN MmuUnchargeCommit (
