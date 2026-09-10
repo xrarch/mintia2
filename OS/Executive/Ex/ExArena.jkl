@@ -1,0 +1,210 @@
+//
+// Generic resource allocator for the MINTIA Executive.
+// Inspired by the Vmem resource allocator from Solaris (Bonwick).
+//
+
+#INCLUDE "Exp.hjk"
+
+#DEFINE EXP_PREALLOCATED_ARENAS 4
+
+STRUCT ExpArenaTag
+    Address : ^VOID,
+    Size : UWORD,
+    TreeEntry : RtlAvlNode,
+    ListEntry : RtlListEntry,
+    Flags : ULONG,
+END
+
+STRUCT ExpArena
+    Lock : KeLock,
+
+KE_CACHE_LINE_END
+
+    Entry : RtlListEntry,
+    Name : ^UBYTE,
+    Node : ^KeuNode,
+    LookupTag : ExArenaLookupTagF,
+    Context : ^VOID,
+
+KE_CACHE_LINE_END
+
+    // Keyed by size.
+    FreeTree : RtlAvlNode,
+
+    // Keyed by address.
+    UsedTree : RtlAvlNode,
+
+    // Ordered by address.
+    SegmentListHead : RtlListEntry,
+END
+
+FN (ExArenaLookupTagF) ExpArenaLookupTag (
+    IN context : ^VOID,
+    IN address : ^VOID,
+) : ^ExpArenaTag
+
+    // Lookup a tag by address.
+    // Arena lock is held.
+
+    arena := CAST context TO ^ExpArena
+
+    avlnode := arena^.UsedTree.Right
+
+    WHILE TRUE DO
+        IF NOT avlnode THEN
+            // Didn't find it.
+
+            RETURN NULLPTR
+        END
+
+        tag := CONTAINEROF avlnode TO ExpArenaTag.TreeEntry
+
+        IF tag^.Address == address THEN
+            // Found it!
+
+            RETURN tag
+        END
+
+        IF address < tag^.Address THEN
+            avlnode = avlnode^.Left
+        ELSE
+            avlnode = avlnode^.Right
+        END
+    END
+END
+
+FN ExpInitializeArenas ()
+
+    // Initialize the arena package for all nodes.
+
+    i := 0
+    nodes := KeQueryNodeCount ()
+
+    WHILE i < nodes DO
+        kenode := KeNumaNodeById ( i )
+
+        expnode := kenode^.Exp
+
+        KeInitializeLock ( &expnode^.ArenaListLock )
+
+        RtlInitializeList ( &expnode^.ArenaListHead )
+
+        expnode^.PreallocatedArenas = KeuAllocateNodeSpace (
+            kenode, // kenode
+            SIZEOF ExpArena * EXP_PREALLOCATED_ARENAS, // bytes
+        )
+
+        KeAssert ( expnode^.PreallocatedArenas != NULLPTR )
+
+        expnode^.PreallocatedArenaIndex = 0
+
+        i += 1
+    END
+END
+
+FN ExDeleteArena (
+    IN arena : ^ExpArena,
+)
+
+    // Delete the arena. It should no longer be in use and all contained
+    // blocks should have been freed by now, if needed; they are not freed
+    // automatically by this function.
+
+    expnode := arena^.Node^.Exp
+
+    KeAcquireLockExclusive ( &expnode^.ArenaListLock )
+
+    RtlRemoveEntryList ( &arena^.Entry )
+
+    KeReleaseLock ( &expnode^.ArenaListLock )
+
+    IF arena >= &expnode^.PreallocatedArenas[0] AND
+        arena < &expnode^.PreallocatedArenas[EXP_PREALLOCATED_ARENAS] THEN
+
+        // The arena is preallocated so don't free it.
+
+        LEAVE
+    END
+
+    MmFreeToPoolCache (
+        expnode^.ArenaCache, // cache
+        arena, // ptr
+    )
+END
+
+FN ExCreateArena (
+    IN name : ^UBYTE,
+    IN kenode : ^KeuNode,
+    IN flags : UWORD,
+    IN lookuptagfunc : ExArenaLookupTagF,
+    IN context : ^VOID,
+    OUT arena : ^ExpArena,
+) : OsStatus
+
+    // Create an arena.
+
+    expnode := kenode^.Exp
+
+    arena = NULLPTR
+
+    KeAcquireLockExclusive ( &expnode^.ArenaListLock )
+
+    IF expnode^.PreallocatedArenaIndex < EXP_PREALLOCATED_ARENAS THEN
+        // There are still preallocated arenas, so take one.
+
+        arena = &expnode^.PreallocatedArenas[expnode^.PreallocatedArenaIndex]
+
+        expnode^.PreallocatedArenaIndex += 1
+    END
+
+    KeReleaseLock ( &expnode^.ArenaListLock )
+
+    IF NOT arena THEN
+        // No more preallocated arenas left, so grab one from the arena pool
+        // cache.
+
+        status := MmAllocateFromPoolCache (
+            expnode^.ArenaCache, // cache
+            flags, // flags
+            OUT arena, // ptr
+        )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+    END
+
+    // Initialize the arena structure before adding it to the arena list.
+
+    KeInitializeLock ( &arena^.Lock )
+
+    arena^.Name = name
+
+    arena^.Node = kenode
+
+    IF NOT lookuptagfunc THEN
+        lookuptagfunc = &ExpArenaLookupTag
+        context = arena
+    END
+
+    arena^.LookupTag = lookuptagfunc
+    arena^.Context = context
+
+    RtlInitializeAvl ( &arena^.FreeTree )
+
+    RtlInitializeAvl ( &arena^.UsedTree )
+
+    RtlInitializeList ( &arena^.SegmentListHead )
+
+    // Insert into the node's arena list.
+    // This list is to be used for user introspection.
+
+    KeAcquireLockExclusive ( &expnode^.ArenaListLock )
+
+    RtlInsertAtTailList (
+        &expnode^.ArenaListHead, // listhead
+        &arena^.Entry, // entry
+    )
+
+    KeReleaseLock ( &expnode^.ArenaListLock )
+END
