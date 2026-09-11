@@ -5,6 +5,8 @@
 
 #INCLUDE "Exp.hjk"
 
+#DEFINE EXP_MAX_QUANTUM_CACHES 16
+
 #DEFINE EXP_PREALLOCATED_ARENAS 4
 
 STRUCT ExpArenaTag
@@ -13,6 +15,12 @@ STRUCT ExpArenaTag
     TreeEntry : RtlAvlNode,
     ListEntry : RtlListEntry,
     Flags : ULONG,
+END
+
+STRUCT ExpQuantumCache
+    Cache : ^MmpPoolCache,
+    Arena : ^ExpArena,
+    Size : UWORD,
 END
 
 STRUCT ExpArena
@@ -25,6 +33,8 @@ KE_CACHE_LINE_END
     Node : ^KeuNode,
     LookupTag : ExArenaLookupTagF,
     Context : ^VOID,
+    QuantumCaches : ExpQuantumCache[EXP_MAX_QUANTUM_CACHES],
+    QuantumCacheMaximum : ULONG,
 
 KE_CACHE_LINE_END
 
@@ -73,6 +83,7 @@ FN (ExArenaLookupTagF) ExpArenaLookupTag (
     END
 END
 
+#SECTION "INITtext"
 FN ExpInitializeArenas ()
 
     // Initialize the arena package for all nodes.
@@ -102,6 +113,28 @@ FN ExpInitializeArenas ()
     END
 END
 
+FN ExpFreeArena (
+    IN arena : ^ExpArena,
+)
+
+    // Free an arena.
+
+    expnode := arena^.Node^.Exp
+
+    IF arena >= &expnode^.PreallocatedArenas[0] AND
+        arena < &expnode^.PreallocatedArenas[EXP_PREALLOCATED_ARENAS] THEN
+
+        // The arena is preallocated so don't free it.
+
+        LEAVE
+    END
+
+    MmFreeToPoolCache (
+        expnode^.ArenaCache, // cache
+        arena, // ptr
+    )
+END
+
 FN ExDeleteArena (
     IN arena : ^ExpArena,
 )
@@ -118,18 +151,143 @@ FN ExDeleteArena (
 
     KeReleaseLock ( &expnode^.ArenaListLock )
 
-    IF arena >= &expnode^.PreallocatedArenas[0] AND
-        arena < &expnode^.PreallocatedArenas[EXP_PREALLOCATED_ARENAS] THEN
+    i := 1
 
-        // The arena is preallocated so don't free it.
+    WHILE i <= arena^.QuantumCacheMaximum DO
+        MmDeletePoolCache ( arena^.QuantumCaches[i].Cache )
+
+        i += 1
+    END
+
+    ExpFreeArena ( arena )
+END
+
+FN ExAllocateFromArena (
+    IN arena : ^ExpArena,
+    IN flags : UWORD,
+    IN size : UWORD,
+    OUT address : ^VOID,
+) : OsStatus
+
+    // Unconstrained allocation of a block with the given size.
+
+    KeAssert ( size != 0 )
+
+    // First try the quantum caches.
+
+    IF size <= arena^.QuantumCacheMaximum AND
+        flags & MM_ALLOCATE_NO_QUANTUM_CACHE == 0 THEN
+
+        RETURN MmAllocateFromPoolCache (
+            arena^.QuantumCaches[size].Cache, // cache
+            flags, // flags
+            OUT address, // address
+        )
+    END
+
+    // Didn't work out.
+
+    // TODO
+
+    KeAssert ( FALSE )
+END
+
+FN ExpFreeToArena (
+    IN arena : ^ExpArena,
+    IN tag : ^ExpArenaTag,
+)
+
+    // Free a block to the arena. Bypass quantum caches.
+
+    // TODO
+
+    KeAssert ( FALSE )
+END
+
+FN ExFreeToArena (
+    IN arena : ^ExpArena,
+    IN address : ^VOID,
+    IN size : UWORD,
+)
+
+    // Free a block to the arena.
+
+    KeAssert ( size != 0 )
+
+    // Will free to a quantum cache if the block is appropriately sized.
+    // Otherwise free directly to the arena.
+
+    IF size <= arena^.QuantumCacheMaximum THEN
+        MmFreeToPoolCache (
+            arena^.QuantumCaches[size].Cache, // cache
+            address, // ptr
+        )
 
         LEAVE
     END
 
-    MmFreeToPoolCache (
-        expnode^.ArenaCache, // cache
-        arena, // ptr
+    ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
+
+    tag := arena^.LookupTag (
+        arena^.Context, // context
+        address, // address
     )
+
+    KeAssert ( tag != NULLPTR )
+    KeAssert ( tag^.Size == size )
+
+    ExpFreeToArena (
+        arena, // arena
+        tag, // tag
+    )
+
+    KeReleaseLockLower ( &arena^.Lock, ipl )
+END
+
+FN (MmPoolCacheAllocateF) ExpPopulateQuantumCache (
+    IN context : ^VOID,
+    IN flags : UWORD,
+    OUT ptr : ^VOID,
+) : OsStatus
+
+    // A quantum cache missed and the magazine layer called us to return a
+    // block.
+
+    qcache := CAST context TO ^ExpQuantumCache
+
+    RETURN ExAllocateFromArena (
+        qcache^.Arena, // arena
+        flags | MM_ALLOCATE_NO_QUANTUM_CACHE, // flags
+        qcache^.Size, // size
+        OUT ptr, // address
+    )
+END
+
+FN (MmPoolCacheFreeF) ExpFreeQuantumCache (
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+)
+
+    // Free a block from a quantum cache back to its underlying arena.
+
+    qcache := CAST context TO ^ExpQuantumCache
+    arena := qcache^.Arena
+
+    ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
+
+    tag := arena^.LookupTag (
+        arena^.Context, // context
+        ptr, // address
+    )
+
+    KeAssert ( tag != NULLPTR )
+
+    ExpFreeToArena (
+        arena, // arena
+        tag, // tag
+    )
+
+    KeReleaseLockLower ( &arena^.Lock, ipl )
 END
 
 FN ExCreateArena (
@@ -138,10 +296,18 @@ FN ExCreateArena (
     IN flags : UWORD,
     IN lookuptagfunc : ExArenaLookupTagF,
     IN context : ^VOID,
+    IN quantumcachemax : UWORD,
+    IN pageable : UWORD,
     OUT arena : ^ExpArena,
 ) : OsStatus
 
     // Create an arena.
+
+    IF quantumcachemax >= EXP_MAX_QUANTUM_CACHES THEN
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    status : OsStatus
 
     expnode := kenode^.Exp
 
@@ -163,7 +329,7 @@ FN ExCreateArena (
         // No more preallocated arenas left, so grab one from the arena pool
         // cache.
 
-        status := MmAllocateFromPoolCache (
+        status = MmAllocateFromPoolCache (
             expnode^.ArenaCache, // cache
             flags, // flags
             OUT arena, // ptr
@@ -190,11 +356,45 @@ FN ExCreateArena (
     arena^.LookupTag = lookuptagfunc
     arena^.Context = context
 
+    arena^.QuantumCacheMaximum = quantumcachemax
+
     RtlInitializeAvl ( &arena^.FreeTree )
 
     RtlInitializeAvl ( &arena^.UsedTree )
 
     RtlInitializeList ( &arena^.SegmentListHead )
+
+    i := 1
+
+    WHILE i <= quantumcachemax DO
+        status = MmCreatePoolCacheEx (
+            kenode^.Mmp, // mmnode
+            "QuantumCache", // name
+            i, // size
+            pageable, // pageable
+            &ExpPopulateQuantumCache, // allocfunc
+            &ExpFreeQuantumCache, // freefunc
+            NULLPTR, // deletefunc
+            &arena^.QuantumCaches[i], // context
+            OUT arena^.QuantumCaches[i].Cache, // poolcache
+        )
+
+        IF OsError ( status ) THEN
+            // Back out and return error status.
+
+            WHILE i != 1 DO
+                i -= 1
+
+                MmDeletePoolCache ( arena^.QuantumCaches[i].Cache )
+            END
+
+            ExpFreeArena ( arena )
+
+            RETURN status
+        END
+
+        i += 1
+    END
 
     // Insert into the node's arena list.
     // This list is to be used for user introspection.
