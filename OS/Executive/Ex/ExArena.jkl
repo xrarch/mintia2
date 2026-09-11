@@ -33,8 +33,9 @@ KE_CACHE_LINE_END
     Node : ^KeuNode,
     LookupTag : ExArenaLookupTagF,
     Context : ^VOID,
-    QuantumCaches : ExpQuantumCache[EXP_MAX_QUANTUM_CACHES],
+    QuantumCaches : ExpQuantumCache[EXP_MAX_QUANTUM_CACHES + 1],
     QuantumCacheMaximum : ULONG,
+    QuantumShift : ULONG,
 
 KE_CACHE_LINE_END
 
@@ -113,6 +114,7 @@ FN ExpInitializeArenas ()
     END
 END
 
+#SECTION "PAGEtext"
 FN ExpFreeArena (
     IN arena : ^ExpArena,
 )
@@ -135,6 +137,7 @@ FN ExpFreeArena (
     )
 END
 
+#SECTION "PAGEtext"
 FN ExDeleteArena (
     IN arena : ^ExpArena,
 )
@@ -172,6 +175,7 @@ FN ExAllocateFromArena (
     // Unconstrained allocation of a block with the given size.
 
     KeAssert ( size != 0 )
+    KeAssert ( size & ((1 << arena^.QuantumShift) - 1) == 0 )
 
     // First try the quantum caches.
 
@@ -179,7 +183,7 @@ FN ExAllocateFromArena (
         flags & MM_ALLOCATE_NO_QUANTUM_CACHE == 0 THEN
 
         RETURN MmAllocateFromPoolCache (
-            arena^.QuantumCaches[size].Cache, // cache
+            arena^.QuantumCaches[size >> arena^.QuantumShift].Cache, // cache
             flags, // flags
             OUT address, // address
         )
@@ -213,13 +217,14 @@ FN ExFreeToArena (
     // Free a block to the arena.
 
     KeAssert ( size != 0 )
+    KeAssert ( size & ((1 << arena^.QuantumShift) - 1) == 0 )
 
     // Will free to a quantum cache if the block is appropriately sized.
     // Otherwise free directly to the arena.
 
     IF size <= arena^.QuantumCacheMaximum THEN
         MmFreeToPoolCache (
-            arena^.QuantumCaches[size].Cache, // cache
+            arena^.QuantumCaches[size >> arena^.QuantumShift].Cache, // cache
             address, // ptr
         )
 
@@ -290,6 +295,7 @@ FN (MmPoolCacheFreeF) ExpFreeQuantumCache (
     KeReleaseLockLower ( &arena^.Lock, ipl )
 END
 
+#SECTION "PAGEtext"
 FN ExCreateArena (
     IN name : ^UBYTE,
     IN kenode : ^KeuNode,
@@ -298,10 +304,13 @@ FN ExCreateArena (
     IN context : ^VOID,
     IN quantumcachemax : UWORD,
     IN pageable : UWORD,
+    IN quantumshift : UWORD,
     OUT arena : ^ExpArena,
 ) : OsStatus
 
     // Create an arena.
+
+    quantumcachemax >>= quantumshift
 
     IF quantumcachemax >= EXP_MAX_QUANTUM_CACHES THEN
         RETURN OS_STATUS_NO_MEMORY
@@ -348,6 +357,8 @@ FN ExCreateArena (
 
     arena^.Node = kenode
 
+    arena^.QuantumShift = quantumshift
+
     IF NOT lookuptagfunc THEN
         lookuptagfunc = &ExpArenaLookupTag
         context = arena
@@ -356,7 +367,7 @@ FN ExCreateArena (
     arena^.LookupTag = lookuptagfunc
     arena^.Context = context
 
-    arena^.QuantumCacheMaximum = quantumcachemax
+    arena^.QuantumCacheMaximum = quantumcachemax << quantumshift
 
     RtlInitializeAvl ( &arena^.FreeTree )
 
