@@ -838,7 +838,7 @@ FN MmpPurgeCpuMagazinesPoolCache (
     END
 END
 
-FN MmpPurgeMagazinesPoolCache (
+FN MmuPurgePoolCache (
     IN cache : ^MmpPoolCache,
 )
 
@@ -885,7 +885,7 @@ EXPORT FN MmDeletePoolCache (
 
     // Empty out the magazine depot.
 
-    MmpPurgeMagazinesPoolCache ( cache )
+    MmuPurgePoolCache ( cache )
 
     // Call the destructor.
 
@@ -1202,7 +1202,7 @@ FN MmpInitializeMagazineType (
 
 END
 
-FN MmpAdjustPoolCache (
+FN MmuAdjustPoolCache (
     IN cache : ^MmpPoolCache,
 )
 
@@ -1230,9 +1230,9 @@ FN MmpAdjustPoolCaches (
         cache := CONTAINEROF listentry TO MmpPoolCache.MasterListEntry
 
         IF empty THEN
-            MmpPurgeMagazinesPoolCache ( cache )
+            MmuPurgePoolCache ( cache )
         ELSE
-            MmpAdjustPoolCache ( cache )
+            MmuAdjustPoolCache ( cache )
         END
 
         listentry = listentry^.Next

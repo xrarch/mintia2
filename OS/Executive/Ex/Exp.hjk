@@ -35,6 +35,8 @@ STRUCT ExpNameBucket
     TreeRoot : RtlAvlNode,
 END
 
+#DEFINE EXP_MAX_POPULATORS 3
+
 STRUCT ExpNode
     WorkQueues : (KE_CACHE_LINE KeBalancedQueue)[EX_MAX_WORK_PRIORITY],
     NameBuckets : (KE_CACHE_LINE ExpNameBucket)[EXP_NAME_BUCKETS],
@@ -46,5 +48,21 @@ KE_CACHE_LINE_END
     ArenaListLock : KeLock,
     ArenaListHead : RtlListEntry,
     PreallocatedArenas : ^ExpArena,
+    PopulatorArenas : ^ExpArena[EXP_MAX_POPULATORS],
     PreallocatedArenaIndex : UBYTE,
+    PopulatorArenaIndex : UBYTE,
+
+KE_CACHE_LINE_END
+
+    ArenaPopulateLowLock : KeLock,
+    ArenaPopulateWaitLock : KeLock,
+    ArenaPopulateNoWaitLock : KeLock,
+
+KE_CACHE_LINE_END
+
+    ArenaTagListLock : KeLock,
+
+KE_CACHE_LINE_END
+
+    ArenaTagListHead : RtlListEntry,
 END

@@ -36,6 +36,7 @@ KE_CACHE_LINE_END
     QuantumCaches : ExpQuantumCache[EXP_MAX_QUANTUM_CACHES + 1],
     QuantumCacheMaximum : ULONG,
     QuantumShift : ULONG,
+    ImportArena : ^ExpArena,
 
 KE_CACHE_LINE_END
 
@@ -47,6 +48,10 @@ KE_CACHE_LINE_END
 
     // Ordered by address.
     SegmentListHead : RtlListEntry,
+
+    TagReserveListHead : RtlListEntry,
+    TagReserveCount : UWORD,
+    TagReserveMinimum : UWORD,
 END
 
 FN (ExArenaLookupTagF) ExpArenaLookupTag (
@@ -110,6 +115,16 @@ FN ExpInitializeArenas ()
 
         expnode^.PreallocatedArenaIndex = 0
 
+        KeInitializeLock ( &expnode^.ArenaTagListLock )
+
+        RtlInitializeList ( &expnode^.ArenaTagListHead )
+
+        KeInitializeLock ( &expnode^.ArenaPopulateLowLock )
+
+        KeInitializeLock ( &expnode^.ArenaPopulateWaitLock )
+
+        KeInitializeLock ( &expnode^.ArenaPopulateNoWaitLock )
+
         i += 1
     END
 END
@@ -165,6 +180,187 @@ FN ExDeleteArena (
     ExpFreeArena ( arena )
 END
 
+FN ExpAdjustQuantumCaches (
+    IN arena : ^ExpArena,
+    IN purge : UWORD,
+)
+
+    // Adjust the arena's quantum caches.
+
+    i := 1
+
+    WHILE i <= arena^.QuantumCacheMaximum DO
+        IF purge THEN
+            MmuPurgePoolCache ( arena^.QuantumCaches[i].Cache )
+        ELSE
+            MmuAdjustPoolCache ( arena^.QuantumCaches[i].Cache )
+        END
+
+        i += 1
+    END
+END
+
+FN ExpPopulateTagReserve (
+    IN arena : ^ExpArena,
+    IN flags : UWORD,
+) : OsStatus
+
+    // Populate the tag reserve of the arena so that it has TagReserveMinimum
+    // of them. Arena lock is held.
+
+    expnode := arena^.Node^.Exp
+    tag : ^ExpArenaTag
+
+    // Take boundary tags off the global per-node free list first.
+
+    KeAcquireLockExclusive ( &expnode^.ArenaTagListLock )
+
+    WHILE arena^.TagReserveCount < arena^.TagReserveMinimum AND
+        NOT RtlEmptyList ( &expnode^.ArenaTagListHead ) DO
+
+        tag =
+            CONTAINEROF expnode^.ArenaTagListHead.Next TO ExpArenaTag.ListEntry
+
+        RtlRemoveEntryList ( &tag^.ListEntry )
+
+        RtlInsertAtTailList (
+            &arena^.TagReserveListHead, // listhead
+            &tag^.ListEntry, // listentry
+        )
+
+        arena^.TagReserveCount += 1
+    END
+
+    KeReleaseLock ( &expnode^.ArenaTagListLock )
+
+    IF arena^.TagReserveCount >= arena^.TagReserveMinimum THEN
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    // We still need more boundary tags.
+
+    current := KeCurrentThread ()
+
+    IF KeLockOwner ( &expnode^.ArenaPopulateLowLock ) == current OR
+        KeLockOwner ( &expnode^.ArenaPopulateWaitLock ) == current OR
+        KeLockOwner ( &expnode^.ArenaPopulateNoWaitLock ) == current THEN
+
+        // This thread is already doing a boundary tag population so just
+        // return. There are enough in the reserve to satisfy this.
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    // Release arena lock but do not lower IPL.
+
+    KeReleaseLock ( &arena^.Lock )
+
+    // Prevent more than 3 concurrent repopulations.
+
+    lock : ^KeLock
+
+    IF flags & MM_ALLOCATE_LOW THEN
+        lock = &expnode^.ArenaPopulateLowLock
+    ELSEIF flags & MM_ALLOCATE_WAIT THEN
+        lock = &expnode^.ArenaPopulateWaitLock
+    ELSE
+        lock = &expnode^.ArenaPopulateNoWaitLock
+    END
+
+    KeAcquireLockExclusive ( lock )
+
+    // Allocate a page of boundary tags.
+    // This ends up allocating from another ExArena so we're at risk of
+    // recursion here which we deal with using the reserved tags.
+
+    status := MmAllocatePoolPages (
+        arena^.Node^.Mmp, // mmnode
+        flags, // flags
+        1, // pages
+        MM_NONPAGED_POOL, // poolindex
+        OUT tag, // ptr
+    )
+
+    IF OsError ( status ) THEN
+        // Failed.
+
+        KeReleaseLock ( lock )
+
+        KeAcquireLockExclusive ( &arena^.Lock )
+
+        RETURN status
+    END
+
+    numtags := RTL_PAGE_SIZE / SIZEOF ExpArenaTag
+
+    // Repopulate arenas involved in population.
+
+    i := 0
+    count := expnode^.PopulatorArenaIndex
+
+    WHILE i < count DO
+        populator := expnode^.PopulatorArenas[i]
+
+        KeAcquireLockExclusive ( &populator^.Lock )
+
+        WHILE populator^.TagReserveCount < populator^.TagReserveMinimum DO
+            KeAssert ( numtags != 0 )
+
+            RtlInsertAtTailList (
+                &populator^.TagReserveListHead, // listhead
+                &tag^.ListEntry, // listentry
+            )
+
+            tag += SIZEOF ExpArenaTag
+            numtags -= 1
+            populator^.TagReserveCount += 1
+        END
+
+        KeReleaseLock ( &populator^.Lock )
+
+        i += 1
+    END
+
+    KeReleaseLock ( lock )
+
+    // Repopulate this arena.
+
+    KeAcquireLockExclusive ( &arena^.Lock )
+
+    WHILE arena^.TagReserveCount < arena^.TagReserveMinimum DO
+        KeAssert ( numtags != 0 )
+
+        RtlInsertAtTailList (
+            &arena^.TagReserveListHead, // listhead
+            &tag^.ListEntry, // listentry
+        )
+
+        tag += SIZEOF ExpArenaTag
+        numtags -= 1
+        arena^.TagReserveCount += 1
+    END
+
+    IF numtags THEN
+        // Put any left on the per node free list.
+
+        KeAcquireLockExclusive ( &expnode^.ArenaTagListLock )
+
+        WHILE numtags DO
+            RtlInsertAtTailList (
+                &expnode^.ArenaTagListHead, // listhead
+                &tag^.ListEntry, // listentry
+            )
+
+            tag += SIZEOF ExpArenaTag
+            numtags -= 1
+        END
+
+        KeReleaseLock ( &expnode^.ArenaTagListLock )
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
 FN ExAllocateFromArena (
     IN arena : ^ExpArena,
     IN flags : UWORD,
@@ -176,6 +372,7 @@ FN ExAllocateFromArena (
 
     KeAssert ( size != 0 )
     KeAssert ( size & ((1 << arena^.QuantumShift) - 1) == 0 )
+    status : OsStatus
 
     // First try the quantum caches.
 
@@ -185,15 +382,110 @@ FN ExAllocateFromArena (
         RETURN MmAllocateFromPoolCache (
             arena^.QuantumCaches[size >> arena^.QuantumShift].Cache, // cache
             flags, // flags
-            OUT address, // address
+            OUT address, // ptr
         )
     END
 
     // Didn't work out.
 
-    // TODO
+    retries := 0
 
-    KeAssert ( FALSE )
+@Retry
+
+    ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
+
+    IF arena^.TagReserveCount < arena^.TagReserveMinimum THEN
+        status = ExpPopulateTagReserve (
+            arena, // arena
+            flags, // flags
+        )
+
+        IF OsError ( status ) THEN
+            KeReleaseLockLower ( &arena^.Lock, ipl )
+
+            RETURN status
+        END
+    END
+
+    // Search for a block of the right size in the size-ordered  free block
+    // tree.
+
+    alloctag : ^ExpArenaTag = NULLPTR
+    avlnode := arena^.FreeTree.Right
+
+    WHILE TRUE DO
+        IF NOT avlnode THEN
+            // Didn't find it.
+
+            BREAK
+        END
+
+        tag := CONTAINEROF avlnode TO ExpArenaTag.TreeEntry
+
+        IF size <= tag^.Size THEN
+            alloctag = tag
+
+            IF size == tag^.Size THEN
+                // Perfectly sized.
+
+                BREAK
+            END
+
+            avlnode = avlnode^.Left
+
+        ELSE
+            avlnode = avlnode^.Right
+        END
+    END
+
+    IF alloctag == NULLPTR THEN
+        // There was no sufficiently sized free block in the whole arena.
+
+        KeReleaseLockLower ( &arena^.Lock, ipl )
+
+        IF arena^.ImportArena THEN
+            // There's an arena to import from, so try to do that now.
+
+            // ... if that works, GOTO Retry ...
+        END
+
+        // Importing from the arena failed or there's none to import from.
+
+        IF arena^.QuantumCacheMaximum != 0 AND
+            retries <= 1 THEN
+
+            // Reap quantum caches and try again.
+
+            ExpAdjustQuantumCaches (
+                arena, // arena
+                retries == 1, // purge
+            )
+
+            retries += 1
+
+            GOTO Retry
+        END
+
+        // If we made it here then we failed to get any block.
+
+        RETURN OS_STATUS_ARENA_EXHAUSTED
+    END
+
+    // There was a sufficient block.
+
+    address = alloctag^.Address
+
+#IF 0
+    ExpAllocateFromTag (
+        arena, // arena
+        alloctag, // tag
+        size, // size
+    )
+#END
+
+    KeReleaseLockLower ( &arena^.Lock, ipl )
+
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN ExpFreeToArena (
@@ -305,6 +597,7 @@ FN ExCreateArena (
     IN quantumcachemax : UWORD,
     IN pageable : UWORD,
     IN quantumshift : UWORD,
+    IN importarena : ^ExpArena,
     OUT arena : ^ExpArena,
 ) : OsStatus
 
@@ -359,6 +652,8 @@ FN ExCreateArena (
 
     arena^.QuantumShift = quantumshift
 
+    arena^.ImportArena = importarena
+
     IF NOT lookuptagfunc THEN
         lookuptagfunc = &ExpArenaLookupTag
         context = arena
@@ -375,9 +670,23 @@ FN ExCreateArena (
 
     RtlInitializeList ( &arena^.SegmentListHead )
 
+    RtlInitializeList ( &arena^.TagReserveListHead )
+    arena^.TagReserveCount = 0
+
+    // Two for import tags and two for each side of a middle-split block.
+
+    arena^.TagReserveMinimum = 4
+
+    // Multiply by four for one normal user plus three concurrent populators.
+
+    arena^.TagReserveMinimum *= 4
+
     i := 1
 
     WHILE i <= quantumcachemax DO
+        arena^.QuantumCaches[i].Arena = arena
+        arena^.QuantumCaches[i].Size = i << quantumshift
+
         status = MmCreatePoolCacheEx (
             kenode^.Mmp, // mmnode
             "QuantumCache", // name
