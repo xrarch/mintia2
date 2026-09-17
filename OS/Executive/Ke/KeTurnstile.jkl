@@ -222,29 +222,23 @@ FN KepBoostPriority (
     KepReleaseThreadElevated ( thread )
 
     WHILE TRUE DO
-        IF priority <= owner^.Priority AND
-            (KepIsInteractiveForFloor ( owner ) OR
-            NOT interactive) THEN
-
-            // We wouldn't actually raise the priority of this thread, so back
-            // out rather than wasting time trying.
-
-            KepReleaseChain ( chain, KEP_IPL_APC )
-
-            RETURN FALSE
-        END
-
         KepAcquireThreadElevated ( owner )
 
         KepReleaseChainElevated ( chain )
 
-        // Boost the owner. His lock is held on entry, released on exit.
+        boosted := FALSE
 
-        boosted := KepRaisePriorityFloorThread (
-            owner, // thread
-            interactive, // interactive
-            priority, // priority
-        )
+        IF priority > owner^.Priority OR
+            (NOT KepIsInteractiveForFloor ( owner ) AND interactive) THEN
+
+            // Boost the owner. His lock is held on entry, released on exit.
+
+            boosted = KepRaisePriorityFloorThread (
+                owner, // thread
+                interactive, // interactive
+                priority, // priority
+            )
+        END
 
         // We have to follow the chain of lock owners and boost them all.
         // Each blocked thread is linked to its turnstile by BlockedOnTurnstile
