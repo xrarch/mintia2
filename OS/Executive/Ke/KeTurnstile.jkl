@@ -84,7 +84,7 @@
     ((address >> KEP_TURNSTILE_HASH_SHIFT) & (KEP_TURNSTILE_CHAINS - 1))
 ]
 
-#DEFINE KEP_SPIN_CYCLES 400
+#DEFINE KEP_SPIN_CYCLES 5000
 
 #SECTION "INITtext"
 FN KepInitializeTurnstiles (
@@ -538,20 +538,20 @@ FN KepBlockOnLock (
             // The owner exists and is currently running on another processor.
             // Spin for a while to see if we can get the lock without blocking.
 
+            ownerprb := owner^.CurrentPrb
+
             KepReleaseChain ( chain, KEP_IPL_APC )
 
             i := KEP_SPIN_CYCLES
 
-            WHILE i DO
+            WHILE i AND
+                VOLATILE ownerprb^.CurrentThread == owner DO
+
                 IF VOLATILE turnstile^.Event.Header.SignalCount THEN
                     // It was freed!
 
                     GOTO UnreferenceAndLeave
                 END
-
-                // Stop the compiler from optimizing this loop out.
-
-                BARRIER
 
                 KeSpinPause ()
 
@@ -559,6 +559,9 @@ FN KepBlockOnLock (
             END
 
             KepAcquireChain ( chain )
+
+            // No longer running or we hit the maximum number of spins.
+            // Go block.
 
             IF turnstile^.Event.Header.SignalCount THEN
                 // Owner no longer valid.
