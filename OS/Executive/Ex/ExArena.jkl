@@ -584,6 +584,7 @@ FN ExAllocateFromArena (
             status = arena^.ImportCallbacks.Import (
                 arena^.ImportCallbacks.Context, // context
                 arena^.ImportArena, // importarena
+                flags, // flags
                 importsize, // size
                 OUT address, // address
             )
@@ -926,6 +927,36 @@ FN (MmPoolCacheFreeF) ExpFreeQuantumCache (
     )
 END
 
+FN (ExArenaImportF) ExDefaultArenaImport (
+    IN context : ^VOID,
+    IN importarena : ^ExpArena,
+    IN flags : UWORD,
+    IN size : UWORD,
+    OUT address : ^VOID,
+) : OsStatus
+
+    RETURN ExAllocateFromArena (
+        importarena, // arena
+        flags, // flags
+        size, // size
+        OUT address, // address
+    )
+END
+
+FN (ExArenaFreeF) ExDefaultArenaFree (
+    IN context : ^VOID,
+    IN importarena : ^ExpArena,
+    IN address : ^VOID,
+    IN size : UWORD,
+) : OsStatus
+
+    ExFreeToArena (
+        importarena, // arena
+        address, // address
+        size, // size
+    )
+END
+
 #SECTION "PAGEtext"
 FN ExCreateArena (
     IN name : ^UBYTE,
@@ -1013,6 +1044,13 @@ FN ExCreateArena (
             SIZEOF ExArenaImportCallbacks, // sz
             0, // ulong
         )
+
+        IF importarena THEN
+            arena^.ImportCallbacks.Import = &ExDefaultArenaImport
+            arena^.ImportCallbacks.Free = &ExDefaultArenaFree
+            arena^.ImportCallbacks.ImportQuantumShift =
+                importarena^.QuantumShift
+        END
     
     ELSE
         RtlCopyBytes (
