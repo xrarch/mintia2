@@ -395,22 +395,23 @@ FN KepBlockOnLock (
         OUT aborted, // aborted
     ) != current OR aborted THEN
 
-        // We were aborted because we faulted on the lock word.
-        // We cannot handle this at this moment because our turnstile is tied
-        // up and the page fault handler has to take turnstile-backed locks.
-        // The page fault will be serviced when the caller tries again to claim
-        // the lock. Also we're at an elevated IPL holding a spinlock so that's
-        // another reason.
-
-        // Call Mm directly to try to satisfy this page fault.
-        // An upcall from Ke to Mm is technically a layering violation but
-        // there's no other decent way to accomplish this.
+        // Access aborted due to page fault or value of lock word changed.
+        // Either way we need to exit here and retry everything.
 
 @SomethingChanged
 
         KepReleaseChain ( chain, ipl )
 
         IF aborted THEN
+            // We were aborted because we faulted on the lock word.
+            // We couldn't handle this at that moment because we held a spinlock
+            // out of order with respect to locks needed by the page fault
+            // handler. Since we released it, we can now do a direct upcall to
+            // Mm to get it to make the lock word's containing page valid again.
+
+            // An upcall from Ke to Mm is technically a layering violation but
+            // there's no other decent way to accomplish this.
+
             MmuWriteFaultOnLockWord ( lock )
         END
 
