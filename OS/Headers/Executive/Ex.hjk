@@ -177,3 +177,43 @@ FNPTR ExArenaLookupTagF (
     IN context : ^VOID,
     IN address : ^VOID,
 ) : ^ExpArenaTag
+
+FNPTR ExArenaInsertTagF (
+    IN context : ^VOID,
+    IN address : ^VOID,
+    IN tag : ^ExpArenaTag,
+)
+
+FNPTR ExArenaRemoveTagF (
+    IN context : ^VOID,
+    IN address : ^VOID,
+    IN tag : ^ExpArenaTag,
+)
+
+STRUCT ExArenaTagCallbacks
+    Context : ^VOID,
+    LookupTag : ExArenaLookupTagF,
+    InsertTag : ExArenaInsertTagF,
+    RemoveTag : ExArenaRemoveTagF,
+END
+
+FNPTR ExArenaImportF (
+    IN context : ^VOID,
+    IN importarena : ^ExpArena,
+    IN size : UWORD,
+    OUT address : ^VOID,
+) : OsStatus
+
+FNPTR ExArenaFreeF (
+    IN context : ^VOID,
+    IN importarena : ^ExpArena,
+    IN address : ^VOID,
+    IN size : UWORD,
+) : OsStatus
+
+STRUCT ExArenaImportCallbacks
+    Context : ^VOID,
+    Import : ExArenaImportF,
+    Free : ExArenaFreeF,
+    ImportQuantumShift : UWORD,
+END

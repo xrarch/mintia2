@@ -9,12 +9,16 @@
 
 #DEFINE EXP_PREALLOCATED_ARENAS 4
 
+#DEFINE EXP_TAG_FREE 1
+#DEFINE EXP_TAG_ALLOCATED 2
+#DEFINE EXP_TAG_SPAN 3
+
 STRUCT ExpArenaTag
     Address : ^VOID,
     Size : UWORD,
     TreeEntry : RtlAvlNode,
     ListEntry : RtlListEntry,
-    Flags : ULONG,
+    Type : ULONG,
 END
 
 STRUCT ExpQuantumCache
@@ -31,8 +35,8 @@ KE_CACHE_LINE_END
     Entry : RtlListEntry,
     Name : ^UBYTE,
     Node : ^KeuNode,
-    LookupTag : ExArenaLookupTagF,
-    Context : ^VOID,
+    TagCallbacks : ExArenaTagCallbacks,
+    ImportCallbacks : ExArenaImportCallbacks,
     QuantumCaches : ExpQuantumCache[EXP_MAX_QUANTUM_CACHES + 1],
     QuantumCacheMaximum : ULONG,
     QuantumShift : ULONG,
@@ -87,6 +91,67 @@ FN (ExArenaLookupTagF) ExpArenaLookupTag (
             avlnode = avlnode^.Right
         END
     END
+END
+
+FN (RtlAvlLessThanF) ExpArenaCompareTagsByAddress (
+    IN a : ^RtlAvlNode,
+    IN b : ^RtlAvlNode,
+) : UWORD
+
+    // Return whether a < b by address.
+
+    tag1 := CONTAINEROF a TO ExpArenaTag.TreeEntry
+    tag2 := CONTAINEROF b TO ExpArenaTag.TreeEntry
+
+    RETURN tag1^.Address < tag2^.Address
+END
+
+FN (RtlAvlLessThanF) ExpArenaCompareTagsBySize (
+    IN a : ^RtlAvlNode,
+    IN b : ^RtlAvlNode,
+) : UWORD
+
+    // Return whether a < b by size.
+
+    tag1 := CONTAINEROF a TO ExpArenaTag.TreeEntry
+    tag2 := CONTAINEROF b TO ExpArenaTag.TreeEntry
+
+    RETURN tag1^.Size < tag2^.Size
+END
+
+FN (ExArenaInsertTagF) ExpArenaInsertTag (
+    IN context : ^VOID,
+    IN address : ^VOID,
+    IN tag : ^ExpArenaTag,
+)
+
+    // Insert a tag into the lookup tree by address.
+    // Arena lock is held.
+
+    arena := CAST context TO ^ExpArena
+
+    RtlInsertAvl (
+        &arena^.UsedTree, // root
+        &tag^.TreeEntry, // node
+        &ExpArenaCompareTagsByAddress, // comparisonfunc
+    )
+END
+
+FN (ExArenaRemoveTagF) ExpArenaRemoveTag (
+    IN context : ^VOID,
+    IN address : ^VOID,
+    IN tag : ^ExpArenaTag,
+)
+
+    // Remove a tag from the lookup tree.
+    // Arena lock is held.
+
+    arena := CAST context TO ^ExpArena
+
+    RtlRemoveAvl (
+        &arena^.UsedTree, // root
+        &tag^.TreeEntry, // node
+    )
 END
 
 #SECTION "INITtext"
@@ -169,12 +234,35 @@ FN ExDeleteArena (
 
     KeReleaseLock ( &expnode^.ArenaListLock )
 
+    // Delete all of the quantum caches.
+
     i := 1
 
     WHILE i <= arena^.QuantumCacheMaximum DO
         MmDeletePoolCache ( arena^.QuantumCaches[i].Cache )
 
         i += 1
+    END
+
+    IF arena^.TagReserveCount THEN
+        // Move the arena's reserved tags to the per-node list.
+
+        KeAssert ( NOT RtlEmptyList ( &arena^.TagReserveListHead ) )
+
+        headentry := arena^.TagReserveListHead.Next
+        tailentry := arena^.TagReserveListHead.Prev
+
+        // Splice the list in at the tail, all at once.
+
+        ipl := KeAcquireLockExclusiveRaise ( &expnode^.ArenaTagListLock )
+
+        headentry^.Prev = expnode^.ArenaTagListHead.Prev
+        expnode^.ArenaTagListHead.Prev^.Next = headentry
+
+        tailentry^.Next = &expnode^.ArenaTagListHead
+        expnode^.ArenaTagListHead.Prev = tailentry
+
+        KeReleaseLockLower ( &expnode^.ArenaTagListLock, ipl )
     END
 
     ExpFreeArena ( arena )
@@ -223,7 +311,7 @@ FN ExpPopulateTagReserve (
 
         RtlRemoveEntryList ( &tag^.ListEntry )
 
-        RtlInsertAtTailList (
+        RtlInsertAtHeadList (
             &arena^.TagReserveListHead, // listhead
             &tag^.ListEntry, // listentry
         )
@@ -306,7 +394,7 @@ FN ExpPopulateTagReserve (
         WHILE populator^.TagReserveCount < populator^.TagReserveMinimum DO
             KeAssert ( numtags != 0 )
 
-            RtlInsertAtTailList (
+            RtlInsertAtHeadList (
                 &populator^.TagReserveListHead, // listhead
                 &tag^.ListEntry, // listentry
             )
@@ -330,7 +418,7 @@ FN ExpPopulateTagReserve (
     WHILE arena^.TagReserveCount < arena^.TagReserveMinimum DO
         KeAssert ( numtags != 0 )
 
-        RtlInsertAtTailList (
+        RtlInsertAtHeadList (
             &arena^.TagReserveListHead, // listhead
             &tag^.ListEntry, // listentry
         )
@@ -346,7 +434,7 @@ FN ExpPopulateTagReserve (
         KeAcquireLockExclusive ( &expnode^.ArenaTagListLock )
 
         WHILE numtags DO
-            RtlInsertAtTailList (
+            RtlInsertAtHeadList (
                 &expnode^.ArenaTagListHead, // listhead
                 &tag^.ListEntry, // listentry
             )
@@ -361,6 +449,40 @@ FN ExpPopulateTagReserve (
     RETURN OS_STATUS_SUCCESS
 END
 
+FN ExpAllocateTag (
+    IN arena : ^ExpArena,
+) : ^ExpArenaTag
+
+    // Allocate a tag from the arena. Arena lock held.
+
+    IF RtlEmptyList ( &arena^.TagReserveListHead ) THEN
+        RETURN NULLPTR
+    END
+
+    tag := CONTAINEROF arena^.TagReserveListHead.Next TO ExpArenaTag.ListEntry
+
+    RtlRemoveEntryList ( &tag^.ListEntry )
+
+    arena^.TagReserveCount -= 1
+
+    RETURN tag
+END
+
+FN ExpFreeTag (
+    IN arena : ^ExpArena,
+    IN tag : ^ExpArenaTag,
+)
+
+    // Free the tag to the arena. Lock held.
+
+    RtlInsertAtHeadList (
+        &arena^.TagReserveListHead, // listhead
+        &tag^.ListEntry, // entry
+    )
+
+    arena^.TagReserveCount += 1
+END
+
 FN ExAllocateFromArena (
     IN arena : ^ExpArena,
     IN flags : UWORD,
@@ -372,7 +494,6 @@ FN ExAllocateFromArena (
 
     KeAssert ( size != 0 )
     KeAssert ( size & ((1 << arena^.QuantumShift) - 1) == 0 )
-    status : OsStatus
 
     // First try the quantum caches.
 
@@ -389,10 +510,13 @@ FN ExAllocateFromArena (
     // Didn't work out.
 
     retries := 0
+    status := OS_STATUS_ARENA_EXHAUSTED
 
 @Retry
 
     ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
+
+@RetryLockHeld
 
     IF arena^.TagReserveCount < arena^.TagReserveMinimum THEN
         status = ExpPopulateTagReserve (
@@ -410,6 +534,7 @@ FN ExAllocateFromArena (
     // Search for a block of the right size in the size-ordered  free block
     // tree.
 
+    tag : ^ExpArenaTag
     alloctag : ^ExpArenaTag = NULLPTR
     avlnode := arena^.FreeTree.Right
 
@@ -420,7 +545,7 @@ FN ExAllocateFromArena (
             BREAK
         END
 
-        tag := CONTAINEROF avlnode TO ExpArenaTag.TreeEntry
+        tag = CONTAINEROF avlnode TO ExpArenaTag.TreeEntry
 
         IF size <= tag^.Size THEN
             alloctag = tag
@@ -441,13 +566,84 @@ FN ExAllocateFromArena (
     IF alloctag == NULLPTR THEN
         // There was no sufficiently sized free block in the whole arena.
 
-        KeReleaseLockLower ( &arena^.Lock, ipl )
+        IF arena^.ImportCallbacks.Import THEN
+            // There's an import function, so try to do that now.
 
-        IF arena^.ImportArena THEN
-            // There's an arena to import from, so try to do that now.
+            // Decrement the reserved tags by 3 to make sure nobody yoinks the
+            // three we will need to describe the imported span.
 
-            // ... if that works, GOTO Retry ...
+            KeAssert ( arena^.TagReserveCount >= 3 )
+
+            arena^.TagReserveCount -= 3
+
+            KeReleaseLockLower ( &arena^.Lock, ipl )
+
+            importminimum := 1 << arena^.ImportCallbacks.ImportQuantumShift
+            importsize := (size + importminimum - 1) & -importminimum
+
+            status = arena^.ImportCallbacks.Import (
+                arena^.ImportCallbacks.Context, // context
+                arena^.ImportArena, // importarena
+                importsize, // size
+                OUT address, // address
+            )
+
+            ipl = KeAcquireLockExclusiveRaise ( &arena^.Lock )
+
+            arena^.TagReserveCount += 3
+
+            IF NOT OsError ( status ) THEN
+                // Import succeeded.
+
+                // Allocate span left tag.
+
+                tag = ExpAllocateTag ( arena )
+                tag^.Type = EXP_TAG_SPAN
+                tag^.Address = address
+                tag^.Size = size
+
+                RtlInsertAtTailList (
+                    &arena^.SegmentListHead, // listhead
+                    &tag^.ListEntry, // entry
+                )
+
+                // Allocate span content tag.
+
+                tag = ExpAllocateTag ( arena )
+                tag^.Type = EXP_TAG_FREE
+                tag^.Address = address
+                tag^.Size = size
+
+                RtlInsertAtTailList (
+                    &arena^.SegmentListHead, // listhead
+                    &tag^.ListEntry, // entry
+                )
+
+                RtlInsertAvl (
+                    &arena^.FreeTree, // root
+                    &tag^.TreeEntry, // node
+                    &ExpArenaCompareTagsBySize, // comparisonfunc
+                )
+
+                // Allocate span right tag.
+
+                tag = ExpAllocateTag ( arena )
+                tag^.Type = EXP_TAG_SPAN
+                tag^.Address = address
+                tag^.Size = 0
+
+                RtlInsertAtTailList (
+                    &arena^.SegmentListHead, // listhead
+                    &tag^.ListEntry, // entry
+                )
+
+                // Retry the allocation.
+
+                GOTO RetryLockHeld
+            END
         END
+
+        KeReleaseLockLower ( &arena^.Lock, ipl )
 
         // Importing from the arena failed or there's none to import from.
 
@@ -468,20 +664,59 @@ FN ExAllocateFromArena (
 
         // If we made it here then we failed to get any block.
 
-        RETURN OS_STATUS_ARENA_EXHAUSTED
+        RETURN status
     END
 
     // There was a sufficient block.
 
     address = alloctag^.Address
 
-#IF 0
-    ExpAllocateFromTag (
-        arena, // arena
-        alloctag, // tag
-        size, // size
+    // Remove the allocated tag from the size-ordered tree.
+
+    RtlRemoveAvl (
+        &arena^.FreeTree, // root
+        &alloctag^.TreeEntry, // node
     )
-#END
+
+    IF size != alloctag^.Size THEN
+        // Create a right-fragment.
+
+        righttag := ExpAllocateTag ( arena )
+
+        righttag^.Type = EXP_TAG_FREE
+
+        KeAssert ( righttag != NULLPTR )
+
+        righttag^.Address = address + size
+        righttag^.Size = alloctag^.Size - size
+
+        // Insert after alloctag.
+
+        RtlInsertAtHeadList (
+            &alloctag^.ListEntry, // listhead
+            &righttag^.ListEntry, // listentry
+        )
+
+        alloctag^.Size -= size
+
+        // Insert right tag in size-ordered free tree.
+
+        RtlInsertAvl (
+            &arena^.FreeTree, // root
+            &righttag^.TreeEntry, // node
+            &ExpArenaCompareTagsBySize, // comparisonfunc
+        )
+    END
+
+    // Insert the allocated tag in the arena's lookup structure.
+
+    arena^.TagCallbacks.InsertTag (
+        arena^.TagCallbacks.Context, // context
+        address, // address
+        alloctag, // tag
+    )
+
+    alloctag^.Type = EXP_TAG_ALLOCATED
 
     KeReleaseLockLower ( &arena^.Lock, ipl )
 
@@ -490,14 +725,141 @@ END
 
 FN ExpFreeToArena (
     IN arena : ^ExpArena,
-    IN tag : ^ExpArenaTag,
+    IN address : ^VOID,
 )
 
     // Free a block to the arena. Bypass quantum caches.
 
-    // TODO
+    ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
 
-    KeAssert ( FALSE )
+    tag := arena^.TagCallbacks.LookupTag (
+        arena^.TagCallbacks.Context, // context
+        address, // address
+    )
+
+    KeAssert ( tag != NULLPTR )
+    KeAssert ( tag^.Type == EXP_TAG_ALLOCATED )
+    KeAssert ( tag^.Address == address )
+
+    // Check left. Checks can be elided because all spans are preceded and
+    // succeeded by EXP_TAG_SPAN tags.
+
+    othertag := CONTAINEROF tag^.ListEntry.Prev TO ExpArenaTag.ListEntry
+
+    IF othertag^.Type == EXP_TAG_FREE THEN
+        // Coalesce left.
+
+        othertag^.Size += tag^.Size
+
+        RtlRemoveEntryList ( &tag^.ListEntry )
+
+        RtlRemoveAvl (
+            &arena^.FreeTree, // root
+            &tag^.TreeEntry, // node
+        )
+
+        ExpFreeTag (
+            arena, // arena
+            tag, // tag
+        )
+
+        tag = othertag
+    END
+
+    // Check right.
+
+    othertag = CONTAINEROF tag^.ListEntry.Next TO ExpArenaTag.ListEntry
+
+    IF othertag^.Type == EXP_TAG_FREE THEN
+        // Coalesce right.
+
+        tag^.Size += othertag^.Size
+
+        RtlRemoveEntryList ( &othertag^.ListEntry )
+
+        RtlRemoveAvl (
+            &arena^.FreeTree, // root
+            &othertag^.TreeEntry, // node
+        )
+
+        ExpFreeTag (
+            arena, // arena
+            othertag, // tag
+        )
+    END
+
+    othertag = CONTAINEROF tag^.ListEntry.Prev TO ExpArenaTag.ListEntry
+
+    IF (CONTAINEROF tag^.ListEntry.Prev TO ExpArenaTag.ListEntry)^.Type
+        == EXP_TAG_SPAN AND
+        (CONTAINEROF tag^.ListEntry.Next TO ExpArenaTag.ListEntry)^.Type
+        == EXP_TAG_SPAN AND
+        arena^.ImportCallbacks.Free THEN
+
+        // The whole span is free and should be returned to the arena it was
+        // imported from.
+
+        // Remove the left span tag.
+
+        othertag = CONTAINEROF tag^.ListEntry.Prev TO ExpArenaTag.ListEntry
+
+        RtlRemoveEntryList ( &othertag^.ListEntry )
+
+        ExpFreeTag (
+            arena, // arena
+            othertag, // tag
+        )
+
+        // Remove the right span tag.
+
+        othertag = CONTAINEROF tag^.ListEntry.Next TO ExpArenaTag.ListEntry
+
+        RtlRemoveEntryList ( &othertag^.ListEntry )
+
+        ExpFreeTag (
+            arena, // arena
+            othertag, // tag
+        )
+
+        // Remove the middle tag.
+
+        address = tag^.Address
+        size := tag^.Size
+
+        RtlRemoveEntryList ( &tag^.ListEntry )
+
+        ExpFreeTag (
+            arena, // arena
+            tag, // tag
+        )
+
+        KeReleaseLockLower ( &arena^.Lock, ipl )
+
+        // Free the span to the source.
+
+        arena^.ImportCallbacks.Free (
+            arena^.ImportCallbacks.Context, // context
+            arena^.ImportArena, // importarena
+            address, // address
+            size, // size
+        )
+
+        LEAVE
+    END
+
+    // Set the tag free.
+
+    tag^.Type = EXP_TAG_FREE
+
+    // Insert into the free tree.
+
+    RtlInsertAvl (
+        &arena^.FreeTree, // root
+        &tag^.TreeEntry, // node
+        &ExpArenaCompareTagsBySize, // comparisonfunc
+    )
+
+    KeReleaseLockLower ( &arena^.Lock, ipl )
 END
 
 FN ExFreeToArena (
@@ -523,22 +885,10 @@ FN ExFreeToArena (
         LEAVE
     END
 
-    ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
-
-    tag := arena^.LookupTag (
-        arena^.Context, // context
-        address, // address
-    )
-
-    KeAssert ( tag != NULLPTR )
-    KeAssert ( tag^.Size == size )
-
     ExpFreeToArena (
         arena, // arena
-        tag, // tag
+        address, // address
     )
-
-    KeReleaseLockLower ( &arena^.Lock, ipl )
 END
 
 FN (MmPoolCacheAllocateF) ExpPopulateQuantumCache (
@@ -570,21 +920,10 @@ FN (MmPoolCacheFreeF) ExpFreeQuantumCache (
     qcache := CAST context TO ^ExpQuantumCache
     arena := qcache^.Arena
 
-    ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
-
-    tag := arena^.LookupTag (
-        arena^.Context, // context
-        ptr, // address
-    )
-
-    KeAssert ( tag != NULLPTR )
-
     ExpFreeToArena (
         arena, // arena
-        tag, // tag
+        ptr, // ptr
     )
-
-    KeReleaseLockLower ( &arena^.Lock, ipl )
 END
 
 #SECTION "PAGEtext"
@@ -592,8 +931,8 @@ FN ExCreateArena (
     IN name : ^UBYTE,
     IN kenode : ^KeuNode,
     IN flags : UWORD,
-    IN lookuptagfunc : ExArenaLookupTagF,
-    IN context : ^VOID,
+    IN tagcallbacks : ^ExArenaTagCallbacks,
+    IN importcallbacks : ^ExArenaImportCallbacks,
     IN quantumcachemax : UWORD,
     IN pageable : UWORD,
     IN quantumshift : UWORD,
@@ -654,13 +993,34 @@ FN ExCreateArena (
 
     arena^.ImportArena = importarena
 
-    IF NOT lookuptagfunc THEN
-        lookuptagfunc = &ExpArenaLookupTag
-        context = arena
+    IF NOT tagcallbacks THEN
+        arena^.TagCallbacks.Context = arena
+        arena^.TagCallbacks.LookupTag = &ExpArenaLookupTag
+        arena^.TagCallbacks.InsertTag = &ExpArenaInsertTag
+        arena^.TagCallbacks.RemoveTag = &ExpArenaRemoveTag
+    
+    ELSE
+        RtlCopyBytes (
+            &arena^.TagCallbacks, // dest
+            tagcallbacks, // src
+            SIZEOF ExArenaTagCallbacks, // sz
+        )
     END
 
-    arena^.LookupTag = lookuptagfunc
-    arena^.Context = context
+    IF NOT importcallbacks THEN
+        RtlFillMemoryWithUlong (
+            &arena^.ImportCallbacks, // dest
+            SIZEOF ExArenaImportCallbacks, // sz
+            0, // ulong
+        )
+    
+    ELSE
+        RtlCopyBytes (
+            &arena^.ImportCallbacks, // dest
+            importcallbacks, // src
+            SIZEOF ExArenaImportCallbacks, // sz
+        )
+    END
 
     arena^.QuantumCacheMaximum = quantumcachemax << quantumshift
 
