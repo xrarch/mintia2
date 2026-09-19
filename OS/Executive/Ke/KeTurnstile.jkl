@@ -431,6 +431,8 @@ FN KepBlockOnLock (
 
             GOTO SomethingChanged
         END
+
+        current |= KEP_LOCK_WAITERS
     END
 
     IF current & KEP_LOCK_WRITE_LOCKED THEN
@@ -453,20 +455,12 @@ FN KepBlockOnLock (
                 IF VOLATILE lock^.Ptr != current THEN
                     // It was freed!
 
-                    RtlPrint ( "F" )
-
                     LEAVE
                 END
 
                 KeSpinPause ()
 
                 i -= 1
-            END
-
-            IF NOT i THEN
-                RtlPrint ( "S" )
-            ELSE
-                RtlPrint ( "R" )
             END
 
             ipl = KepAcquireChain ( chain )
@@ -482,8 +476,6 @@ FN KepBlockOnLock (
                 GOTO SomethingChanged
             END
         END
-
-        RtlPrint ( "G" )
 #END
     END
 
