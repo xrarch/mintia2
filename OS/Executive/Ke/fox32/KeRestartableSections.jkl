@@ -91,6 +91,9 @@ KepCompareSwapUlongEnd:
 
     ret
 
+KepAbortOnFaultStart:
+.global KepAbortOnFaultStart
+
 // a0 - ptr
 // a1 - newvalue
 // a2 - expectedvalue
@@ -111,19 +114,20 @@ KepCompareSwapUlongAbortEnd:
 
     ret
 
-KepCompareSwapUlongAbort:
-.global KepCompareSwapUlongAbort
+// a0 - ptr
+// outputs:
+// a3 - value
+// a2 - aborted
+KeReadUlongAbortOnFault:
+.export KeReadUlongAbortOnFault
 
-    // We took a page fault while attempting the CAS. Return something that
-    // is guaranteed not to be equal to the expectedvalue, thereby making the
-    // CAS look like a failure.
+    mov  a3, [a0]
 
-    mov  a3, a2
-    add  a3, 1
-
-    mov  a2, 1
-
+    mov  a2, 0
     ret
+
+KepAbortOnFaultEnd:
+.global KepAbortOnFaultEnd
 
 // a0 - lock
 // outputs:
@@ -322,5 +326,19 @@ KepNotLockedMessage:
 
 KepRestartableSectionsEnd:
 .global KepRestartableSectionsEnd
+
+KepAbortOnFault:
+.global KepAbortOnFault
+
+    // We took a page fault while attempting the CAS. Return something that
+    // is guaranteed not to be equal to the expectedvalue, thereby making the
+    // CAS look like a failure.
+
+    mov  a3, a2
+    add  a3, 1
+
+    mov  a2, 1
+
+    ret
 
 ]

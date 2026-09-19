@@ -73,6 +73,11 @@ EXTERN FN KeCompareSwapUlongAbortOnFault (
     OUT aborted : UWORD,
 ) : ULONG
 
+EXTERN FN KeReadUlongAbortOnFault (
+    IN ptr : ^ULONG,
+    OUT aborted : UWORD,
+) : ULONG
+
 EXTERN FN KeMaskUlong (
     IN ptr : ^ULONG,
     IN mask : ULONG,
@@ -116,6 +121,13 @@ EXTERN FN KeOrUlongRelaxed (
     )
 ]
 
+#MACRO KeReadPtrAbortOnFault ( ptr, aborted ) [
+    KeReadUquadAbortOnFault (
+        CAST (ptr) TO ^VOID,
+        aborted,
+    )
+]
+
 #MACRO KeCompareSwapPtr ( ptr, newvalue, expectedvalue ) [
     KeCompareSwapUquad (
         CAST (ptr) TO ^VOID,
@@ -150,6 +162,13 @@ EXTERN FN KeOrUlongRelaxed (
         CAST (ptr) TO ^VOID,
         CAST (newvalue) TO ULONG,
         CAST (expectedvalue) TO ULONG,
+        aborted,
+    )
+]
+
+#MACRO KeReadPtrAbortOnFault ( ptr, aborted ) [
+    KeReadUlongAbortOnFault (
+        CAST (ptr) TO ^VOID,
         aborted,
     )
 ]

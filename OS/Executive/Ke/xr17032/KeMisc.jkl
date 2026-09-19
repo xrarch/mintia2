@@ -222,6 +222,9 @@ KeCompareSwapUlong:
 
     ret
 
+KepAbortOnFaultStart:
+.global KepAbortOnFaultStart
+
 // a0 - ptr
 // a1 - newvalue
 // a2 - expectedvalue
@@ -235,31 +238,39 @@ KeCompareSwapUlongAbortOnFault:
     mb                              // Ensure coherence with other processors.
 #END
 
-KepStartAbortCasRegion:
-.global KepStartAbortCasRegion
-
 .retry:
     ll   a3, a0                     // Load-locked the location.
     sub  t0, a3, a2                 // Compare equality with expected value.
-    bne  t0, KepExitAbortCas         // Not equal, leave.
+    bne  t0, .exit                  // Not equal, leave.
     sc   t0, a0, a1                 // Conditionally store the new value.
     beq  t0, .retry                 // If store failed, retry.
-
-KepEndAbortCasRegion:
-.global KepEndAbortCasRegion
 
 #IF BLD_MP
     mb                              // Ensure coherence with other processors.
 #END
 
-KepExitAbortCas:
+.exit:
 
     li   a2, 0
-
     ret
 
-KepAbortCas:
-.global KepAbortCas
+// a0 - ptr
+// outputs:
+// a3 - value
+// a2 - aborted
+KeReadUlongAbortOnFault:
+.export KeReadUlongAbortOnFault
+
+    mov  a3, long [a0]
+
+    li   a2, 0
+    ret
+
+KepAbortOnFaultEnd:
+.global KepAbortOnFaultEnd
+
+KepAbortOnFault:
+.global KepAbortOnFault
 
     // We took a page fault while attempting the CAS. Return something that
     // is guaranteed not to be equal to the expectedvalue, thereby making the
@@ -267,7 +278,6 @@ KepAbortCas:
 
     addi a3, a2, 1
     li   a2, 1
-
     ret
 
 // a0 - ptr

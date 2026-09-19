@@ -850,7 +850,6 @@ EXTERN KepMaskUlongEnd : UBYTE
 EXTERN KepFetchAndSetUlongEnd : UBYTE
 EXTERN KepCompareSwapUlongEnd : UBYTE
 EXTERN KepCompareSwapUlongAbortEnd : UBYTE
-EXTERN KepCompareSwapUlongAbort : UBYTE
 
 EXTERN KepAcquireLockSharedEnd : UBYTE
 EXTERN KepAcquireLockExclusiveEnd : UBYTE
@@ -859,6 +858,10 @@ EXTERN KepTryAcquireLockExclusiveEnd : UBYTE
 
 EXTERN KepReleaseLockEnd : UBYTE
 EXTERN KepReleaseLockLowerEnd : UBYTE
+
+EXTERN KepAbortOnFault : UBYTE
+EXTERN KepAbortOnFaultStart : UBYTE
+EXTERN KepAbortOnFaultEnd : UBYTE
 
 FN KepResetPc (
     IN context : ^OsContext,
@@ -1009,14 +1012,14 @@ FN (KepExceptionHandlerF) KepPageFault (
 
     // Enable interrupts and dispatch the page fault to Mm.
 
-    IF context^.Epc >= &KeCompareSwapUlongAbortOnFault AND
-        context^.Epc < &KepCompareSwapUlongAbortEnd THEN
+    IF context^.Epc >= &KepAbortOnFaultStart AND
+        context^.Epc < &KepAbortOnFaultEnd THEN
 
         // We cannot handle this page fault because the current thread's
         // turnstile is in use; it can't usefully take locks. Abort the CAS
         // operation.
 
-        context^.Epc = &KepCompareSwapUlongAbort
+        context^.Epc = &KepAbortOnFault
 
         LEAVE
     END

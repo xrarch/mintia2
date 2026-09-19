@@ -373,18 +373,12 @@ FN KepBlockOnLock (
 
     turnstile : ^KepTurnstile
     otherturnstile : ^KepTurnstile
+    aborted : UWORD
+    owner : ^KeuThread = NULLPTR
 
     // First acquire a pointer to the current thread.
 
     thread := KeCurrentThread ()
-
-    // Get a pointer to the owner, if the lock is held exclusive.
-
-    owner : ^KeuThread = NULLPTR
-
-    IF current & KEP_LOCK_WRITE_LOCKED THEN
-        owner = CAST current & KEP_LOCK_BITS TO ^KeuThread
-    END
 
     // Lock the turnstile chain.
 
@@ -394,47 +388,103 @@ FN KepBlockOnLock (
 
     ipl := KepAcquireChain ( chain )
 
-    // Set that there are waiters now. This will cause releasing threads to
-    // signal the turnstile event.
+    // Read the current value of the lock word under the chain lock.
 
-    // We do this CAS even if the waiters bit is already set because we want to
-    // also make sure that the owner (or the state of not having one; i.e.
-    // being held shared) did not change before we were able to set the WAITERS
-    // bit. This is because we need to be absolutely sure that whatever owner we
-    // see in our "current" variable (which captures the lock word during a
-    // certain timeframe) will be the exact thread to awaken this turnstile at
-    // some point *after* this CAS is performed.
-
-    aborted : UWORD
-
-    IF KeCompareSwapPtrAbortOnFault (
+    IF KeReadPtrAbortOnFault (
         &lock^.Ptr, // ptr
-        current | KEP_LOCK_WAITERS, // newvalue
-        current, // expectedvalue
         OUT aborted, // aborted
-    ) != current THEN
+    ) != current OR aborted THEN
 
-        // Something changed.
+        // We were aborted because we faulted on the lock word.
+        // We cannot handle this at this moment because our turnstile is tied
+        // up and the page fault handler has to take turnstile-backed locks.
+        // The page fault will be serviced when the caller tries again to claim
+        // the lock. Also we're at an elevated IPL holding a spinlock so that's
+        // another reason.
 
-        // We also may have taken a page fault on the lock word. We cannot
-        // handle this at this moment because our turnstile is tied up and the
-        // page fault handler has to take turnstile-backed locks. The page
-        // fault will be serviced when the caller tries again to claim the lock.
-        // Also we're at an elevated IPL holding a spinlock so that's another
-        // reason.
+        // Call Mm directly to try to satisfy this page fault.
+        // An upcall from Ke to Mm is technically a layering violation but
+        // there's no other decent way to accomplish this.
+
+@SomethingChanged
 
         KepReleaseChain ( chain, ipl )
 
         IF aborted THEN
-            // We were aborted because we faulted on the lock word.
-            // Call Mm directly to try to satisfy this page fault.
-            // An upcall from Ke to Mm is technically a layering violation but
-            // there's no other decent way to accomplish this.
-
             MmuWriteFaultOnLockWord ( lock )
         END
 
         LEAVE
+    END
+
+    IF current & KEP_LOCK_WAITERS == 0 THEN
+        // The WAITERS bit wasn't set yet, so we need to atomically set it
+        // while under the chain lock. This will indicate to the owner that it
+        // needs to do extra processing when it releases the lock.
+
+        IF KeCompareSwapPtrAbortOnFault (
+            &lock^.Ptr, // ptr
+            current | KEP_LOCK_WAITERS, // newvalue
+            current, // expectedvalue
+            OUT aborted, // aborted
+        ) != current THEN
+
+            GOTO SomethingChanged
+        END
+    END
+
+    IF current & KEP_LOCK_WRITE_LOCKED THEN
+        owner = CAST current & KEP_LOCK_BITS TO ^KeuThread
+
+#IF BLD_MP
+        IF owner^.Status == KE_THREAD_RUNNING THEN
+            // The owner exists and is currently running on another processor.
+            // Spin for a while to see if we can get the lock without blocking.
+
+            ownerprb := owner^.CurrentPrb
+
+            KepReleaseChain ( chain, ipl )
+
+            i := KEP_SPIN_CYCLES
+
+            WHILE i AND
+                VOLATILE ownerprb^.CurrentThread == owner DO
+
+                IF VOLATILE lock^.Ptr != current THEN
+                    // It was freed!
+
+                    RtlPrint ( "F" )
+
+                    LEAVE
+                END
+
+                KeSpinPause ()
+
+                i -= 1
+            END
+
+            IF NOT i THEN
+                RtlPrint ( "S" )
+            ELSE
+                RtlPrint ( "R" )
+            END
+
+            ipl = KepAcquireChain ( chain )
+
+            // No longer running or we hit the maximum number of spins.
+            // Check to see whether the lock word changed and go block if not.
+
+            IF KeReadPtrAbortOnFault (
+                &lock^.Ptr, // ptr
+                OUT aborted, // aborted
+            ) != current OR aborted THEN
+
+                GOTO SomethingChanged
+            END
+        END
+
+        RtlPrint ( "G" )
+#END
     END
 
     // Scan the chain for the relevant turnstile.
@@ -526,69 +576,21 @@ FN KepBlockOnLock (
         END
     END
 
-    IF owner THEN
-        // At this point we know exactly who owns this lock and we know they
-        // haven't fully left the lock yet, which means its safe to apply
-        // priority inheritance to them since they definitely exist and will
-        // continue to do so until we release the chain lock and their thread
-        // lock.
+    IF NOT owner THEN
+        // No owner so don't do priority inheritance.
 
-#IF BLD_MP
-        IF owner^.Status == KE_THREAD_RUNNING THEN
-            // The owner exists and is currently running on another processor.
-            // Spin for a while to see if we can get the lock without blocking.
-
-            ownerprb := owner^.CurrentPrb
-
-            KepReleaseChain ( chain, KEP_IPL_APC )
-
-            i := KEP_SPIN_CYCLES
-
-            WHILE i AND
-                VOLATILE ownerprb^.CurrentThread == owner DO
-
-                IF VOLATILE turnstile^.Event.Header.SignalCount THEN
-                    // It was freed!
-
-                    GOTO UnreferenceAndLeave
-                END
-
-                KeSpinPause ()
-
-                i -= 1
-            END
-
-            KepAcquireChain ( chain )
-
-            // No longer running or we hit the maximum number of spins.
-            // Go block.
-
-            IF turnstile^.Event.Header.SignalCount THEN
-                // Owner no longer valid.
-
-                GOTO UnreferenceAndLeaveChainHeld
-            END
-        END
-#END
-
-        // We're really going to wait, so do priority boosting.
-        // This function is called with the chain lock held. It returns at
-        // KEP_IPL_APC with all locks released.
-
-        IF KepBoostPriority (
-            thread, // thread
-            owner, // owner
-            chain, // chain
-            turnstile, // turnstile
-        ) THEN
-
-            // Failed to try-acquire a spinlock. Unwind everything and retry.
-
-            GOTO UnreferenceAndLeave
-        END
-    
-    ELSE
         KepReleaseChain ( chain, KEP_IPL_APC )
+
+    ELSEIF KepBoostPriority (
+        thread, // thread
+        owner, // owner
+        chain, // chain
+        turnstile, // turnstile
+    ) THEN
+
+        // Failed to try-acquire a spinlock. Unwind everything and retry.
+
+        GOTO UnreferenceAndLeave
     END
 
     // Wait on the turnstile event.
