@@ -742,6 +742,14 @@ FN ExpFreeToArena (
     KeAssert ( tag^.Type == EXP_TAG_ALLOCATED )
     KeAssert ( tag^.Address == address )
 
+    // Remove the tag.
+
+    arena^.TagCallbacks.RemoveTag (
+        arena^.TagCallbacks.Context, // context
+        address, // address
+        tag, // tag
+    )
+
     // Check left. Checks can be elided because all spans are preceded and
     // succeeded by EXP_TAG_SPAN tags.
 
