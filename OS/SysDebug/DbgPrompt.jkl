@@ -864,6 +864,152 @@ FN (DbgCommandF) DbgCommandNode ()
     RtlPrint ( "System process: %p\n", node^.SystemProcess )
 END
 
+#IF BLD_LOCKDEP
+
+FN DbgLockIsImmediateChild (
+    IN parent : ULONG,
+    IN child : ULONG,
+    IN classcount : ULONG,
+) : UWORD
+
+    parentmx := &KepLockMatrix[parent]
+
+    IF NOT KepLockIsReachable ( child, parentmx ) THEN
+        RETURN FALSE
+    END
+
+    middle := 0
+
+    WHILE middle != classcount DO
+        middlemx := &KepLockMatrix[middle]
+
+        IF middle != parent AND middle != child AND
+            KepLockIsReachable ( middle, parentmx ) AND
+            KepLockIsReachable ( child, middlemx ) THEN
+
+            RETURN FALSE
+        END
+
+        middle += 1
+    END
+
+    RETURN TRUE
+END
+
+FN DbgDumpLockTree (
+    IN classindex : ULONG,
+    IN classcount : ULONG,
+    IN depth : ULONG,
+    IN visited : ^UBYTE,
+) : UWORD
+
+    IF NOT DbgPaginate () THEN
+        RETURN FALSE
+    END
+
+    i := 0
+
+    WHILE i != depth DO
+        RtlPrint ( "  " )
+        i += 1
+    END
+
+
+    class := &KepLockClasses[classindex]
+
+    IF visited[classindex] THEN
+        RtlPrint ( "+-- %s [shared]\n", class^.Name )
+        RETURN TRUE
+    END
+
+    IF depth == 0 THEN
+        RtlPrint ( "- %s\n", class^.Name )
+    ELSE
+        RtlPrint ( " +-- %s\n", class^.Name )
+    END
+
+
+    visited[classindex] = TRUE
+
+    child := 0
+
+    WHILE child != classcount DO
+        IF child != classindex AND
+            DbgLockIsImmediateChild (
+                classindex,
+                child,
+                classcount,
+            ) THEN
+
+            IF NOT DbgDumpLockTree (
+                child,
+                classcount,
+                depth + 1,
+                visited,
+            ) THEN
+
+                RETURN FALSE
+            END
+        END
+
+        child += 1
+    END
+
+    RETURN TRUE
+END
+
+FN (DbgCommandF) DbgCommandLocks ()
+    classcount := KepActiveLockClasses
+
+    RtlPrint (
+        "Lock hierarchy: %u classes\n",
+        classcount,
+    )
+
+    visited : UBYTE[KEP_LOCKDEP_NUM_CLASSES]
+    i := 0
+
+    WHILE i != KEP_LOCKDEP_NUM_CLASSES DO
+        visited[i] = FALSE
+        i += 1
+    END
+
+    DbgResetPagination ()
+    classindex := 0
+
+    WHILE classindex != classcount DO
+        root := TRUE
+        parent := 0
+
+        WHILE parent != classcount DO
+            IF parent != classindex AND
+                KepLockIsReachable ( classindex, &KepLockMatrix[parent] ) THEN
+
+                root = FALSE
+                BREAK
+            END
+
+            parent += 1
+        END
+
+        IF root AND
+            NOT DbgDumpLockTree (
+                classindex,
+                classcount,
+                0,
+                &visited[0],
+            ) THEN
+
+            LEAVE
+        END
+
+        classindex += 1
+    END
+END
+
+#END
+
+
 #SECTION "text"
 DbgCommandTable : DbgCommand[] = {
     {
@@ -948,6 +1094,15 @@ DbgCommandTable : DbgCommand[] = {
         [Function] = &DbgCommandNode,
         [Help] = "Dump information about a node.",
     },
+
+#IF BLD_LOCKDEP
+    {
+        [Name] = "locks",
+        [Function] = &DbgCommandLocks,
+        [Help] = "Dump lockdep information.",
+    },
+#END
+
 
     // Sentinel.
 

@@ -172,11 +172,12 @@ EXTERN KepMaximumBalanceIterations : ULONG
 
 STRUCT KepHeldLock
     Class : ^VOID,
+    Lock  : ^VOID,
     File  : ^UBYTE,
     Line  : ULONG,
 END
 
-#DEFINE KEP_MAX_HELD_LOCKS 10
+#DEFINE KEP_MAX_HELD_LOCKS 5
 
 #END
 
@@ -747,54 +748,85 @@ EXTERN FN _KepAcquireSpinlockInPrb (
 
 
 #IF BLD_LOCKDEP
-    EXTERN FN KepInitializeLockDep ()
 
-    EXTERN FN KepCheckSpinLock (
-           IN class: ^KepLockClass,
-           IN file : ^UBYTE,
-           IN line : ULONG,
-    )
+EXTERN FN KepInitializeLockDep ()
 
-    EXTERN FN KepAcquiredSpinLock (
-           IN class: ^KepLockClass,
-           IN file : ^UBYTE,
-           IN line : ULONG,
-    )
+EXTERN FN KepCheckSpinLock (
+    IN class: ^KepLockClass,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
 
-    EXTERN FN KepReleasedSpinLock ()
+EXTERN FN KepReleasedSpinlock (
+    IN spinlock : ^KepSpinlock,
+)
 
-    EXTERN FN KepTryAcquireSpinlock (
-           IN spinlock : ^KepSpinlock,
-    ) : UWORD
+EXTERN FN KepAcquiredSpinlock (
+    IN spinlock : ^KepSpinlock,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
 
-    EXTERN FN KepAcquireSpinlock (
-           IN spinlock : ^KepSpinlock,
-    )
+EXTERN FN KepTryAcquireSpinlock (
+    IN spinlock : ^KepSpinlock,
+) : UWORD
 
-    EXTERN FN KepAcquireSpinlockRaise (
-           IN spinlock : ^KepSpinlock,
-    ) : UWORD
+EXTERN FN KepAcquireSpinlock (
+    IN spinlock : ^KepSpinlock,
+)
 
-    EXTERN FN KepAcquireSpinlockInPrb (
-           IN offset : UWORD,
-    ) : UWORD
+EXTERN FN KepAcquireSpinlockRaise (
+    IN spinlock : ^KepSpinlock,
+) : UWORD
+
+EXTERN FN KepAcquireSpinlockInPrb (
+    IN offset : UWORD,
+) : UWORD
+
+EXTERN FN KepLockIsReachable (
+    IN class : ULONG,
+    IN from : ^KepLockRelation,
+) : UBYTE
+
+
+#DEFINE KEP_LOCKDEP_NUM_CLASSES 128
+#DEFINE KEP_LOCKDEP_BITMAP_MASKS [(KEP_LOCKDEP_NUM_CLASSES / SIZEOF UWORD)]
+
+STRUCT KepLockRelation
+    // Bitmap[L] is set iff L is reachable from this lock.
+    Bitmap : UWORD[KEP_LOCKDEP_BITMAP_MASKS]
+END
+
+STRUCT KepLockClass
+    Name : ^UBYTE,
+    Index : ULONG,
+    Entry : RtlAvlNode,
+END
+
+
+EXTERN KepLockMatrix : KepLockRelation[KEP_LOCKDEP_NUM_CLASSES]
+EXTERN KepActiveLockClasses : ULONG
+EXTERN KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
+
 
 #ELSE
-     #MACRO KepAcquireSpinlock ( lock ) [
-            _KepAcquireSpinlock ( lock )
-     ]
 
-     #MACRO KepTryAcquireSpinlock ( lock ) [
-           _KepTryAcquireSpinlock ( lock )
-     ]
+#MACRO KepAcquireSpinlock ( lock ) [
+    _KepAcquireSpinlock ( lock )
+]
 
-     #MACRO KepAcquireSpinlockRaise ( lock ) [
-            _KepAcquireSpinlockRaise ( lock )
-     ]
+#MACRO KepTryAcquireSpinlock ( lock ) [
+    _KepTryAcquireSpinlock ( lock )
+]
 
-     #MACRO KepAcquireSpinlockInPrb ( lock ) [
-            _KepAcquireSpinlockInPrb ( lock )
-     ]
+#MACRO KepAcquireSpinlockRaise ( lock ) [
+    _KepAcquireSpinlockRaise ( lock )
+]
+
+#MACRO KepAcquireSpinlockInPrb ( lock ) [
+    _KepAcquireSpinlockInPrb ( lock )
+]
+
 #END
 
 #MACRO KepAcquireObject ( object ) [
@@ -1051,7 +1083,6 @@ EXTERN FN KepStealWork ()
 ]
 
 EXTERN KepIndexFirstBitClear : UBYTE[256]
-
 EXTERN KepIndexFirstBitSet : UBYTE[256]
 
 #DEFINE KEP_THREAD_PENDING_KAPC 1

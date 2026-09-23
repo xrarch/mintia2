@@ -53,7 +53,7 @@ EXTERN FN KepLockDepInitializeSpinlock (
     BARRIER
 
 #IF BLD_LOCKDEP
-    KepReleasedSpinLock ()
+    KepReleasedSpinlock ( spinlock )
 #END
 ]
 
@@ -70,8 +70,8 @@ EXTERN FN KepLockDepInitializeSpinlock (
     NOTHING VOLATILE (spinlock1)^.Word = 0
     NOTHING VOLATILE (spinlock2)^.Word = 0
 
-    KepReleasedSpinLock ()
-    KepReleasedSpinLock ()
+    KepReleasedSpinlock ( spinlock1 )
+    KepReleasedSpinlock ( spinlock2 )
 #ELSE
     NOTHING VOLATILE (spinlock1)^ = 0
     NOTHING VOLATILE (spinlock2)^ = 0

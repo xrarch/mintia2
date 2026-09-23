@@ -8,8 +8,6 @@
 EXPORT KeuLoaderBlock : BlInfoRecord
 
 
-EXTERN FN KepLockDepTest ()
-
 FNPTR DbgMainF ()
 
 #IF BLD_CHK
@@ -569,6 +567,13 @@ EXPORT FN KeMain (
     listhead^.Next^.Prev = listhead
     listhead^.Prev^.Next = listhead
 
+#IF BLD_LOCKDEP
+    // Initialize this as soon as possible so that all lock classes get
+    // registered.
+
+    KepInitializeLockDep ()
+#END
+
 
     // Initialize the NUMA nodes.
 
@@ -586,9 +591,6 @@ EXPORT FN KeMain (
 
     RtlPrint ( "!! MINTIA2 BOOT CONSOLE !!\n" )
 
-#IF BLD_LOCKDEP
-    KepInitializeLockDep ()
-#END
 
 
     // Perform platform-specific initialization for the boot processor.
