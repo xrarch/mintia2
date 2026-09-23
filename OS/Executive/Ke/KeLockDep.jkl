@@ -1,0 +1,555 @@
+//
+// Lock dependency verifier.
+//
+
+#INCLUDE "Kep.hjk"
+
+// The maximum number of lock classes allowed.
+#DEFINE NUM_CLASSES 128
+#DEFINE BITMAP_MASKS [(NUM_CLASSES / SIZEOF UWORD)]
+#DEFINE NUM_BUCKETS 32
+
+#IF BLD_LOCKDEP
+
+STRUCT LockRelation
+    // Bitmap[L] is set iff L is reachable from this lock.
+    Bitmap : UWORD[BITMAP_MASKS]
+END
+
+STRUCT KepLockClass
+    Name : ^UBYTE,
+    Index : ULONG,
+    Entry : RtlAvlNode,
+END
+
+
+Matrix : LockRelation[NUM_CLASSES]
+ActiveClasses : ULONG
+MatrixLock : KepSpinlock
+Classes : KepLockClass[NUM_CLASSES]
+ClassesBuckets: RtlAvlNode[NUM_BUCKETS]
+Started : UWORD = FALSE
+
+
+#MACRO KepAcquireMatrix ( ) [
+    KepAcquireSpinlockRaise ( &MatrixLock )
+]
+
+#MACRO KepReleaseMatrix ( ipl ) [
+    KepReleaseSpinlockLower ( &MatrixLock, ipl )
+]
+
+#MACRO KepAcquireMatrixElevated ( ) [
+    KepAcquireSpinlock ( &MatrixLock )
+]
+
+#MACRO KepReleaseMatrixElevated ( ) [
+    KepReleaseSpinlock ( &MatrixLock )
+]
+
+
+FN KepHash (
+    IN str : ^UBYTE,
+) : UWORD
+
+    // Simple hash for a string.
+
+    hash := 0
+
+    WHILE str^ DO
+        hash += str^
+        hash += hash << 10
+        hash $= hash >> 6
+
+        str += 1
+    END
+
+    hash += hash << 3
+    hash $= hash >> 11
+    hash += hash << 15
+
+    RETURN hash
+END
+
+#SECTION "PAGEtext"
+FN (RtlAvlLessThanF) KepCompareNameNodes (
+    IN a : ^RtlAvlNode,
+    IN b : ^RtlAvlNode,
+) : UWORD
+
+    // Return whether A < B, lexicographically.
+
+    RETURN CAST RtlCompareString (
+        (CONTAINEROF a TO KepLockClass.Entry )^.Name,  // str1
+        (CONTAINEROF b TO KepLockClass.Entry )^.Name, // str2
+    ) TO WORD < 0
+END
+
+
+EXPORT FN KepInitializeLockDep ()
+      i := 0
+
+
+      KepInitializeSpinlock (&MatrixLock, NULLPTR )
+
+      WHILE i != NUM_CLASSES DO
+            entry := &Classes[i]
+            entry^.Index = i
+            i += 1
+      END
+
+      i = 0
+
+      WHILE i != NUM_BUCKETS DO
+            RtlInitializeAvl ( &ClassesBuckets[i] )
+            i += 1
+      END
+
+      Started = TRUE
+END
+
+FN KepFindLockClass (
+   IN name : ^UBYTE
+) : ^KepLockClass
+
+    // Find a lock class by its name or create it if it doesn't exist.
+
+    IF name == NULLPTR THEN
+       // This lock shouldn't be checked.
+       
+       RETURN NULLPTR
+    END
+
+    // Hash the name.
+
+    hash := KepHash ( name )
+
+    // Get the hash bucket.
+
+    bucket := &ClassesBuckets[hash & (NUM_BUCKETS - 1)]
+
+
+    // Lock the matrix.
+
+    ipl := KepAcquireMatrix () 
+
+    // Look up the name in the bucket, which is an AVL tree keyed by string and
+    // ordered lexicographically.
+
+    avlnode := bucket^.Right
+
+    WHILE TRUE DO
+        IF NOT avlnode THEN
+            // Didn't find it, we'll need to create it.
+
+            BREAK
+        END
+
+        checknode := CONTAINEROF avlnode TO KepLockClass.Entry
+
+        res := CAST RtlCompareString (
+            name, // str1
+            checknode^.Name, // str2
+        ) TO WORD
+
+        IF res == 0 THEN
+            // Found it! Unlock the matrix and return the node.
+
+            KepReleaseMatrix ( ipl ) 
+
+            RETURN checknode
+        END
+
+        IF res < 0 THEN
+            avlnode = avlnode^.Left
+        ELSE
+            avlnode = avlnode^.Right
+        END
+    END
+
+    KeAssert ( ActiveClasses < NUM_CLASSES )
+
+    // Get a new spot for our class.
+    
+    class := &Classes[ActiveClasses]
+    class^.Name = name
+
+    // Insert it so that we can find it by name.
+    
+    RtlInsertAvl (
+        bucket, // root
+        &class^.Entry, // node
+        &KepCompareNameNodes, // comparisonfunc
+    )
+
+    ActiveClasses += 1
+
+
+    KepReleaseMatrix ( ipl ) 
+
+    RETURN class
+END
+
+
+
+FN KepLockCloneSet (
+   IN to : ^LockRelation,
+   IN from: ^LockRelation,
+)
+    // Clone one set into another.
+    
+    i := 0
+
+    WHILE i != BITMAP_MASKS DO
+        to^.Bitmap[i] = from^.Bitmap[i]
+        i += 1
+    END
+END
+
+FN KepLockIsReachable (
+    IN class : ULONG,
+    IN from : ^LockRelation,
+) : UBYTE
+
+    // Return whether the given lock class is reachable.
+    
+    wordidx := class / SIZEOF UWORD
+    bit := class % (SIZEOF UWORD * 8)
+    mask := 1 << bit
+    
+    RETURN from^.Bitmap[wordidx] & mask != 0
+END
+
+
+FN KepLockSetReachable (
+    IN lock : ^LockRelation,
+    IN index : UBYTE,
+)
+
+    // Mark the given lock class as reachable.
+
+    wordidx := index / SIZEOF UWORD
+    bit := index % (SIZEOF UWORD * 8)
+    mask := 1 << bit
+
+    lock^.Bitmap[wordidx] |= mask
+END
+
+FN KepLockMergeSets (
+    IN to : ^LockRelation,
+    IN from : ^LockRelation,
+)
+
+    // Merge `from`'s reachability set into `to`.
+
+    i := 0
+
+    WHILE i != BITMAP_MASKS DO
+        to^.Bitmap[i] |= from^.Bitmap[i]
+        i += 1
+    END
+
+END
+
+FN KepAddEdge (
+   IN parent : ^KepLockClass,
+   IN child : ^KepLockClass,
+) : UWORD
+
+  // Add an edge between parent -> child.
+  // Return FALSE if a cycle was found.
+
+  parentidx := parent^.Index
+  childidx := child^.Index
+
+  parentmx := &Matrix[parentidx]
+  childmx := &Matrix[childidx]
+
+  IF parentidx == childidx THEN
+     // Both are of the same class, trust that whatever the user is doing is
+     // right.
+
+     RETURN TRUE
+  END
+
+  IF KepLockIsReachable ( parentidx, childmx ) THEN
+       // Parent is reachable from child, there is a cycle.
+
+       RETURN FALSE
+      
+  ELSEIF KepLockIsReachable ( childidx, parentmx ) THEN
+       // This relationship is already known, don't bother.
+
+       RETURN TRUE
+   END
+
+   // Add the child and its own children to the parent's reachability set.
+   // While we're here, also add this set to the parent's ancestors.
+   newmask : LockRelation
+
+   KepLockCloneSet (
+       &newmask, // to
+       childmx, // from
+   )
+   
+   // Mark the child as reachable.
+   KepLockSetReachable (
+       &newmask, // lock
+       childidx, // index
+   )
+
+   i := 0
+
+   WHILE i != ActiveClasses DO
+       mxentry := &Matrix[i]
+
+       // Only keep ancestors.
+
+       IF NOT KepLockIsReachable (parentidx, mxentry) AND
+          i != parentidx THEN
+          i += 1
+          CONTINUE
+       END
+
+       // Add this mask to the ancestors.
+       
+       KepLockMergeSets (
+           mxentry, // to
+           &newmask, // from
+       )
+
+       i += 1
+   END
+
+   RETURN TRUE
+END
+
+
+FN KepCheckSpinlock (
+    IN class: ^KepLockClass,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+    IF Started == FALSE THEN
+       LEAVE
+    END
+    
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+    prb := KEP_CURRENT_PRB
+    num := prb^.NumHeldLocks
+
+    IF num == 0 OR class == NULLPTR THEN
+       // This is the first lock to get taken, or this is a lock we
+       // shouldn't check.
+
+       KepLowerIpl ( ipl )
+       LEAVE
+    END
+
+
+    fast := TRUE
+    classidx := class^.Index
+
+    // Try checking the matrix without taking any locks.
+
+    i := 0
+
+
+    WHILE i != num DO
+
+        heldlock := &prb^.HeldLocks[i]
+        kepclass := CAST heldlock^.Class TO ^KepLockClass
+
+        IF kepclass == NULLPTR THEN
+            GOTO Next
+        END
+        
+        heldidx := kepclass^.Index
+        heldmx := &Matrix[heldidx]
+
+        IF NOT KepLockIsReachable( classidx, heldmx ) THEN
+           // Check again under the lock.
+
+           fast = FALSE
+           BREAK
+        END
+
+@Next
+        i += 1
+    END
+
+    IF fast THEN
+       KepLowerIpl ( ipl )
+       LEAVE
+    END
+
+    // Take the graph lock and check again.
+    // Also add edges if needed.
+
+    KepAcquireMatrixElevated ()
+
+    i = 0
+
+    WHILE i != num DO
+        heldlock := &prb^.HeldLocks[i]
+        kepclass := CAST heldlock^.Class TO ^KepLockClass
+
+        IF kepclass == NULLPTR THEN
+            GOTO Next2
+        END
+
+
+        good := KepAddEdge (
+            heldlock^.Class, // parent
+            class, // child
+        )
+
+        IF NOT good THEN
+           KeCrash (
+               "Lock cycle between %s and %s detected at %s:%d\n",
+               kepclass^.Name,
+               class^.Name,
+               file,
+               line,
+           )
+        END
+
+@Next2
+        i += 1
+    END
+
+
+    KepReleaseMatrixElevated ()
+
+END
+
+
+EXPORT FN KepAcquiredSpinLock (
+    IN class: ^KepLockClass,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+ IF Started == FALSE THEN
+       LEAVE
+ END
+
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+    prb := KEP_CURRENT_PRB
+    num := prb^.NumHeldLocks
+
+    prb^.HeldLocks[num].Class = class
+    prb^.HeldLocks[num].File = file
+    prb^.HeldLocks[num].Line = line
+
+    prb^.NumHeldLocks = num + 1
+
+    KepLowerIpl ( ipl )
+END
+
+EXPORT FN KepReleasedSpinLock ()
+ IF Started == FALSE THEN
+       LEAVE
+ END
+
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+    prb := KEP_CURRENT_PRB
+
+    KeAssert ( prb^.NumHeldLocks > 0 )
+    
+    prb^.NumHeldLocks -= 1
+    KepLowerIpl ( ipl )
+END
+
+
+EXPORT FN KepTryAcquireSpinlock (
+    IN spinlock : ^KepSpinlock,
+) : UWORD
+
+  ret := _KepTryAcquireSpinlock (spinlock)
+
+  IF ret == TRUE THEN
+     KepAcquiredSpinLock (
+         CAST spinlock^.Class TO ^KepLockClass, // class
+         "todo", // file
+         "todo", // line
+     )
+  END
+
+  RETURN ret
+END
+
+
+EXPORT FN KepLockDepInitializeSpinlock (
+    IN spinlock : ^KepSpinlock,
+    IN name : ^UBYTE
+)
+    IF Started == FALSE THEN
+       spinlock^.Class = NULLPTR
+       LEAVE
+    END
+
+    class := KepFindLockClass ( name )
+      
+    spinlock^.Class = CAST class TO ^VOID
+END
+
+EXPORT FN KepAcquireSpinlock (
+    IN spinlock : ^KepSpinlock,
+)
+  class := CAST spinlock^.Class TO ^KepLockClass
+
+  KepCheckSpinlock (class, "todo", "todo")
+
+  _KepAcquireSpinlock (spinlock)
+
+  KepAcquiredSpinLock (
+      class, // class
+      "todo", // file
+      "todo", // line
+  )
+END
+
+
+EXPORT FN KepAcquireSpinlockRaise (
+    IN spinlock : ^KepSpinlock,
+) : UWORD
+
+  class := CAST spinlock^.Class TO ^KepLockClass
+    
+  KepCheckSpinlock (class, "todo", "todo")
+
+  ret := _KepAcquireSpinlockRaise (spinlock)
+
+  KepAcquiredSpinLock (
+      class, // class
+      "todo", // file
+      "todo", // line
+  )
+
+  RETURN ret 
+END
+
+EXPORT FN KepAcquireSpinlockInPrb (
+    IN offset : UWORD,
+) : UWORD
+      spinlock := CAST (KEP_CURRENT_PRB_LOCAL + offset) TO ^KepSpinlock
+      class := CAST spinlock^.Class TO ^KepLockClass
+
+      KepCheckSpinlock (
+          class,
+          "todo",
+          0,
+      )
+
+      oldipl := _KepAcquireSpinlockInPrb ( offset )
+
+      KepAcquiredSpinLock (
+          class,
+          "todo",
+          0,
+      )
+
+      RETURN oldipl
+END
+
+#END

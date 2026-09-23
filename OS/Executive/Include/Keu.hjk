@@ -454,9 +454,15 @@ EXTERN FN KeuReaperBarrier (
     (&KeCurrentThread()^.Continuation)
 ]
 
+
 #MACRO KeuInitializeTurnstile ( turnstile ) [
 #IF BLD_MP
+#IF BLD_LOCKDEP
+    NOTHING (turnstile)^.Spinlock.Word = 0
+    KepLockDepInitializeSpinlock (&(turnstile)^.Spinlock, "turnstile")
+#ELSE
     NOTHING (turnstile)^.Spinlock = KEP_INITIAL_SPINLOCK
+#END
 #END
     NOTHING (turnstile)^.Free = NULLPTR
     NOTHING (turnstile)^.WaiterHeapRoot = NULLPTR

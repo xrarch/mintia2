@@ -7,6 +7,9 @@
 
 EXPORT KeuLoaderBlock : BlInfoRecord
 
+
+EXTERN FN KepLockDepTest ()
+
 FNPTR DbgMainF ()
 
 #IF BLD_CHK
@@ -137,9 +140,9 @@ FN KepInitializePrb (
     RtlInitializeList ( &prb^.DpcListHead )
 
 #IF BLD_MP
-    KepInitializeSpinlock ( &prb^.DpcQueueLock )
-    KepInitializeSpinlock ( &prb^.ReadyQueueLock )
-    KepInitializeSpinlock ( &prb^.TimerTreeLock )
+    KepInitializeSpinlock ( &prb^.DpcQueueLock, "DPC" )
+    KepInitializeSpinlock ( &prb^.ReadyQueueLock, "ReadyQueue" )
+    KepInitializeSpinlock ( &prb^.TimerTreeLock, "TimerTree" )
 
     prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
     prb^.IdleDeferredIpiEvents = 0
@@ -368,7 +371,7 @@ FN KepInitializeNode (
 #IF BLD_MP
     // Initialize the stack cache spinlock.
 
-    KepInitializeSpinlock ( &kepnode^.StackCacheLock )
+    KepInitializeSpinlock ( &kepnode^.StackCacheLock, "StackCache" )
 
     // Initialize the work balancing DPC.
 
@@ -566,6 +569,7 @@ EXPORT FN KeMain (
     listhead^.Next^.Prev = listhead
     listhead^.Prev^.Next = listhead
 
+
     // Initialize the NUMA nodes.
 
     KepInitializeNodes ()
@@ -581,6 +585,11 @@ EXPORT FN KeMain (
     // Now that we have a console, announce ourselves.
 
     RtlPrint ( "!! MINTIA2 BOOT CONSOLE !!\n" )
+
+#IF BLD_LOCKDEP
+    KepInitializeLockDep ()
+#END
+
 
     // Perform platform-specific initialization for the boot processor.
 

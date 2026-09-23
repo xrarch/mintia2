@@ -12,9 +12,24 @@
 
 #DEFINE KEP_EB_VIRTUAL_ADDRESS 0xFFFFE000
 
-#MACRO KepInitializeSpinlock ( spinlock ) [
+#IF BLD_LOCKDEP
+
+EXTERN FN KepLockDepInitializeSpinlock (
+    IN spinlock : ^KepSpinlock,
+    IN name : ^UBYTE
+)
+
+#MACRO KepInitializeSpinlock ( spinlock, name ) [
+    NOTHING (spinlock)^.Word = 0
+    KepLockDepInitializeSpinlock (spinlock, name)
+]
+
+#ELSE
+#MACRO KepInitializeSpinlock ( spinlock, name ) [
     NOTHING (spinlock)^ = 0
 ]
+
+#END
 
 #IF BLD_MP
 
@@ -30,9 +45,16 @@
     BARRIER
 
     // Set spinlock un-owned.
-    
+#IF BLD_LOCKDEP
+    NOTHING VOLATILE (spinlock)^.Word = 0
+#ELSE
     NOTHING VOLATILE (spinlock)^ = 0
+#END
     BARRIER
+
+#IF BLD_LOCKDEP
+    KepReleasedSpinLock ()
+#END
 ]
 
 #MACRO KepReleaseTwoSpinlocks ( spinlock1, spinlock2 ) [
@@ -44,9 +66,17 @@
     BARRIER
 
     // Set spinlock un-owned.
-    
+#IF BLD_LOCKDEP
+    NOTHING VOLATILE (spinlock1)^.Word = 0
+    NOTHING VOLATILE (spinlock2)^.Word = 0
+
+    KepReleasedSpinLock ()
+    KepReleasedSpinLock ()
+#ELSE
     NOTHING VOLATILE (spinlock1)^ = 0
     NOTHING VOLATILE (spinlock2)^ = 0
+#END
+
     BARRIER
 ]
 

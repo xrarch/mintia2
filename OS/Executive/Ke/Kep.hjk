@@ -168,6 +168,18 @@ EXTERN KepMaximumBalanceIterations : ULONG
 
 #END
 
+#IF BLD_LOCKDEP
+
+STRUCT KepHeldLock
+    Class : ^VOID,
+    File  : ^UBYTE,
+    Line  : ULONG,
+END
+
+#DEFINE KEP_MAX_HELD_LOCKS 10
+
+#END
+
 // The per-processor block (Prb) is an architectural page size, but is at
 // minimum 4KB. It contains all per-processor information.
 //
@@ -355,6 +367,12 @@ KE_CACHE_LINE_END
     // Threads on these lists are called "timeshared threads".
 
     CalendarListHeads : RtlListEntry[KEP_TIMESHARED_QUEUES],
+
+
+#IF BLD_LOCKDEP
+    HeldLocks : KepHeldLock[KEP_MAX_HELD_LOCKS],
+    NumHeldLocks : UBYTE
+#END
 END
 
 #DEFINE KEP_DISPATCH_EVENT_NOTIF 1
@@ -707,11 +725,11 @@ EXTERN FN KepExecuteOnEveryoneElse (
     END
 ]
 
-EXTERN FN KepTryAcquireSpinlock (
+EXTERN FN _KepTryAcquireSpinlock (
     IN spinlock : ^KepSpinlock,
 ) : UWORD
 
-EXTERN FN KepAcquireSpinlock (
+EXTERN FN _KepAcquireSpinlock (
     IN spinlock : ^KepSpinlock,
 )
 
@@ -719,13 +737,65 @@ EXTERN FN KepForceReleaseSpinlock (
     IN spinlock : ^KepSpinlock,
 )
 
-EXTERN FN KepAcquireSpinlockRaise (
+EXTERN FN _KepAcquireSpinlockRaise (
     IN spinlock : ^KepSpinlock,
 ) : UWORD
 
-EXTERN FN KepAcquireSpinlockInPrb (
+EXTERN FN _KepAcquireSpinlockInPrb (
     IN offset : UWORD,
 ) : UWORD
+
+
+#IF BLD_LOCKDEP
+    EXTERN FN KepInitializeLockDep ()
+
+    EXTERN FN KepCheckSpinLock (
+           IN class: ^KepLockClass,
+           IN file : ^UBYTE,
+           IN line : ULONG,
+    )
+
+    EXTERN FN KepAcquiredSpinLock (
+           IN class: ^KepLockClass,
+           IN file : ^UBYTE,
+           IN line : ULONG,
+    )
+
+    EXTERN FN KepReleasedSpinLock ()
+
+    EXTERN FN KepTryAcquireSpinlock (
+           IN spinlock : ^KepSpinlock,
+    ) : UWORD
+
+    EXTERN FN KepAcquireSpinlock (
+           IN spinlock : ^KepSpinlock,
+    )
+
+    EXTERN FN KepAcquireSpinlockRaise (
+           IN spinlock : ^KepSpinlock,
+    ) : UWORD
+
+    EXTERN FN KepAcquireSpinlockInPrb (
+           IN offset : UWORD,
+    ) : UWORD
+
+#ELSE
+     #MACRO KepAcquireSpinlock ( lock ) [
+            _KepAcquireSpinlock ( lock )
+     ]
+
+     #MACRO KepTryAcquireSpinlock ( lock ) [
+           _KepTryAcquireSpinlock ( lock )
+     ]
+
+     #MACRO KepAcquireSpinlockRaise ( lock ) [
+            _KepAcquireSpinlockRaise ( lock )
+     ]
+
+     #MACRO KepAcquireSpinlockInPrb ( lock ) [
+            _KepAcquireSpinlockInPrb ( lock )
+     ]
+#END
 
 #MACRO KepAcquireObject ( object ) [
     KepAcquireSpinlockRaise ( &(object)^.Spinlock )
@@ -975,7 +1045,7 @@ EXTERN FN KepStealWork ()
     NOTHING (hdr)^.Name = (name)
     NOTHING (hdr)^.WaiterCount = 0
 #IF BLD_MP
-    KepInitializeSpinlock ( &(hdr)^.Spinlock )
+    KepInitializeSpinlock ( &(hdr)^.Spinlock, name )
 #END
     NOTHING (hdr)^.Type = (type)
 ]
