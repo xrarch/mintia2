@@ -195,6 +195,7 @@ FN KepFindCreateLockClass (
     class = &KepLockClasses[KepActiveLockClasses]
     class^.Name = name
     class^.Spin = spin
+    class^.Contention = 0
 
     // Insert it so that we can find it by name.
 
@@ -618,11 +619,29 @@ EXPORT FN KepLockDepTryAcquireSpinlock (
             file, // file
             line, // line
         )
+
+    ELSE
+        class := CAST spinlock^.Class TO ^KepLockClass
+        KepLockDepRegisterContention ( class )
     END
 
     RETURN ret
 END
 
+
+EXPORT FN KepLockDepRegisterContention (
+    IN class : ^KepLockClass,
+)
+
+    // Register contention for a given lock class.
+
+    IF class == NULLPTR THEN
+        LEAVE
+    END
+
+    KeIncrementUlong ( &class^.Contention, 1 )
+
+END
 
 EXPORT FN KepLockDepAcquireSpinlock (
     IN spinlock : ^KepSpinlock,
@@ -641,8 +660,16 @@ EXPORT FN KepLockDepAcquireSpinlock (
         line // line
     )
 
-    KepAcquireSpinlockRaw ( spinlock )
+    ret := KepTryAcquireSpinlockRaw ( spinlock )
 
+    IF ret == TRUE THEN
+        GOTO End
+    END
+
+    KepLockDepRegisterContention ( class )
+
+    KepAcquireSpinlockRaw ( spinlock )
+@End
     KepAcquiredSpinlock (
         spinlock, // spinlock
         file, // file
@@ -668,15 +695,24 @@ EXPORT FN KepLockDepAcquireSpinlockRaise (
         line, // line
     )
 
-    ret := KepAcquireSpinlockRaiseRaw (spinlock)
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+    ret := KepTryAcquireSpinlockRaw ( spinlock )
 
+    IF ret == TRUE THEN
+        GOTO End
+    END
+
+
+    KepAcquireSpinlockRaiseRaw (spinlock)
+
+@End
     KepAcquiredSpinlock (
         spinlock, // spinlock
         file, // file
         line, // line
     )
 
-    RETURN ret
+    RETURN ipl
 END
 
 EXPORT FN KepLockDepAcquireSpinlockInPrb (

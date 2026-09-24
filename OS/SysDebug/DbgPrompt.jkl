@@ -1060,6 +1060,67 @@ FN (DbgCommandF) DbgCommandLocks ()
     END
 END
 
+FN (DbgCommandF) DbgCommandLockStat ()
+    classcount := KepActiveLockClasses
+
+    printed : UBYTE[KEP_LOCKDEP_NUM_CLASSES]
+    classindex := 0
+
+    WHILE classindex != KEP_LOCKDEP_NUM_CLASSES DO
+        printed[classindex] = FALSE
+        classindex += 1
+    END
+
+    RtlPrint ( "%-22s %-4s %s\n", "CLASS", "", "CONTENTION" )
+
+    DbgResetPagination ()
+    remaining := classcount
+
+    WHILE remaining DO
+        IF NOT DbgPaginate () THEN
+            LEAVE
+        END
+
+        best := classcount
+        classindex = 0
+
+        // Print locks with the highest contention first.
+
+        WHILE classindex != classcount DO
+            IF NOT printed[classindex] THEN
+                IF best == classcount THEN
+                    best = classindex
+
+                ELSEIF KepLockClasses[classindex].Contention >
+                    KepLockClasses[best].Contention THEN
+
+                    best = classindex
+                END
+            END
+
+            classindex += 1
+        END
+
+        class := &KepLockClasses[best]
+
+        marker := ""
+
+        IF class^.Spin THEN
+            marker = "(S)"
+        END
+
+        RtlPrint (
+            "%-22s %-4s %u\n",
+            class^.Name,
+            marker,
+            class^.Contention,
+        )
+
+        printed[best] = TRUE
+        remaining -= 1
+    END
+END
+
 FN (DbgCommandF) DbgCommandLock ()
     classname : UBYTE[32]
 
@@ -1205,6 +1266,11 @@ DbgCommandTable : DbgCommand[] = {
         [Name] = "lock",
         [Function] = &DbgCommandLock,
         [Help] = "Dump lockdep information about a given lock class.",
+    },
+    {
+        [Name] = "lockstat",
+        [Function] = &DbgCommandLockStat,
+        [Help] = "Dump statistics for all lock classes.",
     },
 #END
 
