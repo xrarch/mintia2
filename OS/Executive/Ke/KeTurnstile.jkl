@@ -924,7 +924,6 @@ FN KepAcquireLockExclusive (
 #IF BLD_LOCKDEP
     KepCheckLock (lock^.Class, "todo", 0)
     KepLockDepRegisterContention ( lock^.Class )
-
 #END
 
     WHILE TRUE DO
@@ -941,7 +940,6 @@ FN KepAcquireLockExclusive (
                 // Return the same oldipl we were passed.
                 // This simplifies the implementation of the fast path wrappers
                 // written in assembly language.
-
 
 #IF BLD_LOCKDEP
                 KepAcquiredLock (lock, "todo", 0)
@@ -1020,7 +1018,7 @@ FN KepReleaseLock (
             END
 
 #IF BLD_LOCKDEP
-    KepReleasedLock ( lock )
+            KepReleasedLock ( lock )
 #END
 
             LEAVE
@@ -1076,7 +1074,7 @@ FN KepReleaseLock (
 
 
 #IF BLD_LOCKDEP
-    KepReleasedLock ( lock )
+            KepReleasedLock ( lock )
 #END
 
             LEAVE

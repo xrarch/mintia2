@@ -13,27 +13,26 @@ EXPORT KepLockMatrix : KepLockRelation[KEP_LOCKDEP_NUM_CLASSES]
 EXPORT KepActiveLockClasses : ULONG
 EXPORT KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
 
-MatrixLock : KepSpinlock
-
-ClassesBuckets: RtlAvlNode[NUM_BUCKETS]
-Started : UWORD = FALSE
+KepMatrixLock : KepSpinlock
+KepClassesBuckets: RtlAvlNode[NUM_BUCKETS]
+KepLockDepStarted : UWORD = FALSE
 
 #IF BLD_MP
 
 #MACRO KepAcquireMatrix ( ) [
-    KepAcquireSpinlockRaise ( &MatrixLock )
+    KepAcquireSpinlockRaise ( &KepMatrixLock )
 ]
 
 #MACRO KepReleaseMatrix ( ipl ) [
-    KepReleaseSpinlockLower ( &MatrixLock, ipl )
+    KepReleaseSpinlockLower ( &KepMatrixLock, ipl )
 ]
 
 #MACRO KepAcquireMatrixElevated ( ) [
-    KepAcquireSpinlock ( &MatrixLock )
+    KepAcquireSpinlock ( &KepMatrixLock )
 ]
 
 #MACRO KepReleaseMatrixElevated ( ) [
-    KepReleaseSpinlock ( &MatrixLock )
+    KepReleaseSpinlock ( &KepMatrixLock )
 ]
 
 #ELSE
@@ -51,11 +50,7 @@ Started : UWORD = FALSE
 
 #MACRO KepReleaseMatrixElevated ( ) [
 ]
-
-
-
 #END
-
 
 FN KepHash (
     IN str : ^UBYTE,
@@ -80,7 +75,6 @@ FN KepHash (
     RETURN hash
 END
 
-#SECTION "PAGEtext"
 FN (RtlAvlLessThanF) KepCompareNameNodes (
     IN a : ^RtlAvlNode,
     IN b : ^RtlAvlNode,
@@ -94,7 +88,6 @@ FN (RtlAvlLessThanF) KepCompareNameNodes (
     ) TO WORD < 0
 END
 
-
 EXPORT FN KepInitializeLockDep ()
 
     // Initialize the lock verifier.
@@ -104,7 +97,7 @@ EXPORT FN KepInitializeLockDep ()
     i := 0
 
 #IF BLD_MP
-    KepInitializeSpinlock (&MatrixLock, NULLPTR )
+    KepInitializeSpinlock (&KepMatrixLock, NULLPTR )
 #END
 
     WHILE i != KEP_LOCKDEP_NUM_CLASSES DO
@@ -116,11 +109,11 @@ EXPORT FN KepInitializeLockDep ()
     i = 0
 
     WHILE i != NUM_BUCKETS DO
-        RtlInitializeAvl ( &ClassesBuckets[i] )
+        RtlInitializeAvl ( &KepClassesBuckets[i] )
         i += 1
     END
 
-    Started = TRUE
+    KepLockDepStarted = TRUE
 END
 
 EXPORT FN KepFindLockClass (
@@ -142,8 +135,7 @@ EXPORT FN KepFindLockClass (
 
     // Get the hash bucket.
 
-    bucket := &ClassesBuckets[hash & (NUM_BUCKETS - 1)]
-
+    bucket := &KepClassesBuckets[hash & (NUM_BUCKETS - 1)]
 
     // Look up the name in the bucket, which is an AVL tree keyed by string and
     // ordered lexicographically.
@@ -195,7 +187,6 @@ FN KepFindCreateLockClass (
         RETURN NULLPTR
     END
 
-
     // Lock the matrix.
 
     ipl := KepAcquireMatrix ()
@@ -222,7 +213,6 @@ FN KepFindCreateLockClass (
     class^.Contention = 0
     class^.Attempts = 0
 
-
     // Insert it so that we can find it by name.
 
     RtlInsertAvl (
@@ -232,14 +222,10 @@ FN KepFindCreateLockClass (
     )
 
     KepActiveLockClasses += 1
-
-
     KepReleaseMatrix ( ipl ) 
 
     RETURN class
 END
-
-
 
 FN KepLockCloneSet (
     IN to : ^KepLockRelation,
@@ -269,7 +255,6 @@ EXPORT FN KepLockIsReachable (
     RETURN from^.Bitmap[wordidx] & mask != 0
 END
 
-
 FN KepLockSetReachable (
     IN lock : ^KepLockRelation,
     IN index : UBYTE,
@@ -289,7 +274,7 @@ FN KepLockMergeSets (
     IN from : ^KepLockRelation,
 )
 
-    // Merge `from`'s reachability set into `to`.
+    // Merge from's reachability set into to.
 
     i := 0
 
@@ -315,6 +300,7 @@ FN KepAddEdge (
     childmx := &KepLockMatrix[childidx]
 
     IF parentidx == childidx THEN
+
         // Both are of the same class, trust that whatever the user is doing is
         // right.
 
@@ -322,11 +308,13 @@ FN KepAddEdge (
     END
 
     IF KepLockIsReachable ( parentidx, childmx ) THEN
+
         // Parent is reachable from child, there is a cycle.
 
         RETURN FALSE
 
     ELSEIF KepLockIsReachable ( childidx, parentmx ) THEN
+
         // This relationship is already known, don't bother.
 
         RETURN TRUE
@@ -343,6 +331,7 @@ FN KepAddEdge (
     )
 
     // Mark the child as reachable.
+
     KepLockSetReachable (
         &newmask, // lock
         childidx, // index
@@ -383,18 +372,17 @@ FN KepCheck (
 
     // Check that a given lock can be acquired.
 
-    IF Started == FALSE OR class == NULLPTR THEN
+    IF KepLockDepStarted == FALSE OR class == NULLPTR THEN
         LEAVE
     END
 
     num := heldlocks^.Num
 
+    KeIncrementUlong ( &class^.Attempts, 1 )
+
     IF num == 0 THEN
-        KeIncrementUlong ( &class^.Attempts, 1 )
         LEAVE
     END
-    
-
 
     fast := TRUE
     classidx := class^.Index
@@ -402,7 +390,6 @@ FN KepCheck (
     // Try checking the matrix without taking any locks.
 
     i := 0
-
 
     WHILE i != num DO
         heldlock := &heldlocks^.Locks[i]
@@ -416,6 +403,7 @@ FN KepCheck (
         heldmx := &KepLockMatrix[heldidx]
 
         IF NOT KepLockIsReachable( classidx, heldmx ) THEN
+
             // Check again under the lock.
 
             fast = FALSE
@@ -423,6 +411,7 @@ FN KepCheck (
         END
 
 @Next
+
         i += 1
     END
 
@@ -434,7 +423,6 @@ FN KepCheck (
     // Also add edges if needed.
 
     ipl := KepAcquireMatrix ()
-
     i = 0
 
     WHILE i != num DO
@@ -444,7 +432,6 @@ FN KepCheck (
         IF kepclass == NULLPTR THEN
             GOTO Next2
         END
-
 
         good := KepAddEdge (
             heldlock^.Class, // parent
@@ -462,9 +449,9 @@ FN KepCheck (
         END
 
 @Next2
+
         i += 1
     END
-
 
     KepReleaseMatrix ( ipl )
 END
@@ -478,7 +465,7 @@ FN KepCheckSpinlock (
 
     // Check that a given spinlock can be acquired.
 
-    IF Started == FALSE THEN
+    IF KepLockDepStarted == FALSE THEN
         LEAVE
     END
 
@@ -493,7 +480,6 @@ FN KepCheckSpinlock (
     )
 
     KepLowerIpl ( ipl )
-
 END
 
 FN KepAcquired (
@@ -506,8 +492,9 @@ FN KepAcquired (
 
     // Called when a lock was successfully acquired.
 
-
     num := heldlocks^.Num
+
+    KeAssert ( num < KEP_MAX_HELD_LOCKS )
 
     heldlocks^.Locks[num].Class = class
     heldlocks^.Locks[num].File = file
@@ -567,7 +554,7 @@ EXPORT FN KepAcquiredSpinlock (
 
     // Called when a spinlock was successfully acquired.
 
-    IF Started == FALSE THEN
+    IF KepLockDepStarted == FALSE THEN
         LEAVE
     END
 
@@ -592,7 +579,7 @@ EXPORT FN KepReleasedSpinlock (
 
     // Called when a spinlock was released.
 
-    IF Started == FALSE THEN
+    IF KepLockDepStarted == FALSE THEN
         LEAVE
     END
 
@@ -607,8 +594,6 @@ EXPORT FN KepReleasedSpinlock (
     KepLowerIpl ( ipl )
 END
 
-
-
 EXPORT FN KepLockDepInitializeSpinlock (
     IN spinlock : ^KepSpinlock,
     IN name : ^UBYTE
@@ -616,7 +601,7 @@ EXPORT FN KepLockDepInitializeSpinlock (
 
     // Register a spinlock to a given lock class.
 
-    IF Started == FALSE THEN
+    IF KepLockDepStarted == FALSE THEN
         spinlock^.Class = NULLPTR
         LEAVE
     END
@@ -647,14 +632,11 @@ EXPORT FN KepLockDepTryAcquireSpinlock (
         )
 
     ELSE
-        class := CAST spinlock^.Class TO ^KepLockClass
-        KepLockDepRegisterContention ( class )
+        KepLockDepRegisterContention ( CAST spinlock^.Class TO ^KepLockClass )
     END
 
     RETURN ret
 END
-
-
 
 EXPORT FN KepLockDepAcquireSpinlock (
     IN spinlock : ^KepSpinlock,
@@ -663,7 +645,6 @@ EXPORT FN KepLockDepAcquireSpinlock (
 )
 
     // Checked wrapper over AcquireSpinlock.
-
 
     class := CAST spinlock^.Class TO ^KepLockClass
 
@@ -682,7 +663,9 @@ EXPORT FN KepLockDepAcquireSpinlock (
     KepLockDepRegisterContention ( class )
 
     KepAcquireSpinlockRaw ( spinlock )
+
 @End
+
     KepAcquiredSpinlock (
         spinlock, // spinlock
         file, // file
@@ -715,10 +698,10 @@ EXPORT FN KepLockDepAcquireSpinlockRaise (
         GOTO End
     END
 
-
     KepAcquireSpinlockRaiseRaw (spinlock)
 
 @End
+
     KepAcquiredSpinlock (
         spinlock, // spinlock
         file, // file
@@ -772,9 +755,7 @@ EXPORT FN KepLockDepRegisterContention (
     END
 
     KeIncrementUlong ( &class^.Contention, 1 )
-
 END
-
 
 EXPORT FN KepLockDepInitializeLock (
     IN lock : ^KeLock,
@@ -783,7 +764,7 @@ EXPORT FN KepLockDepInitializeLock (
 
     // Register a kernel lock to a given lock class.
 
-    IF Started == FALSE THEN
+    IF KepLockDepStarted == FALSE THEN
         lock^.Class = NULLPTR
         LEAVE
     END
@@ -804,7 +785,7 @@ EXPORT FN KepCheckLock (
 
     // Check that a kernel lock can be acquired.
 
-    IF Started == FALSE THEN
+    IF KepLockDepStarted == FALSE THEN
         LEAVE
     END
 
@@ -834,7 +815,7 @@ EXPORT FN KepAcquiredLock (
 
     // Called after a kernel lock was successfully acquired.
 
-    IF Started == FALSE THEN
+    IF KepLockDepStarted == FALSE THEN
         LEAVE
     END
 
@@ -859,7 +840,7 @@ EXPORT FN KepReleasedLock (
 
     // Called after a kernel lock was released.
 
-    IF Started == FALSE THEN
+    IF KepLockDepStarted == FALSE THEN
         LEAVE
     END
 
@@ -874,6 +855,4 @@ EXPORT FN KepReleasedLock (
         &curtd^.HeldLocks, // heldlocks
     )
 END
-
-
 #END

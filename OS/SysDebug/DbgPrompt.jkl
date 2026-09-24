@@ -378,6 +378,7 @@ FN DbgPrintHeldLocks (
         IF i != locknum - 1 THEN
             RtlPrint ( " " )
         END
+        i += 1
     END
 END
 
@@ -687,10 +688,7 @@ FN (DbgCommandF) DbgCommandThreads ()
         DbgPrintHeldLocks ( &thread^.HeldLocks)
         RtlPrint ( "]" )
 #END
-
         RtlPrint ( "\n" )
-
-
         listentry = listentry^.Next
     END
 END
@@ -961,7 +959,6 @@ FN DbgDumpLockTree (
         i += 1
     END
 
-
     class := &KepLockClasses[classindex]
 
     IF visited[classindex] THEN
@@ -981,9 +978,7 @@ FN DbgDumpLockTree (
         RtlPrint ("\n")
     END
 
-
     visited[classindex] = TRUE
-
     child := 0
 
     WHILE child != classcount DO
@@ -1168,10 +1163,7 @@ FN (DbgCommandF) DbgCommandLock ()
     )
 
 END
-
-
 #END
-
 
 #SECTION "text"
 DbgCommandTable : DbgCommand[] = {
@@ -1275,10 +1267,7 @@ DbgCommandTable : DbgCommand[] = {
         [Help] = "Dump statistics for all lock classes.",
     },
 #END
-
-
     // Sentinel.
-
     {},
 }
 
