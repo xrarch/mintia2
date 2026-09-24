@@ -759,6 +759,7 @@ FN KeuExitThread (
 
     KepAcquireThreadElevated ( thread )
 
+#IF BLD_MP
 #IF BLD_LOCKDEP
     // Pretend we don't hold this lock while taking the timer tree lock.
     //
@@ -772,6 +773,7 @@ FN KeuExitThread (
 
     KepReleasedSpinlock ( &thread^.Spinlock )
 #END
+#END
 
     // Atomically enqueue to reaper list.
 
@@ -780,10 +782,12 @@ FN KeuExitThread (
         &thread^.ReadyEntry.Next, // link
     )
 
-#IF BLD_LOCKDEP
+#IF BLD_MP
+#IF BLD_LOCKDEP 
     // Now we're safe.
 
     KepAcquiredSpinlock ( &thread^.Spinlock, "", 0 )
+#END
 #END
 
 

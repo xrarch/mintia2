@@ -1110,10 +1110,12 @@ FN (DbgCommandF) DbgCommandLockStat ()
         END
 
         RtlPrint (
-            "%-22s %-4s %u\n",
+            "%-22s %-4s %u/%u (%u%%)\n",
             class^.Name,
             marker,
             class^.Contention,
+            class^.Attempts,
+            (class^.Contention * 100) / class^.Attempts,
         )
 
         printed[best] = TRUE

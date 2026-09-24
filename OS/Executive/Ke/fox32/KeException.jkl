@@ -851,7 +851,9 @@ EXTERN KepFetchAndSetUlongEnd : UBYTE
 EXTERN KepCompareSwapUlongEnd : UBYTE
 EXTERN KepCompareSwapUlongAbortEnd : UBYTE
 
+EXTERN KepAcquireLockSharedStart : UBYTE
 EXTERN KepAcquireLockSharedEnd : UBYTE
+EXTERN KepAcquireLockExclusiveStart : UBYTE
 EXTERN KepAcquireLockExclusiveEnd : UBYTE
 
 EXTERN KepTryAcquireLockExclusiveEnd : UBYTE
@@ -920,18 +922,18 @@ FN KepResetPc (
         LEAVE
     END
 
-    IF epc >= &KeAcquireLockShared AND
+    IF epc >= &KepAcquireLockSharedStart AND
         epc < &KepAcquireLockSharedEnd THEN
 
-        context^.Epc = &KeAcquireLockShared
+        context^.Epc = &KepAcquireLockSharedStart
 
         LEAVE
     END
 
-    IF epc >= &KeAcquireLockExclusive AND
+    IF epc >= &KepAcquireLockExclusiveStart AND
         epc < &KepAcquireLockExclusiveEnd THEN
 
-        context^.Epc = &KeAcquireLockExclusive
+        context^.Epc = &KepAcquireLockExclusiveStart
 
         LEAVE
     END

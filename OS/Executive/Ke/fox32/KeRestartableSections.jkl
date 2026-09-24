@@ -10,6 +10,53 @@
 
 #ASM [
 
+#MACRO LockDepCheckLock ( x ) [
+#IF BLD_LOCKDEP
+    push a0
+    push a1
+    push a3
+
+    mov  a0, [a0 + KeLock_Class]
+    mov  a1, KepLockDepTodo
+    mov  a2, 0
+    call KepCheckLock
+
+    pop  a3
+    pop  a1
+    pop  a0
+#END
+]
+
+#MACRO LockDepAcquiredLock ( x ) [
+#IF BLD_LOCKDEP
+    push a0
+    push a1
+    push a3
+
+    mov  a1, KepLockDepTodo
+    mov  a2, 0
+    call KepAcquiredLock
+
+    pop  a3
+    pop  a1
+    pop  a0
+#END
+]
+
+#MACRO LockDepReleasedLock ( x ) [
+#IF BLD_LOCKDEP
+    push a0
+    push a1
+    push a3
+
+    call KepReleasedLock
+
+    pop  a3
+    pop  a1
+    pop  a0
+#END
+]
+
 KepRestartableSections:
 .global KepRestartableSections
 
@@ -144,6 +191,11 @@ KeAcquireLockSharedRaise:
 KeAcquireLockShared:
 .export KeAcquireLockShared
 
+    LockDepCheckLock ( x )
+
+KepAcquireLockSharedStart:
+.global KepAcquireLockSharedStart
+
     mov  t0, [a0]
     and  t0, KEP_LOCK_C_BITS
     ifnz rjmp KepAcquireLockSharedSlow
@@ -152,11 +204,26 @@ KeAcquireLockShared:
 KepAcquireLockSharedEnd:
 .global KepAcquireLockSharedEnd
 
+    LockDepAcquiredLock ( x )
+
     ret
 
 KepAcquireLockSharedSlow:
     mov  a1, a3
+
+#IF BLD_LOCKDEP
+    push a0
+
+    call KepAcquireLockShared
+
+    pop  a0
+
+    LockDepAcquiredLock ( x )
+
+    ret
+#ELSE
     jmp  KepAcquireLockShared
+#END
 
 // a0 - lock
 // outputs:
@@ -172,6 +239,11 @@ KeAcquireLockExclusiveRaise:
 KeAcquireLockExclusive:
 .export KeAcquireLockExclusive
 
+    LockDepCheckLock ( x )
+
+KepAcquireLockExclusiveStart:
+.global KepAcquireLockExclusiveStart
+
     mov  t1, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
     or   t1, KEP_LOCK_WRITE_LOCKED
 
@@ -181,6 +253,8 @@ KeAcquireLockExclusive:
 
 KepAcquireLockExclusiveEnd:
 .global KepAcquireLockExclusiveEnd
+
+    LockDepAcquiredLock ( x )
 
     ret
 
@@ -204,6 +278,9 @@ KeTryAcquireLockExclusive:
 
 KepTryAcquireLockExclusiveEnd:
 .global KepTryAcquireLockExclusiveEnd
+
+    LockDepCheckLock ( x )
+    LockDepAcquiredLock ( x )
 
     movz.8 a3, 1
     ret
@@ -257,6 +334,8 @@ KeReleaseLock:
 KepReleaseLockEnd:
 .global KepReleaseLockEnd
 
+    LockDepReleasedLock ( x )
+
     ret
 
 // a0 - lock
@@ -268,6 +347,8 @@ KeReleaseLockLower:
 
 KepReleaseLockLowerEnd:
 .global KepReleaseLockLowerEnd
+
+    LockDepReleasedLock ( x )
 
     // The lock is APC-safe, so lower IPL.
 
@@ -321,6 +402,14 @@ KepNotLockedMessage:
 
 .align 4
 
+#END
+
+#IF BLD_LOCKDEP
+KepLockDepTodo:
+    .ds "todo"
+    .db 0
+
+.align 4
 #END
 
 

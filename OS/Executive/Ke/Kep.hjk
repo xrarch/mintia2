@@ -736,8 +736,6 @@ EXTERN FN KepAcquireSpinlockInPrbRaw (
 
 #IF BLD_LOCKDEP
 
-EXTERN FN KepInitializeLockDep ()
-
 EXTERN FN KepCheckSpinLock (
     IN class: ^KepLockClass,
     IN file : ^UBYTE,
@@ -754,21 +752,6 @@ EXTERN FN KepAcquiredSpinlock (
     IN line : ULONG,
 )
 
-EXTERN FN KepCheckLock (
-    IN class: ^KepLockClass,
-    IN file : ^UBYTE,
-    IN line : ULONG,
-)
-
-EXTERN FN KepReleasedLock (
-    IN lock : ^KeLock,
-)
-
-EXTERN FN KepAcquiredLock (
-    IN lock : ^KeLock,
-    IN file : ^UBYTE,
-    IN line : ULONG,
-)
 
 EXTERN FN KepLockDepTryAcquireSpinlock (
     IN spinlock : ^KepSpinlock,
@@ -780,10 +763,6 @@ EXTERN FN KepLockDepAcquireSpinlock (
     IN spinlock : ^KepSpinlock,
     IN file : ^UBYTE,
     IN line : ULONG,
-)
-
-EXTERN FN KepLockDepRegisterContention (
-    IN class : ^KepLockClass,
 )
 
 EXTERN FN KepLockDepAcquireSpinlockRaise (
@@ -845,39 +824,6 @@ EXTERN FN KepLockDepAcquireSpinlockInPrb (
     )
 
 ]
-
-
-EXTERN FN KepLockIsReachable (
-    IN class : ULONG,
-    IN from : ^KepLockRelation,
-) : UBYTE
-
-EXTERN FN KepFindLockClass (
-    IN name : ^UBYTE,
-    OUT outbucket : ^RtlAvlNode
-) : ^KepLockClass
-
-
-#DEFINE KEP_LOCKDEP_NUM_CLASSES 128
-#DEFINE KEP_LOCKDEP_BITMAP_MASKS [(KEP_LOCKDEP_NUM_CLASSES / SIZEOF UWORD)]
-
-STRUCT KepLockRelation
-    // Bitmap[L] is set iff L is reachable from this lock.
-    Bitmap : UWORD[KEP_LOCKDEP_BITMAP_MASKS]
-END
-
-STRUCT KepLockClass
-    Name : ^UBYTE,
-    Index : ULONG,
-    Entry : RtlAvlNode,
-    Spin  : UBYTE,
-    Contention : ULONG,
-END
-
-
-EXTERN KepLockMatrix : KepLockRelation[KEP_LOCKDEP_NUM_CLASSES]
-EXTERN KepActiveLockClasses : ULONG
-EXTERN KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
 
 
 #ELSE
@@ -1055,6 +1001,65 @@ EXTERN FN KepStealWork ()
 #MACRO KepReleaseStackCacheElevated ( kenode ) []
 
 #MACRO KepPrbFromNodeAndNumber ( kenode, procid ) [(KEP_CURRENT_PRB)]
+
+#END
+
+#IF BLD_LOCKDEP
+
+EXTERN FN KepInitializeLockDep ()
+
+EXTERN FN KepCheckLock (
+    IN class: ^KepLockClass,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+
+EXTERN FN KepReleasedLock (
+    IN lock : ^KeLock,
+)
+
+EXTERN FN KepLockDepRegisterContention (
+    IN class : ^KepLockClass,
+)
+
+EXTERN FN KepAcquiredLock (
+    IN lock : ^KeLock,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+
+EXTERN FN KepLockIsReachable (
+    IN class : ULONG,
+    IN from : ^KepLockRelation,
+) : UBYTE
+
+EXTERN FN KepFindLockClass (
+    IN name : ^UBYTE,
+    OUT outbucket : ^RtlAvlNode
+) : ^KepLockClass
+
+
+#DEFINE KEP_LOCKDEP_NUM_CLASSES 128
+#DEFINE KEP_LOCKDEP_BITMAP_MASKS [(KEP_LOCKDEP_NUM_CLASSES / SIZEOF UWORD)]
+
+STRUCT KepLockRelation
+    // Bitmap[L] is set iff L is reachable from this lock.
+    Bitmap : UWORD[KEP_LOCKDEP_BITMAP_MASKS]
+END
+
+STRUCT KepLockClass
+    Name : ^UBYTE,
+    Index : ULONG,
+    Entry : RtlAvlNode,
+    Spin  : UBYTE,
+    Contention : ULONG,
+    Attempts : ULONG,
+END
+
+
+EXTERN KepLockMatrix : KepLockRelation[KEP_LOCKDEP_NUM_CLASSES]
+EXTERN KepActiveLockClasses : ULONG
+EXTERN KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
 
 #END
 

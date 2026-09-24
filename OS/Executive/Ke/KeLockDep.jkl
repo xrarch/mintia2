@@ -18,6 +18,8 @@ MatrixLock : KepSpinlock
 ClassesBuckets: RtlAvlNode[NUM_BUCKETS]
 Started : UWORD = FALSE
 
+#IF BLD_MP
+
 #MACRO KepAcquireMatrix ( ) [
     KepAcquireSpinlockRaise ( &MatrixLock )
 ]
@@ -33,6 +35,26 @@ Started : UWORD = FALSE
 #MACRO KepReleaseMatrixElevated ( ) [
     KepReleaseSpinlock ( &MatrixLock )
 ]
+
+#ELSE
+
+#MACRO KepAcquireMatrix ( ) [
+    KepRaiseIpl ( KEP_IPL_DPC )
+]
+
+#MACRO KepReleaseMatrix ( ipl ) [
+    KepLowerIpl ( ipl )
+]
+
+#MACRO KepAcquireMatrixElevated ( ) [
+]
+
+#MACRO KepReleaseMatrixElevated ( ) [
+]
+
+
+
+#END
 
 
 FN KepHash (
@@ -81,7 +103,9 @@ EXPORT FN KepInitializeLockDep ()
 
     i := 0
 
+#IF BLD_MP
     KepInitializeSpinlock (&MatrixLock, NULLPTR )
+#END
 
     WHILE i != KEP_LOCKDEP_NUM_CLASSES DO
         entry := &KepLockClasses[i]
@@ -196,6 +220,8 @@ FN KepFindCreateLockClass (
     class^.Name = name
     class^.Spin = spin
     class^.Contention = 0
+    class^.Attempts = 0
+
 
     // Insert it so that we can find it by name.
 
@@ -357,18 +383,17 @@ FN KepCheck (
 
     // Check that a given lock can be acquired.
 
-    IF Started == FALSE THEN
+    IF Started == FALSE OR class == NULLPTR THEN
         LEAVE
     END
 
     num := heldlocks^.Num
 
-    IF num == 0 OR class == NULLPTR THEN
-        // This is the first lock to get taken, or this is a lock we
-        // shouldn't check.
-
+    IF num == 0 THEN
+        KeIncrementUlong ( &class^.Attempts, 1 )
         LEAVE
     END
+    
 
 
     fast := TRUE
@@ -532,6 +557,7 @@ FN KepReleased (
     heldlocks^.Num = num
 END
 
+#IF BLD_MP
 
 EXPORT FN KepAcquiredSpinlock (
     IN spinlock : ^KepSpinlock,
@@ -629,19 +655,6 @@ EXPORT FN KepLockDepTryAcquireSpinlock (
 END
 
 
-EXPORT FN KepLockDepRegisterContention (
-    IN class : ^KepLockClass,
-)
-
-    // Register contention for a given lock class.
-
-    IF class == NULLPTR THEN
-        LEAVE
-    END
-
-    KeIncrementUlong ( &class^.Contention, 1 )
-
-END
 
 EXPORT FN KepLockDepAcquireSpinlock (
     IN spinlock : ^KepSpinlock,
@@ -745,6 +758,23 @@ EXPORT FN KepLockDepAcquireSpinlockInPrb (
 
     RETURN oldipl
 END
+
+#END
+
+EXPORT FN KepLockDepRegisterContention (
+    IN class : ^KepLockClass,
+)
+
+    // Register contention for a given lock class.
+
+    IF class == NULLPTR THEN
+        LEAVE
+    END
+
+    KeIncrementUlong ( &class^.Contention, 1 )
+
+END
+
 
 EXPORT FN KepLockDepInitializeLock (
     IN lock : ^KeLock,
