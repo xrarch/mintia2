@@ -360,6 +360,27 @@ FN (DbgCommandF) DbgCommandSym ()
     RtlPrint ( "%s!%s = %p\n", dllname, &name[0], value )
 END
 
+#IF BLD_LOCKDEP
+
+FN DbgPrintHeldLocks (
+    IN heldlocks : ^KepHeldLocks,
+)
+    locknum := heldlocks^.Num
+    i := 0
+
+    WHILE i != locknum DO
+        heldlock := &heldlocks^.Locks[i]
+        class := CAST heldlock^.Class TO ^KepLockClass
+        RtlPrint (
+            "%s",
+            class^.Name
+        )
+        IF i != locknum - 1 THEN
+            RtlPrint ( " " )
+        END
+    END
+END
+
 FN (DbgCommandF) DbgCommandCpu ()
 
     num : UBYTE[32]
@@ -627,7 +648,11 @@ FN (DbgCommandF) DbgCommandThreads ()
         LEAVE
     END
 
+#IF BLD_LOCKDEP
+    RtlPrint ( "%-8s %-22s %-8s %-4s %-6s\n", "PTR", "NAME", "STATUS", "PRI", "LOCKS")
+#ELSE
     RtlPrint ( "%-8s %-22s %-8s %-4s\n", "PTR", "NAME", "STATUS", "PRI" )
+#END
 
     listhead := &proc^.ThreadListHead
     listentry := listhead^.Next
@@ -650,12 +675,21 @@ FN (DbgCommandF) DbgCommandThreads ()
         END
 
         RtlPrint (
-            "%p %-22s %-8s %-4u\n",
+            "%p %-22s %-8s %02u",
             thread,
             &thread^.Name[0],
             DbgThreadStatusName[thread^.Status],
             thread^.Priority,
         )
+
+#IF BLD_LOCKDEP
+        RtlPrint ( "%-3s[ ", " " )
+        DbgPrintHeldLocks ( &thread^.HeldLocks)
+        RtlPrint ( "]" )
+#END
+
+        RtlPrint ( "\n" )
+
 
         listentry = listentry^.Next
     END
@@ -763,6 +797,19 @@ FN (DbgCommandF) DbgCommandWait ()
         count -= 1
         i += 1
     END
+
+#IF BLD_LOCKDEP
+        RtlPrint (
+            "Held Locks: [ ",
+        )
+
+        DbgPrintHeldLocks ( &thread^.HeldLocks )
+       
+        RtlPrint (
+            "]\n",
+        )
+#END
+
 END
 
 FN (DbgCommandF) DbgCommandTrace ()

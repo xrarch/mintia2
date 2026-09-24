@@ -75,6 +75,9 @@ END
 
 EXPORT FN KepInitializeLockDep ()
 
+    // Initialize the lock verifier.
+    // This should be called as early as possible so that as many classes as
+    // possible get registered here.
 
     i := 0
 
@@ -304,6 +307,7 @@ FN KepAddEdge (
 
     // Add the child and its own children to the parent's reachability set.
     // While we're here, also add this set to the parent's ancestors.
+
     newmask : KepLockRelation
 
     KepLockCloneSet (
@@ -349,6 +353,9 @@ FN KepCheck (
     IN line : ULONG,
     IN heldlocks: ^KepHeldLocks,
 )
+
+    // Check that a given lock can be acquired.
+
     IF Started == FALSE THEN
         LEAVE
     END
@@ -442,6 +449,9 @@ FN KepCheckSpinlock (
     IN file : ^UBYTE,
     IN line : ULONG,
 )
+
+    // Check that a given spinlock can be acquired.
+
     IF Started == FALSE THEN
         LEAVE
     END
@@ -467,6 +477,10 @@ FN KepAcquired (
     IN line : ULONG,
     IN heldlocks: ^KepHeldLocks,
 )
+
+    // Called when a lock was successfully acquired.
+
+
     num := heldlocks^.Num
 
     heldlocks^.Locks[num].Class = class
@@ -481,6 +495,9 @@ FN KepReleased (
     IN lock : ^VOID,
     IN heldlocks: ^KepHeldLocks,
 )
+
+    // Called when a lock was released.
+
     KeAssert ( heldlocks^.Num > 0 )
 
     i := 0
@@ -493,7 +510,7 @@ FN KepReleased (
         IF arr^[i].Lock == lock THEN
             BREAK
         END
-    i += 1
+        i += 1
     END
 
     KeAssert ( i != num )
@@ -520,6 +537,9 @@ EXPORT FN KepAcquiredSpinlock (
     IN file : ^UBYTE,
     IN line : ULONG,
 )
+
+    // Called when a spinlock was successfully acquired.
+
     IF Started == FALSE THEN
         LEAVE
     END
@@ -542,6 +562,9 @@ END
 EXPORT FN KepReleasedSpinlock (
     IN spinlock : ^KepSpinlock,
 )
+
+    // Called when a spinlock was released.
+
     IF Started == FALSE THEN
         LEAVE
     END
@@ -558,28 +581,14 @@ EXPORT FN KepReleasedSpinlock (
 END
 
 
-EXPORT FN KepTryAcquireSpinlock (
-    IN spinlock : ^KepSpinlock,
-) : UWORD
-
-    ret := _KepTryAcquireSpinlock (spinlock)
-
-    IF ret == TRUE THEN
-        KepAcquiredSpinlock (
-            spinlock, // spinlock
-            "todo", // file
-            "todo", // line
-        )
-    END
-
-    RETURN ret
-END
-
 
 EXPORT FN KepLockDepInitializeSpinlock (
     IN spinlock : ^KepSpinlock,
     IN name : ^UBYTE
 )
+
+    // Register a spinlock to a given lock class.
+
     IF Started == FALSE THEN
         spinlock^.Class = NULLPTR
         LEAVE
@@ -593,64 +602,109 @@ EXPORT FN KepLockDepInitializeSpinlock (
     spinlock^.Class = CAST class TO ^VOID
 END
 
-EXPORT FN KepAcquireSpinlock (
+EXPORT FN KepLockDepTryAcquireSpinlock (
     IN spinlock : ^KepSpinlock,
+    IN file : ^UBYTE,
+    IN line : ULONG
+) : UWORD
+
+    // Checked wrapper over TryAcquireSpinlock.
+
+    ret := KepTryAcquireSpinlockRaw ( spinlock )
+
+    IF ret == TRUE THEN
+        KepAcquiredSpinlock (
+            spinlock, // spinlock
+            file, // file
+            line, // line
+        )
+    END
+
+    RETURN ret
+END
+
+
+EXPORT FN KepLockDepAcquireSpinlock (
+    IN spinlock : ^KepSpinlock,
+    IN file : ^UBYTE,
+    IN line : ULONG
 )
+
+    // Checked wrapper over AcquireSpinlock.
+
+
     class := CAST spinlock^.Class TO ^KepLockClass
 
-    KepCheckSpinlock (class, "todo", "todo")
+    KepCheckSpinlock (
+        class, // class
+        file, // file
+        line // line
+    )
 
-    _KepAcquireSpinlock (spinlock)
+    KepAcquireSpinlockRaw ( spinlock )
 
     KepAcquiredSpinlock (
         spinlock, // spinlock
-        "todo", // file
-        "todo", // line
+        file, // file
+        line, // line
     )
 END
 
 
 
-EXPORT FN KepAcquireSpinlockRaise (
+EXPORT FN KepLockDepAcquireSpinlockRaise (
     IN spinlock : ^KepSpinlock,
+    IN file : ^UBYTE,
+    IN line : ULONG
 ) : UWORD
+
+    // Checked wrapper over AcquireSpinlockRaise.
 
     class := CAST spinlock^.Class TO ^KepLockClass
 
-    KepCheckSpinlock (class, "todo", "todo")
+    KepCheckSpinlock (
+        class, // class
+        file, // file
+        line, // line
+    )
 
-    ret := _KepAcquireSpinlockRaise (spinlock)
+    ret := KepAcquireSpinlockRaiseRaw (spinlock)
 
     KepAcquiredSpinlock (
         spinlock, // spinlock
-        "todo", // file
-        "todo", // line
+        file, // file
+        line, // line
     )
 
     RETURN ret
 END
 
-EXPORT FN KepAcquireSpinlockInPrb (
+EXPORT FN KepLockDepAcquireSpinlockInPrb (
     IN offset : UWORD,
+    IN file : ^UBYTE,
+    IN line : ULONG
 ) : UWORD
+
+    // Checked wrapper over AcquireSpinlockInPrb.
+
     spinlock := CAST (KEP_CURRENT_PRB_LOCAL + offset) TO ^KepSpinlock
     class := CAST spinlock^.Class TO ^KepLockClass
 
     KepCheckSpinlock (
-        class,
-        "todo",
-        0,
+        class, // class
+        file, // file
+        line, // line
     )
 
-    oldipl := _KepAcquireSpinlockInPrb ( offset )
+    oldipl := KepAcquireSpinlockInPrbRaw ( offset )
 
     prb := KEP_CURRENT_PRB
     globalspinlock := CAST (prb + offset) TO ^KepSpinlock
 
     KepAcquiredSpinlock (
-        globalspinlock,
-        "todo",
-        0,
+        globalspinlock, // spinlock
+        file, // file
+        line, // line
     )
 
     RETURN oldipl
@@ -660,6 +714,9 @@ EXPORT FN KepLockDepInitializeLock (
     IN lock : ^KeLock,
     IN name : ^UBYTE
 )
+
+    // Register a kernel lock to a given lock class.
+
     IF Started == FALSE THEN
         lock^.Class = NULLPTR
         LEAVE
@@ -678,6 +735,9 @@ EXPORT FN KepCheckLock (
     IN file : ^UBYTE,
     IN line : ULONG,
 )
+
+    // Check that a kernel lock can be acquired.
+
     IF Started == FALSE THEN
         LEAVE
     END
@@ -685,8 +745,8 @@ EXPORT FN KepCheckLock (
     curthread := KeCurrentThread ()
 
     IF curthread == NULLPTR THEN
-        // KeLocks are used while constructing the boot idle thread, before
-        // there is a current thread in which to record dependencies.
+        // Kernel locks are used while constructing the boot idle thread, before
+        // there is a current thread in which to record held locks.
 
         LEAVE
     END
@@ -705,6 +765,9 @@ EXPORT FN KepAcquiredLock (
     IN file : ^UBYTE,
     IN line : ULONG,
 )
+
+    // Called after a kernel lock was successfully acquired.
+
     IF Started == FALSE THEN
         LEAVE
     END
@@ -727,6 +790,9 @@ END
 EXPORT FN KepReleasedLock (
     IN lock : ^KeLock,
 )
+
+    // Called after a kernel lock was released.
+
     IF Started == FALSE THEN
         LEAVE
     END
