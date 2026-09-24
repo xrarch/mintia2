@@ -168,18 +168,6 @@ EXTERN KepMaximumBalanceIterations : ULONG
 
 #END
 
-#IF BLD_LOCKDEP
-
-STRUCT KepHeldLock
-    Class : ^VOID,
-    Lock  : ^VOID,
-    File  : ^UBYTE,
-    Line  : ULONG,
-END
-
-#DEFINE KEP_MAX_HELD_LOCKS 5
-
-#END
 
 // The per-processor block (Prb) is an architectural page size, but is at
 // minimum 4KB. It contains all per-processor information.
@@ -371,8 +359,7 @@ KE_CACHE_LINE_END
 
 
 #IF BLD_LOCKDEP
-    HeldLocks : KepHeldLock[KEP_MAX_HELD_LOCKS],
-    NumHeldLocks : UBYTE
+    HeldLocks : KepHeldLocks
 #END
 END
 
@@ -767,6 +754,22 @@ EXTERN FN KepAcquiredSpinlock (
     IN line : ULONG,
 )
 
+EXTERN FN KepCheckLock (
+    IN class: ^KepLockClass,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+
+EXTERN FN KepReleasedLock (
+    IN lock : ^KeLock,
+)
+
+EXTERN FN KepAcquiredLock (
+    IN lock : ^KeLock,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+
 EXTERN FN KepTryAcquireSpinlock (
     IN spinlock : ^KepSpinlock,
 ) : UWORD
@@ -788,6 +791,11 @@ EXTERN FN KepLockIsReachable (
     IN from : ^KepLockRelation,
 ) : UBYTE
 
+EXTERN FN KepFindLockClass (
+    IN name : ^UBYTE,
+    OUT outbucket : ^RtlAvlNode
+) : ^KepLockClass
+
 
 #DEFINE KEP_LOCKDEP_NUM_CLASSES 128
 #DEFINE KEP_LOCKDEP_BITMAP_MASKS [(KEP_LOCKDEP_NUM_CLASSES / SIZEOF UWORD)]
@@ -801,6 +809,7 @@ STRUCT KepLockClass
     Name : ^UBYTE,
     Index : ULONG,
     Entry : RtlAvlNode,
+    Spin  : UBYTE,
 END
 
 

@@ -8,6 +8,65 @@
 
 #ASM [
 
+#MACRO LockDepCheckLock ( x ) [
+#IF BLD_LOCKDEP
+    subi sp, sp, 16
+    mov  long [sp], a0
+    mov  long [sp + 4], a1
+    mov  long [sp + 8], a3
+    mov  long [sp + 12], lr
+
+    mov  a0, long [a0 + KeLock_Class]
+    la   a1, KepLockDepTodo
+    li   a2, 0
+    jal  KepCheckLock
+
+    mov  a0, long [sp]
+    mov  a1, long [sp + 4]
+    mov  a3, long [sp + 8]
+    mov  lr, long [sp + 12]
+    addi sp, sp, 16
+#END
+]
+
+#MACRO LockDepAcquiredLock ( x ) [
+#IF BLD_LOCKDEP
+    subi sp, sp, 16
+    mov  long [sp], a0
+    mov  long [sp + 4], a1
+    mov  long [sp + 8], a3
+    mov  long [sp + 12], lr
+
+    la   a1, KepLockDepTodo
+    li   a2, 0
+    jal  KepAcquiredLock
+
+    mov  a0, long [sp]
+    mov  a1, long [sp + 4]
+    mov  a3, long [sp + 8]
+    mov  lr, long [sp + 12]
+    addi sp, sp, 16
+#END
+]
+
+#MACRO LockDepReleasedLock ( x ) [
+#IF BLD_LOCKDEP
+    subi sp, sp, 16
+    mov  long [sp], a0
+    mov  long [sp + 4], a1
+    mov  long [sp + 8], a3
+    mov  long [sp + 12], lr
+
+    jal  KepReleasedLock
+
+    mov  a0, long [sp]
+    mov  a1, long [sp + 4]
+    mov  a3, long [sp + 8]
+    mov  lr, long [sp + 12]
+    addi sp, sp, 16
+#END
+]
+
 // a0 - lock
 // outputs:
 // a3 - success
@@ -27,6 +86,9 @@ KeTryAcquireLockExclusive:
 #IF BLD_MP
     mb                              // Ensure reads don't see stale data.
 #END
+
+    LockDepCheckLock ( x )
+    LockDepAcquiredLock ( x )
 
     li   a3, 1                      // Report success.
     ret
@@ -51,6 +113,8 @@ KeAcquireLockSharedRaise:
 KeAcquireLockShared:
 .export KeAcquireLockShared
 
+    LockDepCheckLock ( x )
+
 .retry:
 
     ll   t0, a0                     // Load-locked the lock word.
@@ -64,12 +128,31 @@ KeAcquireLockShared:
     mb                              // Ensure reads don't see stale data.
 #END
 
+    LockDepAcquiredLock ( x )
+
     ret
 
 .slow:
 
     mov  a1, a3
+
+#IF BLD_LOCKDEP
+    subi sp, sp, 8
+    mov  long [sp], a0
+    mov  long [sp + 4], lr
+
+    jal  KepAcquireLockShared
+
+    mov  a0, long [sp]
+    mov  lr, long [sp + 4]
+    addi sp, sp, 8
+
+    LockDepAcquiredLock ( x )
+
+    ret
+#ELSE
     j    KepAcquireLockShared
+#END
 
 // a0 - lock
 // outputs:
@@ -86,6 +169,8 @@ KeAcquireLockExclusiveRaise:
 KeAcquireLockExclusive:
 .export KeAcquireLockExclusive
 
+    LockDepCheckLock ( x )
+
     mov  t1, long [tp + KepPrb_CurrentThread]
     ori  t1, t1, KEP_LOCK_WRITE_LOCKED
 
@@ -99,6 +184,8 @@ KeAcquireLockExclusive:
 #IF BLD_MP
     mb                              // Ensure reads don't see stale data.
 #END
+
+    LockDepAcquiredLock ( x )
 
     ret
 
@@ -150,6 +237,8 @@ KeReleaseLock:
 
     ReleaseLock ( x )
 
+    LockDepReleasedLock ( x )
+
     ret
 
 .slow:
@@ -162,6 +251,8 @@ KeReleaseLockLower:
 .export KeReleaseLockLower
 
     ReleaseLock ( x )
+
+    LockDepReleasedLock ( x )
 
     // The lock is APC-safe, so restore the old IPL.
     // This is KepLowerIpl inlined.
@@ -220,6 +311,14 @@ KepNotLockedMessage:
 
 .align 4
 
+#END
+
+#IF BLD_LOCKDEP
+KepLockDepTodo:
+    .ds "todo"
+    .db 0
+
+.align 4
 #END
 
 ]

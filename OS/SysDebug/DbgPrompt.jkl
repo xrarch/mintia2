@@ -923,9 +923,15 @@ FN DbgDumpLockTree (
     END
 
     IF depth == 0 THEN
-        RtlPrint ( "- %s\n", class^.Name )
+        RtlPrint ( "- %s", class^.Name )
     ELSE
-        RtlPrint ( " +-- %s\n", class^.Name )
+        RtlPrint ( " +-- %s", class^.Name )
+    END
+
+    IF class^.Spin THEN
+        RtlPrint (" (S)\n")
+    ELSE
+        RtlPrint ("\n")
     END
 
 
@@ -1006,6 +1012,53 @@ FN (DbgCommandF) DbgCommandLocks ()
         classindex += 1
     END
 END
+
+FN (DbgCommandF) DbgCommandLock ()
+    classname : UBYTE[32]
+
+    IF NOT DbgNextToken (
+        &classname[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: lock [name]\n" )
+
+        LEAVE
+    END
+
+    dummy : ^RtlAvlNode
+
+    class := KepFindLockClass (
+        &classname[0], // name
+        OUT dummy, // outbucket
+    )
+
+    classcount := KepActiveLockClasses
+
+    IF class == NULLPTR THEN
+        RtlPrint ( "Invalid class name\n" )
+        LEAVE
+    END
+
+    visited : UBYTE[KEP_LOCKDEP_NUM_CLASSES]
+    i := 0
+
+    WHILE i != KEP_LOCKDEP_NUM_CLASSES DO
+        visited[i] = FALSE
+        i += 1
+    END
+
+    DbgResetPagination ()
+
+    DbgDumpLockTree (
+        class^.Index,
+        classcount,
+        0,
+        &visited[0],
+    )
+
+END
+
 
 #END
 
@@ -1100,6 +1153,11 @@ DbgCommandTable : DbgCommand[] = {
         [Name] = "locks",
         [Function] = &DbgCommandLocks,
         [Help] = "Dump lockdep information.",
+    },
+    {
+        [Name] = "lock",
+        [Function] = &DbgCommandLock,
+        [Help] = "Dump lockdep information about a given lock class.",
     },
 #END
 

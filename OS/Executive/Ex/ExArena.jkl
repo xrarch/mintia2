@@ -167,7 +167,7 @@ FN ExpInitializeArenas ()
 
         expnode := kenode^.Exp
 
-        KeInitializeLock ( &expnode^.ArenaListLock )
+        KeInitializeLock ( &expnode^.ArenaListLock, "ArenaList" )
 
         RtlInitializeList ( &expnode^.ArenaListHead )
 
@@ -180,15 +180,15 @@ FN ExpInitializeArenas ()
 
         expnode^.PreallocatedArenaIndex = 0
 
-        KeInitializeLock ( &expnode^.ArenaTagListLock )
+        KeInitializeLock ( &expnode^.ArenaTagListLock, "ArenaTagList" )
 
         RtlInitializeList ( &expnode^.ArenaTagListHead )
 
-        KeInitializeLock ( &expnode^.ArenaPopulateLowLock )
+        KeInitializeLock ( &expnode^.ArenaPopulateLowLock, "ArenaPopulate" )
 
-        KeInitializeLock ( &expnode^.ArenaPopulateWaitLock )
+        KeInitializeLock ( &expnode^.ArenaPopulateWaitLock, "ArenaPopulate" )
 
-        KeInitializeLock ( &expnode^.ArenaPopulateNoWaitLock )
+        KeInitializeLock ( &expnode^.ArenaPopulateNoWaitLock, "ArenaPopulate" )
 
         i += 1
     END
@@ -1022,7 +1022,7 @@ FN ExCreateArena (
 
     // Initialize the arena structure before adding it to the arena list.
 
-    KeInitializeLock ( &arena^.Lock )
+    KeInitializeLock ( &arena^.Lock, "Arena" )
 
     arena^.Name = name
 

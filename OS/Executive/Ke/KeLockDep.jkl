@@ -96,11 +96,12 @@ EXPORT FN KepInitializeLockDep ()
     Started = TRUE
 END
 
-FN KepFindLockClass (
-    IN name : ^UBYTE
+EXPORT FN KepFindLockClass (
+    IN name : ^UBYTE,
+    OUT outbucket : ^RtlAvlNode
 ) : ^KepLockClass
 
-    // Find a lock class by its name or create it if it doesn't exist.
+    // Find a lock class by its name.
 
     IF name == NULLPTR THEN
         // This lock shouldn't be checked.
@@ -116,10 +117,6 @@ FN KepFindLockClass (
 
     bucket := &ClassesBuckets[hash & (NUM_BUCKETS - 1)]
 
-
-    // Lock the matrix.
-
-    ipl := KepAcquireMatrix () 
 
     // Look up the name in the bucket, which is an AVL tree keyed by string and
     // ordered lexicographically.
@@ -141,9 +138,7 @@ FN KepFindLockClass (
         ) TO WORD
 
         IF res == 0 THEN
-            // Found it! Unlock the matrix and return the node.
-
-            KepReleaseMatrix ( ipl ) 
+            // Found it! Return the class.
 
             RETURN checknode
         END
@@ -155,12 +150,48 @@ FN KepFindLockClass (
         END
     END
 
+    outbucket = bucket
+
+    RETURN NULLPTR
+END
+
+FN KepFindCreateLockClass (
+    IN name : ^UBYTE,
+    IN spin : UBYTE,
+) : ^KepLockClass
+
+    // Find a lock class by its name or create it if it doesn't exist.
+
+    IF name == NULLPTR THEN
+        // This lock shouldn't be checked.
+
+        RETURN NULLPTR
+    END
+
+
+    // Lock the matrix.
+
+    ipl := KepAcquireMatrix ()
+
+    bucket : ^RtlAvlNode
+
+    class := KepFindLockClass (
+        name, // name
+        OUT bucket, // outbucket
+    )
+
+    IF class != NULLPTR THEN
+        KepReleaseMatrix ( ipl ) 
+        RETURN class
+    END
+
     KeAssert ( KepActiveLockClasses < KEP_LOCKDEP_NUM_CLASSES )
 
     // Get a new spot for our class.
 
-    class := &KepLockClasses[KepActiveLockClasses]
+    class = &KepLockClasses[KepActiveLockClasses]
     class^.Name = name
+    class^.Spin = spin
 
     // Insert it so that we can find it by name.
 
@@ -312,25 +343,22 @@ FN KepAddEdge (
     RETURN TRUE
 END
 
-
-FN KepCheckSpinlock (
+FN KepCheck (
     IN class: ^KepLockClass,
     IN file : ^UBYTE,
     IN line : ULONG,
+    IN heldlocks: ^KepHeldLocks,
 )
     IF Started == FALSE THEN
         LEAVE
     END
 
-    ipl := KepRaiseIpl ( KEP_IPL_DPC )
-    prb := KEP_CURRENT_PRB
-    num := prb^.NumHeldLocks
+    num := heldlocks^.Num
 
     IF num == 0 OR class == NULLPTR THEN
         // This is the first lock to get taken, or this is a lock we
         // shouldn't check.
 
-        KepLowerIpl ( ipl )
         LEAVE
     END
 
@@ -344,7 +372,7 @@ FN KepCheckSpinlock (
 
 
     WHILE i != num DO
-        heldlock := &prb^.HeldLocks[i]
+        heldlock := &heldlocks^.Locks[i]
         kepclass := CAST heldlock^.Class TO ^KepLockClass
 
         IF kepclass == NULLPTR THEN
@@ -366,19 +394,18 @@ FN KepCheckSpinlock (
     END
 
     IF fast THEN
-        KepLowerIpl ( ipl )
         LEAVE
     END
 
     // Take the graph lock and check again.
     // Also add edges if needed.
 
-    KepAcquireMatrixElevated ()
+    ipl := KepAcquireMatrix ()
 
     i = 0
 
     WHILE i != num DO
-        heldlock := &prb^.HeldLocks[i]
+        heldlock := &heldlocks^.Locks[i]
         kepclass := CAST heldlock^.Class TO ^KepLockClass
 
         IF kepclass == NULLPTR THEN
@@ -406,8 +433,85 @@ FN KepCheckSpinlock (
     END
 
 
-    KepReleaseMatrixElevated ()
+    KepReleaseMatrix ( ipl )
+END
 
+
+FN KepCheckSpinlock (
+    IN class: ^KepLockClass,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+    IF Started == FALSE THEN
+        LEAVE
+    END
+
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+    prb := KEP_CURRENT_PRB
+
+    KepCheck (
+        class, // class
+        file, // file
+        line, // line
+        &prb^.HeldLocks, // heldlocks
+    )
+
+    KepLowerIpl ( ipl )
+
+END
+
+FN KepAcquired (
+    IN lock : ^VOID,
+    IN class : ^KepLockClass,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+    IN heldlocks: ^KepHeldLocks,
+)
+    num := heldlocks^.Num
+
+    heldlocks^.Locks[num].Class = class
+    heldlocks^.Locks[num].File = file
+    heldlocks^.Locks[num].Line = line
+    heldlocks^.Locks[num].Lock = lock
+
+    heldlocks^.Num = num + 1
+END
+
+FN KepReleased (
+    IN lock : ^VOID,
+    IN heldlocks: ^KepHeldLocks,
+)
+    KeAssert ( heldlocks^.Num > 0 )
+
+    i := 0
+    num := heldlocks^.Num
+    arr := &heldlocks^.Locks
+
+    // Find the lock we just released.
+
+    WHILE i != num DO
+        IF arr^[i].Lock == lock THEN
+            BREAK
+        END
+    i += 1
+    END
+
+    KeAssert ( i != num )
+
+    num -= 1
+
+    // Shift all other locks down.
+
+    WHILE i < num DO
+        arr^[i].Lock = arr^[i + 1].Lock
+        arr^[i].Class = arr^[i + 1].Class
+        arr^[i].File = arr^[i + 1].File
+        arr^[i].Line = arr^[i + 1].Line
+
+        i += 1
+    END
+
+    heldlocks^.Num = num
 END
 
 
@@ -422,15 +526,15 @@ EXPORT FN KepAcquiredSpinlock (
 
     ipl := KepRaiseIpl ( KEP_IPL_DPC )
     prb := KEP_CURRENT_PRB
-    num := prb^.NumHeldLocks
     class := CAST spinlock^.Class TO ^KepLockClass
 
-    prb^.HeldLocks[num].Class = class
-    prb^.HeldLocks[num].File = file
-    prb^.HeldLocks[num].Line = line
-    prb^.HeldLocks[num].Lock = CAST spinlock TO ^VOID
-
-    prb^.NumHeldLocks = num + 1
+    KepAcquired (
+        CAST spinlock TO ^VOID, // lock
+        class, // class
+        file, // file
+        line, // line
+        &prb^.HeldLocks, // heldlocks
+    ) 
 
     KepLowerIpl ( ipl )
 END
@@ -445,36 +549,11 @@ EXPORT FN KepReleasedSpinlock (
     ipl := KepRaiseIpl ( KEP_IPL_DPC )
     prb := KEP_CURRENT_PRB
 
-    KeAssert ( prb^.NumHeldLocks > 0 )
+    KepReleased (
+        CAST spinlock TO ^VOID, // lock
+        &prb^.HeldLocks, // heldlocks
+    )
 
-    i := 0
-    num := prb^.NumHeldLocks
-
-    // Find the lock we just released.
-
-    WHILE i != num DO
-        IF prb^.HeldLocks[i].Lock == spinlock THEN
-            BREAK
-        END
-    i += 1
-    END
-
-    KeAssert ( i != num )
-
-    num -= 1
-
-    // Shift all other locks down.
-
-    WHILE i < num DO
-        prb^.HeldLocks[i].Lock = prb^.HeldLocks[i + 1].Lock
-        prb^.HeldLocks[i].Class = prb^.HeldLocks[i + 1].Class
-        prb^.HeldLocks[i].File = prb^.HeldLocks[i + 1].File
-        prb^.HeldLocks[i].Line = prb^.HeldLocks[i + 1].Line
-
-        i += 1
-    END
-
-    prb^.NumHeldLocks = num
     KepLowerIpl ( ipl )
 END
 
@@ -503,11 +582,13 @@ EXPORT FN KepLockDepInitializeSpinlock (
 )
     IF Started == FALSE THEN
         spinlock^.Class = NULLPTR
-        RtlPrint ("Lockdep not started for %s\n", name )
         LEAVE
     END
 
-    class := KepFindLockClass ( name )
+    class := KepFindCreateLockClass (
+        name, // name
+        TRUE, // spin
+    )
 
     spinlock^.Class = CAST class TO ^VOID
 END
@@ -527,6 +608,7 @@ EXPORT FN KepAcquireSpinlock (
         "todo", // line
     )
 END
+
 
 
 EXPORT FN KepAcquireSpinlockRaise (
@@ -573,5 +655,93 @@ EXPORT FN KepAcquireSpinlockInPrb (
 
     RETURN oldipl
 END
+
+EXPORT FN KepLockDepInitializeLock (
+    IN lock : ^KeLock,
+    IN name : ^UBYTE
+)
+    IF Started == FALSE THEN
+        lock^.Class = NULLPTR
+        LEAVE
+    END
+
+    class := KepFindCreateLockClass (
+        name, // name
+        FALSE, // spin
+    )
+
+    lock^.Class = class
+END
+
+EXPORT FN KepCheckLock (
+    IN class: ^KepLockClass,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+    IF Started == FALSE THEN
+        LEAVE
+    END
+
+    curthread := KeCurrentThread ()
+
+    IF curthread == NULLPTR THEN
+        // KeLocks are used while constructing the boot idle thread, before
+        // there is a current thread in which to record dependencies.
+
+        LEAVE
+    END
+
+    KepCheck (
+        class, // class
+        file, // file
+        line, // line
+        &curthread^.HeldLocks, // heldlocks
+    )
+END
+
+
+EXPORT FN KepAcquiredLock (
+    IN lock : ^KeLock,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+    IF Started == FALSE THEN
+        LEAVE
+    END
+
+    curtd := KeCurrentThread ()
+
+    IF curtd == NULLPTR THEN
+        LEAVE
+    END
+
+    KepAcquired (
+        CAST lock TO ^VOID, // lock
+        lock^.Class, // class
+        file, // file
+        line, // line
+        &curtd^.HeldLocks // heldlocks
+    )
+END
+
+EXPORT FN KepReleasedLock (
+    IN lock : ^KeLock,
+)
+    IF Started == FALSE THEN
+        LEAVE
+    END
+
+    curtd := KeCurrentThread ()
+
+    IF curtd == NULLPTR THEN
+        LEAVE
+    END
+
+    KepReleased (
+        CAST lock TO ^VOID, // lock
+        &curtd^.HeldLocks, // heldlocks
+    )
+END
+
 
 #END

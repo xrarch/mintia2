@@ -31,7 +31,7 @@ FN MmpInitializeChunkSpace (
     chunkspace^.FreeListHead = NULLPTR
     chunkspace^.Node = mmnode
 
-    KeInitializeLock ( &chunkspace^.Lock )
+    KeInitializeLock ( &chunkspace^.Lock, "ChunkSpace" )
 
     // Link the chunks through the PTEs.
 
@@ -282,9 +282,9 @@ FN MmpInitializeSystemVa (
 
     RtlInitializeAvl ( &mmnode^.DynamicSpaceRoot )
 
-    KeInitializeLock ( &mmnode^.DynamicSpaceLock )
+    KeInitializeLock ( &mmnode^.DynamicSpaceLock, "DynamicSpace" )
 
-    KeInitializeLock ( &mmnode^.DynamicSpaceTreeLock )
+    KeInitializeLock ( &mmnode^.DynamicSpaceTreeLock, "DynamicSpaceTree" )
 
     base = kenode + KE_DYNAMIC_SPACE_OFFSET
 

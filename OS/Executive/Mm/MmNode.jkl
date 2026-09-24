@@ -17,7 +17,7 @@ FN MmpInitializeAvailablePageList (
 
     WHILE i < MMP_COLOR_COUNT DO
         RtlInitializeList ( &list^.Colors[i].Head )
-        KeInitializeLock ( &list^.Colors[i].Lock )
+        KeInitializeLock ( &list^.Colors[i].Lock, "Color" )
 
         i += 1
     END
@@ -32,7 +32,7 @@ FN MmpInitializeNodeStage1 (
 
     // Initialize the locks.
 
-    KeInitializeLock ( &mmnode^.ModifiedListLock )
+    KeInitializeLock ( &mmnode^.ModifiedListLock, "ModifiedList" )
 
     // Initialize the events.
 
@@ -92,7 +92,7 @@ FN MmpInitializeNodeStage1 (
 
     mmnode^.SizeLevel = MM_UNINITIALIZED_SYSTEM
 
-    KeInitializeLock ( &mmnode^.KernelStackPteListLock )
+    KeInitializeLock ( &mmnode^.KernelStackPteListLock, "KernelStackPteList" )
 
 #IF BLD_MP
     i := 0
@@ -100,7 +100,7 @@ FN MmpInitializeNodeStage1 (
     table := mmnode^.BatchedShootdowns
 
     WHILE i < procs DO
-        KeInitializeLock ( &table[i].Lock )
+        KeInitializeLock ( &table[i].Lock, "BatchedShootdown" )
 
         i += 1
     END
@@ -109,12 +109,12 @@ FN MmpInitializeNodeStage1 (
     table = mmnode^.AlternateBatchedShootdowns
 
     WHILE i < procs DO
-        KeInitializeLock ( &table[i].Lock )
+        KeInitializeLock ( &table[i].Lock, "BatchedShootdown" )
 
         i += 1
     END
 
-    KeInitializeLock ( &mmnode^.FlushShootdownLock )
+    KeInitializeLock ( &mmnode^.FlushShootdownLock, "FlushShootdown" )
 #END
 
 END

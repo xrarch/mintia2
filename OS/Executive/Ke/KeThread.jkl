@@ -200,6 +200,10 @@ FN KeuInitializeThread (
 
     thread^.LastFaultStatus = 0
 
+#IF BLD_LOCKDEP
+    thread^.HeldLocks.Num = 0
+#END
+
     // Fill the context area with zeroes to avoid leaking data to usermode.
 
     RtlFillMemoryWithUlong (

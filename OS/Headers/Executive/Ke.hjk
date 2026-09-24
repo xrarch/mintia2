@@ -39,20 +39,30 @@ TYPE KepSpinlock : ULONG
 STRUCT KeLock
     Ptr : UWORD,
     #IF BLD_LOCKDEP
-   // Class : ^KeLockClass,
+    Class : ^KepLockClass,
     #END
 END
 
+
 #DEFINE KE_INITIAL_LOCK [{
     [Ptr] = 0,
+#IF BLD_LOCKDEP
+    [Class] = NULLPTR,
+#END
 }]
 
 #IF BLD_LOCKDEP
-    #MACRO KeInitializeLock ( lock ) [
-            NOTHING (lock)^.Ptr = 0
+    EXTERN FN KepLockDepInitializeLock (
+        IN lock : ^KeLock,
+        IN name : ^UBYTE
+    )
+
+    #MACRO KeInitializeLock ( lock, class ) [
+        NOTHING (lock)^.Ptr = 0
+        KepLockDepInitializeLock ( lock, class )
     ]
 #ELSE
-     #MACRO KeInitializeLock ( lock ) [
+     #MACRO KeInitializeLock ( lock, class ) [
             NOTHING (lock)^.Ptr = 0
      ]
 #END
