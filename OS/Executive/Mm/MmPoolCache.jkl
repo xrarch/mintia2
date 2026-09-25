@@ -154,7 +154,7 @@ FN MmpInitializeSlabCache (
     
     RtlInitializeList ( &scache^.FreeListHead )
 
-    KeInitializeLock ( &scache^.Lock )
+    KeInitializeLock ( &scache^.Lock, "SlabCache" )
 
     blocksperslab : UWORD
     slabsize : UWORD
@@ -478,7 +478,7 @@ EXPORT FN MmCreatePoolCacheEx (
     poolcache^.MmNode = mmnode
     poolcache^.ProcessorCount = mmnode^.KeNode^.ProcessorCount
 
-    KeInitializeLock ( &poolcache^.DepotLock )
+    KeInitializeLock ( &poolcache^.DepotLock, "Depot" )
 
     // Set the depot lists to empty.
 
@@ -515,7 +515,7 @@ EXPORT FN MmCreatePoolCacheEx (
     )
 
     WHILE i < cpus DO
-        KeInitializeLock ( &percpu^.MagLock )
+        KeInitializeLock ( &percpu^.MagLock, "Magazine" )
 
         percpu^.Loaded = NULLPTR
         percpu^.Previous = NULLPTR
@@ -1242,7 +1242,7 @@ FN MmpAdjustPoolCaches (
 END
 
 #MACRO MmpInitializePoolCacheList ( list ) [
-    KeInitializeLock ( &(list)^.MasterListLock )
+    KeInitializeLock ( &(list)^.MasterListLock, "MasterList" )
     RtlInitializeList ( &(list)^.Head )
 ]
 

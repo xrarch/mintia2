@@ -360,6 +360,28 @@ FN (DbgCommandF) DbgCommandSym ()
     RtlPrint ( "%s!%s = %p\n", dllname, &name[0], value )
 END
 
+#IF BLD_LOCKDEP
+
+FN DbgPrintHeldLocks (
+    IN heldlocks : ^KepHeldLocks,
+)
+    locknum := heldlocks^.Num
+    i := 0
+
+    WHILE i != locknum DO
+        heldlock := &heldlocks^.Locks[i]
+        class := CAST heldlock^.Class TO ^KepLockClass
+        RtlPrint (
+            "%s",
+            class^.Name
+        )
+        IF i != locknum - 1 THEN
+            RtlPrint ( " " )
+        END
+        i += 1
+    END
+END
+
 FN (DbgCommandF) DbgCommandCpu ()
 
     num : UBYTE[32]
@@ -627,7 +649,11 @@ FN (DbgCommandF) DbgCommandThreads ()
         LEAVE
     END
 
+#IF BLD_LOCKDEP
+    RtlPrint ( "%-8s %-22s %-8s %-4s %-6s\n", "PTR", "NAME", "STATUS", "PRI", "LOCKS")
+#ELSE
     RtlPrint ( "%-8s %-22s %-8s %-4s\n", "PTR", "NAME", "STATUS", "PRI" )
+#END
 
     listhead := &proc^.ThreadListHead
     listentry := listhead^.Next
@@ -650,13 +676,19 @@ FN (DbgCommandF) DbgCommandThreads ()
         END
 
         RtlPrint (
-            "%p %-22s %-8s %-4u\n",
+            "%p %-22s %-8s %02u",
             thread,
             &thread^.Name[0],
             DbgThreadStatusName[thread^.Status],
             thread^.Priority,
         )
 
+#IF BLD_LOCKDEP
+        RtlPrint ( "%-3s[ ", " " )
+        DbgPrintHeldLocks ( &thread^.HeldLocks)
+        RtlPrint ( "]" )
+#END
+        RtlPrint ( "\n" )
         listentry = listentry^.Next
     END
 END
@@ -763,6 +795,19 @@ FN (DbgCommandF) DbgCommandWait ()
         count -= 1
         i += 1
     END
+
+#IF BLD_LOCKDEP
+        RtlPrint (
+            "Held Locks: [ ",
+        )
+
+        DbgPrintHeldLocks ( &thread^.HeldLocks )
+       
+        RtlPrint (
+            "]\n",
+        )
+#END
+
 END
 
 FN (DbgCommandF) DbgCommandTrace ()
@@ -864,6 +909,262 @@ FN (DbgCommandF) DbgCommandNode ()
     RtlPrint ( "System process: %p\n", node^.SystemProcess )
 END
 
+#IF BLD_LOCKDEP
+
+FN DbgLockIsImmediateChild (
+    IN parent : ULONG,
+    IN child : ULONG,
+    IN classcount : ULONG,
+) : UWORD
+
+    parentmx := &KepLockMatrix[parent]
+
+    IF NOT KepLockIsReachable ( child, parentmx ) THEN
+        RETURN FALSE
+    END
+
+    middle := 0
+
+    WHILE middle != classcount DO
+        middlemx := &KepLockMatrix[middle]
+
+        IF middle != parent AND middle != child AND
+            KepLockIsReachable ( middle, parentmx ) AND
+            KepLockIsReachable ( child, middlemx ) THEN
+
+            RETURN FALSE
+        END
+
+        middle += 1
+    END
+
+    RETURN TRUE
+END
+
+FN DbgDumpLockTree (
+    IN classindex : ULONG,
+    IN classcount : ULONG,
+    IN depth : ULONG,
+    IN visited : ^UBYTE,
+) : UWORD
+
+    IF NOT DbgPaginate () THEN
+        RETURN FALSE
+    END
+
+    i := 0
+
+    WHILE i != depth DO
+        RtlPrint ( "  " )
+        i += 1
+    END
+
+    class := &KepLockClasses[classindex]
+
+    IF visited[classindex] THEN
+        RtlPrint ( "+-- %s [shared]\n", class^.Name )
+        RETURN TRUE
+    END
+
+    IF depth == 0 THEN
+        RtlPrint ( "- %s", class^.Name )
+    ELSE
+        RtlPrint ( " +-- %s", class^.Name )
+    END
+
+    IF class^.Spin THEN
+        RtlPrint (" (S)\n")
+    ELSE
+        RtlPrint ("\n")
+    END
+
+    visited[classindex] = TRUE
+    child := 0
+
+    WHILE child != classcount DO
+        IF child != classindex AND
+            DbgLockIsImmediateChild (
+                classindex,
+                child,
+                classcount,
+            ) THEN
+
+            IF NOT DbgDumpLockTree (
+                child,
+                classcount,
+                depth + 1,
+                visited,
+            ) THEN
+
+                RETURN FALSE
+            END
+        END
+
+        child += 1
+    END
+
+    RETURN TRUE
+END
+
+FN (DbgCommandF) DbgCommandLocks ()
+    classcount := KepActiveLockClasses
+
+    RtlPrint (
+        "Lock hierarchy: %u classes\n",
+        classcount,
+    )
+
+    visited : UBYTE[KEP_LOCKDEP_NUM_CLASSES]
+    i := 0
+
+    WHILE i != KEP_LOCKDEP_NUM_CLASSES DO
+        visited[i] = FALSE
+        i += 1
+    END
+
+    DbgResetPagination ()
+    classindex := 0
+
+    WHILE classindex != classcount DO
+        root := TRUE
+        parent := 0
+
+        WHILE parent != classcount DO
+            IF parent != classindex AND
+                KepLockIsReachable ( classindex, &KepLockMatrix[parent] ) THEN
+
+                root = FALSE
+                BREAK
+            END
+
+            parent += 1
+        END
+
+        IF root AND
+            NOT DbgDumpLockTree (
+                classindex,
+                classcount,
+                0,
+                &visited[0],
+            ) THEN
+
+            LEAVE
+        END
+
+        classindex += 1
+    END
+END
+
+FN (DbgCommandF) DbgCommandLockStat ()
+    classcount := KepActiveLockClasses
+
+    printed : UBYTE[KEP_LOCKDEP_NUM_CLASSES]
+    classindex := 0
+
+    WHILE classindex != KEP_LOCKDEP_NUM_CLASSES DO
+        printed[classindex] = FALSE
+        classindex += 1
+    END
+
+    RtlPrint ( "%-22s %-4s %s\n", "CLASS", "", "CONTENTION" )
+
+    DbgResetPagination ()
+    remaining := classcount
+
+    WHILE remaining DO
+        IF NOT DbgPaginate () THEN
+            LEAVE
+        END
+
+        best := classcount
+        classindex = 0
+
+        // Print locks with the highest contention first.
+
+        WHILE classindex != classcount DO
+            IF NOT printed[classindex] THEN
+                IF best == classcount THEN
+                    best = classindex
+
+                ELSEIF KepLockClasses[classindex].Contention >
+                    KepLockClasses[best].Contention THEN
+
+                    best = classindex
+                END
+            END
+
+            classindex += 1
+        END
+
+        class := &KepLockClasses[best]
+
+        marker := ""
+
+        IF class^.Spin THEN
+            marker = "(S)"
+        END
+
+        RtlPrint (
+            "%-22s %-4s %u/%u (%u%%)\n",
+            class^.Name,
+            marker,
+            class^.Contention,
+            class^.Attempts,
+            (class^.Contention * 100) / class^.Attempts,
+        )
+
+        printed[best] = TRUE
+        remaining -= 1
+    END
+END
+
+FN (DbgCommandF) DbgCommandLock ()
+    classname : UBYTE[32]
+
+    IF NOT DbgNextToken (
+        &classname[0], // tokenbuffer
+        32, // bufsize
+    ) THEN
+
+        RtlPrint ( "Usage: lock [name]\n" )
+
+        LEAVE
+    END
+
+    dummy : ^RtlAvlNode
+
+    class := KepFindLockClass (
+        &classname[0], // name
+        OUT dummy, // outbucket
+    )
+
+    classcount := KepActiveLockClasses
+
+    IF class == NULLPTR THEN
+        RtlPrint ( "Invalid class name\n" )
+        LEAVE
+    END
+
+    visited : UBYTE[KEP_LOCKDEP_NUM_CLASSES]
+    i := 0
+
+    WHILE i != KEP_LOCKDEP_NUM_CLASSES DO
+        visited[i] = FALSE
+        i += 1
+    END
+
+    DbgResetPagination ()
+
+    DbgDumpLockTree (
+        class^.Index,
+        classcount,
+        0,
+        &visited[0],
+    )
+
+END
+#END
+
 #SECTION "text"
 DbgCommandTable : DbgCommand[] = {
     {
@@ -949,8 +1250,24 @@ DbgCommandTable : DbgCommand[] = {
         [Help] = "Dump information about a node.",
     },
 
+#IF BLD_LOCKDEP
+    {
+        [Name] = "locks",
+        [Function] = &DbgCommandLocks,
+        [Help] = "Dump lockdep information.",
+    },
+    {
+        [Name] = "lock",
+        [Function] = &DbgCommandLock,
+        [Help] = "Dump lockdep information about a given lock class.",
+    },
+    {
+        [Name] = "lockstat",
+        [Function] = &DbgCommandLockStat,
+        [Help] = "Dump statistics for all lock classes.",
+    },
+#END
     // Sentinel.
-
     {},
 }
 

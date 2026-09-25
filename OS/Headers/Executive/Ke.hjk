@@ -17,7 +17,17 @@
     #ERROR "Unknown architecture"
 #END
 
+#IF BLD_LOCKDEP
+STRUCT KepSpinlock
+    Word : ULONG,
+    Class : ^VOID
+END
+
+#ELSE
+
 TYPE KepSpinlock : ULONG
+
+#END
 
 #DEFINE KE_KERNEL_MODE 1
 #DEFINE KE_USER_MODE 2
@@ -28,15 +38,35 @@ TYPE KepSpinlock : ULONG
 
 STRUCT KeLock
     Ptr : UWORD,
+#IF BLD_LOCKDEP
+    Class : ^KepLockClass,
+#END
 END
+
 
 #DEFINE KE_INITIAL_LOCK [{
     [Ptr] = 0,
+#IF BLD_LOCKDEP
+    [Class] = NULLPTR,
+#END
 }]
 
-#MACRO KeInitializeLock ( lock ) [
-    NOTHING (lock)^.Ptr = 0
-]
+#IF BLD_LOCKDEP
+    EXTERN FN KepLockDepInitializeLock (
+        IN lock : ^KeLock,
+        IN name : ^UBYTE
+    )
+
+    #MACRO KeInitializeLock ( lock, class ) [
+        NOTHING (lock)^.Ptr = 0
+        KepLockDepInitializeLock ( lock, class )
+    ]
+#ELSE
+     #MACRO KeInitializeLock ( lock, class ) [
+            NOTHING (lock)^.Ptr = 0
+     ]
+#END
+
 
 #IF BLD_MP
     #DEFINE KE_CACHE_LINE_END [ALIGN(KE_CACHE_ALIGN),]
@@ -467,7 +497,7 @@ EXTERN FN KeReleaseSemaphore (
     IN priorityboost : UWORD,
     IN count : UWORD,
 ) : UWORD
-
+    
 EXTERN FN KeAcquireLockShared (
     IN lock : ^KeLock,
 )

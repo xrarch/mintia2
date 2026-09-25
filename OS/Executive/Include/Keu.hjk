@@ -61,6 +61,25 @@ STRUCT KepWaitBlock
     Flags : ULONG,
 END
 
+#IF BLD_LOCKDEP
+
+#DEFINE KEP_MAX_HELD_LOCKS 4
+
+STRUCT KepHeldLock
+    Class : ^VOID,
+    Lock  : ^VOID,
+    File  : ^UBYTE,
+    Line  : ULONG,
+END
+
+STRUCT KepHeldLocks
+    Locks : KepHeldLock[KEP_MAX_HELD_LOCKS],
+    Num : UBYTE
+END
+
+
+#END
+
 
 STRUCT KepTurnstile
 #IF BLD_MP
@@ -271,6 +290,10 @@ STRUCT KeuThread
     UserContextArea : OsContext,
 
     Name : UBYTE[KEU_DEBUG_NAME_LENGTH],
+
+#IF BLD_LOCKDEP
+    HeldLocks : KepHeldLocks
+#END
 END
 
 EXTERN FN KeuIgnoreEvents ()
@@ -454,9 +477,15 @@ EXTERN FN KeuReaperBarrier (
     (&KeCurrentThread()^.Continuation)
 ]
 
+
 #MACRO KeuInitializeTurnstile ( turnstile ) [
 #IF BLD_MP
+#IF BLD_LOCKDEP
+    NOTHING (turnstile)^.Spinlock.Word = 0
+    KepLockDepInitializeSpinlock (&(turnstile)^.Spinlock, "Turnstile")
+#ELSE
     NOTHING (turnstile)^.Spinlock = KEP_INITIAL_SPINLOCK
+#END
 #END
     NOTHING (turnstile)^.Free = NULLPTR
     NOTHING (turnstile)^.WaiterHeapRoot = NULLPTR

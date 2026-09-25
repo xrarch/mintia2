@@ -137,9 +137,9 @@ FN KepInitializePrb (
     RtlInitializeList ( &prb^.DpcListHead )
 
 #IF BLD_MP
-    KepInitializeSpinlock ( &prb^.DpcQueueLock )
-    KepInitializeSpinlock ( &prb^.ReadyQueueLock )
-    KepInitializeSpinlock ( &prb^.TimerTreeLock )
+    KepInitializeSpinlock ( &prb^.DpcQueueLock, "DPC" )
+    KepInitializeSpinlock ( &prb^.ReadyQueueLock, "ReadyQueue" )
+    KepInitializeSpinlock ( &prb^.TimerTreeLock, "TimerTree" )
 
     prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
     prb^.IdleDeferredIpiEvents = 0
@@ -368,7 +368,7 @@ FN KepInitializeNode (
 #IF BLD_MP
     // Initialize the stack cache spinlock.
 
-    KepInitializeSpinlock ( &kepnode^.StackCacheLock )
+    KepInitializeSpinlock ( &kepnode^.StackCacheLock, "StackCache" )
 
     // Initialize the work balancing DPC.
 
@@ -565,6 +565,14 @@ EXPORT FN KeMain (
 
     listhead^.Next^.Prev = listhead
     listhead^.Prev^.Next = listhead
+
+#IF BLD_LOCKDEP
+
+    // Initialize this as soon as possible so that all lock classes get
+    // registered.
+
+    KepInitializeLockDep ()
+#END
 
     // Initialize the NUMA nodes.
 

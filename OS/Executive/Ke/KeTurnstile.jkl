@@ -515,7 +515,7 @@ FN KepBlockOnLock (
 
             KeInitializeEvent (
                 &turnstile^.Event, // event
-                "Turnstile", // name
+                "TurnstileEvent", // name
                 TRUE, // notification
                 FALSE, // signalstate
             )
@@ -921,6 +921,11 @@ FN KepAcquireLockExclusive (
 
     thread := KeCurrentThread ()
 
+#IF BLD_LOCKDEP
+    KepCheckLock (lock^.Class, "todo", 0)
+    KepLockDepRegisterContention ( lock^.Class )
+#END
+
     WHILE TRUE DO
         IF current == 0 THEN
             // The lock is free. Try setting it owned with our thread pointer.
@@ -935,6 +940,10 @@ FN KepAcquireLockExclusive (
                 // Return the same oldipl we were passed.
                 // This simplifies the implementation of the fast path wrappers
                 // written in assembly language.
+
+#IF BLD_LOCKDEP
+                KepAcquiredLock (lock, "todo", 0)
+#END
 
                 RETURN oldipl
             END
@@ -1008,6 +1017,10 @@ FN KepReleaseLock (
                 )
             END
 
+#IF BLD_LOCKDEP
+            KepReleasedLock ( lock )
+#END
+
             LEAVE
         END
 
@@ -1041,6 +1054,10 @@ FN KepReleaseLock (
                 )
             END
 
+#IF BLD_LOCKDEP
+            KepReleasedLock ( lock )
+#END
+
             LEAVE
         END
 
@@ -1054,6 +1071,11 @@ FN KepReleaseLock (
 
         IF new == current THEN
             // Got it.
+
+
+#IF BLD_LOCKDEP
+            KepReleasedLock ( lock )
+#END
 
             LEAVE
         END

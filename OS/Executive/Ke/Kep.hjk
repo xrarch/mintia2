@@ -168,6 +168,7 @@ EXTERN KepMaximumBalanceIterations : ULONG
 
 #END
 
+
 // The per-processor block (Prb) is an architectural page size, but is at
 // minimum 4KB. It contains all per-processor information.
 //
@@ -355,6 +356,10 @@ KE_CACHE_LINE_END
     // Threads on these lists are called "timeshared threads".
 
     CalendarListHeads : RtlListEntry[KEP_TIMESHARED_QUEUES],
+
+#IF BLD_LOCKDEP
+    HeldLocks : KepHeldLocks
+#END
 END
 
 #DEFINE KEP_DISPATCH_EVENT_NOTIF 1
@@ -707,11 +712,11 @@ EXTERN FN KepExecuteOnEveryoneElse (
     END
 ]
 
-EXTERN FN KepTryAcquireSpinlock (
+EXTERN FN KepTryAcquireSpinlockRaw (
     IN spinlock : ^KepSpinlock,
 ) : UWORD
 
-EXTERN FN KepAcquireSpinlock (
+EXTERN FN KepAcquireSpinlockRaw (
     IN spinlock : ^KepSpinlock,
 )
 
@@ -719,13 +724,126 @@ EXTERN FN KepForceReleaseSpinlock (
     IN spinlock : ^KepSpinlock,
 )
 
-EXTERN FN KepAcquireSpinlockRaise (
+EXTERN FN KepAcquireSpinlockRaiseRaw (
     IN spinlock : ^KepSpinlock,
 ) : UWORD
 
-EXTERN FN KepAcquireSpinlockInPrb (
+EXTERN FN KepAcquireSpinlockInPrbRaw (
     IN offset : UWORD,
 ) : UWORD
+
+
+#IF BLD_LOCKDEP
+
+EXTERN FN KepCheckSpinLock (
+    IN class: ^KepLockClass,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+
+EXTERN FN KepReleasedSpinlock (
+    IN spinlock : ^KepSpinlock,
+)
+
+EXTERN FN KepAcquiredSpinlock (
+    IN spinlock : ^KepSpinlock,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+
+
+EXTERN FN KepLockDepTryAcquireSpinlock (
+    IN spinlock : ^KepSpinlock,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+) : UWORD
+
+EXTERN FN KepLockDepAcquireSpinlock (
+    IN spinlock : ^KepSpinlock,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+
+EXTERN FN KepLockDepAcquireSpinlockRaise (
+    IN spinlock : ^KepSpinlock,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+) : UWORD
+
+EXTERN FN KepLockDepAcquireSpinlockInPrb (
+    IN offset : UWORD,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+) : UWORD
+
+#MACRO KepAcquireSpinlock ( lock ) [
+    #DEFINE FN_STRING ( STRCAT ( STRCAT "\"" JKL_FILE_NAME ) "\"" )
+    #DEFINE LN_STRING ( STRCAT "" JKL_LINE_NUMBER )
+
+
+    KepLockDepAcquireSpinlock (
+        lock, // spinlock
+        FN_STRING, // file
+        LN_STRING, // line
+    )
+]
+
+#MACRO KepTryAcquireSpinlock ( lock ) [
+    #DEFINE FN_STRING ( STRCAT ( STRCAT "\"" JKL_FILE_NAME ) "\"" )
+    #DEFINE LN_STRING ( STRCAT "" JKL_LINE_NUMBER )
+
+
+    KepLockDepTryAcquireSpinlock (
+        lock, // spinlock
+        FN_STRING, // file
+        LN_STRING, // line
+    )
+]
+
+#MACRO KepAcquireSpinlockRaise ( lock ) [
+    #DEFINE FN_STRING ( STRCAT ( STRCAT "\"" JKL_FILE_NAME ) "\"" )
+    #DEFINE LN_STRING ( STRCAT "" JKL_LINE_NUMBER )
+
+
+    KepLockDepAcquireSpinlockRaise (
+        lock, // spinlock
+        FN_STRING, // file
+        LN_STRING, // line
+    )
+]
+
+#MACRO KepAcquireSpinlockInPrb ( lock ) [
+    #DEFINE FN_STRING ( STRCAT ( STRCAT "\"" JKL_FILE_NAME ) "\"" )
+    #DEFINE LN_STRING ( STRCAT "" JKL_LINE_NUMBER )
+
+    KepLockDepAcquireSpinlockInPrb (
+        lock, // spinlock
+        FN_STRING, // file
+        LN_STRING, // line
+    )
+
+]
+
+
+#ELSE
+
+#MACRO KepAcquireSpinlock ( lock ) [
+    KepAcquireSpinlockRaw ( lock )
+]
+
+#MACRO KepTryAcquireSpinlock ( lock ) [
+    KepTryAcquireSpinlockRaw ( lock )
+]
+
+#MACRO KepAcquireSpinlockRaise ( lock ) [
+    KepAcquireSpinlockRaiseRaw ( lock )
+]
+
+#MACRO KepAcquireSpinlockInPrb ( lock ) [
+    KepAcquireSpinlockInPrbRaw ( lock )
+]
+
+#END
 
 #MACRO KepAcquireObject ( object ) [
     KepAcquireSpinlockRaise ( &(object)^.Spinlock )
@@ -885,6 +1003,65 @@ EXTERN FN KepStealWork ()
 
 #END
 
+#IF BLD_LOCKDEP
+
+EXTERN FN KepInitializeLockDep ()
+
+EXTERN FN KepCheckLock (
+    IN class: ^KepLockClass,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+
+EXTERN FN KepReleasedLock (
+    IN lock : ^KeLock,
+)
+
+EXTERN FN KepLockDepRegisterContention (
+    IN class : ^KepLockClass,
+)
+
+EXTERN FN KepAcquiredLock (
+    IN lock : ^KeLock,
+    IN file : ^UBYTE,
+    IN line : ULONG,
+)
+
+EXTERN FN KepLockIsReachable (
+    IN class : ULONG,
+    IN from : ^KepLockRelation,
+) : UBYTE
+
+EXTERN FN KepFindLockClass (
+    IN name : ^UBYTE,
+    OUT outbucket : ^RtlAvlNode
+) : ^KepLockClass
+
+
+#DEFINE KEP_LOCKDEP_NUM_CLASSES 128
+#DEFINE KEP_LOCKDEP_BITMAP_MASKS [(KEP_LOCKDEP_NUM_CLASSES / SIZEOF UWORD)]
+
+STRUCT KepLockRelation
+    // Bitmap[L] is set iff L is reachable from this lock.
+    Bitmap : UWORD[KEP_LOCKDEP_BITMAP_MASKS]
+END
+
+STRUCT KepLockClass
+    Name : ^UBYTE,
+    Index : ULONG,
+    Entry : RtlAvlNode,
+    Spin  : UBYTE,
+    Contention : ULONG,
+    Attempts : ULONG,
+END
+
+
+EXTERN KepLockMatrix : KepLockRelation[KEP_LOCKDEP_NUM_CLASSES]
+EXTERN KepActiveLockClasses : ULONG
+EXTERN KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
+
+#END
+
 #IF ( == BLD_BITS 32 )
 
 #MACRO KepCaptureCurrentTicks ( uquad ) [
@@ -975,13 +1152,12 @@ EXTERN FN KepStealWork ()
     NOTHING (hdr)^.Name = (name)
     NOTHING (hdr)^.WaiterCount = 0
 #IF BLD_MP
-    KepInitializeSpinlock ( &(hdr)^.Spinlock )
+    KepInitializeSpinlock ( &(hdr)^.Spinlock, "DispatchObject" )
 #END
     NOTHING (hdr)^.Type = (type)
 ]
 
 EXTERN KepIndexFirstBitClear : UBYTE[256]
-
 EXTERN KepIndexFirstBitSet : UBYTE[256]
 
 #DEFINE KEP_THREAD_PENDING_KAPC 1

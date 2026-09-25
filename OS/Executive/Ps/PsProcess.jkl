@@ -398,7 +398,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
     // Initialize the privilege lock.
 
-    KeInitializeLock ( &process^.Paged^.PrivilegeLock )
+    KeInitializeLock ( &process^.Paged^.PrivilegeLock, "PrivilegeLock" )
 
     // Inherit the granted privileges from the parent process.
 
@@ -418,7 +418,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
     // Initialize the group lock.
 
-    KeInitializeLock ( &paged^.GroupLock )
+    KeInitializeLock ( &paged^.GroupLock, "GroupLock" )
 
     // Intern the name.
 
@@ -461,7 +461,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
         GOTO Error5
     END
 
-    KeInitializeLock ( &paged^.ActivationLock )
+    KeInitializeLock ( &paged^.ActivationLock, "ActivationLock" )
 
     paged^.ActivationStatus = 0
     paged^.TerminationStatus = OS_STATUS_SUCCESS

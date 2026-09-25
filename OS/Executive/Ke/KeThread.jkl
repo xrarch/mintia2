@@ -156,7 +156,7 @@ FN KeuInitializeThread (
     // Initialize the thread lock.
 
 #IF BLD_MP
-    KepInitializeSpinlock ( &thread^.Spinlock )
+    KepInitializeSpinlock ( &thread^.Spinlock, "Thread" )
 
     thread^.WaitAttempt = KEP_THREAD_WAIT_NONE
 
@@ -199,6 +199,10 @@ FN KeuInitializeThread (
     thread^.AbortListHead[1] = NULLPTR
 
     thread^.LastFaultStatus = 0
+
+#IF BLD_LOCKDEP
+    thread^.HeldLocks.Num = 0
+#END
 
     // Fill the context area with zeroes to avoid leaking data to usermode.
 
@@ -755,12 +759,33 @@ FN KeuExitThread (
 
     KepAcquireThreadElevated ( thread )
 
+#IF ( AND BLD_MP BLD_LOCKDEP )
+    // Pretend we don't hold this lock while taking the timer tree lock.
+    //
+    // There is a timer -> thread ordering and a timer tree -> timer
+    // ordering,  which establishes transitively a timer tree -> thread
+    // ordering. Here, we hold a thread lock and attempt to take the
+    // timer tree lock in PspActivateReaper, which would be an inversion;
+    // this is safe however as it is guaranteed that the thread lock won't ever
+    // get taken by a timer wake up (which would try to do tree -> thread)
+    // as we are exiting and not waiting on anything.
+
+    KepReleasedSpinlock ( &thread^.Spinlock )
+#END
+
     // Atomically enqueue to reaper list.
 
     KeuInsertCustodyList (
         thread^.Node^.ReaperCustodyList, // list
         &thread^.ReadyEntry.Next, // link
     )
+
+#IF ( AND BLD_MP BLD_LOCKDEP )
+    // Now we're safe.
+
+    KepAcquiredSpinlock ( &thread^.Spinlock, "", 0 )
+#END
+
 
     // Set to terminated status.
 

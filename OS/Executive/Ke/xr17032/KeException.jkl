@@ -647,6 +647,16 @@ KepHandoffStack:
     // Set spinlock un-owned.
 
     mov  long [a1 + KeuThread_Spinlock], zero
+
+  #IF BLD_LOCKDEP
+      mov  s0, a0
+      mov  s1, a1
+      addi a0, s1, KeuThread_Spinlock
+      jal  KepReleasedSpinlock
+      mov  a0, s0
+      mov  a1, s1
+  #END
+
 #END
 
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
@@ -715,6 +725,12 @@ KepSwitchContinuationToContinuation:
     // Set spinlock un-owned.
 
     mov  long [s1 + KeuThread_Spinlock], zero
+
+#IF BLD_LOCKDEP
+    addi a0, s1, KeuThread_Spinlock
+    jal KepReleasedSpinlock
+#END
+
 #END
 
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
@@ -790,6 +806,16 @@ KepSwitchNormalToContinuation:
     // Set spinlock un-owned.
 
     mov  long [a1 + KeuThread_Spinlock], zero
+
+#IF BLD_LOCKDEP
+    mov  s0, a0
+    mov  s1, a1
+    addi a0, s1, KeuThread_Spinlock
+    jal  KepReleasedSpinlock
+    mov  a0, s0
+    mov  a1, s1
+#END
+
 #END
 
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
@@ -854,6 +880,12 @@ KepSwitchContinuationToNormal:
     // Set spinlock un-owned.
 
     mov  long [s1 + KeuThread_Spinlock], zero
+
+#IF BLD_LOCKDEP
+    addi a0, s1, KeuThread_Spinlock
+    jal KepReleasedSpinlock
+#END
+
 #END
 
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
@@ -951,6 +983,16 @@ KepSwitchNormalToNormal:
     // Set spinlock un-owned.
 
     mov  long [a1 + KeuThread_Spinlock], zero
+
+#IF BLD_LOCKDEP
+    mov  s0, a0
+    mov  s1, a1
+    addi a0, s1, KeuThread_Spinlock
+    jal  KepReleasedSpinlock
+    mov  a0, s0
+    mov  a1, s1
+#END
+
 #END
 
     // If there are any KAPCs pending in the new thread, set int at KEP_IPL_APC
