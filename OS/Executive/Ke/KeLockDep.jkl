@@ -4,7 +4,6 @@
 
 #INCLUDE "Kep.hjk"
 
-
 #IF BLD_LOCKDEP
 
 #DEFINE NUM_BUCKETS 32
@@ -15,7 +14,7 @@ EXPORT KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
 
 KepMatrixLock : KepSpinlock
 KepClassesBuckets: RtlAvlNode[NUM_BUCKETS]
-KepLockDepStarted : UWORD = FALSE
+KepLockDepStarted := FALSE
 
 #IF BLD_MP
 
@@ -45,11 +44,10 @@ KepLockDepStarted : UWORD = FALSE
     KepLowerIpl ( ipl )
 ]
 
-#MACRO KepAcquireMatrixElevated ( ) [
-]
+#MACRO KepAcquireMatrixElevated ( ) []
 
-#MACRO KepReleaseMatrixElevated ( ) [
-]
+#MACRO KepReleaseMatrixElevated ( ) []
+
 #END
 
 FN KepHash (
@@ -103,6 +101,7 @@ EXPORT FN KepInitializeLockDep ()
     WHILE i != KEP_LOCKDEP_NUM_CLASSES DO
         entry := &KepLockClasses[i]
         entry^.Index = i
+
         i += 1
     END
 
@@ -110,6 +109,7 @@ EXPORT FN KepInitializeLockDep ()
 
     WHILE i != NUM_BUCKETS DO
         RtlInitializeAvl ( &KepClassesBuckets[i] )
+
         i += 1
     END
 
@@ -199,7 +199,8 @@ FN KepFindCreateLockClass (
     )
 
     IF class != NULLPTR THEN
-        KepReleaseMatrix ( ipl ) 
+        KepReleaseMatrix ( ipl )
+
         RETURN class
     END
 
@@ -222,6 +223,7 @@ FN KepFindCreateLockClass (
     )
 
     KepActiveLockClasses += 1
+
     KepReleaseMatrix ( ipl ) 
 
     RETURN class
@@ -237,6 +239,7 @@ FN KepLockCloneSet (
 
     WHILE i != KEP_LOCKDEP_BITMAP_MASKS DO
         to^.Bitmap[i] = from^.Bitmap[i]
+
         i += 1
     END
 END
@@ -280,9 +283,9 @@ FN KepLockMergeSets (
 
     WHILE i != KEP_LOCKDEP_BITMAP_MASKS DO
         to^.Bitmap[i] |= from^.Bitmap[i]
+
         i += 1
     END
-
 END
 
 FN KepAddEdge (
@@ -344,9 +347,11 @@ FN KepAddEdge (
 
         // Only keep ancestors.
 
-        IF NOT KepLockIsReachable (parentidx, mxentry) AND
+        IF NOT KepLockIsReachable ( parentidx, mxentry ) AND
             i != parentidx THEN
+
             i += 1
+
             CONTINUE
         END
 
@@ -402,11 +407,11 @@ FN KepCheck (
         heldidx := kepclass^.Index
         heldmx := &KepLockMatrix[heldidx]
 
-        IF NOT KepLockIsReachable( classidx, heldmx ) THEN
-
+        IF NOT KepLockIsReachable ( classidx, heldmx ) THEN
             // Check again under the lock.
 
             fast = FALSE
+
             BREAK
         END
 
@@ -523,6 +528,7 @@ FN KepReleased (
         IF arr^[i].Lock == lock THEN
             BREAK
         END
+
         i += 1
     END
 
@@ -603,6 +609,7 @@ EXPORT FN KepLockDepInitializeSpinlock (
 
     IF KepLockDepStarted == FALSE THEN
         spinlock^.Class = NULLPTR
+
         LEAVE
     END
 
@@ -673,8 +680,6 @@ EXPORT FN KepLockDepAcquireSpinlock (
     )
 END
 
-
-
 EXPORT FN KepLockDepAcquireSpinlockRaise (
     IN spinlock : ^KepSpinlock,
     IN file : ^UBYTE,
@@ -698,7 +703,7 @@ EXPORT FN KepLockDepAcquireSpinlockRaise (
         GOTO End
     END
 
-    KepAcquireSpinlockRaiseRaw (spinlock)
+    KepAcquireSpinlockRaiseRaw ( spinlock )
 
 @End
 
@@ -766,6 +771,7 @@ EXPORT FN KepLockDepInitializeLock (
 
     IF KepLockDepStarted == FALSE THEN
         lock^.Class = NULLPTR
+
         LEAVE
     END
 
@@ -855,4 +861,5 @@ EXPORT FN KepReleasedLock (
         &curtd^.HeldLocks, // heldlocks
     )
 END
+
 #END

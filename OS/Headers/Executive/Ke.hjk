@@ -18,6 +18,7 @@
 #END
 
 #IF BLD_LOCKDEP
+
 STRUCT KepSpinlock
     Word : ULONG,
     Class : ^VOID
@@ -52,19 +53,23 @@ END
 }]
 
 #IF BLD_LOCKDEP
-    EXTERN FN KepLockDepInitializeLock (
-        IN lock : ^KeLock,
-        IN name : ^UBYTE
-    )
 
-    #MACRO KeInitializeLock ( lock, class ) [
-        NOTHING (lock)^.Ptr = 0
-        KepLockDepInitializeLock ( lock, class )
-    ]
+EXTERN FN KepLockDepInitializeLock (
+    IN lock : ^KeLock,
+    IN name : ^UBYTE
+)
+
+#MACRO KeInitializeLock ( lock, class ) [
+    NOTHING (lock)^.Ptr = 0
+    KepLockDepInitializeLock ( lock, class )
+]
+
 #ELSE
-     #MACRO KeInitializeLock ( lock, class ) [
-            NOTHING (lock)^.Ptr = 0
-     ]
+
+ #MACRO KeInitializeLock ( lock, class ) [
+        NOTHING (lock)^.Ptr = 0
+ ]
+
 #END
 
 
