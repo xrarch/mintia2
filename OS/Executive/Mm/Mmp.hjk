@@ -453,7 +453,7 @@ STRUCT MmpBatchedShootdown
     Context : ^VOID,
 END
 
-STRUCT MmpBatchedShootdownTable
+STRUCT MmpBatchedShootdownPerCpu
     Table : MmpBatchedShootdown[MMP_MAXIMUM_SHOOTDOWN_BATCH],
     Index : UWORD,
 
@@ -606,8 +606,8 @@ KE_CACHE_LINE_END
     PgPoolCacheList : MmpPoolCacheList,
 
 #IF BLD_MP
-    BatchedShootdowns : ^MmpBatchedShootdownTable,
-    AlternateBatchedShootdowns : ^MmpBatchedShootdownTable,
+    BatchedShootdowns : ^MmpBatchedShootdownPerCpu,
+    AlternateBatchedShootdowns : ^MmpBatchedShootdownPerCpu,
     FlushShootdownLock : KeLock,
     HasPendingFlushes : UBYTE,
 #END

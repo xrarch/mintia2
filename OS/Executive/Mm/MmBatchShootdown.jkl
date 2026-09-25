@@ -27,6 +27,10 @@ FN MmpFlushShootdowns (
 
     mmnode^.HasPendingFlushes = FALSE
 
+    // Flush HasPendingFlushes flag before swapping shootdown tables.
+
+    KeWriteMemoryBarrier ()
+
     // Before doing the shootdown, swap the active shootdown table and the
     // alternate shootdown table. This will give us a copy that is guaranteed
     // not to have any new shootdowns enqueued to it in the future.
