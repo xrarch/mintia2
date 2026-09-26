@@ -307,8 +307,10 @@ FN KepExecuteOnEveryoneElse (
         nodeprocs := kenode^.ProcessorCount
 
         WHILE i < nodeprocs DO
+            globalid := targetprb^.GlobalId
+
             IF targetprb != prb AND
-                processormask^[i / 32] & (1 << (i & 31)) THEN
+                processormask^[globalid / 32] & (1 << (globalid & 31)) THEN
 
                 IF deferred AND
                     VOLATILE targetprb^.InIdleLoop THEN
