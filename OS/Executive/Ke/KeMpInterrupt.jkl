@@ -78,10 +78,6 @@ EXPORT FN KepFreezeOtherProcessors ()
         spincount := KEP_FREEZE_SPIN
 
         WHILE VOLATILE KepFrozenProcessorCount != expected AND spincount DO
-            // Compiler BARRIER so this loop isn't optimized out.
-
-            BARRIER
-
             KeSpinPause ()
 
             spincount -= 1
@@ -120,10 +116,6 @@ EXPORT FN KepUnfreezeOtherProcessors ()
         // It's zero now, they've been released. Wait for them.
 
         WHILE VOLATILE KepFrozenProcessorCount DO
-            // Compiler BARRIER so this loop isn't optimized out.
-
-            BARRIER
-
             KeSpinPause ()
         END
     END
@@ -164,10 +156,6 @@ FN KepExecuteOnOtherProcessor (
     WHILE mask == 0xFF DO
         // 0xFF means theres no clear bits; no free table slots. Spin-wait for
         // a free table slot.
-        
-        // Use a compiler BARRIER to stop this loop from being optimized out.
-
-        BARRIER
 
         KeSpinPause ()
 
@@ -220,10 +208,6 @@ FN KepExecuteOnOtherProcessor (
     // 4. Spin-wait for execution of our callback.
 
     WHILE VOLATILE prb^.IpiSpin DO
-        // Do a compiler BARRIER so that this loop isn't optimized out.
-
-        BARRIER
-
         KeSpinPause ()
     END
 
@@ -346,11 +330,6 @@ FN KepExecuteOnEveryoneElse (
                         deferred, // set
                     )
 
-                    // Compiler BARRIER to stop the read from InIdleLoop
-                    // being smushed together by the compiler.
-
-                    BARRIER
-
                     IF VOLATILE targetprb^.InIdleLoop THEN
                         // It's still in the idle loop, which means we can avoid
                         // waiting for this guy. It doesn't really matter if it
@@ -411,10 +390,6 @@ FN KepExecuteOnEveryoneElse (
     // Spin-wait for execution of our callback.
 
     WHILE VOLATILE prb^.IpiSpin DO
-        // Do a compiler BARRIER so that this loop isn't optimized out.
-
-        BARRIER
-
         KeSpinPause ()
     END
 
@@ -506,10 +481,6 @@ FN (KeInterruptF) KepServiceIpi (
         )
 
         WHILE VOLATILE KepFreezeCount DO
-            // Do a compiler BARRIER so that this loop isn't optimized out.
-
-            BARRIER
-
             KeSpinPause ()
         END
 
