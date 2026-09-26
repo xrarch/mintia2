@@ -305,6 +305,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
     currentprocess := PsCurrentProcess ()
 
     flags := ctx^.Flags
+    kenode := ctx^.KeNode
 
     IF flags & OS_PROCESS_DETACH_JOB AND
         NOT PsuCheckPrivilege ( currentprocess, OS_PRIVILEGE_DETACH_JOB ) THEN
@@ -356,7 +357,12 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 #IF BLD_MP
     process^.Pcb.BatchedShootdownState = CAST psstuff TO ^VOID
 
-    psstuff += KeuSizeOfProcessShootdownState ()
+    // Determine whether we're creating a system process by whether the node has
+    // one yet or not.
+
+    psstuff += KeuSizeOfProcessShootdownState (
+        kenode^.SystemProcess == NULLPTR, // systemspace
+    )
 #END
 
 #IF ( STRCMP ARCHITECTURE "xr17032" )
@@ -367,8 +373,6 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
     psstuff += KeQueryProcessorCount () * SIZEOF KepAsidInfoEntry
 #END
-
-    kenode := ctx^.KeNode
 
     KeuInitializeProcess (
         &process^.Pcb, // process
@@ -1113,6 +1117,15 @@ FN PsuCreateProcessObject (
     // ASID table.
 
     obparams.BodySize += SIZEOF KepAsidInfoEntry * KeQueryProcessorCount ()
+#END
+
+#IF BLD_MP
+    // Determine whether this is a system process by whether the node has one
+    // yet.
+
+    obparams.BodySize += KeuSizeOfProcessShootdownState (
+        kenode^.SystemProcess == NULLPTR, // systemspace
+    )
 #END
 
     RETURN NsuCreateObject (

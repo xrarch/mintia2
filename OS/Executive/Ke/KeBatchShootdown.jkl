@@ -48,7 +48,7 @@ FN KeuFlushShootdowns (
     // enqueues to this table.
 
     i := 0
-    procs := KeQueryMostProcessorsInAnyNode ()
+    procs := state^.Processors
 
     WHILE i < procs DO
         KeAcquireLockExclusive ( &table[i].Lock )
@@ -112,7 +112,7 @@ FN KeuBatchShootdown (
 
 @Retry
 
-    cpuid := KeCurrentNodeLocalProcessorId ()
+    cpuid := KeCurrentNodeLocalProcessorId () & state^.ProcessorIdMask
 
     shootdownstate := state^.BatchedShootdowns
     percpu := &shootdownstate[cpuid]
@@ -206,13 +206,21 @@ FN KeuBatchShootdown (
 END
 
 #SECTION "PAGEtext"
-FN KeuSizeOfProcessShootdownState () : UWORD
+FN KeuSizeOfProcessShootdownState (
+    IN systemspace : UWORD,
+) : UWORD
 
     // Calculate and return the size of the shootdown state for a process.
 
     bytes := SIZEOF KepBatchedShootdownState
-    bytes +=
-        SIZEOF KepBatchedShootdownPerCpu * KeQueryMostProcessorsInAnyNode ()
+
+    IF systemspace THEN
+        bytes += SIZEOF KepBatchedShootdownPerCpu *
+            KeQueryMostProcessorsInAnyNode () * 2
+
+    ELSE
+        bytes += SIZEOF KepBatchedShootdownPerCpu * 2
+    END
 
     RETURN bytes
 END
@@ -226,13 +234,6 @@ FN KepInitializeBatchedShootdownState (
     // Initialize batched shootdown state. Assumes there's room for the
     // per-cpu tables after the main state structure.
 
-    state^.BatchedShootdowns =
-        CAST (state + SIZEOF KepBatchedShootdownState) TO ^VOID
-
-    state^.AlternateBatchedShootdowns =
-        CAST (state^.BatchedShootdowns + KeQueryMostProcessorsInAnyNode () *
-        SIZEOF KepBatchedShootdownPerCpu) TO ^VOID
-
     state^.HasPendingFlushes = FALSE
 
     IF systemspace THEN
@@ -241,6 +242,8 @@ FN KepInitializeBatchedShootdownState (
 
         KepSetProcessorMask ( &state^.ProcessorMask )
         state^.SystemSpace = TRUE
+        state^.Processors = KeQueryMostProcessorsInAnyNode ()
+        state^.ProcessorIdMask = 0xFFFF
 
     ELSE
         // Clear all shootdown target bits since this is a normal user process.
@@ -249,12 +252,21 @@ FN KepInitializeBatchedShootdownState (
 
         KepClearProcessorMask ( &state^.ProcessorMask )
         state^.SystemSpace = FALSE
+        state^.Processors = 1
+        state^.ProcessorIdMask = state^.Processors - 1
     END
+
+    state^.BatchedShootdowns =
+        CAST (state + SIZEOF KepBatchedShootdownState) TO ^VOID
+
+    state^.AlternateBatchedShootdowns =
+        CAST (state^.BatchedShootdowns + state^.Processors *
+        SIZEOF KepBatchedShootdownPerCpu) TO ^VOID
 
     KeInitializeLock ( &state^.FlushShootdownLock, "FlushShootdowns" )
 
     i := 0
-    max := KeQueryMostProcessorsInAnyNode ()
+    max := state^.Processors
 
     WHILE i < 2 DO
         table : ^KepBatchedShootdownPerCpu

@@ -1189,7 +1189,7 @@ EXTERN KepAllProcessorsMask : ULONG[16]
 // Maximum number of shootdowns that can be batched on a per-cpu table at a
 // time.
 
-#DEFINE KEP_MAXIMUM_SHOOTDOWN_BATCH 32
+#DEFINE KEP_MAXIMUM_SHOOTDOWN_BATCH 8
 
 STRUCT KepBatchedShootdown
     Ptr : ^VOID,
@@ -1210,6 +1210,8 @@ END
 STRUCT KepBatchedShootdownState
     BatchedShootdowns : ^KepBatchedShootdownPerCpu,
     AlternateBatchedShootdowns : ^KepBatchedShootdownPerCpu,
+    ProcessorIdMask : UINT,
+    Processors : UINT,
     HasPendingFlushes : UBYTE,
     SystemSpace : UBYTE,
 
