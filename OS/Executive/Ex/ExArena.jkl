@@ -44,6 +44,12 @@ KE_CACHE_LINE_END
 
 KE_CACHE_LINE_END
 
+    ImporterLock : KeLock,
+    ImporterListHead : RtlListEntry,
+    ImporterListEntry : RtlListEntry,
+
+KE_CACHE_LINE_END
+
     // Keyed by size.
     FreeTree : RtlAvlNode,
 
@@ -217,7 +223,6 @@ FN ExpFreeArena (
     )
 END
 
-#SECTION "PAGEtext"
 FN ExDeleteArena (
     IN arena : ^ExpArena,
 )
@@ -226,6 +231,8 @@ FN ExDeleteArena (
     // blocks should have been freed by now, if needed; they are not freed
     // automatically by this function.
 
+    ipl : UWORD
+
     expnode := arena^.Node^.Exp
 
     KeAcquireLockExclusive ( &expnode^.ArenaListLock )
@@ -233,6 +240,18 @@ FN ExDeleteArena (
     RtlRemoveEntryList ( &arena^.Entry )
 
     KeReleaseLock ( &expnode^.ArenaListLock )
+
+    importarena := arena^.ImportArena
+
+    IF importarena THEN
+        // Remove from the imported arena's list of importers.
+
+        ipl = KeAcquireLockExclusiveRaise ( &importarena^.ImporterLock )
+
+        RtlRemoveEntryList ( &arena^.ImporterListEntry )
+
+        KeReleaseLockLower ( &importarena^.ImporterLock, ipl )
+    END
 
     // Delete all of the quantum caches.
 
@@ -254,7 +273,7 @@ FN ExDeleteArena (
 
         // Splice the list in at the tail, all at once.
 
-        ipl := KeAcquireLockExclusiveRaise ( &expnode^.ArenaTagListLock )
+        ipl = KeAcquireLockExclusiveRaise ( &expnode^.ArenaTagListLock )
 
         headentry^.Prev = expnode^.ArenaTagListHead.Prev
         expnode^.ArenaTagListHead.Prev^.Next = headentry
@@ -273,7 +292,28 @@ FN ExpAdjustQuantumCaches (
     IN purge : UWORD,
 )
 
-    // Adjust the arena's quantum caches.
+    // Adjust the arena's quantum caches, along with those of all arenas that
+    // import from it.
+
+    IF NOT RtlEmptyList ( &arena^.ImporterListHead ) THEN
+        ipl := KeAcquireLockExclusiveRaise ( &arena^.ImporterLock )
+
+        listhead := &arena^.ImporterListHead
+        listentry := arena^.ImporterListHead.Next
+
+        WHILE listentry != listhead DO
+            importer := CONTAINEROF listentry TO ExpArena.ImporterListEntry
+
+            ExpAdjustQuantumCaches (
+                importer, // arena
+                purge, // purge
+            )
+
+            listentry = listentry^.Next
+        END
+
+        KeReleaseLockLower ( &arena^.ImporterLock, ipl )
+    END
 
     i := 1
 
@@ -965,6 +1005,42 @@ FN (ExArenaFreeF) ExDefaultArenaFree (
     )
 END
 
+FN ExpInsertArenaInLists (
+    IN arena : ^ExpArena,
+)
+
+    // Nonpaged helper for inserting the arena in the lists.
+
+    // Insert in the imported arena's list.
+
+    importarena := arena^.ImportArena
+
+    IF importarena THEN
+        ipl := KeAcquireLockExclusiveRaise ( &importarena^.ImporterLock )
+
+        RtlInsertAtTailList (
+            &importarena^.ImporterListHead, // listhead
+            &arena^.ImporterListEntry, // entry
+        )
+
+        KeReleaseLockLower ( &importarena^.ImporterLock, ipl )
+    END
+
+    // Insert in the per-node arena list.
+    // This list is to be used for user introspection.
+
+    expnode := arena^.Node^.Exp
+
+    KeAcquireLockExclusive ( &expnode^.ArenaListLock )
+
+    RtlInsertAtTailList (
+        &expnode^.ArenaListHead, // listhead
+        &arena^.Entry, // entry
+    )
+
+    KeReleaseLock ( &expnode^.ArenaListLock )
+END
+
 #SECTION "PAGEtext"
 FN ExCreateArena (
     IN name : ^UBYTE,
@@ -1079,6 +1155,10 @@ FN ExCreateArena (
     RtlInitializeList ( &arena^.TagReserveListHead )
     arena^.TagReserveCount = 0
 
+    RtlInitializeList ( &arena^.ImporterListHead )
+
+    KeInitializeLock ( &arena^.ImporterLock, "ArenaImporterLock" )
+
     // Two for import tags and two for each side of a middle-split block.
 
     arena^.TagReserveMinimum = 4
@@ -1123,14 +1203,6 @@ FN ExCreateArena (
     END
 
     // Insert into the node's arena list.
-    // This list is to be used for user introspection.
 
-    KeAcquireLockExclusive ( &expnode^.ArenaListLock )
-
-    RtlInsertAtTailList (
-        &expnode^.ArenaListHead, // listhead
-        &arena^.Entry, // entry
-    )
-
-    KeReleaseLock ( &expnode^.ArenaListLock )
+    ExpInsertArenaInLists ( arena )
 END
