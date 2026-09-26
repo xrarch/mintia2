@@ -429,24 +429,6 @@ FN MmuInitializeStage1 ()
 
         mmnode^.KeNode = kenode
 
-#IF BLD_MP
-        mmnode^.BatchedShootdowns = KeuAllocateNodeSpace (
-            kenode, // kenode
-            KeQueryMostProcessorsInAnyNode () *
-            SIZEOF MmpBatchedShootdownPerCpu, // bytes
-        )
-
-        KeAssert ( mmnode^.BatchedShootdowns != NULLPTR )
-
-        mmnode^.AlternateBatchedShootdowns = KeuAllocateNodeSpace (
-            kenode, // kenode
-            KeQueryMostProcessorsInAnyNode () *
-            SIZEOF MmpBatchedShootdownPerCpu, // bytes
-        )
-
-        KeAssert ( mmnode^.AlternateBatchedShootdowns != NULLPTR )
-#END
-
 #IF BLD_NUMA
         mmnode^.BorrowCounts = KeuAllocateNodeSpace (
             kenode, // kenode

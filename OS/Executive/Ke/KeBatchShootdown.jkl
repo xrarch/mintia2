@@ -1,31 +1,34 @@
 //
-// Batch TB shootdowns.
+// Per-process & per-cpu batched TB shootdown mechanisms.
+// Also used to shoot down system space.
 //
 
 #IF BLD_MP
 
-#INCLUDE "Mmp.hjk"
+#INCLUDE "Kep.hjk"
 
-FN MmpFlushShootdowns (
-    IN mmnode : ^MmpNode,
+FN KeuFlushShootdowns (
+    IN process : ^KeuProcess,
 )
 
-    // Flush all of the pending batched shootdowns on this node.
+    // Flush all of the pending batched shootdowns on this process.
 
     // Take the shootdown lock to avoid others redundantly doing the same work.
     // We take it unconditionally even if there are no pending flushes so that
     // if we are a high priority thread depending on a low priority thread to
     // do flushes, it inherits our priority, and we wait for it to finish.
 
-    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.FlushShootdownLock )
+    state := process^.BatchedShootdownState
 
-    IF NOT mmnode^.HasPendingFlushes THEN
-        KeReleaseLockLower ( &mmnode^.FlushShootdownLock, ipl )
+    ipl := KeAcquireLockExclusiveRaise ( &state^.FlushShootdownLock )
+
+    IF NOT state^.HasPendingFlushes THEN
+        KeReleaseLockLower ( &state^.FlushShootdownLock, ipl )
 
         LEAVE
     END
 
-    mmnode^.HasPendingFlushes = FALSE
+    state^.HasPendingFlushes = FALSE
 
     // Flush HasPendingFlushes flag before swapping shootdown tables.
 
@@ -35,11 +38,11 @@ FN MmpFlushShootdowns (
     // alternate shootdown table. This will give us a copy that is guaranteed
     // not to have any new shootdowns enqueued to it in the future.
 
-    table := mmnode^.BatchedShootdowns
-    alttable := mmnode^.AlternateBatchedShootdowns
+    table := state^.BatchedShootdowns
+    alttable := state^.AlternateBatchedShootdowns
 
-    mmnode^.BatchedShootdowns = alttable
-    mmnode^.AlternateBatchedShootdowns = table
+    state^.BatchedShootdowns = alttable
+    state^.AlternateBatchedShootdowns = table
 
     // Acquire all per-cpu locks in order to serialize behind all ongoing
     // enqueues to this table.
@@ -54,9 +57,14 @@ FN MmpFlushShootdowns (
         i += 1
     END
 
-    // Do a global synchronous TB shootdown.
+    // Do a global synchronous TB shootdown of all of the processors that this
+    // process has run on. Keep global mappings if this is not a system
+    // process.
 
-    KeuSweepTb ( FALSE )
+    KeuSweepTb (
+        &state^.ProcessorMask, // processormask
+        NOT state^.SystemSpace, // keepglobal
+    )
 
     // Process all of the batched ranges.
 
@@ -73,7 +81,7 @@ FN MmpFlushShootdowns (
 
             WHILE j < index DO
                 percpu^.Table[j].Callback (
-                    mmnode, // mmnode
+                    process, // process
                     percpu^.Table[j].Context, // context
                     percpu^.Table[j].Ptr, // ptr
                     percpu^.Table[j].Pages, // pages
@@ -86,30 +94,32 @@ FN MmpFlushShootdowns (
         i += 1
     END
 
-    KeReleaseLockLower ( &mmnode^.FlushShootdownLock, ipl )
+    KeReleaseLockLower ( &state^.FlushShootdownLock, ipl )
 END
 
-FN MmpBatchShootdown (
-    IN mmnode : ^MmpNode,
+FN KeuBatchShootdown (
+    IN process : ^KeuProcess,
     IN context : ^VOID,
     IN ptr : ^VOID,
     IN pages : UWORD,
-    IN callback : MmpAfterShootdownF,
+    IN callback : KeuAfterShootdownF,
     IN canflush : UWORD,
 ) : UWORD
 
     // Add the callback to the next batch.
 
+    state := process^.BatchedShootdownState
+
 @Retry
 
     cpuid := KeCurrentNodeLocalProcessorId ()
 
-    shootdownstate := mmnode^.BatchedShootdowns
+    shootdownstate := state^.BatchedShootdowns
     percpu := &shootdownstate[cpuid]
 
     ipl := KeAcquireLockExclusiveRaise ( &percpu^.Lock )
 
-    IF shootdownstate != mmnode^.BatchedShootdowns THEN
+    IF shootdownstate != state^.BatchedShootdowns THEN
         // We raced with a flush which swapped the shootdown states. Reload the
         // pointer, since we shouldn't enqueue anything new to this one.
 
@@ -121,7 +131,7 @@ FN MmpBatchShootdown (
     // Try to coalesce with the last entered shootdown.
 
     index := percpu^.Index
-    entry : ^MmpBatchedShootdown
+    entry : ^KepBatchedShootdown
 
     IF index != 0 THEN
         entry = &percpu^.Table[index - 1]
@@ -149,16 +159,16 @@ FN MmpBatchShootdown (
 
     // Nope, add a new entry.
 
-    IF index >= MMP_MAXIMUM_SHOOTDOWN_BATCH THEN
+    IF index >= KEP_MAXIMUM_SHOOTDOWN_BATCH THEN
         // The batch is full, do it immediately.
 
         KeReleaseLockLower ( &percpu^.Lock, ipl )
 
         IF canflush THEN
-            MmpFlushShootdowns ( mmnode )
+            KeuFlushShootdowns ( process )
 
             callback (
-                mmnode, // mmnode
+                process, // process
                 context, // context
                 ptr, // ptr
                 pages, // pages
@@ -177,7 +187,7 @@ FN MmpBatchShootdown (
 
     percpu^.Index = index + 1
 
-    IF NOT mmnode^.HasPendingFlushes THEN
+    IF NOT state^.HasPendingFlushes THEN
         // Indicate that something productive is to be gained by doing a flush.
         // We don't just unconditionally set this to TRUE because it would
         // cause its cache line to aggressively migrate around, so we check
@@ -187,12 +197,88 @@ FN MmpBatchShootdown (
         // particular, but we place it before the release below in order to get
         // caught by its release barrier.
 
-        mmnode^.HasPendingFlushes = TRUE
+        state^.HasPendingFlushes = TRUE
     END
 
     KeReleaseLockLower ( &percpu^.Lock, ipl )
 
     RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN KeuSizeOfProcessShootdownState () : UWORD
+
+    // Calculate and return the size of the shootdown state for a process.
+
+    bytes := SIZEOF KepBatchedShootdownState
+    bytes +=
+        SIZEOF KepBatchedShootdownPerCpu * KeQueryMostProcessorsInAnyNode ()
+
+    RETURN bytes
+END
+
+#SECTION "PAGEtext"
+FN KepInitializeBatchedShootdownState (
+    IN state : ^KepBatchedShootdownState,
+    IN systemspace : UWORD,
+)
+
+    // Initialize batched shootdown state. Assumes there's room for the
+    // per-cpu tables after the main state structure.
+
+    state^.BatchedShootdowns =
+        CAST (state + SIZEOF KepBatchedShootdownState) TO ^VOID
+
+    state^.AlternateBatchedShootdowns =
+        CAST (state^.BatchedShootdowns + KeQueryMostProcessorsInAnyNode () *
+        SIZEOF KepBatchedShootdownPerCpu) TO ^VOID
+
+    state^.HasPendingFlushes = FALSE
+
+    IF systemspace THEN
+        // Set all shootdown target bits since this is used for shooting down
+        // system space.
+
+        KepSetProcessorMask ( &state^.ProcessorMask )
+        state^.SystemSpace = TRUE
+
+    ELSE
+        // Clear all shootdown target bits since this is a normal user process.
+        // They'll get set as threads from this process run on the various
+        // processors.
+
+        KepClearProcessorMask ( &state^.ProcessorMask )
+        state^.SystemSpace = FALSE
+    END
+
+    KeInitializeLock ( &state^.FlushShootdownLock, "FlushShootdowns" )
+
+    i := 0
+    max := KeQueryMostProcessorsInAnyNode ()
+
+    WHILE i < 2 DO
+        table : ^KepBatchedShootdownPerCpu
+
+        IF i == 0 THEN
+            table = state^.BatchedShootdowns
+        ELSE
+            table = state^.AlternateBatchedShootdowns
+        END
+
+        j := 0
+
+        WHILE j < max DO
+            // Reset each per-cpu batched shootdown table.
+
+            table[j].Index = 0
+
+            KeInitializeLock ( &table[j].Lock, "BatchShootdownPerCpu" )
+
+            j += 1
+        END
+
+        i += 1
+    END
 END
 
 #END

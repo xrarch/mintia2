@@ -240,11 +240,16 @@ FN KepExecuteOnEveryoneElse (
     IN context1 : UWORD,
     IN context2 : UWORD,
     IN deferred : UWORD,
+    IN processormask : ^KepProcessorMask,
 )
 
     // Execute the specified function on every other processor.
 
     KeAssert ( KepCurrentIpl () == KEP_IPL_DPC )
+
+    IF NOT processormask THEN
+        processormask = CAST &KepAllProcessorsMask[0] TO ^KepProcessorMask
+    END
 
     count := KeuLoaderBlock.ProcessorCount
 
@@ -256,7 +261,7 @@ FN KepExecuteOnEveryoneElse (
     prb^.IpiContext1 = context1
     prb^.IpiContext2 = context2
 
-    prb^.IpiSpin = count - 1
+    prb^.IpiSpin = 0
 
 @Retry
 
@@ -270,10 +275,6 @@ FN KepExecuteOnEveryoneElse (
     WHILE mask == 0xFF DO
         // 0xFF means theres no clear bits; no free table slots. Spin-wait for
         // a free table slot.
-        
-        // Use a compiler BARRIER to stop this loop from being optimized out.
-
-        BARRIER
 
         KeSpinPause ()
 
@@ -322,8 +323,12 @@ FN KepExecuteOnEveryoneElse (
         nodeprocs := kenode^.ProcessorCount
 
         WHILE i < nodeprocs DO
-            IF targetprb != prb THEN
-                IF deferred AND VOLATILE targetprb^.InIdleLoop THEN
+            IF targetprb != prb AND
+                processormask^[i / 32] & (1 << (i & 31)) THEN
+
+                IF deferred AND
+                    VOLATILE targetprb^.InIdleLoop THEN
+
                     // This is an idle-deferrable IPI and the target is in his
                     // idle loop. Just set the idle deferred event flag. This
                     // lets us avoid spin-waiting for idle processors to come
@@ -372,14 +377,14 @@ FN KepExecuteOnEveryoneElse (
                         // to stop being idle was ultimately caused by an
                         // interrupt.
 
-                        KeIncrementUlong (
-                            &prb^.IpiSpin, // ptr
-                            0xFFFFFFFF, // inc
-                        )
-
                         GOTO Next
                     END
                 END
+
+                KeIncrementUlong (
+                    &prb^.IpiSpin, // ptr
+                    1, // inc
+                )
 
                 // Mark pending.
 

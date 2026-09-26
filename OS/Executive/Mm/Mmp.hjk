@@ -21,6 +21,18 @@
     #ERROR "Unknown architecture"
 #END
 
+#MACRO MmpNodeToProcess ( mmnode ) [
+    ((mmnode)^.KeNode^.SystemProcess)
+]
+
+#MACRO MmpNodeToKeProcess ( mmnode ) [
+    (&MmpNodeToProcess ( mmnode )^.Pcb)
+]
+
+#MACRO MmpKeProcessToNode ( process ) [
+    ((process)^.Node^.Mmp)
+]
+
 // Number of times node A borrows page frames from node B that is significant
 // enough to justify node B signaling node A to free up pages when it runs low.
 
@@ -434,51 +446,6 @@ STRUCT MmpPoolCacheList
     MasterListLock : KeLock,
 END
 
-// Maximum number of shootdowns that can be batched on a per-cpu table at a
-// time.
-
-#DEFINE MMP_MAXIMUM_SHOOTDOWN_BATCH 32
-
-FNPTR MmpAfterShootdownF (
-    IN mmnode : ^MmpNode,
-    IN context : ^VOID,
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-)
-
-STRUCT MmpBatchedShootdown
-    Ptr : ^VOID,
-    Pages : UWORD,
-    Callback : MmpAfterShootdownF,
-    Context : ^VOID,
-END
-
-STRUCT MmpBatchedShootdownPerCpu
-    Table : MmpBatchedShootdown[MMP_MAXIMUM_SHOOTDOWN_BATCH],
-    Index : UWORD,
-
-KE_CACHE_LINE_END
-
-    Lock : KeLock,
-END
-
-#IF BLD_MP
-
-EXTERN FN MmpFlushShootdowns (
-    IN mmnode : ^MmpNode,
-)
-
-EXTERN FN MmpBatchShootdown (
-    IN mmnode : ^MmpNode,
-    IN context : ^VOID,
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-    IN callback : MmpAfterShootdownF,
-    IN canflush : UWORD,
-) : UWORD
-
-#END
-
 STRUCT MmpPagefileState
     CommitRemaining : WORD,
     CommitWishList : UWORD,
@@ -604,14 +571,6 @@ KE_CACHE_LINE_END
 
     NpPoolCacheList : MmpPoolCacheList,
     PgPoolCacheList : MmpPoolCacheList,
-
-#IF BLD_MP
-    BatchedShootdowns : ^MmpBatchedShootdownPerCpu,
-    AlternateBatchedShootdowns : ^MmpBatchedShootdownPerCpu,
-    FlushShootdownLock : KeLock,
-    HasPendingFlushes : UBYTE,
-#END
-
 END
 
 EXTERN FN MmpClearTrackingTableEntry (

@@ -124,6 +124,36 @@ STRUCT KepAsidInfoEntry
     Asid : UWORD,
 END
 
+FNPTR KeuAfterShootdownF (
+    IN process : ^KeuProcess,
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
+
+#IF BLD_MP
+
+EXTERN FN KeuFlushShootdowns (
+    IN process : ^KeuProcess,
+)
+
+EXTERN FN KeuBatchShootdown (
+    IN process : ^KeuProcess,
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+    IN callback : KeuAfterShootdownF,
+    IN canflush : UWORD,
+) : UWORD
+
+EXTERN FN KeuSizeOfProcessShootdownState () : UWORD
+
+#ELSE
+
+#MACRO KeuSizeOfProcessShootdownState () [0]
+
+#END
+
 #DEFINE KEU_DEBUG_NAME_LENGTH 32
 
 STRUCT KeuProcess
@@ -141,12 +171,18 @@ STRUCT KeuProcess
     AsidTable : ^KepAsidInfoEntry,
 #END
 
-    Lock : KeLock,
+#IF BLD_MP
+    BatchedShootdownState : ^KepBatchedShootdownState,
+#END
 
     ThreadCount : ULONG,
 
     Terminated : UBYTE,
     BasePriority : UBYTE,
+
+KE_CACHE_LINE_END
+
+    Lock : KeLock,
 END
 
 EXTERN FN KeuInitializeProcess (
@@ -339,34 +375,44 @@ EXTERN FN KeuFlushMyTbAddress (
 )
 
 EXTERN FN KeuSweepTb (
+    IN processormask : ^KepProcessorMask,
     IN keepglobal : UWORD,
 )
 
 EXTERN FN KeuFlushSingleTb (
+    IN processormask : ^KepProcessorMask,
     IN vaddr : ^VOID,
 )
 
 EXTERN FN KeuFlushMultipleTb (
+    IN processormask : ^KepProcessorMask,
     IN vaddrtable : ^^VOID,
     IN pagecount : UWORD,
 )
 
 EXTERN FN KeuFlushRangeTb (
+    IN processormask : ^KepProcessorMask,
     IN vaddr : ^VOID,
     IN pagecount : UWORD,
     IN keepglobal : UWORD,
 )
 
-EXTERN FN KeuSweepDcache ()
+EXTERN FN KeuSweepDcache (
+    IN processormask : ^KepProcessorMask,
+)
 
 EXTERN FN KeuFlushDcachePages (
+    IN processormask : ^KepProcessorMask,
     IN pfntable : ^^VOID,
     IN pagecount : UWORD,
 )
 
-EXTERN FN KeuSweepIcache ()
+EXTERN FN KeuSweepIcache (
+    IN processormask : ^KepProcessorMask,
+)
 
 EXTERN FN KeuFlushIcachePages (
+    IN processormask : ^KepProcessorMask,
     IN pfntable : ^^VOID,
     IN pagecount : UWORD,
 )

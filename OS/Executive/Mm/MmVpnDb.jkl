@@ -156,7 +156,7 @@ FN MmpCreateVpe (
 
         KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
 
-        MmpFlushShootdowns ( mmnode )
+        KeuFlushShootdowns ( MmpNodeToKeProcess ( mmnode ) )
 
         GOTO RetryAcquire
     END
@@ -230,8 +230,8 @@ END
 
 #IF BLD_MP
 
-FN (MmpAfterShootdownF) MmpFlushVpnDb (
-    IN mmnode : ^MmpNode,
+FN (KeuAfterShootdownF) MmpFlushVpnDb (
+    IN process : ^KeuProcess,
     IN context : ^VOID,
     IN ptr : ^VOID,
     IN pages : UWORD,
@@ -341,8 +341,8 @@ FN MmpGarbageCollectVpnDb (
 
             ptes[i] = MMP_PENDING_FLUSH_PTE
 
-            IF NOT MmpBatchShootdown (
-                mmnode, // mmnode
+            IF NOT KeuBatchShootdown (
+                MmpNodeToKeProcess ( mmnode ), // process
                 NULLPTR, // context
                 base + (i << RTL_PAGE_SHIFT), // ptr
                 1, // pages
@@ -363,7 +363,7 @@ FN MmpGarbageCollectVpnDb (
 
                 KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
 
-                MmpFlushShootdowns ( mmnode )
+                KeuFlushShootdowns ( MmpNodeToKeProcess ( mmnode ) )
 
                 GOTO Retry
             END

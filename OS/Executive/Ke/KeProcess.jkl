@@ -58,6 +58,19 @@ FN KeuInitializeProcess (
     END
 #END
 
+#IF BLD_MP
+    IF process^.BatchedShootdownState THEN
+        // Initialize batched TB shootdown state.
+        // We can tell whether this process is a system process by checking
+        // whether the node has a system process yet. If not, this is it.
+
+        KepInitializeBatchedShootdownState (
+            process^.BatchedShootdownState, // state
+            kenode^.SystemProcess == NULLPTR, // systemspace
+        )
+    END
+#END
+
 END
 
 #SECTION "PAGEtext"

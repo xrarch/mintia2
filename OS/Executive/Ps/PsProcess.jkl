@@ -351,12 +351,21 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
     // Initialize the process for usage by Ke.
 
+    psstuff := process + SIZEOF PsuProcess
+
+#IF BLD_MP
+    process^.Pcb.BatchedShootdownState = CAST psstuff TO ^VOID
+
+    psstuff += KeuSizeOfProcessShootdownState ()
+#END
+
 #IF ( STRCMP ARCHITECTURE "xr17032" )
     // Enough space for the AsidTable was allocated at the end of the nonpaged
     // part of the process object.
 
-    process^.Pcb.AsidTable =
-        CAST (process + SIZEOF PsuProcess) TO ^KepAsidInfoEntry
+    process^.Pcb.AsidTable = CAST psstuff TO ^KepAsidInfoEntry
+
+    psstuff += KeQueryProcessorCount () * SIZEOF KepAsidInfoEntry
 #END
 
     kenode := ctx^.KeNode

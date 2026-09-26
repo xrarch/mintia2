@@ -589,6 +589,7 @@ END
 #END
 
 FN KeuSweepTb (
+    IN processormask : ^KepProcessorMask,
     IN keepglobal : UWORD,
 )
 
@@ -602,6 +603,7 @@ FN KeuSweepTb (
         keepglobal, // context1
         0, // context2
         KEP_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
+        processormask, // processormask
     )
 
     KepLowerIpl ( ipl )
@@ -611,6 +613,7 @@ FN KeuSweepTb (
 END
 
 FN KeuFlushSingleTb (
+    IN processormask : ^KepProcessorMask,
     IN vaddr : ^VOID,
 )
 
@@ -624,6 +627,7 @@ FN KeuFlushSingleTb (
         vaddr, // context1
         0, // context2
         KEP_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
+        processormask, // processormask
     )
 
     KepLowerIpl ( ipl )
@@ -633,6 +637,7 @@ FN KeuFlushSingleTb (
 END
 
 FN KeuFlushMultipleTb (
+    IN processormask : ^KepProcessorMask,
     IN vaddrtable : ^^VOID,
     IN pagecount : UWORD,
 )
@@ -647,6 +652,7 @@ FN KeuFlushMultipleTb (
         vaddrtable, // context1
         pagecount, // context2
         KEP_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
+        processormask, // processormask
     )
 
     KepLowerIpl ( ipl )
@@ -660,7 +666,9 @@ FN KeuFlushMultipleTb (
     END
 END
 
-FN KeuSweepDcache ()
+FN KeuSweepDcache (
+    IN processormask : ^KepProcessorMask,
+)
 
     // Flush the entire Dcache on all processors.
 
@@ -672,6 +680,7 @@ FN KeuSweepDcache ()
         0, // context1
         0, // context2
         KEP_DEFERRED_IDLE_DCACHE_SHOOTDOWN, // deferred
+        processormask, // processormask
     )
 
     KepLowerIpl ( ipl )
@@ -681,6 +690,7 @@ FN KeuSweepDcache ()
 END
 
 FN KeuFlushDcachePages (
+    IN processormask : ^KepProcessorMask,
     IN pfntable : ^^VOID,
     IN pagecount : UWORD,
 )
@@ -695,6 +705,7 @@ FN KeuFlushDcachePages (
         pfntable, // context1
         pagecount, // context2
         KEP_DEFERRED_IDLE_DCACHE_SHOOTDOWN, // deferred
+        processormask, // processormask
     )
 
     KepLowerIpl ( ipl )
@@ -708,7 +719,9 @@ FN KeuFlushDcachePages (
     END
 END
 
-FN KeuSweepIcache ()
+FN KeuSweepIcache (
+    IN processormask : ^KepProcessorMask,
+)
 
     // Flush the entire Icache on all processors.
 
@@ -720,6 +733,7 @@ FN KeuSweepIcache ()
         0, // context1
         0, // context2
         KEP_DEFERRED_IDLE_ICACHE_SHOOTDOWN, // deferred
+        processormask, // processormask
     )
 
     KepLowerIpl ( ipl )
@@ -729,6 +743,7 @@ FN KeuSweepIcache ()
 END
 
 FN KeuFlushIcachePages (
+    IN processormask : ^KepProcessorMask,
     IN pfntable : ^^VOID,
     IN pagecount : UWORD,
 )
@@ -743,6 +758,7 @@ FN KeuFlushIcachePages (
         pfntable, // context1
         pagecount, // context2
         KEP_DEFERRED_IDLE_ICACHE_SHOOTDOWN, // deferred
+        processormask, // processormask
     )
 
     KepLowerIpl ( ipl )
@@ -757,6 +773,7 @@ FN KeuFlushIcachePages (
 END
 
 FN KeuFlushRangeTb (
+    IN processormask : ^KepProcessorMask,
     IN vaddr : ^VOID,
     IN pagecount : UWORD,
     IN keepglobal : UWORD,
@@ -765,7 +782,10 @@ FN KeuFlushRangeTb (
     // Flush a range of the TB on all processors.
 
     IF pagecount >= 32 THEN
-        KeuSweepTb ( keepglobal )
+        KeuSweepTb (
+            processormask, // processormask
+            keepglobal, // keepglobal
+        )
 
         LEAVE
     END
@@ -778,6 +798,7 @@ FN KeuFlushRangeTb (
         vaddr, // context1
         pagecount, // context2
         KEP_DEFERRED_IDLE_TB_SHOOTDOWN, // deferred
+        processormask, // processormask
     )
 
     KepLowerIpl ( ipl )

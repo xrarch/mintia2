@@ -93,30 +93,6 @@ FN MmpInitializeNodeStage1 (
     mmnode^.SizeLevel = MM_UNINITIALIZED_SYSTEM
 
     KeInitializeLock ( &mmnode^.KernelStackPteListLock, "KernelStackPteList" )
-
-#IF BLD_MP
-    i := 0
-    procs := KeQueryMostProcessorsInAnyNode ()
-    table := mmnode^.BatchedShootdowns
-
-    WHILE i < procs DO
-        KeInitializeLock ( &table[i].Lock, "BatchedShootdown" )
-
-        i += 1
-    END
-
-    i = 0
-    table = mmnode^.AlternateBatchedShootdowns
-
-    WHILE i < procs DO
-        KeInitializeLock ( &table[i].Lock, "BatchedShootdown" )
-
-        i += 1
-    END
-
-    KeInitializeLock ( &mmnode^.FlushShootdownLock, "FlushShootdown" )
-#END
-
 END
 
 #SECTION "INITtext"

@@ -265,12 +265,6 @@ FN PsuInitializeStage1 ()
 
     // Initialize the process type.
 
-    pstypeptr := &PspProcessType
-
-#IF ( STRCMP ARCHITECTURE "xr17032" )
-    // Put enough space at the end of the nonpaged part of the process for the
-    // ASID table.
-
     pstype : ObuType
 
     RtlCopyBytes (
@@ -279,10 +273,18 @@ FN PsuInitializeStage1 ()
         SIZEOF ObuType, // sz
     )
 
-    pstypeptr = &pstype
+    pstypeptr := &pstype
+
+#IF ( STRCMP ARCHITECTURE "xr17032" )
+    // Put enough space at the end of the nonpaged part of the process for the
+    // ASID table.
 
     pstype.TypicalBodySize +=
         SIZEOF KepAsidInfoEntry * KeQueryProcessorCount ()
+#END
+
+#IF BLD_MP
+    pstype.TypicalBodySize += KeuSizeOfProcessShootdownState ()
 #END
 
     ObuInitializeType ( pstypeptr )

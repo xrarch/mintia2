@@ -149,7 +149,7 @@ FN MmpAllocateKernelStackVa (
 
         KeReleaseLock ( &mmnode^.KernelStackPteListLock )
 
-        MmpFlushShootdowns ( mmnode )
+        KeuFlushShootdowns ( MmpNodeToKeProcess ( mmnode ) )
 
         RETURN NULLPTR
     END
@@ -175,14 +175,16 @@ FN MmpAllocateKernelStackVa (
     RETURN kstack
 END
 
-FN (MmpAfterShootdownF) MmpFreeKernelStackVa (
-    IN mmnode : ^MmpNode,
+FN (KeuAfterShootdownF) MmpFreeKernelStackVa (
+    IN process : ^KeuProcess,
     IN context : ^VOID,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
 
     // Free the virtual space for a kernel stack.
+
+    mmnode := MmpKeProcessToNode ( process )
 
     WHILE pages DO
         KeAcquireLockExclusive ( &mmnode^.KernelStackPteListLock )
@@ -272,7 +274,7 @@ FN MmuAllocateKernelStack (
             // status.
 
             MmpFreeKernelStackVa (
-                mmnode, // mmnode
+                &kenode^.SystemProcess^.Pcb, // process
                 NULLPTR, // context
                 kstack, // ptr
                 KEU_STACK_PAGES + 1, // pages
@@ -368,8 +370,8 @@ FN MmuDeleteKernelStack (
     kstack -= RTL_PAGE_SIZE
 
 #IF BLD_MP
-    MmpBatchShootdown (
-        mmnode, // mmnode
+    KeuBatchShootdown (
+        &kenode^.SystemProcess^.Pcb, // process
         NULLPTR, // context
         kstack, // ptr
         KEU_STACK_PAGES + 1, // pages
@@ -379,13 +381,14 @@ FN MmuDeleteKernelStack (
 
 #ELSE
     KeuFlushRangeTb (
+        NULLPTR, // processormask
         kstack, // ptr
         KEU_STACK_PAGES + 1, // pagecount
         FALSE, // keepglobal
     )
 
     MmpFreeKernelStackVa (
-        mmnode, // mmnode
+        &kenode^.SystemProcess^.Pcb, // process
         NULLPTR, // context
         kstack, // ptr
         KEU_STACK_PAGES + 1, // pages

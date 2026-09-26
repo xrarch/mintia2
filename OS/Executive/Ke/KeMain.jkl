@@ -31,6 +31,18 @@ KepAnnounceSpinlock : KepSpinlock = KEP_INITIAL_SPINLOCK
     KepReleaseSpinlockLower ( &KepAnnounceSpinlock, oldipl )
 ]
 
+#SECTION "text"
+PUBLIC KepAllProcessorsMask : KE_CACHE_LINE (ULONG[16]) = {
+    0xFFFFFFFF, 0xFFFFFFFF,
+    0xFFFFFFFF, 0xFFFFFFFF,
+    0xFFFFFFFF, 0xFFFFFFFF,
+    0xFFFFFFFF, 0xFFFFFFFF,
+    0xFFFFFFFF, 0xFFFFFFFF,
+    0xFFFFFFFF, 0xFFFFFFFF,
+    0xFFFFFFFF, 0xFFFFFFFF,
+    0xFFFFFFFF, 0xFFFFFFFF,
+}
+
 #ELSE
 
 #MACRO KepAcquireAnnounce () [
@@ -471,6 +483,38 @@ FN (HaluStartProcessorF) KepStartOtherProcessor ()
     // Become a subject of the dispatcher.
 
     KepJumpIntoIdleThread ( prb )
+END
+
+FN KepClearProcessorMask (
+    IN processormask : ^KepProcessorMask,
+)
+
+    // Clear all bits in a processor mask.
+
+    i := 0
+    max := KeQueryProcessorCount ()
+
+    WHILE i < max DO
+        processormask^[0] = 0
+
+        i += 32
+    END
+END
+
+FN KepSetProcessorMask (
+    IN processormask : ^KepProcessorMask,
+)
+
+    // Set all bits in a processor mask.
+
+    i := 0
+    max := KeQueryProcessorCount ()
+
+    WHILE i < max DO
+        processormask^[0] = 0xFFFFFFFF
+
+        i += 32
+    END
 END
 
 #END

@@ -562,6 +562,26 @@ FN KepSwitchThread (
         KepSwitchAddressSpace ( nextproc )
     END
 
+#IF BLD_MP
+    state := nextproc^.BatchedShootdownState
+
+    IF state THEN
+        mask := &state^.ProcessorMask
+
+        IF mask^[prb^.GlobalId / 32] &
+            (1 << (prb^.GlobalId % 32)) == 0 THEN
+
+            // Set the bit for this processor since a thread from this process
+            // is running on it for the first time.
+
+            KeOrUlongRelaxed (
+                &mask^[prb^.GlobalId / 32], // ptr
+                1 << (prb^.GlobalId % 32), // ulong
+            )
+        END
+    END
+#END
+
     // Set parameters for new thread. We have to do this *before* we call
     // KepSwitchContext since we've lost custody of the thread immediately
     // after it releases the spinlock, so it would be incorrect for the interval

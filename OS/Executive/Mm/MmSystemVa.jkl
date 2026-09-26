@@ -71,7 +71,7 @@ FN MmpAllocateChunkSpace (
         // There are chunks pending flush.
         // We can flush them and grab the first freed one.
 
-        MmpFlushShootdowns ( chunkspace^.Node )
+        KeuFlushShootdowns ( MmpNodeToKeProcess ( chunkspace^.Node ) )
 
         IF chunkspace^.FreeListHead THEN
             GOTO Retry
@@ -92,8 +92,8 @@ END
 
 #IF BLD_MP
 
-FN (MmpAfterShootdownF) MmpChunkSpaceCallback (
-    IN mmnode : ^MmpNode,
+FN (KeuAfterShootdownF) MmpChunkSpaceCallback (
+    IN process : ^KeuProcess,
     IN context : ^VOID,
     IN ptr : ^VOID,
     IN pages : UWORD,
@@ -121,14 +121,16 @@ FN (MmpAfterShootdownF) MmpChunkSpaceCallback (
     KeReleaseLockLower ( &chunkspace^.Lock, ipl )
 END
 
-FN (MmpAfterShootdownF) MmpDynamicSpaceCallback (
-    IN mmnode : ^MmpNode,
+FN (KeuAfterShootdownF) MmpDynamicSpaceCallback (
+    IN process : ^KeuProcess,
     IN context : ^VOID,
     IN ptr : ^VOID,
     IN pages : UWORD,
 )
 
     // Perform the deferred flush for dynamic space.
+
+    mmnode := MmpKeProcessToNode ( process )
 
     ipl := KeAcquireLockExclusiveRaise ( &mmnode^.DynamicSpaceLock )
 
@@ -155,8 +157,8 @@ FN MmpFreeChunkSpace (
 #IF BLD_MP
         // Defer the flush.
 
-        MmpBatchShootdown (
-            chunkspace^.Node, // mmnode
+        KeuBatchShootdown (
+            MmpNodeToKeProcess ( chunkspace^.Node ), // process
             chunkspace, // context
             ptr, // ptr
             (1 << chunkspace^.EntryShift) >> RTL_PAGE_SHIFT, // pages
@@ -167,6 +169,7 @@ FN MmpFreeChunkSpace (
         LEAVE
 #ELSE
         KeuFlushRangeTb (
+            NULLPTR, // processormask
             ptr, // vaddr
             (1 << chunkspace^.EntryShift) >> RTL_PAGE_SHIFT, // pagecount
             FALSE, // keepglobal
@@ -448,7 +451,7 @@ FN MmpAllocateDynamicPages (
 #IF BLD_MP
         // Try freeing the deferred regions and trying again.
 
-        MmpFlushShootdowns ( mmnode )
+        KeuFlushShootdowns ( MmpNodeToKeProcess ( mmnode ) )
 
         // Search again, to be absolutely sure it's full.
 
@@ -516,8 +519,8 @@ FN MmpReleaseDynamicPages (
 #IF BLD_MP
         // Add this region to the list of pairs pending flush.
 
-        MmpBatchShootdown (
-            mmnode, // mmnode
+        KeuBatchShootdown (
+            MmpNodeToKeProcess ( mmnode ), // process
             NULLPTR, // context
             ptr, // ptr
             pages, // pages
@@ -528,6 +531,7 @@ FN MmpReleaseDynamicPages (
         LEAVE
 #ELSE
         KeuFlushRangeTb (
+            NULLPTR, // processormask
             ptr, // ptr
             pages, // pages
             FALSE, // keepglobal

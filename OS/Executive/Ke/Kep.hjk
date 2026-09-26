@@ -168,7 +168,6 @@ EXTERN KepMaximumBalanceIterations : ULONG
 
 #END
 
-
 // The per-processor block (Prb) is an architectural page size, but is at
 // minimum 4KB. It contains all per-processor information.
 //
@@ -657,6 +656,16 @@ EXTERN FN KepAbortThread (
 
 #IF BLD_MP
 
+TYPE KepProcessorMask : ULONG[(KEP_MAXIMUM_PROCESSORS + 31) / 32]
+
+EXTERN FN KepClearProcessorMask (
+    IN processormask : ^KepProcessorMask,
+)
+
+EXTERN FN KepSetProcessorMask (
+    IN processormask : ^KepProcessorMask,
+)
+
 EXTERN FN KepProcessIdleDeferredIpiEvents ()
 
 EXTERN FN KepPinThread (
@@ -692,6 +701,7 @@ EXTERN FN KepExecuteOnEveryoneElse (
     IN context1 : UWORD,
     IN context2 : UWORD,
     IN deferred : UWORD,
+    IN processormask : ^KepProcessorMask,
 )
 
 #MACRO KepSoftInterruptOther ( targetprb, ipl ) [
@@ -1171,3 +1181,50 @@ STRUCT KepSystemService
 END
 
 EXTERN KepSystemServiceTable : KepSystemService[]
+
+#IF BLD_MP
+
+EXTERN KepAllProcessorsMask : ULONG[16]
+
+// Maximum number of shootdowns that can be batched on a per-cpu table at a
+// time.
+
+#DEFINE KEP_MAXIMUM_SHOOTDOWN_BATCH 32
+
+STRUCT KepBatchedShootdown
+    Ptr : ^VOID,
+    Pages : UWORD,
+    Callback : KeuAfterShootdownF,
+    Context : ^VOID,
+END
+
+STRUCT KepBatchedShootdownPerCpu
+    Table : KepBatchedShootdown[KEP_MAXIMUM_SHOOTDOWN_BATCH],
+    Index : UWORD,
+
+KE_CACHE_LINE_END
+
+    Lock : KeLock,
+END
+
+STRUCT KepBatchedShootdownState
+    BatchedShootdowns : ^KepBatchedShootdownPerCpu,
+    AlternateBatchedShootdowns : ^KepBatchedShootdownPerCpu,
+    HasPendingFlushes : UBYTE,
+    SystemSpace : UBYTE,
+
+KE_CACHE_LINE_END
+
+    ProcessorMask : KepProcessorMask,
+
+KE_CACHE_LINE_END
+
+    FlushShootdownLock : KeLock,
+END
+
+EXTERN FN KepInitializeBatchedShootdownState (
+    IN state : ^KepBatchedShootdownState,
+    IN systemspace : UWORD,
+)
+
+#END
