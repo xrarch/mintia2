@@ -13,12 +13,17 @@
 #DEFINE EXP_TAG_ALLOCATED 2
 #DEFINE EXP_TAG_SPAN 3
 
+#DEFINE EXP_TAG_RESERVE_MINIMUM 16
+
+#DEFINE EXP_PREALLOCATED_TAGS 75
+
 STRUCT ExpArenaTag
     Address : ^VOID,
     Size : UWORD,
     TreeEntry : RtlAvlNode,
     ListEntry : RtlListEntry,
-    Type : ULONG,
+    Type : UBYTE,
+    Imported : UBYTE,
 END
 
 STRUCT ExpQuantumCache
@@ -61,7 +66,6 @@ KE_CACHE_LINE_END
 
     TagReserveListHead : RtlListEntry,
     TagReserveCount : UWORD,
-    TagReserveMinimum : UWORD,
 END
 
 FN (ExArenaLookupTagF) ExpArenaLookupTag (
@@ -160,6 +164,8 @@ FN (ExArenaRemoveTagF) ExpArenaRemoveTag (
     )
 END
 
+TestArena : ^ExpArena
+
 #SECTION "INITtext"
 FN ExpInitializeArenas ()
 
@@ -195,6 +201,27 @@ FN ExpInitializeArenas ()
         KeInitializeLock ( &expnode^.ArenaPopulateWaitLock, "ArenaPopulate" )
 
         KeInitializeLock ( &expnode^.ArenaPopulateNoWaitLock, "ArenaPopulate" )
+
+        // Allocate initial tags.
+
+        tag : ^ExpArenaTag = KeuAllocateNodeSpace (
+            kenode, // kenode
+            SIZEOF ExpArenaTag * EXP_PREALLOCATED_TAGS, // bytes
+        )
+
+        KeAssert ( tag != NULLPTR )
+
+        j := 0
+
+        WHILE j < EXP_PREALLOCATED_TAGS DO
+            RtlInsertAtTailList (
+                &expnode^.ArenaTagListHead, // listhead
+                &tag^.ListEntry, // listentry
+            )
+
+            j += 1
+            tag += SIZEOF ExpArenaTag
+        END
 
         i += 1
     END
@@ -343,7 +370,7 @@ FN ExpPopulateTagReserve (
 
     KeAcquireLockExclusive ( &expnode^.ArenaTagListLock )
 
-    WHILE arena^.TagReserveCount < arena^.TagReserveMinimum AND
+    WHILE arena^.TagReserveCount < EXP_TAG_RESERVE_MINIMUM AND
         NOT RtlEmptyList ( &expnode^.ArenaTagListHead ) DO
 
         tag =
@@ -361,7 +388,7 @@ FN ExpPopulateTagReserve (
 
     KeReleaseLock ( &expnode^.ArenaTagListLock )
 
-    IF arena^.TagReserveCount >= arena^.TagReserveMinimum THEN
+    IF arena^.TagReserveCount >= EXP_TAG_RESERVE_MINIMUM THEN
         RETURN OS_STATUS_SUCCESS
     END
 
@@ -431,7 +458,7 @@ FN ExpPopulateTagReserve (
 
         KeAcquireLockExclusive ( &populator^.Lock )
 
-        WHILE populator^.TagReserveCount < populator^.TagReserveMinimum DO
+        WHILE populator^.TagReserveCount < EXP_TAG_RESERVE_MINIMUM DO
             KeAssert ( numtags != 0 )
 
             RtlInsertAtHeadList (
@@ -455,7 +482,7 @@ FN ExpPopulateTagReserve (
 
     KeAcquireLockExclusive ( &arena^.Lock )
 
-    WHILE arena^.TagReserveCount < arena^.TagReserveMinimum DO
+    WHILE arena^.TagReserveCount < EXP_TAG_RESERVE_MINIMUM DO
         KeAssert ( numtags != 0 )
 
         RtlInsertAtHeadList (
@@ -523,6 +550,62 @@ FN ExpFreeTag (
     arena^.TagReserveCount += 1
 END
 
+FN ExpAddSpanToArena (
+    IN arena : ^ExpArena,
+    IN address : ^VOID,
+    IN size : UWORD,
+    IN imported : UWORD,
+)
+
+    // Add a span to the arena.
+    // Assumes a sufficient number of tags in the reserve and arena lock held.
+
+    KeAssert ( arena^.TagReserveCount >= 3 )
+
+    // Allocate span left tag.
+
+    tag := ExpAllocateTag ( arena )
+    tag^.Type = EXP_TAG_SPAN
+    tag^.Address = address
+    tag^.Size = size
+    tag^.Imported = imported
+
+    RtlInsertAtTailList (
+        &arena^.SegmentListHead, // listhead
+        &tag^.ListEntry, // entry
+    )
+
+    // Allocate span content tag.
+
+    tag = ExpAllocateTag ( arena )
+    tag^.Type = EXP_TAG_FREE
+    tag^.Address = address
+    tag^.Size = size
+
+    RtlInsertAtTailList (
+        &arena^.SegmentListHead, // listhead
+        &tag^.ListEntry, // entry
+    )
+
+    RtlInsertAvl (
+        &arena^.FreeTree, // root
+        &tag^.TreeEntry, // node
+        &ExpArenaCompareTagsBySize, // comparisonfunc
+    )
+
+    // Allocate span right tag.
+
+    tag = ExpAllocateTag ( arena )
+    tag^.Type = EXP_TAG_SPAN
+    tag^.Address = address
+    tag^.Size = 0
+
+    RtlInsertAtTailList (
+        &arena^.SegmentListHead, // listhead
+        &tag^.ListEntry, // entry
+    )
+END
+
 FN ExAllocateFromArena (
     IN arena : ^ExpArena,
     IN flags : UWORD,
@@ -558,7 +641,7 @@ FN ExAllocateFromArena (
 
 @RetryLockHeld
 
-    IF arena^.TagReserveCount < arena^.TagReserveMinimum THEN
+    IF arena^.TagReserveCount < EXP_TAG_RESERVE_MINIMUM THEN
         status = ExpPopulateTagReserve (
             arena, // arena
             flags, // flags
@@ -586,6 +669,8 @@ FN ExAllocateFromArena (
         END
 
         tag = CONTAINEROF avlnode TO ExpArenaTag.TreeEntry
+
+        RtlPrint ( "- %x %x,%x\n", size, tag^.Address, tag^.Size )
 
         IF size <= tag^.Size THEN
             alloctag = tag
@@ -636,46 +721,11 @@ FN ExAllocateFromArena (
             IF NOT OsError ( status ) THEN
                 // Import succeeded.
 
-                // Allocate span left tag.
-
-                tag = ExpAllocateTag ( arena )
-                tag^.Type = EXP_TAG_SPAN
-                tag^.Address = address
-                tag^.Size = size
-
-                RtlInsertAtTailList (
-                    &arena^.SegmentListHead, // listhead
-                    &tag^.ListEntry, // entry
-                )
-
-                // Allocate span content tag.
-
-                tag = ExpAllocateTag ( arena )
-                tag^.Type = EXP_TAG_FREE
-                tag^.Address = address
-                tag^.Size = size
-
-                RtlInsertAtTailList (
-                    &arena^.SegmentListHead, // listhead
-                    &tag^.ListEntry, // entry
-                )
-
-                RtlInsertAvl (
-                    &arena^.FreeTree, // root
-                    &tag^.TreeEntry, // node
-                    &ExpArenaCompareTagsBySize, // comparisonfunc
-                )
-
-                // Allocate span right tag.
-
-                tag = ExpAllocateTag ( arena )
-                tag^.Type = EXP_TAG_SPAN
-                tag^.Address = address
-                tag^.Size = 0
-
-                RtlInsertAtTailList (
-                    &arena^.SegmentListHead, // listhead
-                    &tag^.ListEntry, // entry
+                ExpAddSpanToArena (
+                    arena, // arena
+                    address, // address
+                    size, // size
+                    TRUE, // imported
                 )
 
                 // Retry the allocation.
@@ -738,7 +788,7 @@ FN ExAllocateFromArena (
             &righttag^.ListEntry, // listentry
         )
 
-        alloctag^.Size -= size
+        alloctag^.Size = size
 
         // Insert right tag in size-ordered free tree.
 
@@ -843,6 +893,7 @@ FN ExpFreeToArena (
         == EXP_TAG_SPAN AND
         (CONTAINEROF tag^.ListEntry.Next TO ExpArenaTag.ListEntry)^.Type
         == EXP_TAG_SPAN AND
+        (CONTAINEROF tag^.ListEntry.Prev TO ExpArenaTag.ListEntry)^.Imported AND
         arena^.ImportCallbacks.Free THEN
 
         // The whole span is free and should be returned to the arena it was
@@ -901,6 +952,8 @@ FN ExpFreeToArena (
     tag^.Type = EXP_TAG_FREE
 
     // Insert into the free tree.
+
+    RtlPrint ( "insert %x,%x\n", tag^.Address, tag^.Size )
 
     RtlInsertAvl (
         &arena^.FreeTree, // root
@@ -1159,14 +1212,6 @@ FN ExCreateArena (
 
     KeInitializeLock ( &arena^.ImporterLock, "ArenaImporterLock" )
 
-    // Two for import tags and two for each side of a middle-split block.
-
-    arena^.TagReserveMinimum = 4
-
-    // Multiply by four for one normal user plus three concurrent populators.
-
-    arena^.TagReserveMinimum *= 4
-
     i := 1
 
     WHILE i <= quantumcachemax DO
@@ -1205,4 +1250,58 @@ FN ExCreateArena (
     // Insert into the node's arena list.
 
     ExpInsertArenaInLists ( arena )
+END
+
+FN ExAddSpanToArena (
+    IN arena : ^ExpArena,
+    IN address : ^VOID,
+    IN size : UWORD,
+    IN flags : UWORD,
+) : OsStatus
+
+    // Manually add a span to the arena.
+
+    status := OS_STATUS_SUCCESS
+
+    ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
+
+    IF arena^.TagReserveCount < EXP_TAG_RESERVE_MINIMUM THEN
+        status = ExpPopulateTagReserve (
+            arena, // arena
+            flags, // flags
+        )
+    END
+
+    IF NOT OsError ( status ) THEN
+        ExpAddSpanToArena (
+            arena, // arena
+            address, // address
+            size, // size
+            FALSE, // imported
+        )
+    END
+
+    KeReleaseLockLower ( &arena^.Lock, ipl )
+
+    RETURN status
+END
+
+#SECTION "INITtext"
+FN ExuRegisterPopulatorArena (
+    IN arena : ^ExpArena,
+)
+
+    // Make the arena a known populator. This should be called for every
+    // arena that is involved in arena tag allocation.
+    // A single-threaded initialization (boot time) context is assumed, there
+    // is no synchronization.
+
+    expnode := arena^.Node^.Exp
+
+    index := expnode^.PopulatorArenaIndex
+
+    KeAssert ( index < EXP_MAX_POPULATORS )
+
+    expnode^.PopulatorArenas[index] = arena
+    expnode^.PopulatorArenaIndex = index + 1
 END

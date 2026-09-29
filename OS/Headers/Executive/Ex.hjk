@@ -218,3 +218,36 @@ STRUCT ExArenaImportCallbacks
     Free : ExArenaFreeF,
     ImportQuantumShift : UWORD,
 END
+
+EXTERN FN ExCreateArena (
+    IN name : ^UBYTE,
+    IN kenode : ^KeuNode,
+    IN flags : UWORD,
+    IN tagcallbacks : ^ExArenaTagCallbacks,
+    IN importcallbacks : ^ExArenaImportCallbacks,
+    IN quantumcachemax : UWORD,
+    IN pageable : UWORD,
+    IN quantumshift : UWORD,
+    IN importarena : ^ExpArena,
+    OUT arena : ^ExpArena,
+) : OsStatus
+
+EXTERN FN ExAddSpanToArena (
+    IN arena : ^ExpArena,
+    IN address : ^VOID,
+    IN size : UWORD,
+    IN flags : UWORD,
+) : OsStatus
+
+EXTERN FN ExAllocateFromArena (
+    IN arena : ^ExpArena,
+    IN flags : UWORD,
+    IN size : UWORD,
+    OUT address : ^VOID,
+) : OsStatus
+
+EXTERN FN ExFreeToArena (
+    IN arena : ^ExpArena,
+    IN address : ^VOID,
+    IN size : UWORD,
+)
