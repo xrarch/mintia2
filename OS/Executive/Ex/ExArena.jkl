@@ -132,8 +132,9 @@ END
 FN (ExArenaInsertTagF) ExpArenaInsertTag (
     IN context : ^VOID,
     IN address : ^VOID,
+    IN flags : UWORD,
     IN tag : ^ExpArenaTag,
-)
+) : OsStatus
 
     // Insert a tag into the lookup tree by address.
     // Arena lock is held.
@@ -145,6 +146,8 @@ FN (ExArenaInsertTagF) ExpArenaInsertTag (
         &tag^.TreeEntry, // node
         &ExpArenaCompareTagsByAddress, // comparisonfunc
     )
+
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN (ExArenaRemoveTagF) ExpArenaRemoveTag (
@@ -163,8 +166,6 @@ FN (ExArenaRemoveTagF) ExpArenaRemoveTag (
         &tag^.TreeEntry, // node
     )
 END
-
-TestArena : ^ExpArena
 
 #SECTION "INITtext"
 FN ExpInitializeArenas ()
@@ -670,8 +671,6 @@ FN ExAllocateFromArena (
 
         tag = CONTAINEROF avlnode TO ExpArenaTag.TreeEntry
 
-        RtlPrint ( "- %x %x,%x\n", size, tag^.Address, tag^.Size )
-
         IF size <= tag^.Size THEN
             alloctag = tag
 
@@ -763,11 +762,38 @@ FN ExAllocateFromArena (
     address = alloctag^.Address
 
     // Remove the allocated tag from the size-ordered tree.
+    // Do this before calling the insert callback, because our default insert
+    // callback requires the TreeEntry field to no longer be in use.
 
     RtlRemoveAvl (
         &arena^.FreeTree, // root
         &alloctag^.TreeEntry, // node
     )
+
+    // Insert the allocated tag in the arena's lookup structure.
+
+    status = arena^.TagCallbacks.InsertTag (
+        arena^.TagCallbacks.Context, // context
+        address, // address
+        flags, // flags
+        alloctag, // tag
+    )
+
+    IF OsError ( status ) THEN
+        // Failed to insert, so undo what we just did.
+
+        RtlInsertAvl (
+            &arena^.FreeTree, // root
+            &alloctag^.TreeEntry, // node
+            &ExpArenaCompareTagsBySize, // comparisonfunc
+        )
+
+        KeReleaseLockLower ( &arena^.Lock, ipl )
+
+        RETURN status
+    END
+
+    alloctag^.Type = EXP_TAG_ALLOCATED
 
     IF size != alloctag^.Size THEN
         // Create a right-fragment.
@@ -799,16 +825,6 @@ FN ExAllocateFromArena (
         )
     END
 
-    // Insert the allocated tag in the arena's lookup structure.
-
-    arena^.TagCallbacks.InsertTag (
-        arena^.TagCallbacks.Context, // context
-        address, // address
-        alloctag, // tag
-    )
-
-    alloctag^.Type = EXP_TAG_ALLOCATED
-
     KeReleaseLockLower ( &arena^.Lock, ipl )
 
     RETURN OS_STATUS_SUCCESS
@@ -817,6 +833,7 @@ END
 FN ExpFreeToArena (
     IN arena : ^ExpArena,
     IN address : ^VOID,
+    OUT blocksize : UWORD,
 )
 
     // Free a block to the arena. Bypass quantum caches.
@@ -831,6 +848,8 @@ FN ExpFreeToArena (
     KeAssert ( tag != NULLPTR )
     KeAssert ( tag^.Type == EXP_TAG_ALLOCATED )
     KeAssert ( tag^.Address == address )
+
+    blocksize = tag^.Size
 
     // Remove the tag.
 
@@ -854,7 +873,7 @@ FN ExpFreeToArena (
 
         RtlRemoveAvl (
             &arena^.FreeTree, // root
-            &tag^.TreeEntry, // node
+            &othertag^.TreeEntry, // node
         )
 
         ExpFreeTag (
@@ -953,8 +972,6 @@ FN ExpFreeToArena (
 
     // Insert into the free tree.
 
-    RtlPrint ( "insert %x,%x\n", tag^.Address, tag^.Size )
-
     RtlInsertAvl (
         &arena^.FreeTree, // root
         &tag^.TreeEntry, // node
@@ -990,7 +1007,32 @@ FN ExFreeToArena (
     ExpFreeToArena (
         arena, // arena
         address, // address
+        OUT size, // size
     )
+END
+
+FN ExFreeMultipleToArena (
+    IN arena : ^ExpArena,
+    IN address : ^VOID,
+    IN size : UWORD,
+)
+
+    // Free multiple consecutive blocks to the arena.
+
+    WHILE size DO
+        blocksize : UWORD
+
+        ExpFreeToArena (
+            arena, // arena
+            address, // address
+            OUT blocksize, // size
+        )
+
+        KeAssert ( blocksize <= size )
+
+        size -= blocksize
+        address += blocksize
+    END
 END
 
 FN (MmPoolCacheAllocateF) ExpPopulateQuantumCache (
@@ -1022,9 +1064,12 @@ FN (MmPoolCacheFreeF) ExpFreeQuantumCache (
     qcache := CAST context TO ^ExpQuantumCache
     arena := qcache^.Arena
 
+    junk : UWORD
+
     ExpFreeToArena (
         arena, // arena
         ptr, // ptr
+        OUT junk, // size
     )
 END
 
@@ -1049,7 +1094,7 @@ FN (ExArenaFreeF) ExDefaultArenaFree (
     IN importarena : ^ExpArena,
     IN address : ^VOID,
     IN size : UWORD,
-) : OsStatus
+)
 
     ExFreeToArena (
         importarena, // arena
@@ -1250,6 +1295,8 @@ FN ExCreateArena (
     // Insert into the node's arena list.
 
     ExpInsertArenaInLists ( arena )
+
+    RETURN OS_STATUS_SUCCESS
 END
 
 FN ExAddSpanToArena (

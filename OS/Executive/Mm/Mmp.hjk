@@ -138,37 +138,11 @@ EXTERN FN MmpSetNodeSize (
     IN mmnode : ^MmpNode,
 )
 
-EXTERN FN MmpAllocateChunkSpace (
-    IN chunkspace : ^MmpChunkSpace,
-    OUT ptr : ^VOID,
-) : OsStatus
-
-EXTERN FN MmpFreeChunkSpace (
-    IN chunkspace : ^MmpChunkSpace,
-    IN ptr : ^VOID,
-    IN flush : UWORD,
-)
-
-STRUCT MmpChunkSpace
-    Lock : KeLock,
-
-KE_CACHE_LINE_END
-
-    Node : ^MmpNode,
-    EntryShift : UWORD,
-    EntryCount : UWORD,
-    FreeListHead : ^MmpChunkEntry,
-END
-
 EXTERN FN MmpInitializeSystemVa (
     IN kenode : ^KeuNode,
 )
 
 EXTERN FN MmpInitializeVpnDb (
-    IN kenode : ^KeuNode,
-)
-
-EXTERN FN MmpInitializeSpaceNodeAllocation (
     IN kenode : ^KeuNode,
 )
 
@@ -184,41 +158,10 @@ EXTERN FN MmpInitializeQuickPages (
 
 #DEFINE MMP_BLOCK_FOR_PAGES_THRESHOLD 4
 
-STRUCT MmpDynamicSpaceDemandNode
-    MappedObject : ^MmuObject,
-    Offset : RtlUquad,
-END
-
-STRUCT MmpDynamicSpacePoolNode
-    Pool : ^MmpPool,
-    Tag : ULONG,
-END
-
-UNION MmpDynamicSpaceNodeUnion
-    Demand : MmpDynamicSpaceDemandNode,
-    Pool : MmpDynamicSpacePoolNode,
-END
-
-// XXX The sanity of using a pool cache for this depends on the
-//     MmpDynamicSpaceNode being small enough to not trigger page-aligned
-//     pool allocation when slabs are created for it.
-
-STRUCT MmpDynamicSpaceNode
-    Entry : RtlAvlNode,
-    
-    StartVa : ^VOID,
-    EndVa : ^VOID,
-
-    U : MmpDynamicSpaceNodeUnion,
-END
-
-EXTERN FN MmpFindDynamicSpaceNode (
-    IN ptr : ^VOID,
-) : ^MmpDynamicSpaceNode
-
 EXTERN FN MmpAllocateDynamicPages (
     IN mmnode : ^MmpNode,
     IN pages : UWORD,
+    IN flags : UWORD,
     OUT ptr : ^VOID,
 ) : OsStatus
 
@@ -226,19 +169,6 @@ EXTERN FN MmpReleaseDynamicPages (
     IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
-    IN flush : UWORD,
-)
-
-EXTERN FN MmpAllocateDynamicSpace (
-    IN mmnode : ^MmpNode,
-    IN pages : UWORD,
-    IN flags : UWORD,
-    OUT spacenode : ^MmpDynamicSpaceNode,
-) : OsStatus
-
-EXTERN FN MmpReleaseDynamicSpace (
-    IN mmnode : ^MmpNode,
-    IN spacenode : ^MmpDynamicSpaceNode,
     IN flush : UWORD,
 )
 
@@ -459,12 +389,6 @@ KE_CACHE_LINE_END
 END
 
 STRUCT MmpNode
-    DynamicSpaceLock : KeLock,
-
-KE_CACHE_LINE_END
-
-    DynamicSpaceBitmap : RtlBitmapHeader,
-    DynamicSpaceHint : UWORD,
     DynamicSpaceBase : ^VOID,
 
 KE_CACHE_LINE_END
@@ -477,14 +401,6 @@ KE_CACHE_LINE_END
     VpnDbCounters : ^ULONG,
     VpnDbFilter : ^ULONG,
     VpnDbPages : UWORD,
-
-KE_CACHE_LINE_END
-
-    DynamicSpaceTreeLock : KeLock,
-
-KE_CACHE_LINE_END
-
-    DynamicSpaceRoot : RtlAvlNode,
 
 KE_CACHE_LINE_END
 
@@ -510,8 +426,8 @@ KE_CACHE_LINE_END
     BorrowCounts : ^UINT,
 
     PagefileState : ^MmpPagefileState,
-    SpaceNodeCache : ^MmpPoolCache,
     MdlCache : ^MmpPoolCache,
+    DynamicSpaceArena : ^ExpArena,
 
     PoolTable : ^MmpPool[MM_MAXIMUM_POOL],
 
@@ -538,9 +454,7 @@ KE_CACHE_LINE_END
 KE_CACHE_LINE_END
 
     PgPoolCacheAdjustItem : ExWorkItem,
-
     PgPoolCacheAdjustActive : UBYTE,
-    CacheSpaceChunkPages : UBYTE,
 
 KE_CACHE_LINE_END
 
@@ -549,11 +463,6 @@ KE_CACHE_LINE_END
     LowPageAvailableEvent : KE_CACHE_LINE KeEvent,
     ModifiedPageEvent : KE_CACHE_LINE KeEvent,
     ZeroPageEvent : KE_CACHE_LINE KeEvent,
-
-KE_CACHE_LINE_END
-
-    PoolSpace : KE_CACHE_LINE MmpChunkSpace,
-    CacheSpace : KE_CACHE_LINE MmpChunkSpace,
 
 KE_CACHE_LINE_END
 
@@ -584,9 +493,40 @@ EXTERN FN MmpUnreferenceObject (
 )
 
 #MACRO MmpFindVpe ( mmnode, vpn ) [
-    ((mmnode)^.VpnDbBase + ((vpn) * MMP_VPE_SIZE))
+    (CAST ((mmnode)^.VpnDbBase + ((vpn) * MMP_VPE_SIZE)) TO ^MmpVpe)
 ]
 
 EXTERN FN MmpGarbageCollectVpnDb (
     IN mmnode : ^MmpNode,
+)
+
+STRUCT MmpVpePoolConsumer
+    Pages : UWORD,
+    Pool : ^MmpPool,
+    Tag : ULONG,
+    PageAligned : UBYTE,
+END
+
+UNION MmpVpeConsumerData
+    Pool : MmpVpePoolConsumer,
+END
+
+STRUCT MmpVpe
+    DynamicSpaceArenaTag : ^ExpArenaTag,
+    U : MmpVpeConsumerData,
+END
+
+EXTERN FN MmpCreateVpe (
+    IN mmnode : ^MmpNode,
+    IN vpn : UWORD,
+    IN flags : UWORD,
+    OUT vpe : ^MmpVpe,
+) : OsStatus
+
+EXTERN FN MmpReferenceVpe (
+    IN vpe : ^MmpVpe,
+)
+
+EXTERN FN MmpUnreferenceVpe (
+    IN vpe : ^MmpVpe,
 )

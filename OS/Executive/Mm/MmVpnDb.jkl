@@ -38,9 +38,11 @@ FN MmpCreateVpe (
 
     KeAssert ( vpn < mmnode^.KeNode^.DynamicSpaceSize )
 
-    vpe = MmpFindVpe ( mmnode, vpn )
+    vpndboffset := vpn * MMP_VPE_SIZE
+    vpndbpage := vpndboffset >> RTL_PAGE_SHIFT
+    vpe = mmnode^.VpnDbBase + vpndboffset
 
-    counter := &mmnode^.VpnDbCounters[vpn]
+    counter := &mmnode^.VpnDbCounters[vpndbpage]
 
     refcount := counter^
 
@@ -79,7 +81,7 @@ FN MmpCreateVpe (
             // a hint by the garbage collection process.
 
             KeIncrementUlong (
-                &mmnode^.VpnDbFilter[vpn / MMP_VPNDB_PER_FILTER], // ptr
+                &mmnode^.VpnDbFilter[vpndbpage / MMP_VPNDB_PER_FILTER], // ptr
                 0xFFFFFFFF, // inc
             )
         END
@@ -277,7 +279,8 @@ FN MmpGarbageCollectVpnDb (
     ptes := MmpPteAddress ( base )
 
     i := 0
-    pages := mmnode^.KeNode^.DynamicSpaceSize
+    pages := ((mmnode^.KeNode^.DynamicSpaceSize * MMP_VPE_SIZE) +
+        RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
 
     WHILE i < pages DO
         IF filter[i / MMP_VPNDB_PER_FILTER] == 0 THEN

@@ -57,10 +57,11 @@ FN MmpFreeExtensionSpace (
     KeuFlushMyTbAddress ( ext )
 #END
 
-    MmpFreeChunkSpace (
-        &mmnode^.PoolSpace, // chunkspace
-        ext, // ptr
-        flush, // flush
+    MmpReleaseDynamicPages (
+       mmnode, // mmnode
+       ext, // ptr
+       1, // pages
+       flush, // flush
     )
 END
 
@@ -327,10 +328,6 @@ FN MmpInitializePools (
     // Initialize pool cache.
 
     MmpInitializePoolCache ( kenode )
-
-    // Initialize system space node allocation.
-
-    MmpInitializeSpaceNodeAllocation ( kenode )
 END
 
 #SECTION "INITtext"
@@ -470,8 +467,10 @@ FN MmpAllocateFromPool (
 
     ext : ^MmpPoolExtension
 
-    status := MmpAllocateChunkSpace (
-        &pool^.MmNode^.PoolSpace, // chunkspace
+    status := MmpAllocateDynamicPages (
+        pool^.MmNode, // mmnode
+        1, // pages
+        pool^.Flags, // flags
         OUT ext, // ptr
     )
 
@@ -491,9 +490,10 @@ FN MmpAllocateFromPool (
     IF OsError ( status ) THEN
         // Failed to allocate a pool extension.
 
-        MmpFreeExtensionSpace (
+        MmpReleaseDynamicPages (
             pool^.MmNode, // mmnode
-            ext, // extension
+            ext, // ptr
+            1, // pages
             FALSE, // flush
         )
 
@@ -528,6 +528,13 @@ FN MmpAllocateFromPool (
     END
 
     // Initialize the extension header.
+
+    vpe := MmpFindVpe (
+        pool^.MmNode, // mmnode
+        (ext - pool^.MmNode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
+
+    vpe^.U.Pool.PageAligned = FALSE
 
     ext^.Pool = pool
     ext^.References = 1
@@ -889,15 +896,15 @@ FN MmpAllocatePageAligned (
     bytes = ((bytes + RTL_PAGE_SIZE - 1) & ~(RTL_PAGE_SIZE - 1)) >>
         RTL_PAGE_SHIFT
 
+    mmnode := pool^.MmNode
+
     // First acquire some room in dynamic space.
 
-    spacenode : ^MmpDynamicSpaceNode
-
-    status := MmpAllocateDynamicSpace (
-        pool^.MmNode, // mmnode
+    status := MmpAllocateDynamicPages (
+        mmnode, // mmnode
         bytes, // pages
         flags, // flags
-        OUT spacenode, // spacenode
+        OUT ptr, // ptr
     )
 
     IF OsError ( status ) THEN
@@ -906,15 +913,20 @@ FN MmpAllocatePageAligned (
 
     // Initialize the node as a page aligned pool node.
 
-    spacenode^.U.Pool.Pool = pool
-    spacenode^.U.Pool.Tag = tag
+    vpe := MmpFindVpe (
+        mmnode, // mmnode
+        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
+
+    vpe^.U.Pool.Pool = pool
+    vpe^.U.Pool.Tag = tag
+    vpe^.U.Pool.Pages = bytes
+    vpe^.U.Pool.PageAligned = TRUE
 
     // Call the pool callback to initialize the allocation.
 
-    ptr = spacenode^.StartVa
-
     status = pool^.GetMemory (
-        pool^.MmNode, // mmnode
+        mmnode, // mmnode
         ptr, // ptr
         bytes, // pages
         pool^.Flags | flags, // flags
@@ -927,9 +939,10 @@ FN MmpAllocatePageAligned (
         // No need to flush the dynamic space since we didn't map anything
         // into it.
 
-        MmpReleaseDynamicSpace (
-            pool^.MmNode, // mmnode
-            spacenode, // spacenode
+        MmpReleaseDynamicPages (
+            mmnode, // mmnode
+            ptr, // ptr
+            bytes, // pages
             FALSE, // flush
         )
     END
@@ -946,17 +959,21 @@ FN MmpFreePageAligned (
 
     // Look up the dynamic space node.
 
-    spacenode := MmpFindDynamicSpaceNode ( ptr )
+    mmnode := KeNumaNodeFromSpacePointer ( ptr )^.Mmp
 
-    KeAssert ( spacenode != NULLPTR )
-    KeAssert ( spacenode^.StartVa == ptr )
+    vpe := MmpFindVpe (
+        mmnode, // mmnode
+        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
 
-    IF spacenode^.U.Pool.Tag != tag THEN
+    IF vpe^.U.Pool.Tag != tag THEN
         KeCrash ( "MmpFreePageAligned: wrong tag %x on %p, expected %x\n",
-            spacenode^.StartVa, spacenode^.U.Pool.Tag, tag )
+            vpe^.U.Pool.Tag, ptr, tag )
     END
 
     // Uninitialize the allocation.
+
+    vpe^.U.Pool.Tag = 0
 
 #IF BLD_CHK
     // Fill with easily recognizable garbage to crash anybody who improperly
@@ -964,24 +981,25 @@ FN MmpFreePageAligned (
 
     RtlFillMemoryWithUlong (
         ptr, // ptr
-        spacenode^.EndVa - spacenode^.StartVa, // sz
+        vpe^.U.Pool.Pages << RTL_PAGE_SHIFT, // sz
         0xFAAAAAAA, // ulong
     )
 #END
 
-    pool := spacenode^.U.Pool.Pool
+    pool := vpe^.U.Pool.Pool
 
     pool^.ReturnMemory (
-        pool^.MmNode, // mmnode
+        mmnode, // mmnode
         ptr, // ptr
-        (spacenode^.EndVa - spacenode^.StartVa) >> RTL_PAGE_SHIFT, // pages
+        vpe^.U.Pool.Pages, // pages
     )
 
     // Free the dynamic space.
 
-    MmpReleaseDynamicSpace (
-        pool^.MmNode, // mmnode
-        spacenode, // spacenode
+    MmpReleaseDynamicPages (
+        mmnode, // mmnode
+        ptr, // ptr
+        vpe^.U.Pool.Pages, // pages
         TRUE, // flush
     )
 END
@@ -1088,11 +1106,14 @@ EXPORT FN MmFreePool (
 
     // Free the block of pool.
 
-    kenode := KeNumaNodeFromSpacePointer ( ptr )
+    mmnode := KeNumaNodeFromSpacePointer ( ptr )^.Mmp
 
-    IF ptr >= (kenode + KE_POOL_SPACE_OFFSET) AND
-        ptr < (kenode + (KE_POOL_SPACE_OFFSET + KE_POOL_SPACE_SIZE)) THEN
+    vpe := MmpFindVpe (
+        mmnode, // mmnode
+        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
 
+    IF NOT vpe^.U.Pool.PageAligned THEN
         // This block resides in small pool.
 
         MmpFreeToPool (
@@ -1118,11 +1139,14 @@ FN MmGetOverheadOfBlock (
 
     // Return the total bytes overhead consumed by a pool allocation.
 
-    kenode := KeNumaNodeFromSpacePointer ( ptr )
+    mmnode := KeNumaNodeFromSpacePointer ( ptr )^.Mmp
 
-    IF ptr >= (kenode + KE_POOL_SPACE_OFFSET) AND
-        ptr < (kenode + (KE_POOL_SPACE_OFFSET + KE_POOL_SPACE_SIZE)) THEN
+    vpe := MmpFindVpe (
+        mmnode, // mmnode
+        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
 
+    IF NOT vpe^.U.Pool.PageAligned THEN
         // This block is in small pool.
 
         block := CAST ptr - SIZEOF MmpBlock TO ^MmpBlock
@@ -1132,12 +1156,7 @@ FN MmGetOverheadOfBlock (
 
     // Page-aligned.
 
-    node := MmpFindDynamicSpaceNode ( ptr )
-
-    KeAssert ( node != NULLPTR )
-    KeAssert ( node^.StartVa == ptr )
-
-    RETURN node^.EndVa - node^.StartVa
+    RETURN vpe^.U.Pool.Pages << RTL_PAGE_SHIFT
 END
 
 #SECTION "PAGEtext"
@@ -1200,5 +1219,13 @@ FN MmAllocatePoolPages (
 
     // Allocate a number of pages from the pool arena.
 
-    KeCrash ( "NYI" )
+    // TEMP!
+
+    RETURN MmpAllocatePageAligned (
+        mmnode^.PoolTable[MM_NONPAGED_POOL], // pool
+        pages << RTL_PAGE_SHIFT, // bytes
+        'Pool', // tag
+        flags, // flags
+        OUT ptr, // ptr
+    )
 END

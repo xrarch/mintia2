@@ -181,8 +181,9 @@ FNPTR ExArenaLookupTagF (
 FNPTR ExArenaInsertTagF (
     IN context : ^VOID,
     IN address : ^VOID,
+    IN flags : UWORD,
     IN tag : ^ExpArenaTag,
-)
+) : OsStatus
 
 FNPTR ExArenaRemoveTagF (
     IN context : ^VOID,
@@ -210,7 +211,7 @@ FNPTR ExArenaFreeF (
     IN importarena : ^ExpArena,
     IN address : ^VOID,
     IN size : UWORD,
-) : OsStatus
+)
 
 STRUCT ExArenaImportCallbacks
     Context : ^VOID,
@@ -247,6 +248,12 @@ EXTERN FN ExAllocateFromArena (
 ) : OsStatus
 
 EXTERN FN ExFreeToArena (
+    IN arena : ^ExpArena,
+    IN address : ^VOID,
+    IN size : UWORD,
+)
+
+EXTERN FN ExFreeMultipleToArena (
     IN arena : ^ExpArena,
     IN address : ^VOID,
     IN size : UWORD,
