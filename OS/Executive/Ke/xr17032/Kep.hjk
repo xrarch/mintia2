@@ -24,10 +24,18 @@ EXTERN FN KepLockDepInitializeSpinlock (
     KepLockDepInitializeSpinlock (spinlock, name)
 ]
 
+#MACRO KepSpinlockIsReleased ( lock ) [
+    (lock)^.Word == 0
+]
+
 #ELSE
 
 #MACRO KepInitializeSpinlock ( spinlock, name ) [
     NOTHING (spinlock)^ = 0
+]
+
+#MACRO KepSpinlockIsReleased ( lock ) [
+    (lock)^ == 0
 ]
 
 #END
