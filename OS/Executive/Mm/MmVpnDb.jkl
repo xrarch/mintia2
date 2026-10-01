@@ -26,22 +26,16 @@ FN MmpInitializeVpnDb (
     mmnode^.VpnDbFilter = kenode^.VpnDbFilter
 END
 
-FN MmpCreateVpe (
+FN MmpReferenceVpnDbPage (
     IN mmnode : ^MmpNode,
-    IN vpn : UWORD,
+    IN vpndbpage : UWORD,
+    IN count : UWORD,
     IN flags : UWORD,
-    OUT vpe : ^MmpVpe,
 ) : OsStatus
 
-    // Return a pointer to the VPE for the given VPN within the given node's
-    // dynamic space.
+    // Reference the specified vpndb page with the specified count of VPEs.
 
-    KeAssert ( vpn < mmnode^.KeNode^.DynamicSpaceSize )
-
-    vpndboffset := vpn * MMP_VPE_SIZE
-    vpndbpage := vpndboffset >> RTL_PAGE_SHIFT
-    vpe = mmnode^.VpnDbBase + vpndboffset
-
+    vpe := CAST mmnode^.VpnDbBase + (vpndbpage << RTL_PAGE_SHIFT) TO ^MmpVpe
     counter := &mmnode^.VpnDbCounters[vpndbpage]
 
     refcount := counter^
@@ -61,7 +55,7 @@ FN MmpCreateVpe (
 
         new := KeCompareSwapUlong (
             counter, // ptr
-            refcount + 1, // newvalue
+            refcount + count, // newvalue
             refcount, // expectedvalue
         )
 
@@ -171,10 +165,10 @@ FN MmpCreateVpe (
 
     KeWriteMemoryBarrier ()
 
-    // Set the refcount to 2.
-    // 1 for existence of the physical page, plus 1 for existence of our VPE.
+    // Set the refcount to 1 + count.
+    // 1 for existence of the physical page, plus the existence of each VPE.
 
-    counter^ = 2
+    counter^ = 1 + count
 
     KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
 
@@ -228,6 +222,126 @@ FN MmpUnreferenceVpe (
             1, // inc
         )
     END
+END
+
+FN MmpUnreferenceVpes (
+    IN mmnode : ^MmpNode,
+    IN vpn : UWORD,
+    IN pages : UWORD,
+) : OsStatus
+
+    // Unreference the specified number of VPEs.
+    // We want to reduce the number of CAS operations on the VPNDB reference
+    // counter, so we allow unreferencing ranges of VPEs at a time here.
+
+    KeAssert ( vpn < mmnode^.KeNode^.DynamicSpaceSize )
+    KeAssert ( vpn + pages < mmnode^.KeNode^.DynamicSpaceSize )
+
+    WHILE pages DO
+        vpndbpage := (vpn * MMP_VPE_SIZE) >> RTL_PAGE_SHIFT
+
+        max := (RTL_PAGE_SIZE / MMP_VPE_SIZE) -
+            (vpn & ((RTL_PAGE_SIZE / MMP_VPE_SIZE) - 1))
+
+        IF max > pages THEN
+            max = pages
+        END
+
+        oldcount := KeIncrementUlong (
+            &mmnode^.VpnDbCounters[vpndbpage],
+            -max, // inc
+        )
+
+        KeAssert ( oldcount >= max + 1 )
+
+        IF oldcount == max + 1 THEN
+            // Old refcount was 2, and now its 1, so we are responsible for
+            // incrementing the count in the filter. Note that this can
+            // race but this is self-correcting as the racing threads leave, and
+            // not a functional hazard as the filter is only used as a hint by
+            // the garbage collection process.
+
+            KeIncrementUlong (
+                &mmnode^.VpnDbFilter[vpndbpage / MMP_VPNDB_PER_FILTER], // ptr
+                1, // inc
+            )
+        END
+
+        vpn += max
+        pages -= max
+    END
+END
+
+FN MmpCreateVpes (
+    IN mmnode : ^MmpNode,
+    IN vpn : UWORD,
+    IN pages : UWORD,
+    IN flags : UWORD,
+) : OsStatus
+
+    // Create the specified number of VPEs.
+    // We want to reduce the number of CAS operations on the VPNDB reference
+    // counter, so we allow creating ranges of VPEs at a time here.
+
+    KeAssert ( vpn < mmnode^.KeNode^.DynamicSpaceSize )
+    KeAssert ( vpn + pages < mmnode^.KeNode^.DynamicSpaceSize )
+
+    curvpn := vpn
+    i := 0
+
+    WHILE i < pages DO
+        vpndbpage := (curvpn * MMP_VPE_SIZE) >> RTL_PAGE_SHIFT
+
+        max := (RTL_PAGE_SIZE / MMP_VPE_SIZE) -
+            (curvpn & ((RTL_PAGE_SIZE / MMP_VPE_SIZE) - 1))
+
+        IF max > pages - i THEN
+            max = pages - i
+        END
+
+        status := MmpReferenceVpnDbPage (
+            mmnode, // mmnode
+            vpndbpage, // vpndbpage
+            max, // count
+            flags, // flags
+        )
+
+        IF OsError ( status ) THEN
+            // Failed to create, so back out and undo the increments we
+            // already did.
+
+            IF i THEN
+                MmpUnreferenceVpes (
+                    mmnode, // mmnode
+                    vpn, // vpn
+                    i, // pages
+                )
+            END
+
+            RETURN status
+        END
+
+        curvpn += max
+        i += max
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+FN MmpCreateVpe (
+    IN mmnode : ^MmpNode,
+    IN vpn : UWORD,
+    IN flags : UWORD,
+) : OsStatus
+
+    // Create a single VPE.
+
+    RETURN MmpReferenceVpnDbPage (
+        mmnode, // mmnode
+        (vpn * MMP_VPE_SIZE) >> RTL_PAGE_SHIFT, // vpndbpage
+        1, // count
+        flags, // flags
+    )
 END
 
 #IF BLD_MP

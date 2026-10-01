@@ -1,0 +1,877 @@
+//
+// Implementation of generic magazine caches for the MINTIA executive.
+//
+
+#INCLUDE "Exp.hjk"
+
+STRUCT ExpMagazineCachePerCpu
+    MagLock : KeLock,
+
+KE_CACHE_LINE_END
+
+    Loaded : ^^VOID,
+    Previous : ^^VOID,
+
+    Rounds : BYTE,
+    PreviousRounds : BYTE,
+
+    MagazineSize : UBYTE,
+END
+
+STRUCT ExpDepotList
+    Head : ^^VOID,
+
+    Total : ULONG,
+    Min : ULONG,
+    ReapLimit : ULONG,
+END
+
+STRUCT ExpMagazineCache
+    DepotLock : KeLock,
+
+KE_CACHE_LINE_END
+
+    FullMagazineList : ExpDepotList,
+    EmptyMagazineList : ExpDepotList,
+
+    MasterListEntry : RtlListEntry,
+
+KE_CACHE_LINE_END
+
+    Name : ^UBYTE,
+
+    Allocate : ExMagazineCacheAllocateF,
+    Free : ExMagazineCacheFreeF,
+
+    Context : ^VOID,
+
+    ExNode : ^ExpNode,
+
+    MagazineType : ^ExpMagazineType,
+
+    ProcessorCount : ULONG,
+
+    Pageable : UBYTE,
+END
+
+#MACRO ExpMagazineCachePerCpuById ( magazinecache, id ) [
+    (CAST (magazinecache + SIZEOF ExpMagazineCache) +
+        (id * SIZEOF ExpMagazineCachePerCpu) TO ^ExpMagazineCachePerCpu)
+]
+
+#MACRO ExpLockMagazineCacheList ( list ) [
+    KeAcquireLockExclusive ( &(list)^.MasterListLock )
+]
+
+#MACRO ExpUnlockMagazineCacheList ( list ) [
+    KeReleaseLock ( &(list)^.MasterListLock )
+]
+
+#MACRO ExpLockMagazineCacheDepot ( magazinecache ) [
+    KeAcquireLockExclusiveRaise ( &(magazinecache)^.DepotLock )
+]
+
+#MACRO ExpUnlockMagazineCacheDepot ( magazinecache, ipl ) [
+    KeReleaseLockLower ( &(magazinecache)^.DepotLock, ipl )
+]
+
+#MACRO ExpLockMagazineCache ( pcpcpu ) [
+    KeAcquireLockExclusiveRaise ( &(pcpcpu)^.MagLock )
+]
+
+#MACRO ExpUnlockMagazineCache ( pcpcpu, ipl ) [
+    KeReleaseLockLower ( &(pcpcpu)^.MagLock, ipl )
+]
+
+#MACRO ExpInitializeDepotList ( list ) [
+    NOTHING (list)^.Head = NULLPTR
+    NOTHING (list)^.Total = 0
+    NOTHING (list)^.Min = 0
+    NOTHING (list)^.ReapLimit = 0
+]
+
+#DEFINE EXP_LARGE_MAGAZINE_SIZE 4
+#DEFINE EXP_SMALL_MAGAZINE_SIZE 8
+
+#SECTION "PAGEtext"
+EXPORT FN ExCreateMagazineCache (
+    IN kenode : ^KeuNode,
+    IN name : ^UBYTE,
+    IN pageable : UWORD,
+    IN freefunc : ExMagazineCacheFreeF,
+    IN context : ^VOID,
+    OUT poolcache : ^ExpMagazineCache,
+) : OsStatus
+
+    // Allocate and return a new pool cache structure.
+
+    expnode := kenode^.Exp
+
+    status := ExpAllocateFromSlabCache (
+        &expnode^.MagazineCacheSlabs, // scache
+        TRUE, // wait
+        OUT poolcache, // poolcache
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Determine the magazine size based on whether the size of each cached
+    // block is smaller or larger than what the slab layer considers a small
+    // pool block.
+
+    IF size < MMP_SMALL_POOL_BLOCK THEN
+        poolcache^.MagazineType = &mmnode^.MagazineTypeTable[MMP_MAGAZINE_SMALL]
+    ELSE
+        poolcache^.MagazineType = &mmnode^.MagazineTypeTable[MMP_MAGAZINE_LARGE]
+    END
+
+    // Save the name of the cache.
+
+    poolcache^.Name = name
+
+    poolcache^.Allocate = allocfunc
+    poolcache^.Free = freefunc
+    poolcache^.Delete = deletefunc
+    poolcache^.Context = context
+
+    poolcache^.ExNode = mmnode
+    poolcache^.ProcessorCount = mmnode^.KeNode^.ProcessorCount
+
+    KeInitializeLock ( &poolcache^.DepotLock, "Depot" )
+
+    // Set the depot lists to empty.
+
+    ExpInitializeDepotList ( &poolcache^.FullMagazineList )
+    ExpInitializeDepotList ( &poolcache^.EmptyMagazineList )
+
+    // Insert on global list.
+
+    list : ^ExpMagazineCacheList
+
+    IF NOT pageable THEN
+        list = &mmnode^.NpMagazineCacheList
+    ELSE
+        list = &mmnode^.PgMagazineCacheList
+    END
+
+    ExpLockMagazineCacheList ( list )
+
+    RtlInsertAtTailList (
+        &list^.Head, // head
+        &poolcache^.MasterListEntry, // entry
+    )
+
+    // Initialize the per-CPU caches with the global list lock still held to
+    // synchronize against changes to the magazine type size.
+
+    cpus := KeQueryMostProcessorsInAnyNode ()
+
+    i := 0
+
+    percpu := ExpMagazineCachePerCpuById (
+        poolcache, // magazinecache
+        0, // id
+    )
+
+    WHILE i < cpus DO
+        KeInitializeLock ( &percpu^.MagLock, "Magazine" )
+
+        percpu^.Loaded = NULLPTR
+        percpu^.Previous = NULLPTR
+        percpu^.Rounds = -1
+        percpu^.PreviousRounds = -1
+        percpu^.MagazineSize = poolcache^.MagazineType^.Size
+
+        i += 1
+        percpu += SIZEOF ExpMagazineCachePerCpu
+    END
+
+    ExpUnlockMagazineCacheList ( list )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+FN ExpDestroyAndFreeMagazine (
+    IN magazinecache : ^ExpMagazineCache,
+    IN magazine : ^^VOID,
+    IN rounds : UWORD,
+)
+
+    // Destroy the magazine.
+
+    // Skip over the depot list link.
+
+    magazine += SIZEOF ^VOID
+
+    // Destroy and free each block contained in the magazine.
+
+    i := 0
+
+    WHILE i < rounds DO
+        magazinecache^.Free (
+            magazinecache^.Context, // context
+            magazine[i], // ptr
+        )
+
+        i += 1
+    END
+
+    // Un-skip depot list link and free magazine.
+
+    ExFreeToMagazineCache (
+        magazinecache^.MagazineType^.MagazineCache, // magazinecache
+        magazine - SIZEOF ^VOID, // ptr
+    )
+END
+
+FN ExpAllocateMagazineFromDepot (
+    IN magazinecache : ^ExpMagazineCache,
+    IN list : ^ExpDepotList,
+) : ^^VOID
+
+    // Allocate a magazine from the depot.
+
+    ipl := ExpLockMagazineCacheDepot ( magazinecache )
+
+    magazine := list^.Head
+
+    IF magazine THEN
+        list^.Head = magazine^
+
+        list^.Total -= 1
+
+        IF list^.Total < list^.Min THEN
+            // Increase the working set size by decreasing the number of
+            // magazines that can be reaped.
+
+            list^.Min = list^.Total
+        END
+    END
+
+    ExpUnlockMagazineCacheDepot ( magazinecache, ipl )
+
+    RETURN magazine
+END
+
+FN ExpFreeMagazineToDepot (
+    IN magazinecache : ^ExpMagazineCache,
+    IN list : ^ExpDepotList,
+    IN magazine : ^^VOID,
+)
+
+    // Free a magazine to the depot.
+
+    ipl := ExpLockMagazineCacheDepot ( magazinecache )
+
+    magazine^ = list^.Head
+    list^.Head = magazine
+
+    list^.Total += 1
+
+    ExpUnlockMagazineCacheDepot ( magazinecache, ipl )
+END
+
+FN ExpReapDepotList (
+    IN magazinecache : ^ExpMagazineCache,
+    IN list : ^ExpDepotList,
+    IN rounds : UWORD,
+)
+
+    // Reap magazines from the depot list until it is shrunk to its working set
+    // size. Each magazine has the number of rounds specified.
+
+    reap := list^.ReapLimit
+
+    IF reap > list^.Min THEN
+        // Don't reap more than was actually used since the last reaping.
+
+        reap = list^.Min
+    END
+
+    // rept := 0
+
+    WHILE reap DO
+        magazine := ExpAllocateMagazineFromDepot (
+            magazinecache, // magazinecache
+            list, // list
+        )
+
+        IF NOT magazine THEN
+            BREAK
+        END
+
+        ExpDestroyAndFreeMagazine (
+            magazinecache, // magazinecache
+            magazine, // magazine
+            rounds, // rounds
+        )
+
+        // rept += 1
+        reap -= 1
+    END
+
+    // IF rept THEN
+    //     RtlPrint ( "[%s %d] ", magazinecache^.Name, rept )
+    // END
+END
+
+FN ExpReapMagazineCacheDepot (
+    IN magazinecache : ^ExpMagazineCache,
+)
+
+    // Reap magazines from the pool cache depot until all unused entries are
+    // gone.
+
+    ExpReapDepotList (
+        magazinecache, // magazinecache
+        &magazinecache^.FullMagazineList, // list
+        magazinecache^.MagazineType^.Size, // rounds
+    )
+
+    ExpReapDepotList (
+        magazinecache, // magazinecache
+        &magazinecache^.EmptyMagazineList, // list
+        0, // rounds
+    )
+END
+
+FN ExpSetMagazineCacheWsToZero (
+    IN magazinecache : ^ExpMagazineCache,
+)
+
+    // Set pool cache working set size to zero by making all entries reapable.
+
+    ipl := ExpLockMagazineCacheDepot ( magazinecache )
+
+    magazinecache^.FullMagazineList.Min = magazinecache^.FullMagazineList.Total
+    magazinecache^.FullMagazineList.ReapLimit =
+        magazinecache^.FullMagazineList.Total
+
+    magazinecache^.EmptyMagazineList.Min = magazinecache^.EmptyMagazineList.Total
+    magazinecache^.EmptyMagazineList.ReapLimit =
+        magazinecache^.EmptyMagazineList.Total
+
+    ExpUnlockMagazineCacheDepot ( magazinecache, ipl )
+END
+
+FN ExpUpdateMagazineCacheWs (
+    IN magazinecache : ^ExpMagazineCache,
+)
+
+    // Update the pool cache working set size before a round of reaping.
+
+    ipl := ExpLockMagazineCacheDepot ( magazinecache )
+
+    magazinecache^.FullMagazineList.ReapLimit =
+        magazinecache^.FullMagazineList.Min
+
+    magazinecache^.FullMagazineList.Min =
+        magazinecache^.FullMagazineList.Total
+
+    magazinecache^.EmptyMagazineList.ReapLimit =
+        magazinecache^.EmptyMagazineList.Min
+
+    magazinecache^.EmptyMagazineList.Min =
+        magazinecache^.EmptyMagazineList.Total
+
+    ExpUnlockMagazineCacheDepot ( magazinecache, ipl )
+END
+
+FN ExpPurgeCpuMagazinesMagazineCache (
+    IN magazinecache : ^ExpMagazineCache,
+)
+
+    // Purge the per-CPU magazine caches.
+
+    percpu := ExpMagazineCachePerCpuById (
+        magazinecache, // magazinecache
+        0, // id
+    )
+
+    cpus := KeQueryMostProcessorsInAnyNode ()
+    i := 0
+
+    WHILE i < cpus DO
+        ipl := ExpLockMagazineCache ( percpu )
+
+        currentmag := percpu^.Loaded
+        prevmag := percpu^.Previous
+        rounds := CAST percpu^.Rounds TO UWORD
+        prevrounds := CAST percpu^.PreviousRounds TO UWORD
+
+        percpu^.Loaded = NULLPTR
+        percpu^.Previous = NULLPTR
+        percpu^.Rounds = -1
+        percpu^.PreviousRounds = -1
+
+        ExpUnlockMagazineCache ( percpu, ipl )
+
+        IF currentmag THEN
+            ExpDestroyAndFreeMagazine (
+                magazinecache, // magazinecache
+                currentmag, // magazine
+                rounds, // rounds
+            )
+        END
+
+        IF prevmag THEN
+            ExpDestroyAndFreeMagazine (
+                magazinecache, // magazinecache
+                prevmag, // magazine
+                prevrounds, // rounds
+            )
+        END
+
+        i += 1
+        percpu += SIZEOF ExpMagazineCachePerCpu
+    END
+END
+
+FN ExuPurgeMagazineCache (
+    IN magazinecache : ^ExpMagazineCache,
+)
+
+    // Purge the magazines of the given pool cache.
+    // If this is a result of a resize operation then the global cache list
+    // lock is held. If it's the result of an ExDeleteMagazineCache then no lock is
+    // needed.
+
+    ExpPurgeCpuMagazinesMagazineCache ( magazinecache )
+
+    // Set the working set size of the pool cache to zero.
+
+    ExpSetMagazineCacheWsToZero ( magazinecache )
+
+    // Reap down to the new working set size, which is zero.
+
+    ExpReapMagazineCacheDepot ( magazinecache )
+END
+
+#SECTION "PAGEtext"
+EXPORT FN ExDeleteMagazineCache (
+    IN magazinecache : ^ExpMagazineCache,
+)
+
+    // Delete a pool cache.
+
+    mmnode := magazinecache^.ExNode
+
+    // Remove from global list.
+
+    list : ^ExpMagazineCacheList
+
+    IF NOT magazinecache^.Pageable THEN
+        list = &mmnode^.NpMagazineCacheList
+    ELSE
+        list = &mmnode^.PgMagazineCacheList
+    END
+
+    ExpLockMagazineCacheList ( list )
+
+    RtlRemoveEntryList ( &magazinecache^.MasterListEntry )
+
+    ExpUnlockMagazineCacheList ( list )
+
+    // Empty out the magazine depot.
+
+    ExuPurgeMagazineCache ( magazinecache )
+
+    // Free pool cache to pool cache slab cache.
+    // Say that ten times fast.
+
+    ExpFreeToSlabCache (
+        &mmnode^.MagazineCacheSlabs, // scache
+        magazinecache, // ptr
+    )
+END
+
+FN ExpReloadMagazines (
+    IN percpu : ^ExpMagazineCachePerCpu,
+    IN newloaded : ^^VOID,
+    IN rounds : WORD,
+)
+
+    // Swap the previous and loaded magazines.
+
+    percpu^.Previous = percpu^.Loaded
+    percpu^.PreviousRounds = percpu^.Rounds
+
+    percpu^.Loaded = newloaded
+    percpu^.Rounds = rounds
+END
+
+EXPORT FN ExAllocateFromMagazineCache (
+    IN magazinecache : ^ExpMagazineCache,
+) : ^VOID
+
+    // Allocate a block from the pool cache.
+
+    rounds : WORD
+
+@RetryTakeLock
+
+    // Acquire a pointer to the pool cache's per-cpu magazine cache.
+
+    percpu := ExpMagazineCachePerCpuById (
+        magazinecache, // magazinecache
+        KeCurrentNodeLocalProcessorId (), // id
+    )
+
+    ipl := ExpLockMagazineCache ( percpu )
+
+@Retry
+
+    // Try to grab a block from the loaded magazine.
+
+    rounds = percpu^.Rounds
+
+    IF rounds > 0 THEN
+        // NOTE: The cache link pointer in the zeroth element of the magazine is
+        //       skipped in a subtle way here that shouldn't be confused with an
+        //       off-by-one bug.
+
+        ptr = percpu^.Loaded[rounds]
+        percpu^.Rounds = rounds - 1
+
+        ExpUnlockMagazineCache ( percpu, ipl )
+
+        RETURN ptr
+    END
+
+    // Loaded magazine was empty, try to reload.
+
+    rounds = percpu^.PreviousRounds
+
+    IF rounds > 0 THEN
+        ExpReloadMagazines (
+            percpu, // percpu
+            percpu^.Previous, // newloaded
+            rounds, // rounds
+        )
+
+        GOTO Retry
+    END
+
+    // Can't reload the previous magazine, allocate from the depot.
+
+    magazine := ExpAllocateMagazineFromDepot (
+        magazinecache, // magazinecache
+        &magazinecache^.FullMagazineList, // list
+    )
+
+    IF magazine THEN
+        // Got a full magazine.
+
+        IF percpu^.Previous THEN
+            // First free the previous magazine to the empty magazine list.
+
+            KeAssert ( percpu^.PreviousRounds == 0 )
+
+            ExpFreeMagazineToDepot (
+                magazinecache, // magazinecache
+                &magazinecache^.EmptyMagazineList, // list
+                percpu^.Previous, // magazine
+            )
+        END
+
+        ExpReloadMagazines (
+            percpu, // percpu
+            magazine, // newloaded
+            CAST percpu^.MagazineSize TO WORD, // rounds
+        )
+
+        GOTO Retry
+    END
+
+    ExpUnlockMagazineCache ( percpu, ipl )
+
+    // Magazine cache wasn't of any help.
+
+    RETURN NULLPTR
+END
+
+EXPORT FN ExFreeToMagazineCache (
+    IN magazinecache : ^ExpMagazineCache,
+    IN ptr : ^VOID,
+)
+
+    // Free a block to the pool cache.
+
+    rounds : WORD
+
+    // Acquire a pointer to the pool cache's per-cpu magazine cache.
+
+    id := KeCurrentNodeLocalProcessorId ()
+
+    percpu := ExpMagazineCachePerCpuById (
+        magazinecache, // magazinecache
+        id, // id
+    )
+
+    ipl := ExpLockMagazineCache ( percpu )
+
+@Retry
+
+    rounds = percpu^.Rounds
+
+    IF (CAST rounds TO UWORD) < percpu^.MagazineSize THEN
+        // There's room in the loaded magazine.
+        // Make sure to skip over the depot list link, which occupies the zeroth
+        // element of the magazine.
+
+        percpu^.Loaded[rounds + 1] = ptr
+        percpu^.Rounds = rounds + 1
+
+        ExpUnlockMagazineCache ( percpu, ipl )
+
+        LEAVE
+    END
+
+    // Loaded magazine is full. Swap with previous if empty.
+
+    IF percpu^.PreviousRounds == 0 THEN
+        ExpReloadMagazines (
+            percpu, // percpu
+            percpu^.Previous, // newloaded
+            0, // rounds
+        )
+
+        GOTO Retry
+    END
+
+#IF BLD_NUMA
+    IF id >= magazinecache^.ProcessorCount THEN
+        // The current thread at some point migrated to another NUMA node with
+        // fewer processors. 
+        //
+        // This is a CPU foreign to the preferred NUMA node of the pool cache.
+        // Bypass the magazine layer since it won't do any good to have some
+        // foreign CPU take up magazines in another NUMA node's pool cache.
+
+        GOTO BypassMagazines
+    END
+#END
+
+    // Allocate a new magazine into the CPU layer.
+
+    magazine := ExpAllocateMagazineFromDepot (
+        magazinecache, // magazinecache
+        &magazinecache^.EmptyMagazineList, // list
+    )
+
+    IF magazine THEN
+        // Got an empty magazine to load.
+
+        IF percpu^.Previous THEN
+            // First free the previous magazine to the full magazine list.
+
+            KeAssert ( percpu^.PreviousRounds == percpu^.MagazineSize )
+
+            ExpFreeMagazineToDepot (
+                magazinecache, // magazinecache
+                &magazinecache^.FullMagazineList, // list
+                percpu^.Previous, // magazine
+            )
+        END
+
+        // Load it and free the block into it.
+
+        ExpReloadMagazines (
+            percpu, // percpu
+            magazine, // newloaded
+            0, // rounds
+        )
+
+        GOTO Retry
+    END
+
+    // The depot is out of empty magazines.
+    // Unlock the magazine cache and allocate a new one.
+
+    magtype := magazinecache^.MagazineType
+
+    ExpUnlockMagazineCache ( percpu, ipl )
+
+    status := ExAllocateFromObjectCache (
+        magtype^.MagazineCache, // magazinecache
+        0, // flags
+        OUT magazine, // ptr
+    )
+
+    ipl = ExpLockMagazineCache ( percpu )
+
+    IF NOT OsError ( status ) THEN
+        // Got a magazine.
+
+        IF percpu^.MagazineSize != magtype^.Size THEN
+            // The magazine type size was changed.
+            // Retry.
+
+            ExpUnlockMagazineCache ( percpu, ipl )
+
+            ExFreeToMagazineCache (
+                magtype^.MagazineCache, // magazinecache
+                magazine, // ptr
+            )
+
+            ipl = ExpLockMagazineCache ( percpu )
+
+            GOTO Retry
+        END
+
+        // Add to the depot and retry.
+
+        ExpFreeMagazineToDepot (
+            magazinecache, // magazinecache
+            &magazinecache^.EmptyMagazineList, // list
+            magazine, // magazine
+        )
+
+        GOTO Retry
+    END
+
+@BypassMagazines
+
+    ExpUnlockMagazineCache ( percpu, ipl )
+
+    // Failed to get a magazine, our last resort is to just free the block
+    // directly to the slab layer.
+
+    magazinecache^.Free (
+        magazinecache^.Context, // context
+        ptr, // ptr
+    )
+END
+
+#SECTION "INITtext"
+FN ExpInitializeMagazineType (
+    IN mmnode : ^ExpNode,
+    IN magtype : ^ExpMagazineType,
+    IN name : ^UBYTE,
+    IN size : UWORD,
+)
+
+    // Initialize a magazine type.
+
+    magtype^.Size = size
+
+    status := ExCreateMagazineCache (
+        mmnode, // mmnode
+        name, // name
+        (size + 1) * SIZEOF ^VOID, // size
+        MM_NONPAGED_POOL, // poolindex
+        'Magz', // tag
+        OUT magtype^.MagazineCache, // ptr
+    )
+
+#ENTERSECTION "INITtext"
+    IF OsError ( status ) THEN
+        KeCrash ( "ExpInitializeMagazineType: failed to create pool cache\n" )
+    END
+#LEAVESECTION
+
+END
+
+FN ExuAdjustMagazineCache (
+    IN magazinecache : ^ExpMagazineCache,
+)
+
+    // Adjust a pool cache.
+    // This involves reaping the working set.
+
+    ExpUpdateMagazineCacheWs ( magazinecache )
+
+    ExpReapMagazineCacheDepot ( magazinecache )
+END
+
+FN ExpAdjustMagazineCaches (
+    IN list : ^ExpMagazineCacheList,
+    IN empty : UWORD,
+)
+
+    // Adjust all of the pool caches on the given node.
+
+    ExpLockMagazineCacheList ( list )
+
+    listhead := &list^.Head
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        magazinecache :=
+            CONTAINEROF listentry TO ExpMagazineCache.MasterListEntry
+
+        IF empty THEN
+            ExuPurgeMagazineCache ( magazinecache )
+        ELSE
+            ExuAdjustMagazineCache ( magazinecache )
+        END
+
+        listentry = listentry^.Next
+    END
+
+    ExpUnlockMagazineCacheList ( list )
+END
+
+#MACRO ExpInitializeMagazineCacheList ( list ) [
+    KeInitializeLock ( &(list)^.MasterListLock, "MasterList" )
+    RtlInitializeList ( &(list)^.Head )
+]
+
+#SECTION "INITtext"
+FN ExpInitializeMagazineCache (
+    IN kenode : ^KeuNode,
+)
+
+    // Initialize the pool cache.
+    //
+    // NOTE: We always create as many per-cpu caches in each pool cache as there
+    //       are the maximum number of CPUs in the any node, not just in the
+    //       local node. This is to avoid having to guard against race
+    //       conditions where the current thread migrates to another node with
+    //       fewer processors and could perform an invalid memory access if it
+    //       tries to access the per-cpu cache with the old index.
+
+    mmnode := kenode^.Exp
+
+    ExpInitializeMagazineCacheList ( &mmnode^.PgMagazineCacheList )
+    ExpInitializeMagazineCacheList ( &mmnode^.NpMagazineCacheList )
+
+    // Initialize a slab cache to allocate pool caches from.
+
+    ExpInitializeSlabCache (
+        mmnode, // mmnode
+        &mmnode^.MagazineCacheSlabs, // scache
+        SIZEOF ExpMagazineCache +
+        KeQueryMostProcessorsInAnyNode () * SIZEOF ExpMagazineCachePerCpu, // size
+        MM_NONPAGED_POOL, // poolindex
+        'PoCa', // tag
+    )
+
+    // Initialize a slab cache to allocate slab caches from.
+
+    ExpInitializeSlabCache (
+        mmnode, // mmnode
+        &mmnode^.SlabCacheSlabs, // scache
+        SIZEOF ExpSlabCache, // size
+        MM_NONPAGED_POOL, // poolindex
+        'PoSl', // tag
+    )
+
+    // Initialize the magazine types.
+
+    ExpInitializeMagazineType (
+        mmnode, // mmnode
+        &mmnode^.MagazineTypeTable[MMP_MAGAZINE_SMALL], // magtype
+        "Small Block Magazines", // name
+        MMP_SMALL_MAGAZINE_SIZE, // size
+    )
+
+    ExpInitializeMagazineType (
+        mmnode, // mmnode
+        &mmnode^.MagazineTypeTable[MMP_MAGAZINE_LARGE], // magtype
+        "Large Block Magazines", // name
+        MMP_LARGE_MAGAZINE_SIZE, // size
+    )
+END

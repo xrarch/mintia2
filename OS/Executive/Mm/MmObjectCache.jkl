@@ -1,0 +1,771 @@
+//
+// Implementation of object caches for the MINTIA Executive.
+//
+// A "slabs and magazines" type cache is implemented, inspired by Solaris.
+// Magazines provide a per-cpu caching mechanism.
+//
+// It is recommended that for best performance on NUMA systems, object caches
+// be duplicated per NUMA node, because the slab caches and depots are not
+// automatically duplicated on that basis.
+//
+
+#INCLUDE "Mmp.hjk"
+
+#DEFINE MMP_PREALLOCATED_CACHES 4
+
+#DEFINE MMP_MAXIMUM_SMALL_SLAB_PAGES 2
+#DEFINE MMP_MAXIMUM_MEDIUM_SLAB_PAGES 4
+#DEFINE MMP_MAXIMUM_LARGE_SLAB_PAGES 6
+
+#DEFINE MMP_SMALL_OBJECT 1024
+#DEFINE MMP_MEDIUM_OBJECT 4096
+#DEFINE MMP_LARGE_OBJECT 8192
+
+STRUCT MmpObjectCache
+    Lock : KeLock,
+
+KE_CACHE_LINE_END
+
+    Node : ^KeuNode,
+    MagazineCache : ^ExpMagazineCache,
+    SlabArena : ^ExpArena,
+    ObjectSize : ULONG,
+    SlabBytes : ULONG,
+    ObjectsPerSlab : UINT,
+    SlabPages : UBYTE,
+
+KE_CACHE_LINE_END
+
+    PartialSlabListHead : RtlListEntry,
+END
+
+FN MmAllocateFromObjectCache (
+    IN objectcache : ^MmpObjectCache,
+    IN flags : UWORD,
+    OUT object : ^VOID,
+) : OsStatus
+
+    // Allocate an object.
+
+@Retry
+
+    IF objectcache^.MagazineCache THEN
+        object = ExAllocateFromMagazineCache ( objectcache^.MagazineCache )
+
+        IF object THEN
+            RETURN OS_STATUS_SUCCESS
+        END
+    END
+
+    ipl := KeAcquireLockExclusiveRaise ( &objectcache^.Lock )
+
+    listhead := &objectcache^.PartialSlabListHead
+    listentry := listhead^.Next
+    vpe : ^MmpVpe
+
+    IF listentry != listhead THEN
+        // There's a partial slab, so grab an object from it.
+        // We know for a fact there must be one there.
+
+        vpe = CONTAINEROF listentry TO MmpVpe.U.ObjectCache.SlabListEntry
+
+        object = vpe^.U.ObjectCache.FreeListHead
+
+        KeAssert ( object != NULLPTR )
+
+        vpe^.U.ObjectCache.InUseObjects += 1
+
+        next := (CAST object TO ^^VOID)^
+
+        vpe^.U.ObjectCache.FreeListHead = next
+
+        IF NOT next THEN
+            // Remove this slab from the partial list, since it is fully used.
+
+            RtlRemoveEntryList ( &vpe^.U.ObjectCache.SlabListEntry )
+        END
+
+        KeReleaseLockLower ( &objectcache^.Lock, ipl )
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    // Need to allocate a new slab since there are no partial ones.
+
+    mmnode := objectcache^.Node^.Mmp
+
+    KeReleaseLockLower ( &objectcache^.Lock, ipl )
+
+    status := ExAllocateFromArena (
+        objectcache^.SlabArena, // arena
+        flags, // flags
+        objectcache^.SlabBytes, // size
+        OUT object, // address
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    ipl = KeAcquireLockExclusiveRaise ( &objectcache^.Lock )
+
+    IF NOT RtlEmptyList ( &objectcache^.PartialSlabListHead ) THEN
+        // Someone else added a partial slab while we were trying to get one.
+        // Free ours and retry everything.
+
+        KeReleaseLockLower ( &objectcache^.Lock, ipl )
+
+        ExFreeToArena (
+            objectcache^.SlabArena, // arena
+            object, // address
+            objectcache^.SlabBytes, // size
+        )
+
+        GOTO Retry
+    END
+
+    vpe = MmpFindVpe (
+        mmnode, // mmnode
+        (object - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
+
+    // Initialize the VPE to describe the slab.
+    // Note that the SlabArena's import function already created the VPEs.
+
+    vpe^.U.ObjectCache.InUseObjects = 1
+    vpe^.U.ObjectCache.FreeListHead = NULLPTR
+
+    RtlInsertAtTailList (
+        &objectcache^.PartialSlabListHead, // listhead
+        &vpe^.U.ObjectCache.SlabListEntry, // listentry
+    )
+
+    // Initialize all VPEs of the slab to point to the first one as the
+    // control VPE.
+
+    max : UWORD = objectcache^.SlabPages
+    i := 0
+
+    WHILE i < max DO
+        vpe^.U.ObjectCache.SlabControl = vpe
+
+        vpe += MMP_VPE_SIZE
+        i += 1
+    END
+
+    // Put all the objects on the slab's free list.
+
+    max = objectcache^.ObjectsPerSlab
+    i = 1
+    objectsize := objectcache^.ObjectSize
+    ptr : ^^VOID = object + objectsize
+
+    WHILE i < max DO
+        ptr^ = vpe^.U.ObjectCache.FreeListHead
+        vpe^.U.ObjectCache.FreeListHead = ptr
+
+        ptr += objectsize
+        i += 1
+    END
+
+    KeReleaseLockLower ( &objectcache^.Lock, ipl )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+FN (ExMagazineCacheFreeF) MmpFreeToObjectCache (
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+)
+
+    // Free the object to the object cache. Bypass magazine layer.
+
+    objectcache := CAST context TO ^MmpObjectCache
+
+    mmnode := objectcache^.Node^.Mmp
+
+    vpe := MmpFindVpe (
+        mmnode, // mmnode
+        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
+
+    // Find the control VPE for the slab in case this is in the middle of a
+    // multi-page slab.
+
+    vpe = vpe^.U.ObjectCache.SlabControl
+
+    ipl := KeAcquireLockExclusiveRaise ( &objectcache^.Lock )
+
+    inuse := vpe^.U.ObjectCache.InUseObjects
+
+    KeAssert ( inuse > 0 )
+
+    IF inuse != 1 THEN
+        // There are still active objects inside the slab.
+
+        vpe^.U.ObjectCache.InUseObjects = inuse - 1
+
+        IF inuse == objectcache^.ObjectsPerSlab THEN
+            // The slab went from completely in use to partial.
+            // Put it on the head of the partial slab list since it's only
+            // one object away from being completely in use again, so we want
+            // to prioritize allocating from it to try to make that happen.
+
+            KeAssert ( vpe^.U.ObjectCache.FreeListHead == NULLPTR )
+
+            RtlInsertAtHeadList (
+                &objectcache^.PartialSlabListHead, // listhead
+                &vpe^.U.ObjectCache.SlabListEntry, // listentry
+            )
+        END
+
+        NOTHING (CAST ptr TO ^^VOID)^ = vpe^.U.ObjectCache.FreeListHead
+        vpe^.U.ObjectCache.FreeListHead = ptr
+
+        KeReleaseLockLower ( &objectcache^.Lock, ipl )
+
+        LEAVE
+    END
+
+    // This slab is now empty and should be freed.
+
+    RtlRemoveEntryList ( &vpe^.U.ObjectCache.SlabListEntry )
+
+    KeReleaseLockLower ( &objectcache^.Lock, ipl )
+
+    ExFreeToArena (
+        objectcache^.SlabArena, // arena
+        mmnode^.DynamicSpaceBase +
+        (MmpVpeToVpn ( mmnode, vpe ) << RTL_PAGE_SHIFT), // address
+        objectcache^.SlabBytes, // size
+    )
+END
+
+FN MmFreeToObjectCache (
+    IN objectcache : ^MmpObjectCache,
+    IN object : ^VOID,
+)
+
+    // Free the object to the object cache.
+
+    IF objectcache^.MagazineCache THEN
+        ExFreeToMagazineCache (
+            objectcache^.MagazineCache, // magazinecache
+            object, // ptr
+        )
+
+        LEAVE
+    END
+
+    MmpFreeToObjectCache (
+        objectcache, // context
+        object, // ptr
+    )
+END
+
+#SECTION "PAGEtext"
+FN MmpFreeObjectCache (
+    IN objectcache : ^MmpObjectCache,
+)
+
+    // Free an object cache.
+
+    mmnode := objectcache^.Node^.Mmp
+
+    IF objectcache >= &mmnode^.PreallocatedObjectCaches[0] AND
+objectcache < &mmnode^.PreallocatedObjectCaches[MMP_PREALLOCATED_CACHES] THEN
+
+        // The object cache is preallocated so don't free it.
+
+        LEAVE
+    END
+
+    MmFreeToPoolCache (
+        mmnode^.ObjectCacheCache, // cache
+        objectcache, // ptr
+    )
+END
+
+#SECTION "PAGEtext"
+FN MmpCalculateGoodSlabSize (
+    IN objectsize : UWORD,
+) : UWORD
+
+    // Calculate a number of pages for the slabt hat minimizes fragmentation
+    // while still fitting at least two of the object.
+
+    max : UWORD
+
+    IF objectsize <= MMP_SMALL_OBJECT THEN
+        max = MMP_MAXIMUM_SMALL_SLAB_PAGES
+
+    ELSEIF objectsize <= MMP_MEDIUM_OBJECT THEN
+        max = MMP_MAXIMUM_MEDIUM_SLAB_PAGES
+
+    ELSE
+        max = MMP_MAXIMUM_LARGE_SLAB_PAGES
+    END
+
+    i := ((objectsize * 2) + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
+    bestpages := -1
+    bestfragmentation := -1
+
+    // Pick the smallest page count that achieves below 5% wastage.
+    // If none do, then pick the best one.
+
+    WHILE i <= max DO
+        slabbytes := i * RTL_PAGE_SIZE
+
+        slabobjects := slabbytes / objectsize
+
+        wastebytes := slabbytes - (slabobjects * objectsize)
+
+        percentwasted := (wastebytes * 100) / slabbytes
+
+        IF percentwasted < 5 THEN
+            bestpages = i
+
+            BREAK
+        END
+
+        IF percentwasted < bestfragmentation THEN
+            bestfragmentation = percentwasted
+            bestpages = i
+        END
+
+        i += 1
+    END
+
+    RETURN bestpages
+END
+
+#SECTION "PAGEtext"
+FN MmCreateObjectCache (
+    IN kenode : ^KeuNode,
+    IN name : ^UBYTE,
+    IN flags : UWORD,
+    IN objectsize : UWORD,
+    IN magazinecached : UWORD,
+    IN pageable : UWORD,
+    OUT objectcache : ^MmpObjectCache,
+) : OsStatus
+
+    // Create an object cache.
+
+    KeAssert ( objectsize < MMP_LARGE_OBJECT )
+    KeAssert ( objectsize != 0 )
+
+    objectsize = (objectsize + SIZEOF ^VOID - 1) & -(SIZEOF ^VOID)
+
+    status : OsStatus
+
+    mmnode := kenode^.Mmp
+
+    objectcache = NULLPTR
+
+    KeAcquireLockExclusive ( &mmnode^.ObjectCacheListLock )
+
+    IF mmnode^.PreallocatedObjectCacheIndex < MMP_PREALLOCATED_CACHES THEN
+        // There are still preallocated object caches, so take one.
+
+        index := mmnode^.PreallocatedObjectCacheIndex
+
+        objectcache = &mmnode^.PreallocatedObjectCaches[index]
+
+        mmnode^.PreallocatedObjectCacheIndex = index + 1
+    END
+
+    KeReleaseLock ( &mmnode^.ObjectCacheListLock )
+
+    IF NOT objectcache THEN
+        // No more preallocated object caches left, so grab one from the
+        // object cache cache.
+
+        status = MmAllocateFromPoolCache (
+            mmnode^.ObjectCacheCache, // cache
+            flags, // flags
+            OUT objectcache, // ptr
+        )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+    END
+
+    objectcache^.Node = kenode
+    objectcache^.MagazineCache = NULLPTR
+    objectcache^.ObjectSize = objectsize
+
+    RtlInitializeList ( &objectcache^.PartialSlabListHead )
+
+    objectcache^.SlabPages = MmpCalculateGoodSlabSize ( objectsize )
+    objectcache^.SlabBytes = objectcache^.SlabPages << RTL_PAGE_SHIFT
+
+    objectcache^.ObjectsPerSlab = objectcache^.SlabBytes / objectsize
+
+    objectcache^.SlabArena = mmnode^.SlabArenas[NOT NOT pageable]
+
+    KeInitializeLock ( &objectcache^.Lock, "ObjectCache" )
+
+    IF magazinecached THEN
+        // Initialize a magazine cache.
+
+#IF 0
+        status = ExCreateMagazineCache (
+            kenode, // kenode
+            name, // name
+            pageable, // pageable
+            &MmpAllocateFromObjectCache, // allocfunc
+            &MmpFreeToObjectCache, // freefunc
+            objectcache, // context
+            OUT objectcache^.MagazineCache, // magazinecache
+        )
+
+        IF OsError ( status ) THEN
+            MmpFreeObjectCache ( objectcache )
+
+            RETURN status
+        END
+#END
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN MmDeleteObjectCache (
+    IN objectcache : ^MmpObjectCache,
+)
+
+    // Delete an object cache.
+
+    KeAssert ( RtlEmptyList ( &objectcache^.PartialSlabListHead ) )
+
+    IF objectcache^.MagazineCache THEN
+        ExDeleteMagazineCache ( objectcache^.MagazineCache )
+    END
+
+    MmpFreeObjectCache ( objectcache )
+END
+
+FN (ExArenaImportF) MmpImportNonpageable (
+    IN context : ^VOID,
+    IN importarena : ^ExpArena,
+    IN flags : UWORD,
+    IN size : UWORD,
+    OUT address : ^VOID,
+) : OsStatus
+
+    // Import into the nonpaged arena.
+
+    mmnode := CAST context TO ^MmpNode
+
+    pages := size >> RTL_PAGE_SHIFT
+
+    // First charge commit for these pages.
+
+    status := MmuChargeCommit (
+        mmnode, // mmnode
+        pages, // pages
+        flags, // flags
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    status = MmpAllocateDynamicPages (
+        mmnode, // mmnode
+        pages, // pages
+        flags, // flags
+        OUT address, // ptr
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Error1
+    END
+
+    i := 0
+    pte := MmpPteAddress ( address )
+    colorptr := address
+
+    WHILE i < pages DO
+        // Allocate a page frame to place here.
+
+@Retry
+
+        pfe := MmpAllocatePage (
+            mmnode, // mmnode
+            flags, // flags
+            MmpVirtualAddressColor ( colorptr ), // color
+        )
+
+        IF NOT pfe THEN
+            IF flags & MM_ALLOCATE_WAIT THEN
+                // Caller said we should wait here for more pages.
+
+                MmpWaitForPages (
+                    mmnode, // mmnode
+                    flags & MM_ALLOCATE_LOW, // low
+                )
+
+                GOTO Retry
+            END
+
+            // Free everything we just did.
+
+            i = 0
+            colorptr = address
+
+            WHILE i < pages DO
+                ptecontents := pte[i]
+
+                KeAssert ( MmpIsPteValid ( ptecontents ) )
+
+                pte[i] = MMP_INVALID_KERNEL_PTE
+
+                MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
+
+#IF BLD_CHK
+                KeuFlushMyTbAddress ( colorptr )
+
+                colorptr += RTL_PAGE_SIZE
+#END
+
+                i += 1
+            END
+
+            status = OS_STATUS_NO_MEMORY
+
+            GOTO Error2
+        END
+
+        // Map the page frame.
+        // Note that no TB entry exists for this page in any CPU if we've been
+        // given it by the dynamic space allocator.
+
+        pte[i] = MmpBuildPoolPte ( MmpPfeToPfn ( pfe ) )
+
+        i += 1
+        colorptr += RTL_PAGE_SIZE
+    END
+
+    RETURN OS_STATUS_SUCCESS
+
+@Error2
+
+    MmpReleaseDynamicPages (
+        mmnode, // mmnode
+        address, // ptr
+        pages, // pages
+        FALSE, // flush
+    )
+
+@Error1
+
+    MmuUnchargeCommit (
+        mmnode, // mmnode
+        pages, // pages
+    )
+
+    RETURN status
+END
+
+FN (ExArenaFreeF) MmpFreeNonpageable (
+    IN context : ^VOID,
+    IN importarena : ^ExpArena,
+    IN address : ^VOID,
+    IN size : UWORD,
+)
+
+    // Free a nonpageable slab.
+
+    mmnode := CAST context TO ^MmpNode
+    pages := size >> RTL_PAGE_SHIFT
+
+    pte := MmpPteAddress ( address )
+    i := 0
+
+#IF BLD_CHK
+    ptr := address
+#END
+
+    WHILE i < pages DO
+        ptecontents := pte[i]
+
+        KeAssert ( MmpIsPteValid ( ptecontents ) )
+
+        pte[i] = MMP_INVALID_KERNEL_PTE
+
+        MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
+
+#IF BLD_CHK
+        KeuFlushMyTbAddress ( ptr )
+
+        ptr += RTL_PAGE_SIZE
+#END
+
+        i += 1
+    END
+
+    MmpReleaseDynamicPages (
+        mmnode, // mmnode
+        address, // ptr
+        pages, // pages
+        TRUE, // flush
+    )
+
+    MmuUnchargeCommit (
+        mmnode, // mmnode
+        pages, // pages
+    )
+END
+
+FN (ExArenaLookupTagF) MmpLookupSlabArenaTag (
+    IN context : ^VOID,
+    IN address : ^VOID,
+) : ^ExpArenaTag
+
+    // Look up the slab arena tag.
+
+    mmnode := CAST context TO ^MmpNode
+
+    vpe := MmpFindVpe (
+        mmnode, // mmnode
+        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
+
+    RETURN vpe^.U.ObjectCache.SlabArenaTag
+END
+
+FN (ExArenaInsertTagF) MmpInsertSlabArenaTag (
+    IN context : ^VOID,
+    IN address : ^VOID,
+    IN size : UWORD,
+    IN flags : UWORD,
+    IN tag : ^ExpArenaTag,
+) : OsStatus
+
+    // Insert the slab arena tag.
+
+    mmnode := CAST context TO ^MmpNode
+
+    status := MmpCreateVpes (
+        mmnode, // mmnode
+        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+        size >> RTL_PAGE_SHIFT, // pages
+        flags, // flags
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    vpe := MmpFindVpe (
+        mmnode, // mmnode
+        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
+
+    vpe^.U.ObjectCache.SlabArenaTag = tag
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+FN (ExArenaRemoveTagF) MmpRemoveSlabArenaTag (
+    IN context : ^VOID,
+    IN address : ^VOID,
+    IN size : UWORD,
+    IN tag : ^ExpArenaTag,
+)
+
+    // Remove the slab arena tag.
+
+    mmnode := CAST context TO ^MmpNode
+
+    vpe := MmpFindVpe (
+        mmnode, // mmnode
+        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
+
+    vpe^.U.ObjectCache.SlabArenaTag = NULLPTR
+
+    MmpUnreferenceVpes (
+        mmnode, // mmnode
+        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+        size >> RTL_PAGE_SHIFT, // pages
+    )
+END
+
+#SECTION "INITtext"
+FN MmpInitializeObjectCaches (
+    IN kenode : ^KeuNode,
+)
+
+    // Initialize the object cache package for all nodes.
+
+    mmnode := kenode^.Mmp
+
+    mmnode^.PreallocatedObjectCaches = KeuAllocateNodeSpace (
+        kenode, // kenode
+        SIZEOF MmpObjectCache * MMP_PREALLOCATED_CACHES, // bytes
+    )
+
+    KeAssert ( mmnode^.PreallocatedObjectCaches != NULLPTR )
+
+    mmnode^.PreallocatedObjectCacheIndex = 0
+
+    KeInitializeLock ( &mmnode^.ObjectCacheListLock, "ObjectCacheList" )
+
+    // Create the two slab arenas, one for each type of pageability.
+
+    tagcallbacks : ExArenaTagCallbacks
+    tagcallbacks.Context = mmnode
+    tagcallbacks.LookupTag = &MmpLookupSlabArenaTag
+    tagcallbacks.InsertTag = &MmpInsertSlabArenaTag
+    tagcallbacks.RemoveTag = &MmpRemoveSlabArenaTag
+
+    importcallbacks : ExArenaImportCallbacks
+    importcallbacks.Context = mmnode
+    importcallbacks.Import = &MmpImportNonpageable
+    importcallbacks.Free = &MmpFreeNonpageable
+    importcallbacks.ImportQuantumShift = RTL_PAGE_SHIFT + 2
+
+    status := ExCreateArena (
+        "NonpagedSlabs", // name
+        kenode, // kenode
+        0, // flags
+        NULLPTR, // tagcallbacks
+        &importcallbacks, // importcallbacks
+        0, // quantumcachemax
+        FALSE, // pageable
+        RTL_PAGE_SHIFT, // quantumshift
+        mmnode^.DynamicSpaceArena, // importarena
+        OUT mmnode^.SlabArenas[FALSE], // arena
+    )
+
+    KeAssert ( NOT OsError ( status ) )
+
+    ExuRegisterPopulatorArena ( mmnode^.SlabArenas[FALSE] )
+
+    // TEMP
+#IF 0
+    importcallbacks.Import = &MmpImportPageable
+    importcallbacks.Free = &MmpFreePageable
+    importcallbacks.ImportQuantumShift = RTL_PAGE_SHIFT + 3
+#END
+
+    status = ExCreateArena (
+        "PagedSlabs", // name
+        kenode, // kenode
+        0, // flags
+        NULLPTR, // tagcallbacks
+        &importcallbacks, // importcallbacks
+        0, // quantumcachemax
+        TRUE, // pageable
+        RTL_PAGE_SHIFT, // quantumshift
+        mmnode^.DynamicSpaceArena, // importarena
+        OUT mmnode^.SlabArenas[TRUE], // arena
+    )
+
+    KeAssert ( NOT OsError ( status ) )
+END

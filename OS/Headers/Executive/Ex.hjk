@@ -181,6 +181,7 @@ FNPTR ExArenaLookupTagF (
 FNPTR ExArenaInsertTagF (
     IN context : ^VOID,
     IN address : ^VOID,
+    IN size : UWORD,
     IN flags : UWORD,
     IN tag : ^ExpArenaTag,
 ) : OsStatus
@@ -188,6 +189,7 @@ FNPTR ExArenaInsertTagF (
 FNPTR ExArenaRemoveTagF (
     IN context : ^VOID,
     IN address : ^VOID,
+    IN size : UWORD,
     IN tag : ^ExpArenaTag,
 )
 
@@ -257,4 +259,22 @@ EXTERN FN ExFreeMultipleToArena (
     IN arena : ^ExpArena,
     IN address : ^VOID,
     IN size : UWORD,
+)
+
+FNPTR ExMagazineCacheFreeF (
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+)
+
+EXTERN FN ExAllocateFromMagazineCache (
+    IN magazinecache : ^ExpMagazineCache,
+) : ^VOID
+
+EXTERN FN ExFreeToMagazineCache (
+    IN magazinecache : ^ExpMagazineCache,
+    IN ptr : ^VOID,
+)
+
+EXTERN FN ExDeleteMagazineCache (
+    IN magazinecache : ^ExpMagazineCache,
 )

@@ -132,6 +132,7 @@ END
 FN (ExArenaInsertTagF) ExpArenaInsertTag (
     IN context : ^VOID,
     IN address : ^VOID,
+    IN size : UWORD,
     IN flags : UWORD,
     IN tag : ^ExpArenaTag,
 ) : OsStatus
@@ -153,6 +154,7 @@ END
 FN (ExArenaRemoveTagF) ExpArenaRemoveTag (
     IN context : ^VOID,
     IN address : ^VOID,
+    IN size : UWORD,
     IN tag : ^ExpArenaTag,
 )
 
@@ -775,6 +777,7 @@ FN ExAllocateFromArena (
     status = arena^.TagCallbacks.InsertTag (
         arena^.TagCallbacks.Context, // context
         address, // address
+        size, // size
         flags, // flags
         alloctag, // tag
     )
@@ -856,6 +859,7 @@ FN ExpFreeToArena (
     arena^.TagCallbacks.RemoveTag (
         arena^.TagCallbacks.Context, // context
         address, // address
+        blocksize, // size
         tag, // tag
     )
 

@@ -142,6 +142,10 @@ EXTERN FN MmpInitializeSystemVa (
     IN kenode : ^KeuNode,
 )
 
+EXTERN FN MmpInitializeObjectCaches (
+    IN kenode : ^KeuNode,
+)
+
 EXTERN FN MmpInitializeVpnDb (
     IN kenode : ^KeuNode,
 )
@@ -389,10 +393,6 @@ KE_CACHE_LINE_END
 END
 
 STRUCT MmpNode
-    DynamicSpaceBase : ^VOID,
-
-KE_CACHE_LINE_END
-
     VpnDbLock : KeLock,
 
 KE_CACHE_LINE_END
@@ -425,9 +425,11 @@ KE_CACHE_LINE_END
 
     BorrowCounts : ^UINT,
 
+    DynamicSpaceBase : ^VOID,
     PagefileState : ^MmpPagefileState,
     MdlCache : ^MmpPoolCache,
     DynamicSpaceArena : ^ExpArena,
+    SlabArenas : ^ExpArena[2],
 
     PoolTable : ^MmpPool[MM_MAXIMUM_POOL],
 
@@ -450,6 +452,13 @@ KE_CACHE_LINE_END
 
     SizeLevel : UBYTE,
     Id : UBYTE,
+
+KE_CACHE_LINE_END
+
+    ObjectCacheListLock : KeLock,
+    ObjectCacheCache : ^MmpPoolCache,
+    PreallocatedObjectCaches : ^MmpObjectCache,
+    PreallocatedObjectCacheIndex : UWORD,
 
 KE_CACHE_LINE_END
 
@@ -492,13 +501,17 @@ EXTERN FN MmpUnreferenceObject (
     IN defer : UWORD,
 )
 
+EXTERN FN MmpGarbageCollectVpnDb (
+    IN mmnode : ^MmpNode,
+)
+
 #MACRO MmpFindVpe ( mmnode, vpn ) [
     (CAST ((mmnode)^.VpnDbBase + ((vpn) * MMP_VPE_SIZE)) TO ^MmpVpe)
 ]
 
-EXTERN FN MmpGarbageCollectVpnDb (
-    IN mmnode : ^MmpNode,
-)
+#MACRO MmpVpeToVpn ( mmnode, vpe ) [
+    ((vpe - (mmnode)^.VpnDbBase) / MMP_VPE_SIZE)
+]
 
 STRUCT MmpVpePoolConsumer
     Pages : UWORD,
@@ -507,8 +520,17 @@ STRUCT MmpVpePoolConsumer
     PageAligned : UBYTE,
 END
 
+STRUCT MmpVpeObjectConsumer
+    SlabArenaTag : ^ExpArenaTag,
+    SlabControl : ^MmpVpe,
+    SlabListEntry : RtlListEntry,
+    FreeListHead : ^^VOID,
+    InUseObjects : UINT,
+END
+
 UNION MmpVpeConsumerData
     Pool : MmpVpePoolConsumer,
+    ObjectCache : MmpVpeObjectConsumer,
 END
 
 STRUCT MmpVpe
@@ -520,7 +542,13 @@ EXTERN FN MmpCreateVpe (
     IN mmnode : ^MmpNode,
     IN vpn : UWORD,
     IN flags : UWORD,
-    OUT vpe : ^MmpVpe,
+) : OsStatus
+
+EXTERN FN MmpCreateVpes (
+    IN mmnode : ^MmpNode,
+    IN vpn : UWORD,
+    IN pages : UWORD,
+    IN flags : UWORD,
 ) : OsStatus
 
 EXTERN FN MmpReferenceVpe (
@@ -530,3 +558,9 @@ EXTERN FN MmpReferenceVpe (
 EXTERN FN MmpUnreferenceVpe (
     IN vpe : ^MmpVpe,
 )
+
+EXTERN FN MmpUnreferenceVpes (
+    IN mmnode : ^MmpNode,
+    IN vpn : UWORD,
+    IN pages : UWORD,
+) : OsStatus

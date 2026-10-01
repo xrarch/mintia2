@@ -24,6 +24,7 @@ END
 FN (ExArenaInsertTagF) MmpInsertDynamicSpaceTag (
     IN context : ^VOID,
     IN address : ^VOID,
+    IN size : UWORD,
     IN flags : UWORD,
     IN tag : ^ExpArenaTag,
 ) : OsStatus
@@ -32,18 +33,20 @@ FN (ExArenaInsertTagF) MmpInsertDynamicSpaceTag (
 
     mmnode := CAST context TO ^MmpNode
 
-    vpe : ^MmpVpe
-
     status := MmpCreateVpe (
         mmnode, // mmnode
         (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
         flags, // flags
-        OUT vpe, // vpe
     )
 
     IF OsError ( status ) THEN
         RETURN status
     END
+
+    vpe := MmpFindVpe (
+        mmnode, // mmnode
+        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+    )
 
     vpe^.DynamicSpaceArenaTag = tag
 
@@ -53,6 +56,7 @@ END
 FN (ExArenaRemoveTagF) MmpRemoveDynamicSpaceTag (
     IN context : ^VOID,
     IN address : ^VOID,
+    IN size : UWORD,
     IN tag : ^ExpArenaTag,
 )
 
