@@ -19,11 +19,13 @@ KepLockDepStarted := FALSE
 #IF BLD_MP
 
 #MACRO KepAcquireMatrix ( ) [
-    KepAcquireSpinlockRaise ( &KepMatrixLock )
+    KepDisableInterrupts ()
+    KepAcquireSpinlock ( &KepMatrixLock )
 ]
 
-#MACRO KepReleaseMatrix ( ipl ) [
-    KepReleaseSpinlockLower ( &KepMatrixLock, ipl )
+#MACRO KepReleaseMatrix ( oldstate ) [
+    KepReleaseSpinlock ( &KepMatrixLock )
+    KepRestoreInterrupts ( oldstate )
 ]
 
 #MACRO KepAcquireMatrixElevated ( ) [
@@ -37,11 +39,11 @@ KepLockDepStarted := FALSE
 #ELSE
 
 #MACRO KepAcquireMatrix ( ) [
-    KepRaiseIpl ( KEP_IPL_DPC )
+    KepDisableInterrupts ()
 ]
 
-#MACRO KepReleaseMatrix ( ipl ) [
-    KepLowerIpl ( ipl )
+#MACRO KepReleaseMatrix ( oldstate ) [
+    KepRestoreInterrupts ( oldstate )
 ]
 
 #MACRO KepAcquireMatrixElevated ( ) []
@@ -189,7 +191,7 @@ FN KepFindCreateLockClass (
 
     // Lock the matrix.
 
-    ipl := KepAcquireMatrix ()
+    oldstate := KepAcquireMatrix ()
 
     bucket : ^RtlAvlNode
 
@@ -199,7 +201,7 @@ FN KepFindCreateLockClass (
     )
 
     IF class != NULLPTR THEN
-        KepReleaseMatrix ( ipl )
+        KepReleaseMatrix ( oldstate )
 
         RETURN class
     END
@@ -224,7 +226,7 @@ FN KepFindCreateLockClass (
 
     KepActiveLockClasses += 1
 
-    KepReleaseMatrix ( ipl ) 
+    KepReleaseMatrix ( oldstate ) 
 
     RETURN class
 END
@@ -427,7 +429,7 @@ FN KepCheck (
     // Take the graph lock and check again.
     // Also add edges if needed.
 
-    ipl := KepAcquireMatrix ()
+    oldstate := KepAcquireMatrix ()
     i = 0
 
     WHILE i != num DO
@@ -458,7 +460,7 @@ FN KepCheck (
         i += 1
     END
 
-    KepReleaseMatrix ( ipl )
+    KepReleaseMatrix ( oldstate )
 END
 
 
@@ -474,7 +476,7 @@ FN KepCheckSpinlock (
         LEAVE
     END
 
-    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+    oldstate := KepDisableInterrupts ()
     prb := KEP_CURRENT_PRB
 
     KepCheck (
@@ -484,7 +486,7 @@ FN KepCheckSpinlock (
         &prb^.HeldLocks, // heldlocks
     )
 
-    KepLowerIpl ( ipl )
+    KepRestoreInterrupts ( oldstate )
 END
 
 FN KepAcquired (
@@ -564,7 +566,7 @@ EXPORT FN KepAcquiredSpinlock (
         LEAVE
     END
 
-    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+    oldstate := KepDisableInterrupts ()
     prb := KEP_CURRENT_PRB
     class := CAST spinlock^.Class TO ^KepLockClass
 
@@ -576,7 +578,7 @@ EXPORT FN KepAcquiredSpinlock (
         &prb^.HeldLocks, // heldlocks
     ) 
 
-    KepLowerIpl ( ipl )
+    KepRestoreInterrupts ( oldstate )
 END
 
 EXPORT FN KepReleasedSpinlock (
@@ -589,7 +591,7 @@ EXPORT FN KepReleasedSpinlock (
         LEAVE
     END
 
-    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+    oldstate := KepDisableInterrupts ()
     prb := KEP_CURRENT_PRB
 
     KepReleased (
@@ -597,7 +599,7 @@ EXPORT FN KepReleasedSpinlock (
         &prb^.HeldLocks, // heldlocks
     )
 
-    KepLowerIpl ( ipl )
+    KepRestoreInterrupts ( oldstate )
 END
 
 EXPORT FN KepLockDepInitializeSpinlock (
