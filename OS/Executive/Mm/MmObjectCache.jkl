@@ -474,6 +474,8 @@ FN (ExArenaImportF) MmpImportNonpageable (
         RETURN status
     END
 
+    // Now allocate the virtual addresses from the dynamic space arena.
+
     status = MmpAllocateDynamicPages (
         mmnode, // mmnode
         pages, // pages
@@ -483,6 +485,19 @@ FN (ExArenaImportF) MmpImportNonpageable (
 
     IF OsError ( status ) THEN
         GOTO Error1
+    END
+
+    // Create a range of VPEs for the pages in the span.
+
+    status = MmpCreateVpes (
+        mmnode, // mmnode
+        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+        size >> RTL_PAGE_SHIFT, // pages
+        flags, // flags
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Error2
     END
 
     i := 0
@@ -537,7 +552,7 @@ FN (ExArenaImportF) MmpImportNonpageable (
 
             status = OS_STATUS_NO_MEMORY
 
-            GOTO Error2
+            GOTO Error3
         END
 
         // Map the page frame.
@@ -551,6 +566,14 @@ FN (ExArenaImportF) MmpImportNonpageable (
     END
 
     RETURN OS_STATUS_SUCCESS
+
+@Error3
+
+    MmpUnreferenceVpes (
+        mmnode, // mmnode
+        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+        pages, // pages
+    )
 
 @Error2
 
@@ -608,6 +631,12 @@ FN (ExArenaFreeF) MmpFreeNonpageable (
         i += 1
     END
 
+    MmpUnreferenceVpes (
+        mmnode, // mmnode
+        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+        pages, // pages
+    )
+
     MmpReleaseDynamicPages (
         mmnode, // mmnode
         address, // ptr
@@ -624,9 +653,12 @@ END
 FN (ExArenaLookupTagF) MmpLookupSlabArenaTag (
     IN context : ^VOID,
     IN address : ^VOID,
+    IN remove : UWORD,
 ) : ^ExpArenaTag
 
     // Look up the slab arena tag.
+    // Do nothing on removal since we unreference the VPE upon freeing the
+    // underlying imported span.
 
     mmnode := CAST context TO ^MmpNode
 
@@ -641,7 +673,6 @@ END
 FN (ExArenaInsertTagF) MmpInsertSlabArenaTag (
     IN context : ^VOID,
     IN address : ^VOID,
-    IN size : UWORD,
     IN flags : UWORD,
     IN tag : ^ExpArenaTag,
 ) : OsStatus
@@ -649,17 +680,6 @@ FN (ExArenaInsertTagF) MmpInsertSlabArenaTag (
     // Insert the slab arena tag.
 
     mmnode := CAST context TO ^MmpNode
-
-    status := MmpCreateVpes (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-        size >> RTL_PAGE_SHIFT, // pages
-        flags, // flags
-    )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
 
     vpe := MmpFindVpe (
         mmnode, // mmnode
@@ -669,31 +689,6 @@ FN (ExArenaInsertTagF) MmpInsertSlabArenaTag (
     vpe^.U.ObjectCache.SlabArenaTag = tag
 
     RETURN OS_STATUS_SUCCESS
-END
-
-FN (ExArenaRemoveTagF) MmpRemoveSlabArenaTag (
-    IN context : ^VOID,
-    IN address : ^VOID,
-    IN size : UWORD,
-    IN tag : ^ExpArenaTag,
-)
-
-    // Remove the slab arena tag.
-
-    mmnode := CAST context TO ^MmpNode
-
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
-
-    vpe^.U.ObjectCache.SlabArenaTag = NULLPTR
-
-    MmpUnreferenceVpes (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-        size >> RTL_PAGE_SHIFT, // pages
-    )
 END
 
 #SECTION "INITtext"
@@ -722,7 +717,6 @@ FN MmpInitializeObjectCaches (
     tagcallbacks.Context = mmnode
     tagcallbacks.LookupTag = &MmpLookupSlabArenaTag
     tagcallbacks.InsertTag = &MmpInsertSlabArenaTag
-    tagcallbacks.RemoveTag = &MmpRemoveSlabArenaTag
 
     importcallbacks : ExArenaImportCallbacks
     importcallbacks.Context = mmnode

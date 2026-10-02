@@ -7,6 +7,7 @@
 FN (ExArenaLookupTagF) MmpLookupDynamicSpaceTag (
     IN context : ^VOID,
     IN address : ^VOID,
+    IN remove : UWORD,
 ) : ^ExpArenaTag
 
     // Look up the dynamic space tag.
@@ -18,13 +19,20 @@ FN (ExArenaLookupTagF) MmpLookupDynamicSpaceTag (
         (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
     )
 
-    RETURN vpe^.DynamicSpaceArenaTag
+    tag := vpe^.DynamicSpaceArenaTag
+
+    IF remove THEN
+        // Also remove the tag (unreference its containing VPE).
+
+        MmpUnreferenceVpe ( vpe )
+    END
+
+    RETURN tag
 END
 
 FN (ExArenaInsertTagF) MmpInsertDynamicSpaceTag (
     IN context : ^VOID,
     IN address : ^VOID,
-    IN size : UWORD,
     IN flags : UWORD,
     IN tag : ^ExpArenaTag,
 ) : OsStatus
@@ -53,27 +61,6 @@ FN (ExArenaInsertTagF) MmpInsertDynamicSpaceTag (
     RETURN OS_STATUS_SUCCESS
 END
 
-FN (ExArenaRemoveTagF) MmpRemoveDynamicSpaceTag (
-    IN context : ^VOID,
-    IN address : ^VOID,
-    IN size : UWORD,
-    IN tag : ^ExpArenaTag,
-)
-
-    // Remove the dynamic space tag.
-
-    mmnode := CAST context TO ^MmpNode
-
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
-
-    vpe^.DynamicSpaceArenaTag = NULLPTR
-
-    MmpUnreferenceVpe ( vpe )
-END
-
 #SECTION "INITtext"
 FN MmpInitializeSystemVa (
     IN kenode : ^KeuNode,
@@ -91,7 +78,6 @@ FN MmpInitializeSystemVa (
     tagcallbacks.Context = mmnode
     tagcallbacks.LookupTag = &MmpLookupDynamicSpaceTag
     tagcallbacks.InsertTag = &MmpInsertDynamicSpaceTag
-    tagcallbacks.RemoveTag = &MmpRemoveDynamicSpaceTag
 
     status := ExCreateArena (
         "DynamicSpace", // name
