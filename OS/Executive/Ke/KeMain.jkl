@@ -115,13 +115,13 @@ FN KepInitializePrb (
     // 3 - Global ID
     // 4 - Hardware ID
 
-    idword := CAST prb TO ^UWORD
+    idword := CAST prb TO ^BlStashedPrbInfo
 
-    id := idword[0]
-    irqdt := idword[1]
-    stackbase := idword[2]
-    consecid := idword[3]
-    hwid := idword[4]
+    id := idword^.NodeLocalId
+    irqdt := idword^.Idt
+    stackbase := idword^.IdleStack
+    consecid := idword^.GlobalId
+    hwid := idword^.HardwareId
 
     // Clear the Prb.
 
@@ -661,6 +661,12 @@ EXPORT FN KeMain (
 
         BARRIER
     END
+#END
+
+#IF BLD_LOCKDEP
+    // Now ready to start lockdep.
+
+    KepStartLockDep ()
 #END
 
     // Become a subject of the dispatcher.

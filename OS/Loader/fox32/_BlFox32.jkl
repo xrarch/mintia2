@@ -28,14 +28,14 @@ BxFlushPage:
 // a0 - port
 // a1 - value
 BxFox32Out:
-    out a0, a1
+    out  a0, a1
     ret
 
 // a0 - port
 // outputs:
 // a3 - value
 BxFox32In:
-    in a3, a0
+    in   a3, a0
     ret
 
 BxFox32Font:
@@ -45,7 +45,23 @@ BxHaltFox32:
     halt
     ret
 
+// a0 - arg
+// a1 - ptr
+// a2 - sp
+BxCallWithStack:
+
+    // Call the function with the given stack.
+
+    mov  sp, a2
+    jmp  a1
+
 ]
+
+EXTERN FN BxCallWithStack (
+    IN arg : ^VOID,
+    IN ptr : ^VOID,
+    IN sp : ^VOID,
+)
 
 EXTERN FN BxFox32Out (
     IN port : UWORD,
@@ -892,6 +908,7 @@ FNPTR SysEntry (
 FN BxStartSystem (
     IN entrypoint : ^VOID,
     IN prbphysical : ^VOID,
+    IN idlestack : ^VOID,
 )
 
     // Map the Prb at 0xFFFFC000.
@@ -906,9 +923,11 @@ FN BxStartSystem (
 
     // Jump to the system entrypoint.
 
-    entry := CAST entrypoint TO SysEntry
-
-    entry ( &BlInfoBlock )
+    BxCallWithStack (
+        &BlInfoBlock, // arg
+        entrypoint, // ptr
+        idlestack, // sp
+    )
 END
 
 FN BxExit ()

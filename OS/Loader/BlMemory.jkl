@@ -671,6 +671,8 @@ FN BlInitializeNodeMemory (
         0, // ulong
     )
 
+    blnode^.IdtStackBase = idtstackbase
+
     // Allocate the Prbs.
 
     totalsize = blnode^.ProcessorCount << BL_PRB_SHIFT
@@ -710,13 +712,13 @@ FN BlInitializeNodeMemory (
     i := 0
 
     WHILE i < blnode^.ProcessorCount DO
-        idword := CAST prbva TO ^UWORD
+        prbs := CAST prbva TO ^BlStashedPrbInfo
 
-        idword[0] = i
-        idword[1] = idtstackbase
-        idword[2] = idtstackbase + BL_IDT_SIZE
-        idword[3] = BlConsecutiveProcessorId
-        idword[4] = BxHardwareIdForProcessor ( BlConsecutiveProcessorId )
+        prbs^.NodeLocalId = i
+        prbs^.Idt = idtstackbase
+        prbs^.IdleStack = idtstackbase + BL_IDT_SIZE
+        prbs^.GlobalId = BlConsecutiveProcessorId
+        prbs^.HardwareId = BxHardwareIdForProcessor ( BlConsecutiveProcessorId )
 
         idtstackbase += BL_IDT_STACK_SIZE
         prbva += BL_PRB_SIZE

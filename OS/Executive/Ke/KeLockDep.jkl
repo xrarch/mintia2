@@ -88,7 +88,7 @@ FN (RtlAvlLessThanF) KepCompareNameNodes (
     ) TO WORD < 0
 END
 
-EXPORT FN KepInitializeLockDep ()
+FN KepInitializeLockDep ()
 
     // Initialize the lock verifier.
     // This should be called as early as possible so that as many classes as
@@ -97,7 +97,7 @@ EXPORT FN KepInitializeLockDep ()
     i := 0
 
 #IF BLD_MP
-    KepInitializeSpinlock (&KepMatrixLock, NULLPTR )
+    KepInitializeSpinlock ( &KepMatrixLock, NULLPTR )
 #END
 
     WHILE i != KEP_LOCKDEP_NUM_CLASSES DO
@@ -114,6 +114,11 @@ EXPORT FN KepInitializeLockDep ()
 
         i += 1
     END
+END
+
+FN KepStartLockDep ()
+
+    // Start lockdep tracking.
 
     KepLockDepStarted = TRUE
 END
