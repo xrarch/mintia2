@@ -567,7 +567,7 @@ FN ExpAddSpanToArena (
     IN address : ^VOID,
     IN size : UWORD,
     IN imported : UWORD,
-)
+) : ^ExpArenaTag
 
     // Add a span to the arena.
     // Assumes a sufficient number of tags in the reserve and arena lock held.
@@ -599,11 +599,7 @@ FN ExpAddSpanToArena (
         &tag^.ListEntry, // entry
     )
 
-    RtlInsertAvl (
-        &arena^.FreeTree, // root
-        &tag^.TreeEntry, // node
-        &ExpArenaCompareTagsBySize, // comparisonfunc
-    )
+    content := tag 
 
     // Allocate span right tag.
 
@@ -616,6 +612,8 @@ FN ExpAddSpanToArena (
         &arena^.SegmentListHead, // listhead
         &tag^.ListEntry, // entry
     )
+
+    RETURN content
 END
 
 FN ExpFreeToArena (
@@ -748,6 +746,42 @@ FN ExpFreeToArena (
     KeReleaseLockLower ( &arena^.Lock, ipl )
 END
 
+FN ExpFindBigEnoughTag (
+    IN arena : ^ExpArena,
+    IN size : UWORD,
+) : ^ExpArenaTag
+
+    // Return a large enough tag for the size or NULLPTR if none.
+
+    avlnode := arena^.FreeTree.Right
+    alloctag : ^ExpArenaTag = NULLPTR
+
+    WHILE TRUE DO
+        IF NOT avlnode THEN
+            // Didn't find it.
+
+            RETURN alloctag
+        END
+
+        tag := CONTAINEROF avlnode TO ExpArenaTag.TreeEntry
+
+        IF size <= tag^.Size THEN
+            alloctag = tag
+
+            IF size == tag^.Size THEN
+                // Perfectly sized.
+
+                RETURN alloctag
+            END
+
+            avlnode = avlnode^.Left
+
+        ELSE
+            avlnode = avlnode^.Right
+        END
+    END
+END
+
 FN ExAllocateFromArena (
     IN arena : ^ExpArena,
     IN flags : UWORD,
@@ -777,13 +811,11 @@ FN ExAllocateFromArena (
     // Didn't work out.
 
     retries := 0
-    status := OS_STATUS_ARENA_EXHAUSTED
+    status : OsStatus
 
 @Retry
 
     ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
-
-@RetryLockHeld
 
     IF arena^.TagReserveCount < EXP_TAG_RESERVE_MINIMUM THEN
         status = ExpPopulateTagReserve (
@@ -798,37 +830,15 @@ FN ExAllocateFromArena (
         END
     END
 
+    status = OS_STATUS_ARENA_EXHAUSTED
+
     // Search for a block of the right size in the size-ordered  free block
     // tree.
 
-    tag : ^ExpArenaTag
-    alloctag : ^ExpArenaTag = NULLPTR
-    avlnode := arena^.FreeTree.Right
-
-    WHILE TRUE DO
-        IF NOT avlnode THEN
-            // Didn't find it.
-
-            BREAK
-        END
-
-        tag = CONTAINEROF avlnode TO ExpArenaTag.TreeEntry
-
-        IF size <= tag^.Size THEN
-            alloctag = tag
-
-            IF size == tag^.Size THEN
-                // Perfectly sized.
-
-                BREAK
-            END
-
-            avlnode = avlnode^.Left
-
-        ELSE
-            avlnode = avlnode^.Right
-        END
-    END
+    alloctag := ExpFindBigEnoughTag (
+        arena, // arena
+        size, // size
+    )
 
     IF alloctag == NULLPTR THEN
         // There was no sufficiently sized free block in the whole arena.
@@ -836,12 +846,13 @@ FN ExAllocateFromArena (
         IF arena^.ImportCallbacks.Import THEN
             // There's an import function, so try to do that now.
 
-            // Decrement the reserved tags by 3 to make sure nobody yoinks the
-            // three we will need to describe the imported span.
+            // Decrement the reserved tags by 5 to make sure nobody yoinks
+            // the three we will need to describe the imported span plus two
+            // for a split.
 
-            KeAssert ( arena^.TagReserveCount >= 3 )
+            KeAssert ( arena^.TagReserveCount >= 5 )
 
-            arena^.TagReserveCount -= 3
+            arena^.TagReserveCount -= 5
 
             KeReleaseLockLower ( &arena^.Lock, ipl )
 
@@ -858,21 +869,39 @@ FN ExAllocateFromArena (
 
             ipl = KeAcquireLockExclusiveRaise ( &arena^.Lock )
 
-            arena^.TagReserveCount += 3
+            arena^.TagReserveCount += 5
 
             IF NOT OsError ( status ) THEN
                 // Import succeeded.
 
-                ExpAddSpanToArena (
+                IF ExpFindBigEnoughTag (
+                    arena, // arena
+                    size, // size
+                ) != NULLPTR THEN
+
+                    // While we had the lock dropped a big enough segment
+                    // appeared. Immediately return this span and retry.
+
+                    KeReleaseLockLower ( &arena^.Lock, ipl )
+
+                    arena^.ImportCallbacks.Free (
+                        arena^.ImportCallbacks.Context, // context
+                        arena^.ImportArena, // importarena
+                        address, // address
+                        importsize, // size
+                    )
+
+                    GOTO Retry
+                END
+
+                alloctag = ExpAddSpanToArena (
                     arena, // arena
                     address, // address
                     importsize, // size
                     TRUE, // imported
                 )
 
-                // Retry the allocation.
-
-                GOTO RetryLockHeld
+                GOTO Success
             END
         END
 
@@ -900,10 +929,6 @@ FN ExAllocateFromArena (
         RETURN status
     END
 
-    // There was a sufficient block.
-
-    address = alloctag^.Address
-
     // Remove the allocated tag from the size-ordered tree.
     // Do this before calling the insert callback, because our default insert
     // callback requires the TreeEntry field to no longer be in use.
@@ -912,6 +937,12 @@ FN ExAllocateFromArena (
         &arena^.FreeTree, // root
         &alloctag^.TreeEntry, // node
     )
+
+    // There was a sufficient block.
+
+    address = alloctag^.Address
+
+@Success
 
     alloctag^.Type = EXP_TAG_ALLOCATED
 
@@ -1309,11 +1340,17 @@ FN ExAddSpanToArena (
     END
 
     IF NOT OsError ( status ) THEN
-        ExpAddSpanToArena (
+        tag := ExpAddSpanToArena (
             arena, // arena
             address, // address
             size, // size
             FALSE, // imported
+        )
+
+        RtlInsertAvl (
+            &arena^.FreeTree, // root
+            &tag^.TreeEntry, // node
+            &ExpArenaCompareTagsBySize, // comparisonfunc
         )
     END
 
