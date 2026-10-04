@@ -868,6 +868,8 @@ EXPORT FN KeWaitForObjects (
 
 @WaitOnObject
 
+        KepReleaseThreadElevated ( thread )
+
         // Enqueue our wait block to the object.
 
         IF object^.Type == KEP_DISPATCH_BALANCED_QUEUE THEN
@@ -893,8 +895,6 @@ EXPORT FN KeWaitForObjects (
         object^.WaiterCount += 1
 
         // Release the object lock.
-
-        KepReleaseThreadElevated ( thread )
 
         KepReleaseObjectElevated ( object )
 
