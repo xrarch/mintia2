@@ -32,6 +32,8 @@ KE_CACHE_LINE_END
     ObjectsPerSlab : UINT,
     SlabPages : UBYTE,
     Pageable : UBYTE,
+    PoolCacheIndex1 : UBYTE,
+    PoolCacheIndex2 : UBYTE,
 
 KE_CACHE_LINE_END
 
@@ -41,6 +43,7 @@ END
 EXPORT FN MmAllocateFromObjectCache (
     IN objectcache : ^MmpObjectCache,
     IN flags : UWORD,
+    IN tag : UWORD,
     OUT object : ^VOID,
 ) : OsStatus
 
@@ -52,7 +55,7 @@ EXPORT FN MmAllocateFromObjectCache (
         object = ExAllocateFromMagazineCache ( objectcache^.MagazineCache )
 
         IF object THEN
-            RETURN OS_STATUS_SUCCESS
+            GOTO Success
         END
     END
 
@@ -86,7 +89,7 @@ EXPORT FN MmAllocateFromObjectCache (
 
         KeReleaseLockLower ( &objectcache^.Lock, ipl )
 
-        RETURN OS_STATUS_SUCCESS
+        GOTO Success
     END
 
     // Need to allocate a new slab since there are no partial ones.
@@ -135,6 +138,9 @@ EXPORT FN MmAllocateFromObjectCache (
 
     vpe^.U.ObjectCache.InUseObjects = 1
     vpe^.U.ObjectCache.FreeListHead = NULLPTR
+    vpe^.U.ObjectCache.Tag = 0xABABABAB
+    vpe^.U.ObjectCache.PoolCacheIndex1 = objectcache^.PoolCacheIndex1
+    vpe^.U.ObjectCache.PoolCacheIndex2 = objectcache^.PoolCacheIndex2
 
     RtlInsertAtTailList (
         &objectcache^.PartialSlabListHead, // listhead
@@ -171,6 +177,11 @@ EXPORT FN MmAllocateFromObjectCache (
     END
 
     KeReleaseLockLower ( &objectcache^.Lock, ipl )
+
+@Success
+
+    (CAST object TO ^ULONG)[0] = tag
+    object += RTL_ALIGN_BYTES
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -247,9 +258,17 @@ END
 EXPORT FN MmFreeToObjectCache (
     IN objectcache : ^MmpObjectCache,
     IN object : ^VOID,
+    IN tag : UWORD,
 )
 
     // Free the object to the object cache.
+
+    object -= RTL_ALIGN_BYTES
+
+    IF (CAST object TO ^ULONG)[0] != tag THEN
+        KeCrash ( "MmFreeToObjectCache: incorrect tag (expected %x, saw %x\n",
+            tag, (CAST object TO ^ULONG)[0] )
+    END
 
     IF objectcache^.MagazineCache THEN
         ExFreeToMagazineCache (
@@ -286,6 +305,7 @@ objectcache < &mmnode^.PreallocatedObjectCaches[MMP_PREALLOCATED_CACHES] THEN
     MmFreeToObjectCache (
         mmnode^.ObjectCacheCache, // cache
         objectcache, // ptr
+        'ObjC', // tag
     )
 END
 
@@ -358,7 +378,11 @@ EXPORT FN MmCreateObjectCache (
     KeAssert ( objectsize < MMP_LARGE_OBJECT )
     KeAssert ( objectsize != 0 )
 
-    objectsize = (objectsize + SIZEOF ^VOID - 1) & -(SIZEOF ^VOID)
+    // Make room for a tag.
+
+    objectsize += RTL_ALIGN_BYTES
+
+    objectsize = (objectsize + RTL_ALIGN_BYTES - 1) & -RTL_ALIGN_BYTES
 
     status : OsStatus
 
@@ -387,6 +411,7 @@ EXPORT FN MmCreateObjectCache (
         status = MmAllocateFromObjectCache (
             mmnode^.ObjectCacheCache, // cache
             flags, // flags
+            'ObjC', // tag
             OUT objectcache, // ptr
         )
 
@@ -484,4 +509,18 @@ FN MmpInitializeObjectCaches (
     )
 
     KeAssert ( NOT OsError ( status ) )
+END
+
+#SECTION "INITtext"
+FN MmpSetObjectCacheIndex (
+    IN objectcache : ^MmpObjectCache,
+    IN index1 : UWORD,
+    IN index2 : UWORD,
+)
+
+    // Set the indices that the object cache will store in its slab VPEs.
+    // This is used by MmPool.
+
+    objectcache^.PoolCacheIndex1 = index1
+    objectcache^.PoolCacheIndex2 = index2
 END

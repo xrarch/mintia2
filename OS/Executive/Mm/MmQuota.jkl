@@ -32,11 +32,11 @@ FN MmpInitializeQuotaBlock (
     quotablock^.Uid = uid
     quotablock^.References = 1
 
-    quotablock^.Pool[MM_NONPAGED_POOL].Used = 0
-    quotablock^.Pool[MM_NONPAGED_POOL].Limit = nplimit
+    quotablock^.Pool[FALSE].Used = 0
+    quotablock^.Pool[FALSE].Limit = nplimit
 
-    quotablock^.Pool[MM_PAGED_POOL].Used = 0
-    quotablock^.Pool[MM_PAGED_POOL].Limit = pglimit
+    quotablock^.Pool[TRUE].Used = 0
+    quotablock^.Pool[TRUE].Limit = pglimit
 
     quotablock^.VmPages.Used = 0
     quotablock^.VmPages.Limit = vmlimit
@@ -164,7 +164,7 @@ FN MmuLookupQuotaBlock (
     // Allocate a quota block from paged pool.
 
     status := MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
+        TRUE, // pageable
         SIZEOF MmpQuotaBlock, // bytes
         'Quot', // tag
         MM_ALLOCATE_WAIT, // flags
@@ -179,8 +179,8 @@ FN MmuLookupQuotaBlock (
 
     MmpInitializeQuotaBlock (
         quotablock, // quotablock
-        copyquotablock^.Pool[MM_NONPAGED_POOL].Limit, // nplimit
-        copyquotablock^.Pool[MM_PAGED_POOL].Limit, // pglimit
+        copyquotablock^.Pool[FALSE].Limit, // nplimit
+        copyquotablock^.Pool[TRUE].Limit, // pglimit
         copyquotablock^.VmPages.Limit, // vmlimit
         copyquotablock^.OpenFiles.Limit, // openfilelimit
         uid, // uid
@@ -244,13 +244,13 @@ END
 FN MmuChargePoolQuota (
     IN quotablock : ^MmpQuotaBlock,
     IN charge : UWORD,
-    IN poolindex : UWORD,
+    IN pageable : UWORD,
 ) : OsStatus
 
     // Apply the quota charge to the block.
 
     MmpChargeQuota (
-        &quotablock^.Pool[poolindex], // limit
+        &quotablock^.Pool[pageable], // limit
         charge, // charge
     )
 END
@@ -259,13 +259,13 @@ END
 FN MmuUnchargePoolQuota (
     IN quotablock : ^MmpQuotaBlock,
     IN charge : UWORD,
-    IN poolindex : UWORD,
+    IN pageable : UWORD,
 )
 
     // Remove the quota charge from the block.
 
     MmpUnchargeQuota (
-        &quotablock^.Pool[poolindex], // limit
+        &quotablock^.Pool[pageable], // limit
         charge, // charge
     )
 END
@@ -378,8 +378,8 @@ FN MmuSetQuotaLimits (
 
     // Set new limits on the quota block.
 
-    quotablock^.Pool[MM_NONPAGED_POOL].Limit = query^.NpPoolLimit
-    quotablock^.Pool[MM_PAGED_POOL].Limit = query^.PgPoolLimit
+    quotablock^.Pool[FALSE].Limit = query^.NpPoolLimit
+    quotablock^.Pool[TRUE].Limit = query^.PgPoolLimit
     quotablock^.VmPages.Limit = query^.VmLimit
     quotablock^.OpenFiles.Limit = query^.OpenFileLimit
 END
@@ -392,11 +392,11 @@ FN MmuQueryQuota (
 
     // Query the quota block.
 
-    query^.NpPoolUsed = quotablock^.Pool[MM_NONPAGED_POOL].Used
-    query^.NpPoolLimit = quotablock^.Pool[MM_NONPAGED_POOL].Limit
+    query^.NpPoolUsed = quotablock^.Pool[FALSE].Used
+    query^.NpPoolLimit = quotablock^.Pool[FALSE].Limit
 
-    query^.PgPoolUsed = quotablock^.Pool[MM_PAGED_POOL].Used
-    query^.PgPoolLimit = quotablock^.Pool[MM_PAGED_POOL].Limit
+    query^.PgPoolUsed = quotablock^.Pool[TRUE].Used
+    query^.PgPoolLimit = quotablock^.Pool[TRUE].Limit
 
     query^.VmUsed = quotablock^.VmPages.Used
     query^.VmLimit = quotablock^.VmPages.Limit

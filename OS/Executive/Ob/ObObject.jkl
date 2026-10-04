@@ -47,7 +47,7 @@ FN ObuInitializeType (
 
     IF npsize THEN
         status = MmAllocatePool (
-            MM_NONPAGED_POOL, // poolindex
+            FALSE, // pageable
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
             MM_ALLOCATE_WAIT, // flags
@@ -71,7 +71,7 @@ FN ObuInitializeType (
 
     IF psize THEN
         status = MmAllocatePool (
-            MM_NONPAGED_POOL, // poolindex
+            FALSE, // pageable
             typenamelen + 2 + 1, // bytes
             'PcNm', // tag
             MM_ALLOCATE_WAIT, // flags
@@ -196,7 +196,7 @@ FN ObuAllocateObject (
         status = MmuChargePoolQuota (
             quotablock, // quotablock
             npquota, // charge
-            MM_NONPAGED_POOL, // poolindex
+            FALSE, // pageable
         )
 
         IF OsError ( status ) THEN
@@ -208,7 +208,7 @@ FN ObuAllocateObject (
         status = MmuChargePoolQuota (
             quotablock, // quotablock
             pquota, // charge
-            MM_PAGED_POOL, // poolindex
+            TRUE, // pageable
         )
 
         IF OsError ( status ) THEN
@@ -227,12 +227,13 @@ FN ObuAllocateObject (
             status = MmAllocateFromObjectCache (
                 type^.NpPartCache, // cache
                 MM_ALLOCATE_WAIT, // flags
+                type^.Tag, // tag
                 OUT nppart, // ptr
             )
         
         ELSE
             status = MmAllocatePool (
-                MM_NONPAGED_POOL, // poolindex
+                FALSE, // pageable
                 npsize, // bytes
                 type^.Tag, // tag
                 MM_ALLOCATE_WAIT, // flags
@@ -256,12 +257,13 @@ FN ObuAllocateObject (
             status = MmAllocateFromObjectCache (
                 type^.PgPartCache, // cache
                 MM_ALLOCATE_WAIT, // flags
+                type^.Tag, // tag
                 OUT pgpart, // ptr
             )
         
         ELSE
             status = MmAllocatePool (
-                MM_PAGED_POOL, // poolindex
+                TRUE, // pageable
                 psize, // bytes
                 type^.Tag, // tag
                 MM_ALLOCATE_WAIT, // flags
@@ -342,6 +344,7 @@ FN ObuAllocateObject (
             MmFreeToObjectCache (
                 type^.NpPartCache, // cache
                 nppart, // ptr
+                type^.Tag, // tag
             )
 
         ELSE
@@ -358,7 +361,7 @@ FN ObuAllocateObject (
         MmuUnchargePoolQuota (
             quotablock, // quotablock
             pquota, // charge
-            MM_PAGED_POOL, // poolindex
+            TRUE, // pageable
         )
     END
 
@@ -368,7 +371,7 @@ FN ObuAllocateObject (
         MmuUnchargePoolQuota (
             quotablock, // quotablock
             npquota, // charge
-            MM_NONPAGED_POOL, // poolindex
+            FALSE, // pageable
         )
     END
 
@@ -409,6 +412,7 @@ FN ObuFreeObject (
             MmFreeToObjectCache (
                 type^.PgPartCache, // cache
                 header, // ptr
+                type^.Tag, // tag
             )
 
         ELSE
@@ -425,6 +429,7 @@ FN ObuFreeObject (
             MmFreeToObjectCache (
                 type^.PgPartCache, // cache
                 header, // ptr
+                type^.Tag, // tag
             )
 
         ELSE
@@ -438,6 +443,7 @@ FN ObuFreeObject (
             MmFreeToObjectCache (
                 type^.NpPartCache, // cache
                 object - SIZEOF ObpCommonHeader, // ptr
+                type^.Tag, // tag
             )
 
         ELSE
@@ -454,7 +460,7 @@ FN ObuFreeObject (
         MmuUnchargePoolQuota (
             quotablock, // quotablock
             pquota, // charge
-            MM_PAGED_POOL, // poolindex
+            TRUE, // pageable
         )
     END
 
@@ -462,7 +468,7 @@ FN ObuFreeObject (
         MmuUnchargePoolQuota (
             quotablock, // quotablock
             npquota, // charge
-            MM_NONPAGED_POOL, // poolindex
+            FALSE, // pageable
         )
     END
 

@@ -1,1184 +1,185 @@
 //
-// Implements system memory pool management.
+// Pool allocation for the MINTIA executive.
 //
 
 #INCLUDE "Mmp.hjk"
 
-#DEFINE MMP_BLOCK_SWIFT_MAGIC 0xC0
-#DEFINE MMP_BLOCK_FREE_MAGIC 0xE4
-#DEFINE MMP_BLOCK_INVALID_MAGIC 0xA5
-
-STRUCT MmpBlock
-    BucketIndex : UBYTE,
-    LastSize : UBYTE,
-    Magic : UBYTE,
-    Size : UBYTE,
-
-    Tag : ULONG,
-
-#IF ( == RTL_ALIGN_SHIFT 4 )
-    AlignToSixteen1 : ULONG,
-    AlignToSixteen2 : ULONG,
-#END
-
-END
-
-STRUCT MmpFreeBlock
-    Block : MmpBlock,
-
-    LogEntry : RtlListEntry,
-    SizeEntry : RtlListEntry,
-END
-
-STRUCT MmpPoolExtension
-    Pool : ^MmpPool,
-    References : ULONG,
-END
-
-FN MmpFreeExtensionSpace (
-    IN mmnode : ^MmpNode,
-    IN ext : ^MmpPoolExtension,
-    IN flush : UWORD,
-)
-
-    // Free the virtual space for the pool extension.
-
-    pte := MmpPteAddress ( ext )
-
-    // Clear the PTE, makes it more likely we'll see it if a bad pointer within
-    // this chunk is used later. Due to the TB it's not 100% though.
-
-    pte[0] = MMP_INVALID_KERNEL_PTE
-
-#IF BLD_CHK
-    // Make it even more likely by at least flushing this page on the current
-    // processor.
-
-    KeuFlushMyTbAddress ( ext )
-#END
-
-    MmpReleaseDynamicPages (
-       mmnode, // mmnode
-       ext, // ptr
-       1, // pages
-       flush, // flush
-    )
-END
-
-FN MmpFreeNonpagedPoolPages (
-    IN mmnode : ^MmpNode,
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-)
-
-    // Free the page frames within this extension and return it to nonpaged
-    // space. The space allocator will deal with flushing the TB.
-
-    pte := MmpPteAddress ( ptr )
-    i := 0
-
-    WHILE i < pages DO
-        ptecontents := pte[i]
-
-        KeAssert ( MmpIsPteValid ( ptecontents ) )
-
-        pte[i] = MMP_INVALID_KERNEL_PTE
-
-        MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
-
-#IF BLD_CHK
-        KeuFlushMyTbAddress ( ptr )
-
-        ptr += RTL_PAGE_SIZE
-#END
-
-        i += 1
-    END
-END
-
-FN (MmpPoolReturnMemoryF) MmpFreeNonpagedMemory (
-    IN mmnode : ^MmpNode,
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-)
-
-    // Free the page frames within this extension and return it to nonpaged
-    // space. The space allocator will deal with flushing the TB.
-
-    MmpFreeNonpagedPoolPages (
-        mmnode, // mmnode
-        ptr, // ptr
-        pages, // pages
-    )
-
-    // Uncharge the commit.
-
-    MmuUnchargeCommit (
-        mmnode, // mmnode
-        pages, // pages
-    )
-END
-
-FN (MmpPoolGetMemoryF) MmpGetNonpagedMemory (
-    IN mmnode : ^MmpNode,
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-    IN flags : UWORD,
-) : OsStatus
-    
-    // Allocate an extension for nonpaged pool. If the required page frame can't
-    // be immediately allocated, return NULLPTR. Caller will decide whether to
-    // wait for free memory and retry the allocation, or give up.
-
-    // First charge commit for these pages.
-
-    status := MmuChargeCommit (
-        mmnode, // mmnode
-        pages, // pages
-        flags, // flags
-    )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    i := 0
-    pte := MmpPteAddress ( ptr )
-    colorptr := ptr
-
-    WHILE i < pages DO
-        // Allocate a page frame to place here.
-
-@Retry
-
-        pfe := MmpAllocatePage (
-            mmnode, // mmnode
-            flags, // flags
-            MmpVirtualAddressColor ( colorptr ), // color
-        )
-
-        IF NOT pfe THEN
-            IF flags & MM_ALLOCATE_WAIT THEN
-                // Caller said we should wait here for more pages.
-
-                MmpWaitForPages (
-                    mmnode, // mmnode
-                    flags & MM_ALLOCATE_LOW, // low
-                )
-
-                GOTO Retry
-            END
-
-            // Free everything we just did.
-
-            MmpFreeNonpagedPoolPages (
-                mmnode, // mmnode
-                ptr, // ptr
-                i, // pages
-            )
-
-            MmuUnchargeCommit (
-                mmnode, // mmnode
-                pages, // pages
-            )
-
-            RETURN OS_STATUS_NO_MEMORY
-        END
-
-        // Map the page frame.
-        // Note that no TB entry exists for this page in any CPU if we've been
-        // given it by the pool space allocator.
-
-        pte[i] = MmpBuildPoolPte ( MmpPfeToPfn ( pfe ) )
-
-        i += 1
-        colorptr += RTL_PAGE_SIZE
-    END
-
-    RETURN OS_STATUS_SUCCESS
-END
-
-FN (MmpPoolReturnMemoryF) MmpFreePagedMemory (
-    IN mmnode : ^MmpNode,
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-)
-
-    // Free an extension for paged pool.
-
-    KeCrash ( "NYI MmpFreePagedMemory\n" )
-END
-
-FN (MmpPoolGetMemoryF) MmpGetPagedMemory (
-    IN mmnode : ^MmpNode,
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-    IN flags : UWORD,
-) : OsStatus
-    
-    // Allocate an extension for paged pool.
-
-    KeCrash ( "NYI MmpGetPagedMemory\n" )
-END
-
-#MACRO MmpFindPoolExtension ( ptr ) [
-    (CAST (ptr) & RTL_PAGE_NUMBER_MASK TO ^MmpPoolExtension)
-]
+#SECTION "text"
+MmpObjectSizes : UINT[] = {
+    32, 64, 96, 160, 256, 384, 576, 864, 1312, 1984, 2976,
+}
 
 #SECTION "INITtext"
 FN MmpInitializePool (
-    IN pool : ^MmpPool,
-    IN mmnode : ^MmpNode,
-)
-
-    // Initialize a pool.
-
-    KeInitializeLock ( &pool^.Lock, "Pool" )
-
-    pool^.BytesUsedInternally = 0
-    pool^.BytesUsedExternally = 0
-    pool^.BytesUsedPeak = 0
-    pool^.Flags = 0
-    pool^.MmNode = mmnode
-
-    i := 0
-
-    WHILE i < MMP_BLOCK_LOG_BUCKETS DO
-        RtlInitializeList ( &pool^.LogListHeads[i] )
-
-        i += 1
-    END
-
-    i = 0
-
-    WHILE i < MMP_BLOCK_SIZE_BUCKETS DO
-        RtlInitializeList ( &pool^.SizeListHeads[i] )
-
-        i += 1
-    END
-END
-
-#SECTION "INITtext"
-FN MmpInitializeNonpagedPool (
-    IN pool : ^MmpPool,
-    IN mmnode : ^MmpNode,
-)
-
-    // Initialize a nonpaged pool.
-
-    MmpInitializePool (
-        pool, // pool
-        mmnode, // mmnode
-    )
-
-    pool^.GetMemory = &MmpGetNonpagedMemory
-    pool^.ReturnMemory = &MmpFreeNonpagedMemory
-END
-
-#SECTION "INITtext"
-FN MmpInitializePagedPool (
-    IN pool : ^MmpPool,
-    IN mmnode : ^MmpNode,
-)
-
-    // Initialize a paged pool.
-
-    MmpInitializePool (
-        pool, // pool
-        mmnode, // mmnode
-    )
-
-    pool^.GetMemory = &MmpGetPagedMemory
-    pool^.ReturnMemory = &MmpFreePagedMemory
-END
-
-#SECTION "INITtext"
-FN MmpInitializePools (
     IN kenode : ^KeuNode,
 )
 
-    // Initialize the system pools as part of stage 1 Mm init.
+    // Initialize the generic allocator.
 
     mmnode := kenode^.Mmp
 
-    MmpInitializeNonpagedPool (
-        &mmnode^.PoolRecords[MM_NONPAGED_POOL], // pool
-        mmnode, // mmnode
-    )
+    i := 0
 
-    MmpInitializeNonpagedPool (
-        &mmnode^.PoolRecords[MM_PRIVILEGED_POOL], // pool
-        mmnode, // mmnode
-    )
+    WHILE i < 2 DO
+        j := 0
 
-    // Allow privileged pool to use privileged memory.
+        WHILE j < MMP_NUMBER_POOL_BUCKETS DO
+            status := MmCreateObjectCache (
+                kenode, // kenode
+                "Pool", // name
+                0, // flags
+                MmpObjectSizes[j], // objectsize
+                TRUE, // magazinecached
+                i, // pageable
+                OUT mmnode^.PoolCaches[i][j], // objectcache
+            )
 
-    mmnode^.PoolRecords[MM_PRIVILEGED_POOL].Flags |= MM_ALLOCATE_LOW
+            KeAssert ( NOT OsError ( status ) )
 
-    // Set paged pool to point to nonpaged pool for now, since we don't have
-    // enough initialized to deal with faults on paged pool yet.
+            MmpSetObjectCacheIndex (
+                mmnode^.PoolCaches[i][j], // objectcache
+                i, // index1
+                j, // index2
+            )
 
-    mmnode^.PoolTable[MM_NONPAGED_POOL] =
-        &mmnode^.PoolRecords[MM_NONPAGED_POOL]
-    mmnode^.PoolTable[MM_PAGED_POOL] = &mmnode^.PoolRecords[MM_NONPAGED_POOL]
+            j += 1
+        END
 
-    mmnode^.PoolTable[MM_PRIVILEGED_POOL] =
-        &mmnode^.PoolRecords[MM_PRIVILEGED_POOL]
+        i += 1
+    END
 END
 
-#SECTION "INITtext"
-FN MmpInitializePagedPools (
-    IN mmnode : ^MmpNode,
-)
-
-    // Initialize the paged pools as part of stage 2 Mm init.
-
-    MmpInitializePagedPool (
-        &mmnode^.PoolRecords[MM_PAGED_POOL], // pool
-        mmnode, // mmnode
-    )
-
-    MmpInitializePagedPool (
-        &mmnode^.PoolRecords[MM_PAGE_TRACKING_POOL], // pool
-        mmnode, // mmnode
-    )
-
-    mmnode^.PoolTable[MM_PAGED_POOL] = &mmnode^.PoolRecords[MM_PAGED_POOL]
-
-    mmnode^.PoolTable[MM_PAGE_TRACKING_POOL] =
-        &mmnode^.PoolRecords[MM_PAGE_TRACKING_POOL]
-END
-
-#SECTION "text"
-MmpEightBitLog : UBYTE[256] = {
-    0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
-    4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-    6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-}
-
-#MACRO MmpAcquirePool ( pool ) [
-    KeAcquireLockExclusiveRaise ( &pool^.Lock )
-]
-
-#MACRO MmpReleasePool ( pool, ipl ) [
-    KeReleaseLockLower ( &pool^.Lock, ipl )
-]
-
-FN MmpAllocateFromPool (
-    IN pool : ^MmpPool,
+FN MmAllocatePoolEx (
+    IN kenode : ^KeuNode,
+    IN pageable : UWORD,
     IN bytes : UWORD,
-    IN tag : ULONG,
+    IN tag : UWORD,
     IN flags : UWORD,
-    OUT block : ^MmpFreeBlock,
+    OUT ptr : ^VOID,
 ) : OsStatus
 
-    // Allocate a block of memory of at least the given number of bytes from the
-    // specified pool.
+    // Allocate pool.
 
-    bytes += SIZEOF MmpBlock
-
-    bytes += MMP_BLOCK_SIZE_MASK
-    bytes >>= MMP_BLOCK_SIZE_SHIFT
-
-    KeAssert ( bytes <= MMP_BLOCK_MAX_REQUEST_UNITS )
-
-    // Bytes now stores size units rather than real bytes.
-
-    // We want to start searching in the bucket ceil(log_2(units)).
-    // We place blocks in bucket floor(log_2(units)).
-
-    insertindex := MmpEightBitLog[bytes]
-
-    bucketindex := insertindex
-
-    IF 1 << insertindex != bytes THEN
-        // Not a power of two number of units, so ceil log is floor log + 1.
-
-        bucketindex += 1
+    IF NOT kenode THEN
+        kenode = KeCurrentAffinityNode ()
     END
 
-@Retry
+    status : OsStatus
 
-    // Do some work outside the pool lock.
+    mmnode := kenode^.Mmp
 
-    listhead := &pool^.SizeListHeads[bytes]
-    i := bytes
-    max := 1 << bucketindex
+    IF bytes > MmpObjectSizes[MMP_NUMBER_POOL_BUCKETS - 1] THEN
+        // Page-aligned allocation.
 
-    // Lock the pool.
+        bytes = (bytes + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
 
-    ipl := MmpAcquirePool ( pool )
-
-    // Search the inbetween lists up to the next power of two.
-
-    WHILE i < max DO
-        IF NOT RtlEmptyList ( listhead ) THEN
-            // Found a block.
-
-            block = CONTAINEROF listhead^.Next TO MmpFreeBlock.SizeEntry
-
-            KeAssert ( block^.Block.Size == i )
-
-            GOTO FoundBlock
-        END
-
-        i += 1
-        listhead += SIZEOF RtlListEntry
-    END
-
-    // Search the log lists.
-
-    listhead = &pool^.LogListHeads[bucketindex]
-    i = bucketindex
-
-    WHILE i < MMP_BLOCK_LOG_BUCKETS DO
-        IF NOT RtlEmptyList ( listhead ) THEN
-            // Found a block.
-
-            block = CONTAINEROF listhead^.Next TO MmpFreeBlock.LogEntry
-
-            KeAssert ( block^.Block.BucketIndex == i )
-
-            GOTO FoundBlock
-        END
-
-        i += 1
-        listhead += SIZEOF RtlListEntry
-    END
-
-    // No sufficient block. We need to allocate a new pool extension.
-
-    ext : ^MmpPoolExtension
-
-    status := MmpAllocateDynamicPages (
-        pool^.MmNode, // mmnode
-        1, // pages
-        pool^.Flags, // flags
-        OUT ext, // ptr
-    )
-
-    IF OsError ( status ) THEN
-        MmpReleasePool ( pool, ipl )
-
-        RETURN status
-    END
-
-    status = pool^.GetMemory (
-        pool^.MmNode, // mmnode
-        ext, // ptr
-        1, // pages
-        pool^.Flags, // flags
-    )
-
-    IF OsError ( status ) THEN
-        // Failed to allocate a pool extension.
-
-        MmpReleaseDynamicPages (
-            pool^.MmNode, // mmnode
-            ext, // ptr
-            1, // pages
-            FALSE, // flush
+        status = MmAllocateMappedPages (
+            kenode, // kenode
+            flags, // flags
+            bytes, // pages
+            pageable, // pageable
+            OUT ptr, // ptr
         )
 
-        MmpReleasePool ( pool, ipl )
-
-        IF flags & MM_ALLOCATE_WAIT == 0 THEN
-            // Caller requested that we don't wait upon failure.
-
+        IF OsError ( status ) THEN
             RETURN status
         END
 
-        // Wait for free memory and retry.
-
-        MmpWaitForPages (
-            pool^.MmNode, // mmnode
-            pool^.Flags & MM_ALLOCATE_LOW, // low
+        vpe := MmpFindVpe (
+            mmnode, // mmnode
+            (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
         )
 
-        GOTO Retry
+        // Indicate page-aligned.
+
+        vpe^.U.ObjectCache.PoolCacheIndex1 = NOT NOT pageable
+        vpe^.U.ObjectCache.PoolCacheIndex2 = 0xFF
+
+        // Stash length in slab control pointer.
+
+        vpe^.U.ObjectCache.SlabControl = CAST bytes TO ^VOID
+
+        vpe^.U.ObjectCache.Tag = tag
+
+        RETURN status
     END
 
-    // Increment external usage. Note that a pool chunk is one page frame.
+    // Small allocation.
 
-    pool^.BytesUsedExternally += RTL_PAGE_SIZE
+    l : WORD = 0
+    r : WORD = MMP_NUMBER_POOL_BUCKETS - 1
+    index : WORD
 
-    // Increment pool statistics.
+    // Binary search to find the right bucket.
 
-    pool^.BytesUsedInternally += bytes << MMP_BLOCK_SIZE_SHIFT
+    WHILE l <= r DO
+        m := CAST l + (r - l) / 2 TO WORD
 
-    IF pool^.BytesUsedInternally > pool^.BytesUsedPeak THEN
-        pool^.BytesUsedPeak = pool^.BytesUsedInternally
-    END
+        IF MmpObjectSizes[m] >= bytes THEN
+            index = m
 
-    // Initialize the extension header.
+            IF MmpObjectSizes[m] == bytes THEN
+                BREAK
+            END
 
-    vpe := MmpFindVpe (
-        pool^.MmNode, // mmnode
-        (ext - pool^.MmNode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
+            r = m - 1
 
-    vpe^.U.Pool.PageAligned = FALSE
-
-    ext^.Pool = pool
-    ext^.References = 1
-
-    // We need to initialize the extension as a single block of the maximum size
-    // minus whatever is used by the extension header, minus whatever we need
-    // for our allocation.
-
-    // Here we assume that a maximum size block is <= the chunk size, i.e.,
-    // there's always room for at least one within a new extension.
-
-    // We also assume that the extension header fits within a single block unit
-    // (currently 32 bytes).
-
-    block = CAST ext + MMP_BLOCK_MIN_SIZE TO ^MmpFreeBlock
-
-    // Initialize the block we'll be returning to the caller.
-
-    block^.Block.Magic = MMP_BLOCK_SWIFT_MAGIC
-    block^.Block.Size = bytes
-    block^.Block.BucketIndex = insertindex
-    block^.Block.LastSize = 0
-    block^.Block.Tag = tag
-
-    // Initialize the new block.
-
-    newblock := block + (bytes << MMP_BLOCK_SIZE_SHIFT)
-
-    newblocksize := (1 << MMP_BLOCK_MAX_UNITS_SHIFT) - 1
-
-    KeAssert ( bytes <= newblocksize )
-
-    newblocksize -= bytes
-
-    newbucketindex := MmpEightBitLog[newblocksize]
-
-    newblock^.Block.Magic = MMP_BLOCK_FREE_MAGIC
-    newblock^.Block.Size = newblocksize
-    newblock^.Block.BucketIndex = newbucketindex
-    newblock^.Block.LastSize = bytes
-
-    // Insert the new block in the free list.
-
-    RtlInsertAtHeadList (
-        &pool^.LogListHeads[newbucketindex], // head
-        &newblock^.LogEntry, // entry
-    )
-
-    RtlInsertAtHeadList (
-        &pool^.SizeListHeads[newblocksize], // head
-        &newblock^.SizeEntry, // entry
-    )
-
-    // Unlock the pool.
-
-    MmpReleasePool ( pool, ipl )
-
-    // Return the block.
-
-    RETURN OS_STATUS_SUCCESS
-
-@FoundBlock
-
-    KeAssert ( block^.Block.Magic == MMP_BLOCK_FREE_MAGIC )
-
-    // This block is either perfectly sized, or at least big enough to
-    // satisfy the allocation request. In either case, we want to
-    // unlink it from the bucket's free list now.
-
-    RtlRemoveEntryList ( &block^.SizeEntry )
-
-    RtlRemoveEntryList ( &block^.LogEntry )
-
-    // Increment the reference count on the pool extension to which this
-    // free block belongs, since in any case, we're going to be adding
-    // a new allocated block to it.
-
-    ext = MmpFindPoolExtension ( block )
-    ext^.References += 1
-
-    // Set magic to indicate allocated, since in either case we'll be
-    // returning this block to the caller.
-
-    block^.Block.Magic = MMP_BLOCK_SWIFT_MAGIC
-
-    // Increment pool statistics.
-
-    pool^.BytesUsedInternally += bytes << MMP_BLOCK_SIZE_SHIFT
-
-    IF pool^.BytesUsedInternally > pool^.BytesUsedPeak THEN
-        pool^.BytesUsedPeak = pool^.BytesUsedInternally
-    END
-
-    // Set tag.
-
-    block^.Block.Tag = tag
-
-    // Load the block size and check.
-
-    newblocksize = block^.Block.Size
-
-    IF newblocksize != bytes THEN
-        // The block is too big and must be split.
-
-        KeAssert ( newblocksize >= bytes )
-
-        // Set new bucketindex and size in old block header.
-
-        block^.Block.BucketIndex = insertindex
-        block^.Block.Size = bytes
-
-        // Calculate the size of the new block.
-
-        newblocksize -= bytes
-
-        // Calculate the index of the bucket to place the new block in.
-
-        newbucketindex = MmpEightBitLog[newblocksize]
-
-        // Get a pointer to the new block.
-
-        newblock = block + (bytes << MMP_BLOCK_SIZE_SHIFT)
-
-        // Create new block header.
-
-        newblock^.Block.Size = newblocksize
-        newblock^.Block.LastSize = bytes
-        newblock^.Block.BucketIndex = newbucketindex
-        newblock^.Block.Magic = MMP_BLOCK_FREE_MAGIC
-
-        // Insert the new block into the buckets indexed by floor-log and size.
-
-        RtlInsertAtHeadList (
-            &pool^.LogListHeads[newbucketindex], // head
-            &newblock^.LogEntry, // entry
-        )
-
-        RtlInsertAtHeadList (
-            &pool^.SizeListHeads[newblocksize], // head
-            &newblock^.SizeEntry,
-        )
-
-        // Update next block to point to the new block, unless it is
-        // aligned to a maximum block size, in which case there is no next
-        // block.
-
-        newblock += newblocksize << MMP_BLOCK_SIZE_SHIFT
-
-        IF newblock & MMP_BLOCK_MAX_SIZE_MASK THEN
-            newblock^.Block.LastSize = newblocksize
+        ELSE
+            l = m + 1
         END
     END
 
-    // Unlock the pool.
-
-    MmpReleasePool ( pool, ipl )
-
-    // Return the block.
-
-    RETURN OS_STATUS_SUCCESS
-END
-
-FN MmpFreeToPool (
-    IN ptr : ^VOID,
-    IN tag : ULONG,
-)
-
-    // Free the pool block. We're only passed blocks that were small enough to
-    // go in POOLSPACE.
-
-    otherblock : ^MmpFreeBlock
-
-    // Acquire a pointer to the block.
-
-    block := CAST ptr - SIZEOF MmpBlock TO ^MmpFreeBlock
-
-    IF tag != block^.Block.Tag THEN
-        KeCrash ( "MmpFreeToPool: wrong tag %x on %p (expected %x)\n",
-            block^.Block.Tag, ptr, tag )
-    END
-
-    // Acquire a pointer to the pool extension.
-
-    ext := MmpFindPoolExtension ( block )
-
-    pool := ext^.Pool
-
-    merged := FALSE
-
-    blocksize := block^.Block.Size
-
-    // Lock the pool in which the block resides.
-
-    ipl := MmpAcquirePool ( pool )
-
-    pool^.BytesUsedInternally -= blocksize << MMP_BLOCK_SIZE_SHIFT
-
-    IF block^.Block.LastSize THEN
-        // Check the block to the left for merging.
-
-        otherblock = block - (block^.Block.LastSize << MMP_BLOCK_SIZE_SHIFT)
-
-        KeAssert ( otherblock^.Block.Size == block^.Block.LastSize )
-
-        IF otherblock^.Block.Magic == MMP_BLOCK_FREE_MAGIC THEN
-            // Free! Merge left.
-
-            merged = TRUE
-
-            // Remove it from old free lists.
-
-            RtlRemoveEntryList ( &otherblock^.LogEntry )
-
-            RtlRemoveEntryList ( &otherblock^.SizeEntry )
-
-            // Increment our block size.
-
-            blocksize += otherblock^.Block.Size
-
-#IF BLD_CHK
-            // Invalidate magic number of old block, since it's now in the
-            // middle of this new block.
-
-            block^.Block.Magic = MMP_BLOCK_INVALID_MAGIC
-#END
-
-            // Set block pointer to left block.
-
-            block = otherblock
-        END
-    END
-
-    // Get a pointer to the block to the right.
-
-    otherblock = block + (blocksize << MMP_BLOCK_SIZE_SHIFT)
-
-    IF otherblock & MMP_BLOCK_MAX_SIZE_MASK THEN
-        // A block to the right exists if it's not aligned to the maximum block
-        // size.
-
-        IF otherblock^.Block.Magic == MMP_BLOCK_FREE_MAGIC THEN
-            // Free! Merge right.
-
-            merged = TRUE
-
-            // Remove it from old free lists.
-
-            RtlRemoveEntryList ( &otherblock^.LogEntry )
-
-            RtlRemoveEntryList ( &otherblock^.SizeEntry )
-
-            // Increment our block size.
-
-            blocksize += otherblock^.Block.Size
-
-#IF BLD_CHK
-            // Invalidate magic number of old block, since it's now in the
-            // middle of the new block.
-
-            otherblock^.Block.Magic = MMP_BLOCK_INVALID_MAGIC
-#END
-        END
-    END
-
-    // Decrement the refcount on the extension.
-
-    ext^.References -= 1
-
-    IF NOT ext^.References THEN
-        // The extension is totally empty and should be released.
-        // This involves removing all of its blocks (except this one!) from the
-        // free lists and then returning the extension to whence it came.
-
-        // The form of the extension should be a partial block (with a piece cut
-        // out for the extension header) plus a number of maximum sized blocks.
-        // First unlink the partial block.
-
-        otherblock = CAST ext + MMP_BLOCK_MIN_SIZE TO ^MmpFreeBlock
-
-        IF otherblock != block THEN
-            KeAssert ( otherblock^.Block.Magic == MMP_BLOCK_FREE_MAGIC )
-
-            RtlRemoveEntryList ( &otherblock^.LogEntry )
-
-            RtlRemoveEntryList ( &otherblock^.SizeEntry )
-        END
-
-        pool^.BytesUsedExternally -= RTL_PAGE_SIZE
-
-        // Return the extension.
-
-        pool^.ReturnMemory (
-            pool^.MmNode, // mmnode
-            ext, // ptr
-            1, // pages
-        )
-
-        MmpFreeExtensionSpace (
-            pool^.MmNode, // mmnode
-            ext, // extension
-            TRUE, // flush
-        )
-
-        // Unlock pool.
-
-        MmpReleasePool ( pool, ipl )
-
-        LEAVE
-    END
-
-    IF merged THEN
-        // Re-calculate bucket index and set new fields.
-
-        block^.Block.BucketIndex = MmpEightBitLog[blocksize]
-        block^.Block.Size = blocksize
-
-        // Set last size of block to our right.
-
-        otherblock = block + (blocksize << MMP_BLOCK_SIZE_SHIFT)
-
-        IF otherblock & MMP_BLOCK_MAX_SIZE_MASK THEN
-            otherblock^.Block.LastSize = blocksize
-        END
-    END
-
-    // Set free magic.
-
-    block^.Block.Magic = MMP_BLOCK_FREE_MAGIC
-
-    // Put on free lists.
-
-    RtlInsertAtHeadList (
-        &pool^.LogListHeads[block^.Block.BucketIndex], // head
-        &block^.LogEntry, // entry
-    )
-
-    RtlInsertAtHeadList (
-        &pool^.SizeListHeads[blocksize], // head
-        &block^.SizeEntry, // entry
-    )
-
-    // Unlock pool and return.
-
-    MmpReleasePool ( pool, ipl )
-END
-
-FN MmpAllocatePageAligned (
-    IN pool : ^MmpPool,
-    IN bytes : UWORD,
-    IN tag : ULONG,
-    IN flags : UWORD,
-    OUT ptr : ^VOID,
-) : OsStatus
-
-    // Perform a page-aligned allocation from the specified pool.
-
-    // Turn bytes into a rounded up count of pages.
-
-    bytes = ((bytes + RTL_PAGE_SIZE - 1) & ~(RTL_PAGE_SIZE - 1)) >>
-        RTL_PAGE_SHIFT
-
-    mmnode := pool^.MmNode
-
-    // First acquire some room in dynamic space.
-
-    status := MmpAllocateDynamicPages (
-        mmnode, // mmnode
-        bytes, // pages
+    RETURN MmAllocateFromObjectCache (
+        mmnode^.PoolCaches[NOT NOT pageable][index], // objectcache
         flags, // flags
+        tag, // tag
         OUT ptr, // ptr
     )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    // Initialize the node as a page aligned pool node.
-
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
-
-    vpe^.U.Pool.Pool = pool
-    vpe^.U.Pool.Tag = tag
-    vpe^.U.Pool.Pages = bytes
-    vpe^.U.Pool.PageAligned = TRUE
-
-    // Call the pool callback to initialize the allocation.
-
-    status = pool^.GetMemory (
-        mmnode, // mmnode
-        ptr, // ptr
-        bytes, // pages
-        pool^.Flags | flags, // flags
-    )
-
-    IF OsError ( status ) THEN
-        // Caller told us not to wait and we didn't get the page frames we
-        // wanted, so just return.
-
-        // No need to flush the dynamic space since we didn't map anything
-        // into it.
-
-        MmpReleaseDynamicPages (
-            mmnode, // mmnode
-            ptr, // ptr
-            bytes, // pages
-            FALSE, // flush
-        )
-    END
-
-    RETURN status
 END
 
-FN MmpFreePageAligned (
+FN MmFreePool (
     IN ptr : ^VOID,
-    IN tag : ULONG,
+    IN tag : UWORD,
 )
 
-    // Free a page-aligned allocation to pool.
+    // Free a block to pool.
 
-    // Look up the dynamic space node.
-
-    mmnode := KeNumaNodeFromSpacePointer ( ptr )^.Mmp
-
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
-
-    IF vpe^.U.Pool.Tag != tag THEN
-        KeCrash ( "MmpFreePageAligned: wrong tag %x on %p, expected %x\n",
-            vpe^.U.Pool.Tag, ptr, tag )
-    END
-
-    // Uninitialize the allocation.
-
-    vpe^.U.Pool.Tag = 0
-
-#IF BLD_CHK
-    // Fill with easily recognizable garbage to crash anybody who improperly
-    // uses this memory.
-
-    RtlFillMemoryWithUlong (
-        ptr, // ptr
-        vpe^.U.Pool.Pages << RTL_PAGE_SHIFT, // sz
-        0xFAAAAAAA, // ulong
-    )
-#END
-
-    pool := vpe^.U.Pool.Pool
-
-    pool^.ReturnMemory (
-        mmnode, // mmnode
-        ptr, // ptr
-        vpe^.U.Pool.Pages, // pages
-    )
-
-    // Free the dynamic space.
-
-    MmpReleaseDynamicPages (
-        mmnode, // mmnode
-        ptr, // ptr
-        vpe^.U.Pool.Pages, // pages
-        TRUE, // flush
-    )
-END
-
-EXPORT FN MmAllocatePoolEx (
-    IN mmnode : ^MmpNode,
-    IN poolindex : UWORD,
-    IN bytes : UWORD,
-    IN tag : ULONG,
-    IN flags : UWORD,
-    OUT ptr : ^VOID,
-) : OsStatus
-
-    // Allocate a block of memory from the specified pool.
-
-    KeAssert ( bytes != 0 )
-
-    IF NOT mmnode THEN
-        mmnode = MmCurrentAffinityNode ()
-    END
-
-    saveflags := flags
-    status : OsStatus
-
-    IF poolindex == MM_NONPAGED_POOL AND
-        (flags & MM_ALLOCATE_LOW OR
-        PsCurrentThread()^.VmPrivileged) THEN
-
-        // If this is a VM-privileged thread allocating nonpaged pool, override
-        // the wait parameter to FALSE, so that we don't deadlock waiting for
-        // page frames.
-
-        flags &= ~(MM_ALLOCATE_LOW | MM_ALLOCATE_WAIT)
-        flags |= MM_ALLOCATE_FORCE_COMMIT
-        saveflags |= MM_ALLOCATE_FORCE_COMMIT
-    END
-
-@Retry
-
-    pool := mmnode^.PoolTable[poolindex]
-
-    IF bytes < MMP_BLOCK_MAX_REQUEST_SIZE THEN
-        // Allocate from the small block pool.
-
-        status = MmpAllocateFromPool (
-            pool, // pool
-            bytes, // bytes
-            tag, // tag
-            flags, // flags
-            OUT ptr, // ptr
-        )
-
-        ptr += SIZEOF MmpBlock
-
-    ELSE
-        // Allocate from page aligned pool.
-
-        status = MmpAllocatePageAligned (
-            pool, // pool
-            bytes, // bytes
-            tag, // tag
-            flags, // flags
-            OUT ptr, // ptr
-        )
-    END
-
-    IF status == OS_STATUS_NO_MEMORY AND
-        saveflags & MM_ALLOCATE_LOW THEN
-
-        // This was a VM-privileged thread allocating nonpaged pool, and it
-        // just failed to get a block from normal pool. Try again from
-        // privileged pool (which will take from the reserved final page
-        // frames if necessary).
-
-        poolindex = MM_PRIVILEGED_POOL
-        flags = saveflags
-        saveflags = 0
-
-        GOTO Retry
-    END
-
-#IF BLD_CHK
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    // Make sure it gets initialized by filling it with garbage.
-    // Garbage is chosen to be easily recognizable on a hex dump.
-
-    RtlFillMemoryWithUlong (
-        ptr, // ptr
-        bytes, // sz
-        0xFBCDEFAF, // ulong
-    )
-#END
-
-    RETURN status
-END
-
-EXPORT FN MmFreePool (
-    IN ptr : ^VOID,
-    IN tag : ULONG,
-)
-
-    // Free the block of pool.
-
-    mmnode := KeNumaNodeFromSpacePointer ( ptr )^.Mmp
+    kenode := KeNumaNodeFromSpacePointer ( ptr )
+    mmnode := kenode^.Mmp
 
     vpe := MmpFindVpe (
         mmnode, // mmnode
         (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
     )
 
-    IF NOT vpe^.U.Pool.PageAligned THEN
-        // This block resides in small pool.
+    pageable := vpe^.U.ObjectCache.PoolCacheIndex1
+    index := vpe^.U.ObjectCache.PoolCacheIndex2
 
-        MmpFreeToPool (
+    IF index == 0xFF THEN
+        // Page aligned.
+
+        IF vpe^.U.ObjectCache.Tag != tag THEN
+            KeCrash ( "MmFreePool: incorrect tag (expected %x, saw %x)\n",
+                tag, vpe^.U.ObjectCache.Tag )
+        END
+
+        MmFreeMappedPages (
+            kenode, // kenode
             ptr, // ptr
-            tag, // tag
+            CAST vpe^.U.ObjectCache.SlabControl TO UWORD, // pages
+            pageable, // pageable
         )
 
         LEAVE
     END
 
-    // Page aligned pool.
+    // Smaller.
 
-    MmpFreePageAligned (
+    MmFreeToObjectCache (
+        mmnode^.PoolCaches[pageable][index], // objectcache
         ptr, // ptr
         tag, // tag
     )
-END
-
-#SECTION "PAGEtext"
-FN MmGetOverheadOfBlock (
-    IN ptr : ^VOID,
-) : UWORD
-
-    // Return the total bytes overhead consumed by a pool allocation.
-
-    mmnode := KeNumaNodeFromSpacePointer ( ptr )^.Mmp
-
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
-
-    IF NOT vpe^.U.Pool.PageAligned THEN
-        // This block is in small pool.
-
-        block := CAST ptr - SIZEOF MmpBlock TO ^MmpBlock
-
-        RETURN block^.Size << MMP_BLOCK_SIZE_SHIFT
-    END
-
-    // Page-aligned.
-
-    RETURN vpe^.U.Pool.Pages << RTL_PAGE_SHIFT
-END
-
-#SECTION "PAGEtext"
-FN MmGetOverheadOfBytes (
-    IN bytes : UWORD,
-) : UWORD
-
-    // Calculate the total overhead in bytes that the pool allocation for the
-    // given number of bytes would consume. This *MUST* match what is returned
-    // by MmuGetChargeFromBlock for a pool allocation that really was for this
-    // many bytes.
-
-    IF bytes == 0 THEN
-        RETURN 0
-    END
-
-    IF bytes >= MMP_BLOCK_MAX_REQUEST_SIZE THEN
-        // Page-aligned charge.
-
-        RETURN (bytes + RTL_PAGE_OFFSET_MASK) & RTL_PAGE_NUMBER_MASK
-    END
-
-    // Small block charge.
-
-    RETURN (bytes + SIZEOF MmpBlock + MMP_BLOCK_SIZE_MASK)
-        & ~MMP_BLOCK_SIZE_MASK
 END
 
 FN MmWaitForPoolMemory ()
@@ -1203,4 +204,27 @@ FN MmWaitForPoolMemory ()
         MmCurrentAffinityNode(), // mmnode
         PsCurrentThread()^.VmPrivileged, // low
     )
+END
+
+#SECTION "PAGEtext"
+FN MmGetOverheadOfBytes (
+    IN bytes : UWORD,
+) : UWORD
+
+    // Calculate the total overhead in bytes that the pool allocation for the
+    // given number of bytes would consume.
+
+    IF bytes == 0 THEN
+        RETURN 0
+    END
+
+    IF bytes > MmpObjectSizes[MMP_NUMBER_POOL_BUCKETS - 1] THEN
+        // Page-aligned charge.
+
+        RETURN (bytes + RTL_PAGE_OFFSET_MASK) & RTL_PAGE_NUMBER_MASK
+    END
+
+    // Small block charge.
+
+    RETURN (bytes + RTL_ALIGN_BYTES + RTL_ALIGN_BYTES - 1) & -RTL_ALIGN_BYTES
 END

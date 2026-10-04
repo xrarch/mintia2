@@ -109,6 +109,7 @@ EXPORT FN ExCreateMagazineCache (
     status := MmAllocateFromObjectCache (
         expnode^.MagazineCacheCache, // objectcache
         MM_ALLOCATE_WAIT, // flags
+        'MagC', // tag
         OUT magazinecache, // object
     )
 
@@ -213,6 +214,7 @@ FN ExpDestroyAndFreeMagazine (
     MmFreeToObjectCache (
         magazinecache^.MagazineType^.ObjectCache, // objectcache
         magazine - SIZEOF ^VOID, // object
+        'Magz', // tag
     )
 END
 
@@ -473,6 +475,7 @@ EXPORT FN ExDeleteMagazineCache (
     MmFreeToObjectCache (
         expnode^.MagazineCacheCache, // objectcache
         magazinecache, // object
+        'MagC', // tag
     )
 END
 
@@ -686,6 +689,7 @@ EXPORT FN ExFreeToMagazineCache (
     status := MmAllocateFromObjectCache (
         magtype^.ObjectCache, // objectcache
         0, // flags
+        'Magz', // tag
         OUT magazine, // ptr
     )
 
@@ -703,6 +707,7 @@ EXPORT FN ExFreeToMagazineCache (
             MmFreeToObjectCache (
                 magtype^.ObjectCache, // objectcache
                 magazine, // ptr
+                'Magz', // tag
             )
 
             ipl = ExpLockMagazineCache ( percpu )

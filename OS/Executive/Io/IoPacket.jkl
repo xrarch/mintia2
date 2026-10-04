@@ -98,6 +98,7 @@ FN IopFreeLocation (
         MmFreeToObjectCache (
             IopLocationCache, // cache
             location, // ptr
+            'IoLo', // tag
         )
 
         LEAVE
@@ -141,6 +142,7 @@ EXPORT FN IoCreateLocation (
             status = MmAllocateFromObjectCache (
                 IopLocationCache, // cache
                 MM_ALLOCATE_WAIT, // flags
+                'IoLo', // tag
                 OUT location, // ptr
             )
 
@@ -156,7 +158,7 @@ EXPORT FN IoCreateLocation (
         // Still don't have a location so try to pool-allocate one.
 
         status = MmAllocatePool (
-            MM_NONPAGED_POOL, // poolindex
+            FALSE, // pageable
             SIZEOF IoLocation + contextsize +
             (RTL_MACHINE_WORD_SIZE - 1), // bytes
             'IoLo', // tag
@@ -207,6 +209,7 @@ EXPORT FN IoAllocatePacket (
     status := MmAllocateFromObjectCache (
         IopPacketCaches[ioptype], // cache
         MM_ALLOCATE_WAIT, // flags
+        'IoPa', // tag
         OUT packet, // ptr
     )
 
@@ -277,6 +280,7 @@ EXPORT FN IoFreePacket (
     MmFreeToObjectCache (
         IopPacketCaches[packet^.InternalType], // cache
         packet, // ptr
+        'IoPa', // tag
     )
 END
 
@@ -379,6 +383,7 @@ FN IopBounceOnTrampoline (
         MmFreeToObjectCache (
             IopTrampolineCache, // cache
             trampoline, // ptr
+            'IoTr', // tag
         )
     END
 
@@ -583,6 +588,7 @@ EXPORT FN IoEnqueuePacket (
         status = MmAllocateFromObjectCache (
             IopTrampolineCache, // cache
             MM_ALLOCATE_WAIT, // flags
+            'IoTr', // tag
             OUT trampoline, // ptr
         )
 

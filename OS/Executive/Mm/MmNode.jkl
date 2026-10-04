@@ -621,6 +621,10 @@ FN MmpAllocatePage (
     // Allocate a page from the given node. If none available, return
     // NULLPTR.
 
+    IF PsCurrentThread()^.VmPrivileged THEN
+        flags |= MM_ALLOCATE_LOW
+    END
+
 #IF BLD_NUMA
     nodelist : ^^KeuNode = NULLPTR
     originalnode := mmnode
@@ -908,6 +912,10 @@ FN MmpWaitForPages (
     backoff : RtlUquad
     backoffms := MMP_INITIAL_BACKOFF_MS
 
+    IF PsCurrentThread()^.VmPrivileged THEN
+        low = TRUE
+    END
+
     IF low THEN
         threshold = 0
         event = &mmnode^.LowPageAvailableEvent
@@ -1062,6 +1070,10 @@ FN MmuChargeCommit (
     // Attempt to charge the specified commit to the memory node.
     // It would be unwise to page this routine as it can be called during
     // nonpaged pool allocation.
+
+    IF PsCurrentThread()^.VmPrivileged THEN
+        flags |= MM_ALLOCATE_FORCE_COMMIT
+    END
 
     IF pages > RTL_MACHINE_WORD_MAX_S THEN
         // Page count overflows and is negative.

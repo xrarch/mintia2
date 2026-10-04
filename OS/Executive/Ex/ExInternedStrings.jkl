@@ -146,8 +146,8 @@ EXPORT FN ExFindName (
     node : ^ExuName
 
     status := MmAllocatePoolEx (
-        kenode^.Mmp, // mmnode
-        MM_PAGED_POOL, // poolindex
+        kenode, // kenode
+        TRUE, // pageable
         SIZEOF ExuName + SIZEOF RtlString + len + 1, // bytes
         'Name', // tag
         0, // flags
@@ -287,7 +287,7 @@ END
 EXPORT FN ExDuplicateString (
     IN outputstring : ^RtlString,
     IN inputstring : ^RtlString,
-    IN poolindex : UWORD,
+    IN pageable : UWORD,
     IN tag : UWORD,
 ) : OsStatus
 
@@ -300,7 +300,7 @@ EXPORT FN ExDuplicateString (
     // Create a new string buffer (this is the important work).
 
     status := MmAllocatePool (
-        poolindex, // poolindex
+        pageable, // pageable
         inputstring^.Length + 1, // bytes
         tag, // tag
         MM_ALLOCATE_WAIT, // flags

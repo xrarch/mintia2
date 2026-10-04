@@ -168,7 +168,7 @@ FN MmpIdentifyUnwireableSections (
             region : ^MmpUnwireableRegion
 
             status := MmAllocatePool (
-                MM_NONPAGED_POOL, // poolindex
+                FALSE, // pageable
                 SIZEOF MmpUnwireableRegion, // bytes
                 'Unwi', // tag
                 0, // flags
@@ -258,7 +258,7 @@ FN MmpReclaimMemory ()
     loaderhunk : ^VOID
 
     status := MmAllocatePool (
-        MM_NONPAGED_POOL, // poolindex
+        FALSE, // pageable
         KeuLoaderBlock.ResourceCount * SIZEOF BlResource +
         KeuLoaderBlock.DllCount * SIZEOF BlDll, // bytes
         'Boot', // tag
@@ -523,7 +523,7 @@ FN MmuInitializeStage1 ()
 
             // Initialize the system pools.
 
-            MmpInitializePools ( kenode )
+            MmpInitializePool ( kenode )
 
             // Initialize the quick map pages.
 

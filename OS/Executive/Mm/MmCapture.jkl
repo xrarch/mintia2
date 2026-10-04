@@ -146,7 +146,7 @@ FN (KeAbortableF) MmpSafeCaptureString (
     status := MmuChargePoolQuota (
         PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
         quota, // charge
-        MM_PAGED_POOL, // poolindex
+        TRUE, // pageable
     )
 
     IF OsError ( status ) THEN
@@ -162,7 +162,7 @@ FN (KeAbortableF) MmpSafeCaptureString (
     buf : ^UBYTE
 
     status = MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
+        TRUE, // pageable
         len + 1, // bytes
         'CpSt', // tag
         MM_ALLOCATE_WAIT, // flags
@@ -240,7 +240,7 @@ EXPORT FN MmCaptureString (
             MmuUnchargePoolQuota (
                 PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
                 ctx.Charged, // charge
-                MM_PAGED_POOL, // poolindex
+                TRUE, // pageable
             )
         END
     END
@@ -255,7 +255,7 @@ EXPORT FN MmFreeCapturedString (
 
     // Free a previously captured string.
 
-    charge := MmGetOverheadOfBlock ( string^.Data )
+    charge := MmGetOverheadOfBytes ( string^.Length + 1 )
 
     MmFreePool (
         string^.Data, // ptr
@@ -271,14 +271,14 @@ EXPORT FN MmFreeCapturedString (
     MmuUnchargePoolQuota (
         PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
         charge, // charge
-        MM_PAGED_POOL, // poolindex
+        TRUE, // pageable
     )
 END
 
 #SECTION "PAGEtext"
 EXPORT FN MmAllocateAndChargeSysBuffer (
     IN bytes : UWORD,
-    IN poolindex : UWORD,
+    IN pageable : UWORD,
     IN tag : UWORD,
     OUT ptr : ^VOID,
 ) : OsStatus
@@ -291,7 +291,7 @@ EXPORT FN MmAllocateAndChargeSysBuffer (
     status := MmuChargePoolQuota (
         PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
         quota, // charge
-        poolindex, // poolindex
+        pageable, // pageable
     )
 
     IF OsError ( status ) THEN
@@ -299,7 +299,7 @@ EXPORT FN MmAllocateAndChargeSysBuffer (
     END
 
     status = MmAllocatePool (
-        poolindex, // poolindex
+        pageable, // pageable
         bytes, // bytes
         tag, // tag
         MM_ALLOCATE_WAIT, // flags
@@ -312,7 +312,7 @@ EXPORT FN MmAllocateAndChargeSysBuffer (
         MmuUnchargePoolQuota (
             PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
             quota, // charge
-            poolindex, // poolindex
+            pageable, // pageable
         )
     END
 
@@ -324,7 +324,7 @@ EXPORT FN MmDeallocateAndUnchargeSysBuffer (
     IN ptr : ^VOID,
     IN tag : UWORD,
     IN bytes : UWORD,
-    IN poolindex : UWORD,
+    IN pageable : UWORD,
 )
 
     // Uncharge the size of a buffer and free it to kernel pool.
@@ -337,6 +337,6 @@ EXPORT FN MmDeallocateAndUnchargeSysBuffer (
     MmuUnchargePoolQuota (
         PsuQuotaBlock ( PsCurrentProcess () ), // quotablock
         MmGetOverheadOfBytes ( bytes ), // charge
-        poolindex, // poolindex
+        pageable, // pageable
     )
 END

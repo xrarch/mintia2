@@ -39,6 +39,7 @@ FN PsuReallocateRemoteTurnstile ()
     status := MmAllocateFromObjectCache (
         KeNumaNodeFromSpacePointer ( thread )^.Psp^.TurnstileCache, // cache
         0, // flags
+        'Turn', // tag
         OUT newts, // ptr
     )
 
@@ -61,6 +62,7 @@ FN PsuReallocateRemoteTurnstile ()
     MmFreeToObjectCache (
         KeNumaNodeFromSpacePointer ( oldts )^.Psp^.TurnstileCache, // cache
         oldts, // ptr
+        'Turn', // tag
     )
 END
 
@@ -109,6 +111,7 @@ FN PspPerformEagerThreadCleanup (
             thread^.Tcb.Turnstile
         )^.Psp^.TurnstileCache, // cache
         thread^.Tcb.Turnstile, // ptr
+        'Turn', // tag
     )
 
     IF paged^.IpcBlock THEN
@@ -321,6 +324,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     status = MmAllocateFromObjectCache (
         kenode^.Psp^.TurnstileCache, // cache
         MM_ALLOCATE_WAIT, // flags
+        'Turn', // tag
         OUT turnstile, // ptr
     )
 
@@ -443,6 +447,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
     MmFreeToObjectCache (
         kenode^.Psp^.TurnstileCache, // cache
         turnstile, // ptr
+        'Turn', // tag
     )
 
 @Error4

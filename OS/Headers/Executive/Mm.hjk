@@ -35,7 +35,7 @@ EXTERN FN MmIsVirtualValid (
 
 #MACRO MmAllocatePool ( poolindex, bytes, tag, flags, ptr ) [
     MmAllocatePoolEx (
-        NULLPTR, // mmnode
+        NULLPTR, // kenode
         poolindex, // poolindex
         bytes, // bytes
         tag, // tag
@@ -45,8 +45,8 @@ EXTERN FN MmIsVirtualValid (
 ]
 
 EXTERN FN MmAllocatePoolEx (
-    IN mmnode : ^MmpNode,
-    IN poolindex : UWORD,
+    IN kenode : ^KeuNode,
+    IN pageable : UWORD,
     IN bytes : UWORD,
     IN tag : ULONG,
     IN flags : UWORD,
@@ -65,15 +65,6 @@ EXTERN FN MmGetOverheadOfBlock (
 EXTERN FN MmGetOverheadOfBytes (
     IN bytes : UWORD,
 ) : UWORD
-
-ENUM MmPoolIndex : UBYTE
-    MM_NONPAGED_POOL,
-    MM_PRIVILEGED_POOL,
-    MM_PAGED_POOL,
-    MM_PAGE_TRACKING_POOL,
-
-    MM_MAXIMUM_POOL,
-END
 
 ENUM MmSystemSize : UBYTE
     MM_UNINITIALIZED_SYSTEM,
@@ -116,7 +107,7 @@ EXTERN FN MmFreeCapturedString (
 
 EXTERN FN MmAllocateAndChargeSysBuffer (
     IN bytes : UWORD,
-    IN poolindex : UWORD,
+    IN pageable : UWORD,
     IN tag : UWORD,
     OUT ptr : ^VOID,
 ) : OsStatus
@@ -125,7 +116,7 @@ EXTERN FN MmDeallocateAndUnchargeSysBuffer (
     IN ptr : ^VOID,
     IN tag : UWORD,
     IN bytes : UWORD,
-    IN poolindex : UWORD,
+    IN pageable : UWORD,
 )
 
 EXTERN FN MmWaitForPoolMemory ()
@@ -151,12 +142,14 @@ EXTERN FN MmDeleteObjectCache (
 EXTERN FN MmAllocateFromObjectCache (
     IN objectcache : ^MmpObjectCache,
     IN flags : UWORD,
+    IN tag : UWORD,
     OUT object : ^VOID,
 ) : OsStatus
 
 EXTERN FN MmFreeToObjectCache (
     IN objectcache : ^MmpObjectCache,
     IN object : ^VOID,
+    IN tag : UWORD,
 )
 
 EXTERN FN MmAllocateMappedPages (

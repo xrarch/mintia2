@@ -124,7 +124,7 @@ FN ExuDeleteHandleTable (
         MmuUnchargePoolQuota (
             handletable^.QuotaBlock, // quotablock
             handletable^.Entries << handletable^.EntrySizeLog, // charge
-            MM_PAGED_POOL, // poolindex
+            TRUE, // pageable
         )
     END
 
@@ -218,7 +218,7 @@ FN ExuCreateHandle (
     status := MmuChargePoolQuota (
         handletable^.QuotaBlock, // quotablock
         newsize, // charge
-        MM_PAGED_POOL, // poolindex
+        TRUE, // pageable
     )
 
     IF OsError ( status ) THEN
@@ -236,7 +236,7 @@ FN ExuCreateHandle (
     newtable : ^VOID
 
     status = MmAllocatePool (
-        MM_PAGED_POOL, // poolindex
+        TRUE, // pageable
         newsize, // bytes
         'HnTb', // tag
         flags, // flags
@@ -247,7 +247,7 @@ FN ExuCreateHandle (
         MmuUnchargePoolQuota (
             handletable^.QuotaBlock, // quotablock
             newsize, // charge
-            MM_PAGED_POOL, // poolindex
+            TRUE, // pageable
         )
 
         IF lock THEN
@@ -295,7 +295,7 @@ FN ExuCreateHandle (
         MmuUnchargePoolQuota (
             handletable^.QuotaBlock, // quotablock
             oldsize, // charge
-            MM_PAGED_POOL, // poolindex
+            TRUE, // pageable
         )
     END
 
