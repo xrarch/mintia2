@@ -496,7 +496,8 @@ END
 
 EXPORT FN ExAllocateFromMagazineCache (
     IN magazinecache : ^ExpMagazineCache,
-) : ^VOID
+    OUT ptr : ^VOID,
+) : UWORD
 
     // Allocate a block from the pool cache.
 
@@ -524,12 +525,12 @@ EXPORT FN ExAllocateFromMagazineCache (
         //       skipped in a subtle way here that shouldn't be confused with an
         //       off-by-one bug.
 
-        ptr := percpu^.Loaded[rounds]
+        ptr = percpu^.Loaded[rounds]
         percpu^.Rounds = rounds - 1
 
         ExpUnlockMagazineCache ( percpu, ipl )
 
-        RETURN ptr
+        RETURN TRUE
     END
 
     // Loaded magazine was empty, try to reload.
@@ -581,7 +582,7 @@ EXPORT FN ExAllocateFromMagazineCache (
 
     // Magazine cache wasn't of any help.
 
-    RETURN NULLPTR
+    RETURN FALSE
 END
 
 EXPORT FN ExFreeToMagazineCache (

@@ -52,9 +52,11 @@ EXPORT FN MmAllocateFromObjectCache (
 @Retry
 
     IF objectcache^.MagazineCache THEN
-        object = ExAllocateFromMagazineCache ( objectcache^.MagazineCache )
+        IF ExAllocateFromMagazineCache (
+            objectcache^.MagazineCache, // magazinecache
+            OUT object, // address
+        ) THEN
 
-        IF object THEN
             GOTO Success
         END
     END

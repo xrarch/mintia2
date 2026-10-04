@@ -799,11 +799,11 @@ FN ExAllocateFromArena (
     IF size <= arena^.QuantumCacheMaximum AND
         flags & MM_ALLOCATE_NO_QUANTUM_CACHE == 0 THEN
 
-        address = ExAllocateFromMagazineCache (
+        IF ExAllocateFromMagazineCache (
             arena^.QuantumCaches[size >> arena^.QuantumShift].Cache, // cache
-        )
+            OUT address, // address
+        ) THEN
 
-        IF address THEN
             RETURN OS_STATUS_SUCCESS
         END
     END
