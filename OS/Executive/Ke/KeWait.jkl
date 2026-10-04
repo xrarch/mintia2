@@ -796,6 +796,15 @@ EXPORT FN KeWaitForObjects (
             // Already signaled. Our wait has been satisfied before it began.
             // If this isn't a notification event, consume the count.
 
+#IF BLD_MP
+            // Set the thread to wait-satisfied so that objects being
+            // concurrently satisfied don't double-dip.
+
+            thread^.WaitState = KEP_THREAD_WAIT_SATISFIED
+#END
+
+            KepReleaseThreadElevated ( thread )
+
             IF object^.Type != KEP_DISPATCH_EVENT_NOTIF THEN
                 IF object^.Type == KEP_DISPATCH_BALANCED_QUEUE THEN
                     // This is a balanced queue and it has a non-zero signal
@@ -825,15 +834,6 @@ EXPORT FN KeWaitForObjects (
 
                 object^.SignalCount = signal - 1
             END
-
-#IF BLD_MP
-            // Set the thread to wait-satisfied so that objects being
-            // concurrently satisfied don't double-dip.
-
-            thread^.WaitState = KEP_THREAD_WAIT_SATISFIED
-#END
-
-            KepReleaseThreadElevated ( thread )
 
             KepReleaseObjectElevated ( object )
 
@@ -866,9 +866,9 @@ EXPORT FN KeWaitForObjects (
             GOTO Exit
         END
 
-@WaitOnObject
-
         KepReleaseThreadElevated ( thread )
+
+@WaitOnObject
 
         // Enqueue our wait block to the object.
 
