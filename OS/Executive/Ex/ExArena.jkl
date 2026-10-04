@@ -27,7 +27,7 @@ STRUCT ExpArenaTag
 END
 
 STRUCT ExpQuantumCache
-    Cache : ^MmpPoolCache,
+    Cache : ^ExpMagazineCache,
     Arena : ^ExpArena,
     Size : UWORD,
 END
@@ -184,6 +184,12 @@ FN ExpInitializeArenas ()
 
         expnode := kenode^.Exp
 
+        IF NOT expnode THEN
+            i += 1
+
+            CONTINUE
+        END
+
         KeInitializeLock ( &expnode^.ArenaListLock, "ArenaList" )
 
         RtlInitializeList ( &expnode^.ArenaListHead )
@@ -249,7 +255,7 @@ FN ExpFreeArena (
         LEAVE
     END
 
-    MmFreeToPoolCache (
+    MmFreeToObjectCache (
         expnode^.ArenaCache, // cache
         arena, // ptr
     )
@@ -290,7 +296,7 @@ FN ExDeleteArena (
     i := 1
 
     WHILE i <= arena^.QuantumCacheMaximum DO
-        MmDeletePoolCache ( arena^.QuantumCaches[i].Cache )
+        ExDeleteMagazineCache ( arena^.QuantumCaches[i].Cache )
 
         i += 1
     END
@@ -351,9 +357,9 @@ FN ExpAdjustQuantumCaches (
 
     WHILE i <= arena^.QuantumCacheMaximum DO
         IF purge THEN
-            MmuPurgePoolCache ( arena^.QuantumCaches[i].Cache )
+            ExuPurgeMagazineCache ( arena^.QuantumCaches[i].Cache )
         ELSE
-            MmuAdjustPoolCache ( arena^.QuantumCaches[i].Cache )
+            ExuAdjustMagazineCache ( arena^.QuantumCaches[i].Cache )
         END
 
         i += 1
@@ -433,11 +439,11 @@ FN ExpPopulateTagReserve (
     // This ends up allocating from another ExArena so we're at risk of
     // recursion here which we deal with using the reserved tags.
 
-    status := MmAllocatePoolPages (
-        arena^.Node^.Mmp, // mmnode
+    status := MmAllocateMappedPages (
+        arena^.Node, // kenode
         flags, // flags
         1, // pages
-        MM_NONPAGED_POOL, // poolindex
+        FALSE, // pageable
         OUT tag, // ptr
     )
 
@@ -668,8 +674,6 @@ FN ExpFreeToArena (
         )
     END
 
-    othertag = CONTAINEROF tag^.ListEntry.Prev TO ExpArenaTag.ListEntry
-
     IF (CONTAINEROF tag^.ListEntry.Prev TO ExpArenaTag.ListEntry)^.Type
         == EXP_TAG_SPAN AND
         (CONTAINEROF tag^.ListEntry.Next TO ExpArenaTag.ListEntry)^.Type
@@ -760,11 +764,13 @@ FN ExAllocateFromArena (
     IF size <= arena^.QuantumCacheMaximum AND
         flags & MM_ALLOCATE_NO_QUANTUM_CACHE == 0 THEN
 
-        RETURN MmAllocateFromPoolCache (
+        address = ExAllocateFromMagazineCache (
             arena^.QuantumCaches[size >> arena^.QuantumShift].Cache, // cache
-            flags, // flags
-            OUT address, // ptr
         )
+
+        IF address THEN
+            RETURN OS_STATUS_SUCCESS
+        END
     END
 
     // Didn't work out.
@@ -859,7 +865,7 @@ FN ExAllocateFromArena (
                 ExpAddSpanToArena (
                     arena, // arena
                     address, // address
-                    size, // size
+                    importsize, // size
                     TRUE, // imported
                 )
 
@@ -976,7 +982,7 @@ FN ExFreeToArena (
     // Otherwise free directly to the arena.
 
     IF size <= arena^.QuantumCacheMaximum THEN
-        MmFreeToPoolCache (
+        ExFreeToMagazineCache (
             arena^.QuantumCaches[size >> arena^.QuantumShift].Cache, // cache
             address, // ptr
         )
@@ -1032,26 +1038,7 @@ FN ExFreeMultipleToArena (
     END
 END
 
-FN (MmPoolCacheAllocateF) ExpPopulateQuantumCache (
-    IN context : ^VOID,
-    IN flags : UWORD,
-    OUT ptr : ^VOID,
-) : OsStatus
-
-    // A quantum cache missed and the magazine layer called us to return a
-    // block.
-
-    qcache := CAST context TO ^ExpQuantumCache
-
-    RETURN ExAllocateFromArena (
-        qcache^.Arena, // arena
-        flags | MM_ALLOCATE_NO_QUANTUM_CACHE, // flags
-        qcache^.Size, // size
-        OUT ptr, // address
-    )
-END
-
-FN (MmPoolCacheFreeF) ExpFreeQuantumCache (
+FN (ExMagazineCacheFreeF) ExpFreeQuantumCache (
     IN context : ^VOID,
     IN ptr : ^VOID,
 )
@@ -1187,7 +1174,7 @@ FN ExCreateArena (
         // No more preallocated arenas left, so grab one from the arena pool
         // cache.
 
-        status = MmAllocateFromPoolCache (
+        status = MmAllocateFromObjectCache (
             expnode^.ArenaCache, // cache
             flags, // flags
             OUT arena, // ptr
@@ -1266,14 +1253,11 @@ FN ExCreateArena (
         arena^.QuantumCaches[i].Arena = arena
         arena^.QuantumCaches[i].Size = i << quantumshift
 
-        status = MmCreatePoolCacheEx (
-            kenode^.Mmp, // mmnode
+        status = ExCreateMagazineCache (
+            kenode, // kenode
             "QuantumCache", // name
-            i, // size
             pageable, // pageable
-            &ExpPopulateQuantumCache, // allocfunc
             &ExpFreeQuantumCache, // freefunc
-            NULLPTR, // deletefunc
             &arena^.QuantumCaches[i], // context
             OUT arena^.QuantumCaches[i].Cache, // poolcache
         )
@@ -1284,7 +1268,7 @@ FN ExCreateArena (
             WHILE i != 1 DO
                 i -= 1
 
-                MmDeletePoolCache ( arena^.QuantumCaches[i].Cache )
+                ExDeleteMagazineCache ( arena^.QuantumCaches[i].Cache )
             END
 
             ExpFreeArena ( arena )

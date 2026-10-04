@@ -130,68 +130,9 @@ EXTERN FN MmDeallocateAndUnchargeSysBuffer (
 
 EXTERN FN MmWaitForPoolMemory ()
 
-EXTERN FN MmAllocateFromPoolCache (
-    IN cache : ^MmpPoolCache,
-    IN flags : UWORD,
-    OUT ptr : ^VOID,
-) : OsStatus
-
-EXTERN FN MmFreeToPoolCache (
-    IN cache : ^MmpPoolCache,
-    IN ptr : ^VOID,
-)
-
-FNPTR MmPoolCacheAllocateF (
-    IN context : ^VOID,
-    IN flags : UWORD,
-    OUT ptr : ^VOID,
-) : OsStatus
-
-FNPTR MmPoolCacheFreeF (
-    IN context : ^VOID,
-    IN ptr : ^VOID,
-)
-
-FNPTR MmPoolCacheDeleteF (
-    IN context : ^VOID,
-)
-
-EXTERN FN MmCreatePoolCacheEx (
-    IN mmnode : ^MmpNode,
-    IN name : ^UBYTE,
-    IN size : UWORD,
-    IN pageable : UWORD,
-    IN allocfunc : MmPoolCacheAllocateF,
-    IN freefunc : MmPoolCacheFreeF,
-    IN deletefunc : MmPoolCacheDeleteF,
-    IN context : ^VOID,
-    OUT poolcache : ^MmpPoolCache,
-) : OsStatus
-
-EXTERN FN MmCreatePoolCache (
-    IN mmnode : ^MmpNode,
-    IN name : ^UBYTE,
-    IN size : UWORD,
-    IN poolindex : UWORD,
-    IN tag : UWORD,
-    OUT poolcache : ^MmpPoolCache,
-) : OsStatus
-
-EXTERN FN MmDeletePoolCache (
-    IN cache : ^MmpPoolCache,
-)
-
 #MACRO MmCurrentAffinityNode () [
     (KeCurrentAffinityNode()^.Mmp)
 ]
-
-EXTERN FN MmAllocatePoolPages (
-    IN mmnode : ^MmpNode,
-    IN flags : UWORD,
-    IN pages : UWORD,
-    IN poolindex : UWORD,
-    OUT ptr : ^VOID,
-) : OsStatus
 
 EXTERN FN MmCreateObjectCache (
     IN kenode : ^KeuNode,
@@ -203,6 +144,10 @@ EXTERN FN MmCreateObjectCache (
     OUT objectcache : ^MmpObjectCache,
 ) : OsStatus
 
+EXTERN FN MmDeleteObjectCache (
+    IN objectcache : ^MmpObjectCache,
+)
+
 EXTERN FN MmAllocateFromObjectCache (
     IN objectcache : ^MmpObjectCache,
     IN flags : UWORD,
@@ -212,4 +157,19 @@ EXTERN FN MmAllocateFromObjectCache (
 EXTERN FN MmFreeToObjectCache (
     IN objectcache : ^MmpObjectCache,
     IN object : ^VOID,
+)
+
+EXTERN FN MmAllocateMappedPages (
+    IN kenode : ^KeuNode,
+    IN flags : UWORD,
+    IN pages : UWORD,
+    IN pageable : UWORD,
+    OUT ptr : ^VOID,
+) : OsStatus
+
+EXTERN FN MmFreeMappedPages (
+    IN kenode : ^KeuNode,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+    IN pageable : UWORD,
 )

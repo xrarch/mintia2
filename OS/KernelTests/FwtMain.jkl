@@ -4,7 +4,7 @@
 
 #INCLUDE "Fwt.hjk"
 
-PUBLIC FwtDataCache : ^MmpPoolCache
+PUBLIC FwtDataCache : ^MmpObjectCache
 
 FN (KeContinuationF) FwtMainThread (
     IN continuation : ^KeContinuation,
@@ -52,13 +52,14 @@ FN FwtMain ()
 
     thread : ^PsuThread
     
-    status := MmCreatePoolCache (
-        MmCurrentAffinityNode (), // mmnode
+    status := MmCreateObjectCache (
+        KeCurrentAffinityNode (), // mmnode
         "Fireworks Data", // name
-        SIZEOF FwtData, // size
-        MM_NONPAGED_POOL, // poolindex
-        'FwtD', // tag
-        OUT FwtDataCache, // ptr
+        0, // flags
+        SIZEOF FwtData, // objectsize
+        TRUE, // magazinecached
+        FALSE, // pageable
+        OUT FwtDataCache, // objectcache
     )
 
     IF OsError ( status ) THEN
@@ -85,7 +86,7 @@ FN FwtMain ()
     IF OsError ( status ) THEN
         RtlPrint ( "FwtMain: Could not create main thread\n" )
 
-        MmDeletePoolCache ( FwtDataCache )
+        MmDeleteObjectCache ( FwtDataCache )
 
         LEAVE
     END

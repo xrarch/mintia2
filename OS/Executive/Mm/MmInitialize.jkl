@@ -503,13 +503,19 @@ FN MmuInitializeStage1 ()
 
             MmpInitializeSystemVa ( kenode )
 
+            // Initialize the VPN DB.
+
+            MmpInitializeVpnDb ( kenode )
+
             // Initialize the object cache package.
 
             MmpInitializeObjectCaches ( kenode )
 
-            // Initialize the VPN DB.
+            // Call into Ex to initialize the magazine cache package.
+            // This is done at this odd place due to dependency ordering
+            // problems.
 
-            MmpInitializeVpnDb ( kenode )
+            ExuInitializeMagazineCaches ( kenode )
 
             // Initialize the system pools.
 

@@ -36,7 +36,7 @@ FN PsuReallocateRemoteTurnstile ()
 
     newts : ^KepTurnstile
 
-    status := MmAllocateFromPoolCache (
+    status := MmAllocateFromObjectCache (
         KeNumaNodeFromSpacePointer ( thread )^.Psp^.TurnstileCache, // cache
         0, // flags
         OUT newts, // ptr
@@ -58,7 +58,7 @@ FN PsuReallocateRemoteTurnstile ()
 
     thread^.Turnstile = newts
 
-    MmFreeToPoolCache (
+    MmFreeToObjectCache (
         KeNumaNodeFromSpacePointer ( oldts )^.Psp^.TurnstileCache, // cache
         oldts, // ptr
     )
@@ -104,7 +104,7 @@ FN PspPerformEagerThreadCleanup (
     // started with, and it might be on a remote node, so recompute the node
     // pointer from the turnstile's pointer.
 
-    MmFreeToPoolCache (
+    MmFreeToObjectCache (
         KeNumaNodeFromSpacePointer (
             thread^.Tcb.Turnstile
         )^.Psp^.TurnstileCache, // cache
@@ -318,7 +318,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     turnstile : ^KepTurnstile
 
-    status = MmAllocateFromPoolCache (
+    status = MmAllocateFromObjectCache (
         kenode^.Psp^.TurnstileCache, // cache
         MM_ALLOCATE_WAIT, // flags
         OUT turnstile, // ptr
@@ -440,7 +440,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
 @Error5
 
-    MmFreeToPoolCache (
+    MmFreeToObjectCache (
         kenode^.Psp^.TurnstileCache, // cache
         turnstile, // ptr
     )

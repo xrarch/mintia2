@@ -39,7 +39,7 @@ KE_CACHE_LINE_END
     PartialSlabListHead : RtlListEntry,
 END
 
-FN MmAllocateFromObjectCache (
+EXPORT FN MmAllocateFromObjectCache (
     IN objectcache : ^MmpObjectCache,
     IN flags : UWORD,
     OUT object : ^VOID,
@@ -92,9 +92,9 @@ FN MmAllocateFromObjectCache (
 
     // Need to allocate a new slab since there are no partial ones.
 
-    mmnode := objectcache^.Node^.Mmp
-
     KeReleaseLockLower ( &objectcache^.Lock, ipl )
+
+    mmnode := objectcache^.Node^.Mmp
 
     status := ExAllocateFromArena (
         objectcache^.SlabArena, // arena
@@ -242,7 +242,7 @@ FN (ExMagazineCacheFreeF) MmpFreeToObjectCache (
     )
 END
 
-FN MmFreeToObjectCache (
+EXPORT FN MmFreeToObjectCache (
     IN objectcache : ^MmpObjectCache,
     IN object : ^VOID,
 )
@@ -281,7 +281,7 @@ objectcache < &mmnode^.PreallocatedObjectCaches[MMP_PREALLOCATED_CACHES] THEN
         LEAVE
     END
 
-    MmFreeToPoolCache (
+    MmFreeToObjectCache (
         mmnode^.ObjectCacheCache, // cache
         objectcache, // ptr
     )
@@ -341,7 +341,7 @@ FN MmpCalculateGoodSlabSize (
 END
 
 #SECTION "PAGEtext"
-FN MmCreateObjectCache (
+EXPORT FN MmCreateObjectCache (
     IN kenode : ^KeuNode,
     IN name : ^UBYTE,
     IN flags : UWORD,
@@ -382,7 +382,7 @@ FN MmCreateObjectCache (
         // No more preallocated object caches left, so grab one from the
         // object cache cache.
 
-        status = MmAllocateFromPoolCache (
+        status = MmAllocateFromObjectCache (
             mmnode^.ObjectCacheCache, // cache
             flags, // flags
             OUT objectcache, // ptr
@@ -403,6 +403,8 @@ FN MmCreateObjectCache (
     objectcache^.SlabBytes = objectcache^.SlabPages << RTL_PAGE_SHIFT
 
     objectcache^.ObjectsPerSlab = objectcache^.SlabBytes / objectsize
+
+    KeAssert ( objectcache^.ObjectsPerSlab != 1 )
 
     objectcache^.SlabArena = mmnode^.SlabArenas[NOT NOT pageable]
 
@@ -431,7 +433,7 @@ FN MmCreateObjectCache (
 END
 
 #SECTION "PAGEtext"
-FN MmDeleteObjectCache (
+EXPORT FN MmDeleteObjectCache (
     IN objectcache : ^MmpObjectCache,
 )
 
@@ -721,7 +723,7 @@ FN MmpInitializeObjectCaches (
     importcallbacks.Context = mmnode
     importcallbacks.Import = &MmpImportNonpageable
     importcallbacks.Free = &MmpFreeNonpageable
-    importcallbacks.ImportQuantumShift = RTL_PAGE_SHIFT + 2
+    importcallbacks.ImportQuantumShift = RTL_PAGE_SHIFT + 3
 
     status := ExCreateArena (
         "NonpagedSlabs", // name
@@ -744,7 +746,7 @@ FN MmpInitializeObjectCaches (
 #IF 0
     importcallbacks.Import = &MmpImportPageable
     importcallbacks.Free = &MmpFreePageable
-    importcallbacks.ImportQuantumShift = RTL_PAGE_SHIFT + 3
+    importcallbacks.ImportQuantumShift = RTL_PAGE_SHIFT + 4
 #END
 
     status = ExCreateArena (
@@ -761,4 +763,52 @@ FN MmpInitializeObjectCaches (
     )
 
     KeAssert ( NOT OsError ( status ) )
+
+    // Create the object cache cache.
+
+    status = MmCreateObjectCache (
+        kenode, // kenode
+        "ObjectCacheCache", // name
+        0, // flags
+        SIZEOF MmpObjectCache, // objectsize
+        FALSE, // magazinecached
+        FALSE, // pageable
+        OUT mmnode^.ObjectCacheCache, // objectcache
+    )
+
+    KeAssert ( NOT OsError ( status ) )
+END
+
+FN MmAllocateMappedPages (
+    IN kenode : ^KeuNode,
+    IN flags : UWORD,
+    IN pages : UWORD,
+    IN pageable : UWORD,
+    OUT ptr : ^VOID,
+) : OsStatus
+
+    // Allocate a number of pages from the slab arena.
+
+    RETURN ExAllocateFromArena (
+        kenode^.Mmp^.SlabArenas[NOT NOT pageable], // arena
+        flags, // flags
+        pages << RTL_PAGE_SHIFT, // size
+        OUT ptr, // address
+    )
+END
+
+FN MmFreeMappedPages (
+    IN kenode : ^KeuNode,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+    IN pageable : UWORD,
+)
+
+    // Free a number of pages to the slab arena.
+
+    ExFreeToArena (
+        kenode^.Mmp^.SlabArenas[NOT NOT pageable], // arena
+        ptr, // address
+        pages << RTL_PAGE_SHIFT, // size
+    )
 END

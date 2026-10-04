@@ -102,7 +102,7 @@ EXPORT FN ExCreateMagazineCache (
     OUT magazinecache : ^ExpMagazineCache,
 ) : OsStatus
 
-    // Allocate and return a new pool cache structure.
+    // Allocate and return a new magazine cache structure.
 
     expnode := kenode^.Exp
 
@@ -776,12 +776,23 @@ FN ExuAdjustMagazineCache (
     ExpReapMagazineCacheDepot ( magazinecache )
 END
 
-FN ExpAdjustMagazineCaches (
-    IN list : ^ExpMagazineCacheList,
+FN ExuAdjustMagazineCaches (
+    IN kenode : ^KeuNode,
+    IN paged : UWORD,
     IN empty : UWORD,
 )
 
     // Adjust all of the pool caches on the given node.
+
+    expnode := kenode^.Exp
+
+    list : ^ExpMagazineCacheList
+
+    IF paged THEN
+        list = &expnode^.PgMagazineCacheList
+    ELSE
+        list = &expnode^.NpMagazineCacheList
+    END
 
     ExpLockMagazineCacheList ( list )
 
@@ -810,7 +821,7 @@ END
 ]
 
 #SECTION "INITtext"
-FN ExpInitializeMagazineCachesForNode (
+FN ExuInitializeMagazineCaches (
     IN kenode : ^KeuNode,
 )
 
@@ -824,6 +835,10 @@ FN ExpInitializeMagazineCachesForNode (
     //       tries to access the per-cpu cache with the old index.
 
     expnode := kenode^.Exp
+
+    IF NOT expnode THEN
+        LEAVE
+    END
 
     ExpInitializeMagazineCacheList ( &expnode^.PgMagazineCacheList )
     ExpInitializeMagazineCacheList ( &expnode^.NpMagazineCacheList )
@@ -863,19 +878,4 @@ FN ExpInitializeMagazineCachesForNode (
         "Medium Magazines", // name
         EXP_MEDIUM_MAGAZINE_SIZE, // size
     )
-END
-
-#SECTION "INITtext"
-FN ExpInitializeMagazineCaches ()
-
-    // Initialize magazine caches for all nodes.
-
-    i := 0
-    nodes := KeQueryNodeCount ()
-
-    WHILE i < nodes DO
-        ExpInitializeMagazineCachesForNode ( KeNumaNodeById ( i ) )
-
-        i += 1
-    END
 END

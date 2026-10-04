@@ -57,7 +57,7 @@ FN (KeContinuationF) FwtParticleContinuation (
     )
 
     IF thisfwd^.I >= thisfwd^.ExpireIn THEN
-        MmFreeToPoolCache (
+        MmFreeToObjectCache (
             FwtDataCache, // cache
             thisfwd, // ptr
         )
@@ -212,7 +212,7 @@ FN (KeContinuationF) FwtExplodeableThread (
         
         data : ^FwtData
 
-        status := MmAllocateFromPoolCache (
+        status := MmAllocateFromObjectCache (
             FwtDataCache, // cache
             0, // flags
             OUT data, // ptr
@@ -239,7 +239,7 @@ FN (KeContinuationF) FwtExplodeableThread (
         IF OsError ( status ) THEN
             RtlPrint ( "[FWT %x]No particle ", status )
 
-            MmFreeToPoolCache (
+            MmFreeToObjectCache (
                 FwtDataCache, // cache
                 data, // ptr
             )

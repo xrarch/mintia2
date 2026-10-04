@@ -4,11 +4,11 @@
 
 #INCLUDE "Iop.hjk"
 
-IopPacketCaches : ^MmpPoolCache[IOP_PACKET_TYPE_MAX]
+IopPacketCaches : ^MmpObjectCache[IOP_PACKET_TYPE_MAX]
 
-IopLocationCache : ^MmpPoolCache
+IopLocationCache : ^MmpObjectCache
 
-IopTrampolineCache : ^MmpPoolCache
+IopTrampolineCache : ^MmpObjectCache
 
 IopPacketSize : UBYTE[IOP_PACKET_TYPE_MAX] = {
     [IOP_PACKET_TYPE_NORMAL] = SIZEOF IoPacket,
@@ -17,20 +17,21 @@ IopPacketSize : UBYTE[IOP_PACKET_TYPE_MAX] = {
 
 #SECTION "INITtext"
 FN IopInitPacketCache (
-    IN cache : ^^MmpPoolCache,
+    IN cache : ^^MmpObjectCache,
     IN packetsize : UWORD,
     IN name : ^UBYTE,
 )
 
     // Initialize a packet cache.
 
-    status := MmCreatePoolCache (
-        MmCurrentAffinityNode (), // mmnode
+    status := MmCreateObjectCache (
+        KeNumaNodeById ( 0 ), // kenode
         name, // name
-        packetsize, // size
-        MM_NONPAGED_POOL, // poolindex
-        'IOPz', // tag
-        OUT cache^, // ptr
+        0, // flags
+        packetsize, // objectsize
+        TRUE, // magazinecached
+        FALSE, // pageable
+        OUT cache^, // objectcache
     )
 
 #ENTERSECTION "INITtext"
@@ -94,7 +95,7 @@ FN IopFreeLocation (
     IF location^.InternalFlags & IOP_LOCATION_FROM_ZONE THEN
         // Return to cache.
 
-        MmFreeToPoolCache (
+        MmFreeToObjectCache (
             IopLocationCache, // cache
             location, // ptr
         )
@@ -137,7 +138,7 @@ EXPORT FN IoCreateLocation (
         ELSE
             // Try to allocate from the location zone.
 
-            status = MmAllocateFromPoolCache (
+            status = MmAllocateFromObjectCache (
                 IopLocationCache, // cache
                 MM_ALLOCATE_WAIT, // flags
                 OUT location, // ptr
@@ -203,7 +204,7 @@ EXPORT FN IoAllocatePacket (
     // We acquire this lock APC-safe because it can also be taken by async IO
     // completion APCs when they finally free the packet.
 
-    status := MmAllocateFromPoolCache (
+    status := MmAllocateFromObjectCache (
         IopPacketCaches[ioptype], // cache
         MM_ALLOCATE_WAIT, // flags
         OUT packet, // ptr
@@ -273,7 +274,7 @@ EXPORT FN IoFreePacket (
 
     // Free a packet back to the appropriate zone or pool.
 
-    MmFreeToPoolCache (
+    MmFreeToObjectCache (
         IopPacketCaches[packet^.InternalType], // cache
         packet, // ptr
     )
@@ -375,7 +376,7 @@ FN IopBounceOnTrampoline (
     IF trampoline^.IopFlags & IOP_TRAMPOLINE_DONT_FREE == 0 THEN
         // Free the trampoline.
 
-        MmFreeToPoolCache (
+        MmFreeToObjectCache (
             IopTrampolineCache, // cache
             trampoline, // ptr
         )
@@ -579,7 +580,7 @@ EXPORT FN IoEnqueuePacket (
         // Nested I/O request.
         // Have to allocate a trampoline out of line.
 
-        status = MmAllocateFromPoolCache (
+        status = MmAllocateFromObjectCache (
             IopTrampolineCache, // cache
             MM_ALLOCATE_WAIT, // flags
             OUT trampoline, // ptr

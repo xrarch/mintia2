@@ -24,8 +24,6 @@ EXTERN FN ExpInitializeEvents ()
 
 EXTERN FN ExpInitializeArenas ()
 
-EXTERN FN ExpInitializeMagazineCaches ()
-
 EXTERN FN ExpHash (
     IN str : ^UBYTE,
 ) : UWORD
@@ -59,12 +57,12 @@ END
 STRUCT ExpNode
     WorkQueues : (KE_CACHE_LINE KeBalancedQueue)[EX_MAX_WORK_PRIORITY],
     NameBuckets : (KE_CACHE_LINE ExpNameBucket)[EXP_NAME_BUCKETS],
-    EventCounterCache : KE_CACHE_LINE ^MmpPoolCache,
+    EventCounterCache : KE_CACHE_LINE ^MmpObjectCache,
     MagazineCacheCache : ^MmpObjectCache,
 
 KE_CACHE_LINE_END
     
-    ArenaCache : ^MmpPoolCache,
+    ArenaCache : ^MmpObjectCache,
     ArenaListLock : KeLock,
     ArenaListHead : RtlListEntry,
     PreallocatedArenas : ^ExpArena,

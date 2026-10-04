@@ -13,7 +13,7 @@
 
 #DEFINE MMP_VPN_DB_SCAN_INTERVAL_MS 7000
 
-FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
+FN (ExWorkItemF) MmpAdjustPagedCacheWorker (
     IN context1 : UWORD,
     IN context2 : UWORD,
 )
@@ -24,7 +24,7 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
     mmnode := CAST context1 TO ^MmpNode
     kenode := mmnode^.KeNode
 
-    mmnode^.PgPoolCacheAdjustActive = FALSE
+    mmnode^.PgCacheAdjustActive = FALSE
 
     empty := mmnode^.AvailablePageCount < mmnode^.LowPageCount
 
@@ -44,13 +44,14 @@ FN (ExWorkItemF) MmpAdjustPagedPoolCacheWorker (
         )
     END
 
-    MmpAdjustPoolCaches (
-        &mmnode^.PgPoolCacheList, // list
+    ExuAdjustMagazineCaches (
+        kenode, // kenode
+        TRUE, // paged
         empty, // empty
     )
 END
 
-FN MmpAdjustAllPoolCachesSafely (
+FN MmpAdjustAllCachesSafely (
     IN mmnode : ^MmpNode,
     IN empty : UWORD,
 )
@@ -60,11 +61,11 @@ FN MmpAdjustAllPoolCachesSafely (
     // thread because the balance manager cannot safely take page faults as it
     // is a critical memory-making thread.
 
-    IF NOT mmnode^.PgPoolCacheAdjustActive THEN
-        mmnode^.PgPoolCacheAdjustActive = TRUE
+    IF NOT mmnode^.PgCacheAdjustActive THEN
+        mmnode^.PgCacheAdjustActive = TRUE
 
         ExEnqueueWorkItem (
-            &mmnode^.PgPoolCacheAdjustItem, // item
+            &mmnode^.PgCacheAdjustItem, // item
             EX_HIGH_WORK_PRIORITY, // priority
             empty, // head
             CAST mmnode TO UWORD, // context1
@@ -93,11 +94,12 @@ FN MmpAdjustAllPoolCachesSafely (
         kstacktoreap = next
     END
 
-    // Immediately chuck the nonpaged pool caches from the context
+    // Immediately chuck the nonpaged magazine caches from the context
     // of this thread.
 
-    MmpAdjustPoolCaches (
-        &mmnode^.NpPoolCacheList, // list
+    ExuAdjustMagazineCaches (
+        kenode, // kenode
+        FALSE, // paged
         empty, // empty
     )
 END
@@ -124,11 +126,11 @@ FN (KeContinuationF) MmuBalanceManager (
 
     mmnode := MmCurrentAffinityNode ()
 
-    mmnode^.PgPoolCacheAdjustActive = FALSE
+    mmnode^.PgCacheAdjustActive = FALSE
 
     ExInitializeWorkItem (
-        &mmnode^.PgPoolCacheAdjustItem, // item
-        &MmpAdjustPagedPoolCacheWorker, // routine
+        &mmnode^.PgCacheAdjustItem, // item
+        &MmpAdjustPagedCacheWorker, // routine
     )
 
     ms := 0
@@ -195,7 +197,7 @@ FN (KeContinuationF) MmuBalanceManager (
 
                 mssinceadjust = ms
 
-                MmpAdjustAllPoolCachesSafely (
+                MmpAdjustAllCachesSafely (
                     mmnode, // mmnode
                     mmnode^.AvailablePageCount <
                         mmnode^.LowPageCount, // empty
@@ -214,7 +216,7 @@ FN (KeContinuationF) MmuBalanceManager (
             // The low memory event was set.
             // Try to free up page frames in a hurry.
 
-            MmpAdjustAllPoolCachesSafely (
+            MmpAdjustAllCachesSafely (
                 mmnode, // mmnode
                 TRUE, // empty
             )

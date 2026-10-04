@@ -22,12 +22,13 @@ FN MmpInitializeMdlCache (
         mdlsize * MMP_SMALL_MDLS + MMU_ZONE_OVERHEAD )
 #END
 
-    status := MmCreatePoolCache (
-        mmnode, // mmnode
+    status := MmCreateObjectCache (
+        kenode, // kenode
         "Mdls", // name
-        mdlsize, // size
-        MM_NONPAGED_POOL, // poolindex
-        'MDLz', // tag
+        0, // flags
+        mdlsize, // objectsize
+        TRUE, // magazinecached
+        FALSE, // pageable
         OUT mmnode^.MdlCache, // ptr
     )
 

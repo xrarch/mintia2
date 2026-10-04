@@ -114,12 +114,13 @@ FN ObuInitializeType (
             pernodetype^.CachedNpBodySize = npsize
 
             IF npsize THEN
-                status = MmCreatePoolCache (
-                    kenode^.Mmp, // mmnode
+                status = MmCreateObjectCache (
+                    kenode, // kenode
                     npname, // name
-                    npsize, // size
-                    MM_NONPAGED_POOL, // poolindex
-                    type^.Tag, // tag
+                    0, // flags
+                    npsize, // objectsize
+                    TRUE, // magazinecached
+                    FALSE, // pageable
                     OUT pernodetype^.NpPartCache, // ptr
                 )
 
@@ -129,12 +130,13 @@ FN ObuInitializeType (
             END
 
             IF psize THEN
-                status = MmCreatePoolCache (
-                    kenode^.Mmp, // mmnode
+                status = MmCreateObjectCache (
+                    kenode, // kenode
                     pgname, // name
-                    psize, // size
-                    MM_PAGED_POOL, // poolindex
-                    type^.Tag, // tag
+                    0, // flags
+                    psize, // objectsize
+                    TRUE, // magazinecached
+                    TRUE, // pageable
                     OUT pernodetype^.PgPartCache, // ptr
                 )
 
@@ -222,7 +224,7 @@ FN ObuAllocateObject (
 
             internalflags |= OBP_NP_FROM_CACHE
 
-            status = MmAllocateFromPoolCache (
+            status = MmAllocateFromObjectCache (
                 type^.NpPartCache, // cache
                 MM_ALLOCATE_WAIT, // flags
                 OUT nppart, // ptr
@@ -251,7 +253,7 @@ FN ObuAllocateObject (
 
             internalflags |= OBP_PG_FROM_CACHE
 
-            status = MmAllocateFromPoolCache (
+            status = MmAllocateFromObjectCache (
                 type^.PgPartCache, // cache
                 MM_ALLOCATE_WAIT, // flags
                 OUT pgpart, // ptr
@@ -337,7 +339,7 @@ FN ObuAllocateObject (
 
     IF nppart THEN
         IF internalflags & OBP_NP_FROM_CACHE THEN
-            MmFreeToPoolCache (
+            MmFreeToObjectCache (
                 type^.NpPartCache, // cache
                 nppart, // ptr
             )
@@ -404,7 +406,7 @@ FN ObuFreeObject (
         // Only a single part.
 
         IF flags & OBP_PG_FROM_CACHE THEN
-            MmFreeToPoolCache (
+            MmFreeToObjectCache (
                 type^.PgPartCache, // cache
                 header, // ptr
             )
@@ -420,7 +422,7 @@ FN ObuFreeObject (
         // Two parts.
 
         IF flags & OBP_PG_FROM_CACHE THEN
-            MmFreeToPoolCache (
+            MmFreeToObjectCache (
                 type^.PgPartCache, // cache
                 header, // ptr
             )
@@ -433,7 +435,7 @@ FN ObuFreeObject (
         END
 
         IF flags & OBP_NP_FROM_CACHE THEN
-            MmFreeToPoolCache (
+            MmFreeToObjectCache (
                 type^.NpPartCache, // cache
                 object - SIZEOF ObpCommonHeader, // ptr
             )

@@ -16,12 +16,13 @@ FN ExpInitializeEventCountersForNode (
         LEAVE
     END
 
-    status := MmCreatePoolCache (
-        kenode^.Mmp, // mmnode
+    status := MmCreateObjectCache (
+        kenode, // kenode
         "Event Counters", // name
-        SIZEOF ExuEventCounter, // size
-        MM_NONPAGED_POOL, // poolindex
-        'EvCn', // tag
+        0, // flags
+        SIZEOF ExuEventCounter, // objectsize
+        TRUE, // magazinecached
+        FALSE, // pageable
         OUT kenode^.Exp^.EventCounterCache, // ptr
     )
 
@@ -59,7 +60,7 @@ EXPORT FN ExAllocateEventCounter (
 
     expnode := KeCurrentVolatileNode ()^.Exp
 
-    status := MmAllocateFromPoolCache (
+    status := MmAllocateFromObjectCache (
         expnode^.EventCounterCache, // cache
         flags, // flags
         OUT counter, // ptr
@@ -113,7 +114,7 @@ EXPORT FN ExUnreferenceEventCounter (
 
         expnode := KeNumaNodeFromSpacePointer ( counter )^.Exp
 
-        MmFreeToPoolCache (
+        MmFreeToObjectCache (
             expnode^.EventCounterCache, // cache
             counter, // ptr
         )
