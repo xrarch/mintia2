@@ -867,6 +867,21 @@ EXPORT FN KeWaitForObjects (
                 object^.SignalCount = signal - 1
             END
 
+#IF BLD_MP
+            // Set all the waitblocks we earlier enqueued to UNWAITED so that
+            // earlier objects don't lose signal counts.
+
+            waitblock = &waitblocktable[0]
+            j := 0
+
+            WHILE j < i DO
+                waitblock^.Flags |= KEP_WB_UNWAITED
+
+                j += 1
+                waitblock += SIZEOF KepWaitBlock
+            END
+#END
+
             KepReleaseThreadElevated ( thread )
 
             KepReleaseObjectElevated ( object )
@@ -885,7 +900,7 @@ EXPORT FN KeWaitForObjects (
             // reached before we aborted, and "status" is equivalent to whatever
             // we should return when we leave.
 
-            j := 0
+            j = 0
             waitblock = &waitblocktable[0]
 
             WHILE j < i DO
