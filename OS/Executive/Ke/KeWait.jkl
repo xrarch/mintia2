@@ -811,6 +811,24 @@ EXPORT FN KeWaitForObjects (
 
         KepAcquireObjectElevated ( object )
 
+        // Take the thread's lock too to guard against an abort.
+
+        KepAcquireThreadElevated ( thread )
+
+#IF BLD_MP
+        IF thread^.WaitAttempt == KEP_THREAD_WAIT_ABORTED THEN
+            // We were actually aborted, so nevermind.
+
+            KepReleaseThreadElevated ( thread )
+
+            KepReleaseObjectElevated ( object )
+
+            status = thread^.WaitStatus
+
+            GOTO Abort
+        END
+#END
+
         // Capture the current signal count.
 
         signal := object^.SignalCount
@@ -848,6 +866,8 @@ EXPORT FN KeWaitForObjects (
 
                 object^.SignalCount = signal - 1
             END
+
+            KepReleaseThreadElevated ( thread )
 
             KepReleaseObjectElevated ( object )
 
@@ -909,6 +929,8 @@ EXPORT FN KeWaitForObjects (
         object^.WaiterCount += 1
 
         // Release the object lock.
+
+        KepReleaseThreadElevated ( thread )
 
         KepReleaseObjectElevated ( object )
 
