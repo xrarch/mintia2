@@ -158,14 +158,14 @@ FN KeuInitializeThread (
 #IF BLD_MP
     KepInitializeSpinlock ( &thread^.Spinlock, "Thread" )
 
-    thread^.WaitAttempt = KEP_THREAD_WAIT_NONE
-
     thread^.AffinityPrb = NULLPTR
     thread^.CurrentPrb = NULLPTR
     thread^.Pinned = FALSE
     thread^.Switching = FALSE
     thread^.CurrentMode = KE_KERNEL_MODE
 #END
+
+    thread^.WaitState = KEP_THREAD_WAIT_SATISFIED
 
     thread^.IgnoreEventCount = 0
 
@@ -395,7 +395,7 @@ FN KepWakeThreadForSignal (
     IF (thread^.Status == KE_THREAD_WAITING
 #IF BLD_MP
         OR (thread^.Status == KE_THREAD_RUNNING AND
-        thread^.WaitAttempt == KEP_THREAD_WAIT_TRY)
+        thread^.WaitState == KEP_THREAD_WAIT_TRY)
 #END
         ) AND thread^.WaitIpl == KEP_IPL_LOW THEN
 

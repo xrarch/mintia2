@@ -91,7 +91,7 @@ EXPORT FN KeEnqueueKapc (
         prb := KEP_CURRENT_PRB
 
 #IF BLD_MP
-        IF thread^.WaitAttempt == KEP_THREAD_WAIT_TRY AND
+        IF thread^.WaitState == KEP_THREAD_WAIT_TRY AND
             (thread^.WaitIpl == KEP_IPL_LOW OR
             thread^.Alertable == KE_CANCEL_ON_KAPC) THEN
 
@@ -185,7 +185,7 @@ EXPORT FN KeEnqueueUapc (
     IF (thread^.Status == KE_THREAD_WAITING
 #IF BLD_MP
         OR (thread^.Status == KE_THREAD_RUNNING AND
-        thread^.WaitAttempt == KEP_THREAD_WAIT_TRY)
+        thread^.WaitState == KEP_THREAD_WAIT_TRY)
 #END
         ) AND thread^.WaitIpl == KEP_IPL_LOW AND
         thread^.WaitMode == KE_USER_MODE AND
@@ -259,7 +259,7 @@ EXPORT FN KeEnqueueLapc (
     IF (thread^.Status == KE_THREAD_WAITING
 #IF BLD_MP
         OR (thread^.Status == KE_THREAD_RUNNING AND
-        thread^.WaitAttempt == KEP_THREAD_WAIT_TRY)
+        thread^.WaitState == KEP_THREAD_WAIT_TRY)
 #END
         ) AND thread^.WaitIpl == KEP_IPL_LOW AND
         thread^.WaitMode == KE_USER_MODE THEN

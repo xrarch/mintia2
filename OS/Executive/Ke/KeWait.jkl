@@ -7,18 +7,6 @@
 #INCLUDE "<ll>/System/OsStatus.hjk"
 #INCLUDE "<ll>/System/OsSignal.hjk"
 
-#IF BLD_MP
-
-#MACRO KepSetWaitAttempt ( thread, state ) [
-    NOTHING (thread)^.WaitAttempt = (state)
-]
-
-#ELSE
-
-#MACRO KepSetWaitAttempt ( thread, state ) []
-
-#END
-
 #MACRO KepDequeueWaitBlock ( waitblock ) [
     object := (waitblock)^.Object
 
@@ -369,7 +357,7 @@ FN KepUnwaitThread (
     IF thread^.Status != KE_THREAD_WAITING
 #IF BLD_MP
         AND (thread^.Status != KE_THREAD_RUNNING OR
-        thread^.WaitAttempt != KEP_THREAD_WAIT_TRY)
+        thread^.WaitState != KEP_THREAD_WAIT_TRY)
 #END
         THEN
 
@@ -378,36 +366,13 @@ FN KepUnwaitThread (
     END
 #END
 
-#IF BLD_MP
-    IF thread^.Status == KE_THREAD_RUNNING THEN
-        // Must be in WAIT_TRY. Abort the wait.
+    // Must be in WAIT_TRY. Abort the wait.
 
-        thread^.WaitAttempt = KEP_THREAD_WAIT_ABORTED
-    END
-#END
+    thread^.WaitState = KEP_THREAD_WAIT_SATISFIED
 
     // Store the wake status in the thread object.
 
     thread^.WaitStatus = status
-
-    // Set all the thread's wait blocks to UNWAITED.
-    // They'll be dequeued under the lock of each object as they stumble across
-    // them, and will be finally removed by the thread when it wakes up.
-
-    waitblock := thread^.WaitBlockTable
-    count := thread^.WaitCount
-
-    WHILE count DO
-        waitblock^.Flags |= KEP_WB_UNWAITED
-
-        count -= 1
-        waitblock += SIZEOF KepWaitBlock
-    END
-
-    // Set the timeout wait block unwaited too. If the timer was enqueued, it'll
-    // be dequeued by the thread when he wakes up or notices he was aborted.
-
-    thread^.TimeoutWaitBlock.Flags |= KEP_WB_UNWAITED
 
     IF thread^.Status == KE_THREAD_WAITING THEN
         // Replenish the quantum of the thread.
@@ -486,9 +451,9 @@ FN KepSatisfyObject (
 
         object^.WaiterCount -= 1
 
-        IF waitblock^.Flags & KEP_WB_UNWAITED THEN
-            // This wait block was already unwaited and left on our queue by
-            // someone else. Get the next one and continue.
+        IF thread^.WaitState == KEP_THREAD_WAIT_SATISFIED THEN
+            // The thread this wait block belongs to was already satisfied.
+            // Don't do that a second time. Get the next one and continue.
 
             KepReleaseThreadElevated ( thread )
 
@@ -499,24 +464,17 @@ FN KepSatisfyObject (
 
         // Still active. Unwait the thread.
 
-        IF NOT status THEN
-            // Unwait with the status stored in the wait block.
+        wakestatus := status
 
-            KepUnwaitThread (
-                waitblock^.Thread, // thread
-                waitblock^.WakeStatus, // status
-                priorityboost, // priorityboost
-            )
-
-        ELSE
-            // Unwait with the specified status.
-
-            KepUnwaitThread (
-                waitblock^.Thread, // thread
-                status, // status
-                priorityboost, // priorityboost
-            )
+        IF NOT wakestatus THEN
+            wakestatus = waitblock^.WakeStatus
         END
+
+        KepUnwaitThread (
+            waitblock^.Thread, // thread
+            wakestatus, // status
+            priorityboost, // priorityboost
+        )
 
         KepReleaseThreadElevated ( thread )
 
@@ -796,7 +754,7 @@ EXPORT FN KeWaitForObjects (
     // by Arun Kishan in an interview about how the Windows kernel team
     // broke up the dispatcher spinlock.
 
-    KepSetWaitAttempt ( thread, KEP_THREAD_WAIT_TRY )
+    thread^.WaitState = KEP_THREAD_WAIT_TRY
 
     KepReleaseThreadElevated ( thread )
 
@@ -816,8 +774,9 @@ EXPORT FN KeWaitForObjects (
         KepAcquireThreadElevated ( thread )
 
 #IF BLD_MP
-        IF thread^.WaitAttempt == KEP_THREAD_WAIT_ABORTED THEN
-            // We were actually aborted, so nevermind.
+        IF thread^.WaitState == KEP_THREAD_WAIT_SATISFIED THEN
+            // We were actually aborted by another processor satisfying an
+            // object, so nevermind.
 
             KepReleaseThreadElevated ( thread )
 
@@ -868,18 +827,10 @@ EXPORT FN KeWaitForObjects (
             END
 
 #IF BLD_MP
-            // Set all the waitblocks we earlier enqueued to UNWAITED so that
-            // earlier objects don't lose signal counts.
+            // Set the thread to wait-satisfied so that objects being
+            // concurrently satisfied don't double-dip.
 
-            waitblock = &waitblocktable[0]
-            j := 0
-
-            WHILE j < i DO
-                waitblock^.Flags |= KEP_WB_UNWAITED
-
-                j += 1
-                waitblock += SIZEOF KepWaitBlock
-            END
+            thread^.WaitState = KEP_THREAD_WAIT_SATISFIED
 #END
 
             KepReleaseThreadElevated ( thread )
@@ -900,7 +851,7 @@ EXPORT FN KeWaitForObjects (
             // reached before we aborted, and "status" is equivalent to whatever
             // we should return when we leave.
 
-            j = 0
+            j := 0
             waitblock = &waitblocktable[0]
 
             WHILE j < i DO
@@ -909,8 +860,6 @@ EXPORT FN KeWaitForObjects (
                 j += 1
                 waitblock += SIZEOF KepWaitBlock
             END
-
-            KepSetWaitAttempt ( thread, KEP_THREAD_WAIT_NONE )
 
             KepLowerIpl ( ipl )
 
@@ -1002,7 +951,7 @@ EXPORT FN KeWaitForObjects (
     // APC, etc) from another processor aborted our wait while we were enqueuing
     // wait blocks.
 
-    IF thread^.WaitAttempt == KEP_THREAD_WAIT_ABORTED THEN
+    IF thread^.WaitState == KEP_THREAD_WAIT_SATISFIED THEN
         // It was aborted. We have to dequeue all our wait blocks and return.
         //
         // Release the thread lock so we don't violate the object->thread
@@ -1040,9 +989,9 @@ EXPORT FN KeWaitForObjects (
 
         GOTO Abort
     END
-
-    thread^.WaitAttempt = KEP_THREAD_WAIT_COMMITTED
 #END
+
+    thread^.WaitState = KEP_THREAD_WAIT_COMMITTED
 
     // The wait shall proceed.
 
