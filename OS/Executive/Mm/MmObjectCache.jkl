@@ -17,9 +17,9 @@
 #DEFINE MMP_MAXIMUM_MEDIUM_SLAB_PAGES 4
 #DEFINE MMP_MAXIMUM_LARGE_SLAB_PAGES 6
 
-#DEFINE MMP_SMALL_OBJECT 1024
-#DEFINE MMP_MEDIUM_OBJECT 4096
-#DEFINE MMP_LARGE_OBJECT 8192
+#DEFINE MMP_SMALL_OBJECT [(RTL_PAGE_SIZE / 4)]
+#DEFINE MMP_MEDIUM_OBJECT [(RTL_PAGE_SIZE)]
+#DEFINE MMP_LARGE_OBJECT [(RTL_PAGE_SIZE * 2)]
 
 STRUCT MmpObjectCache
     Lock : KeLock,
@@ -143,13 +143,14 @@ FN MmAllocateFromObjectCache (
     // Initialize all VPEs of the slab to point to the first one as the
     // control VPE.
 
+    othervpe := vpe
     max : UWORD = objectcache^.SlabPages
     i := 0
 
     WHILE i < max DO
-        vpe^.U.ObjectCache.SlabControl = vpe
+        othervpe^.U.ObjectCache.SlabControl = vpe
 
-        vpe += MMP_VPE_SIZE
+        othervpe += MMP_VPE_SIZE
         i += 1
     END
 
@@ -410,12 +411,10 @@ FN MmCreateObjectCache (
     IF magazinecached THEN
         // Initialize a magazine cache.
 
-#IF 0
         status = ExCreateMagazineCache (
             kenode, // kenode
             name, // name
             pageable, // pageable
-            &MmpAllocateFromObjectCache, // allocfunc
             &MmpFreeToObjectCache, // freefunc
             objectcache, // context
             OUT objectcache^.MagazineCache, // magazinecache
@@ -426,7 +425,6 @@ FN MmCreateObjectCache (
 
             RETURN status
         END
-#END
     END
 
     RETURN status
@@ -438,12 +436,13 @@ FN MmDeleteObjectCache (
 )
 
     // Delete an object cache.
-
-    KeAssert ( RtlEmptyList ( &objectcache^.PartialSlabListHead ) )
+    // All objects should have been freed.
 
     IF objectcache^.MagazineCache THEN
         ExDeleteMagazineCache ( objectcache^.MagazineCache )
     END
+
+    KeAssert ( RtlEmptyList ( &objectcache^.PartialSlabListHead ) )
 
     MmpFreeObjectCache ( objectcache )
 END

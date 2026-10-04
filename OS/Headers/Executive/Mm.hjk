@@ -192,3 +192,24 @@ EXTERN FN MmAllocatePoolPages (
     IN poolindex : UWORD,
     OUT ptr : ^VOID,
 ) : OsStatus
+
+EXTERN FN MmCreateObjectCache (
+    IN kenode : ^KeuNode,
+    IN name : ^UBYTE,
+    IN flags : UWORD,
+    IN objectsize : UWORD,
+    IN magazinecached : UWORD,
+    IN pageable : UWORD,
+    OUT objectcache : ^MmpObjectCache,
+) : OsStatus
+
+EXTERN FN MmAllocateFromObjectCache (
+    IN objectcache : ^MmpObjectCache,
+    IN flags : UWORD,
+    OUT object : ^VOID,
+) : OsStatus
+
+EXTERN FN MmFreeToObjectCache (
+    IN objectcache : ^MmpObjectCache,
+    IN object : ^VOID,
+)

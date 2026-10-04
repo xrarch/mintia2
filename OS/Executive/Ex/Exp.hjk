@@ -24,6 +24,8 @@ EXTERN FN ExpInitializeEvents ()
 
 EXTERN FN ExpInitializeArenas ()
 
+EXTERN FN ExpInitializeMagazineCaches ()
+
 EXTERN FN ExpHash (
     IN str : ^UBYTE,
 ) : UWORD
@@ -37,10 +39,28 @@ END
 
 #DEFINE EXP_MAX_POPULATORS 3
 
+STRUCT ExpMagazineCacheList
+    Head : RtlListEntry,
+    MasterListLock : KeLock,
+END
+
+STRUCT ExpMagazineType
+    ObjectCache : ^MmpObjectCache,
+    Size : UBYTE,
+END
+
+ENUM ExpMagazineTypeEnum : UBYTE
+    EXP_MAGAZINE_SMALL,
+    EXP_MAGAZINE_MEDIUM,
+
+    EXP_MAGAZINE_MAX,
+END
+
 STRUCT ExpNode
     WorkQueues : (KE_CACHE_LINE KeBalancedQueue)[EX_MAX_WORK_PRIORITY],
     NameBuckets : (KE_CACHE_LINE ExpNameBucket)[EXP_NAME_BUCKETS],
     EventCounterCache : KE_CACHE_LINE ^MmpPoolCache,
+    MagazineCacheCache : ^MmpObjectCache,
 
 KE_CACHE_LINE_END
     
@@ -65,4 +85,11 @@ KE_CACHE_LINE_END
 KE_CACHE_LINE_END
 
     ArenaTagListHead : RtlListEntry,
+
+KE_CACHE_LINE_END
+
+    MagazineTypeTable : ExpMagazineType[EXP_MAGAZINE_MAX],
+
+    NpMagazineCacheList : ExpMagazineCacheList,
+    PgMagazineCacheList : ExpMagazineCacheList,
 END

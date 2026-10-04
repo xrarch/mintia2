@@ -40,7 +40,6 @@ KE_CACHE_LINE_END
 
     Name : ^UBYTE,
 
-    Allocate : ExMagazineCacheAllocateF,
     Free : ExMagazineCacheFreeF,
 
     Context : ^VOID,
@@ -90,8 +89,8 @@ END
     NOTHING (list)^.ReapLimit = 0
 ]
 
-#DEFINE EXP_LARGE_MAGAZINE_SIZE 4
-#DEFINE EXP_SMALL_MAGAZINE_SIZE 8
+#DEFINE EXP_SMALL_MAGAZINE_SIZE 4
+#DEFINE EXP_MEDIUM_MAGAZINE_SIZE 8
 
 #SECTION "PAGEtext"
 EXPORT FN ExCreateMagazineCache (
@@ -100,67 +99,58 @@ EXPORT FN ExCreateMagazineCache (
     IN pageable : UWORD,
     IN freefunc : ExMagazineCacheFreeF,
     IN context : ^VOID,
-    OUT poolcache : ^ExpMagazineCache,
+    OUT magazinecache : ^ExpMagazineCache,
 ) : OsStatus
 
     // Allocate and return a new pool cache structure.
 
     expnode := kenode^.Exp
 
-    status := ExpAllocateFromSlabCache (
-        &expnode^.MagazineCacheSlabs, // scache
-        TRUE, // wait
-        OUT poolcache, // poolcache
+    status := MmAllocateFromObjectCache (
+        expnode^.MagazineCacheCache, // objectcache
+        MM_ALLOCATE_WAIT, // flags
+        OUT magazinecache, // object
     )
 
     IF OsError ( status ) THEN
         RETURN status
     END
 
-    // Determine the magazine size based on whether the size of each cached
-    // block is smaller or larger than what the slab layer considers a small
-    // pool block.
-
-    IF size < MMP_SMALL_POOL_BLOCK THEN
-        poolcache^.MagazineType = &mmnode^.MagazineTypeTable[MMP_MAGAZINE_SMALL]
-    ELSE
-        poolcache^.MagazineType = &mmnode^.MagazineTypeTable[MMP_MAGAZINE_LARGE]
-    END
+    magazinecache^.MagazineType =
+        &expnode^.MagazineTypeTable[EXP_MAGAZINE_SMALL]
 
     // Save the name of the cache.
 
-    poolcache^.Name = name
+    magazinecache^.Name = name
 
-    poolcache^.Allocate = allocfunc
-    poolcache^.Free = freefunc
-    poolcache^.Delete = deletefunc
-    poolcache^.Context = context
+    magazinecache^.Free = freefunc
+    magazinecache^.Context = context
 
-    poolcache^.ExNode = mmnode
-    poolcache^.ProcessorCount = mmnode^.KeNode^.ProcessorCount
+    magazinecache^.ExNode = expnode
+    magazinecache^.ProcessorCount = kenode^.ProcessorCount
 
-    KeInitializeLock ( &poolcache^.DepotLock, "Depot" )
+    KeInitializeLock ( &magazinecache^.DepotLock, "Depot" )
 
     // Set the depot lists to empty.
 
-    ExpInitializeDepotList ( &poolcache^.FullMagazineList )
-    ExpInitializeDepotList ( &poolcache^.EmptyMagazineList )
+    ExpInitializeDepotList ( &magazinecache^.FullMagazineList )
+    ExpInitializeDepotList ( &magazinecache^.EmptyMagazineList )
 
     // Insert on global list.
 
     list : ^ExpMagazineCacheList
 
     IF NOT pageable THEN
-        list = &mmnode^.NpMagazineCacheList
+        list = &expnode^.NpMagazineCacheList
     ELSE
-        list = &mmnode^.PgMagazineCacheList
+        list = &expnode^.PgMagazineCacheList
     END
 
     ExpLockMagazineCacheList ( list )
 
     RtlInsertAtTailList (
         &list^.Head, // head
-        &poolcache^.MasterListEntry, // entry
+        &magazinecache^.MasterListEntry, // entry
     )
 
     // Initialize the per-CPU caches with the global list lock still held to
@@ -171,7 +161,7 @@ EXPORT FN ExCreateMagazineCache (
     i := 0
 
     percpu := ExpMagazineCachePerCpuById (
-        poolcache, // magazinecache
+        magazinecache, // magazinecache
         0, // id
     )
 
@@ -182,7 +172,7 @@ EXPORT FN ExCreateMagazineCache (
         percpu^.Previous = NULLPTR
         percpu^.Rounds = -1
         percpu^.PreviousRounds = -1
-        percpu^.MagazineSize = poolcache^.MagazineType^.Size
+        percpu^.MagazineSize = magazinecache^.MagazineType^.Size
 
         i += 1
         percpu += SIZEOF ExpMagazineCachePerCpu
@@ -220,9 +210,9 @@ FN ExpDestroyAndFreeMagazine (
 
     // Un-skip depot list link and free magazine.
 
-    ExFreeToMagazineCache (
-        magazinecache^.MagazineType^.MagazineCache, // magazinecache
-        magazine - SIZEOF ^VOID, // ptr
+    MmFreeToObjectCache (
+        magazinecache^.MagazineType^.ObjectCache, // objectcache
+        magazine - SIZEOF ^VOID, // object
     )
 END
 
@@ -456,16 +446,16 @@ EXPORT FN ExDeleteMagazineCache (
 
     // Delete a pool cache.
 
-    mmnode := magazinecache^.ExNode
+    expnode := magazinecache^.ExNode
 
     // Remove from global list.
 
     list : ^ExpMagazineCacheList
 
     IF NOT magazinecache^.Pageable THEN
-        list = &mmnode^.NpMagazineCacheList
+        list = &expnode^.NpMagazineCacheList
     ELSE
-        list = &mmnode^.PgMagazineCacheList
+        list = &expnode^.PgMagazineCacheList
     END
 
     ExpLockMagazineCacheList ( list )
@@ -478,12 +468,11 @@ EXPORT FN ExDeleteMagazineCache (
 
     ExuPurgeMagazineCache ( magazinecache )
 
-    // Free pool cache to pool cache slab cache.
-    // Say that ten times fast.
+    // Free magazine cache to magazine cache object cache.
 
-    ExpFreeToSlabCache (
-        &mmnode^.MagazineCacheSlabs, // scache
-        magazinecache, // ptr
+    MmFreeToObjectCache (
+        expnode^.MagazineCacheCache, // objectcache
+        magazinecache, // object
     )
 END
 
@@ -532,7 +521,7 @@ EXPORT FN ExAllocateFromMagazineCache (
         //       skipped in a subtle way here that shouldn't be confused with an
         //       off-by-one bug.
 
-        ptr = percpu^.Loaded[rounds]
+        ptr := percpu^.Loaded[rounds]
         percpu^.Rounds = rounds - 1
 
         ExpUnlockMagazineCache ( percpu, ipl )
@@ -694,8 +683,8 @@ EXPORT FN ExFreeToMagazineCache (
 
     ExpUnlockMagazineCache ( percpu, ipl )
 
-    status := ExAllocateFromObjectCache (
-        magtype^.MagazineCache, // magazinecache
+    status := MmAllocateFromObjectCache (
+        magtype^.ObjectCache, // objectcache
         0, // flags
         OUT magazine, // ptr
     )
@@ -711,8 +700,8 @@ EXPORT FN ExFreeToMagazineCache (
 
             ExpUnlockMagazineCache ( percpu, ipl )
 
-            ExFreeToMagazineCache (
-                magtype^.MagazineCache, // magazinecache
+            MmFreeToObjectCache (
+                magtype^.ObjectCache, // objectcache
                 magazine, // ptr
             )
 
@@ -747,7 +736,7 @@ END
 
 #SECTION "INITtext"
 FN ExpInitializeMagazineType (
-    IN mmnode : ^ExpNode,
+    IN kenode : ^KeuNode,
     IN magtype : ^ExpMagazineType,
     IN name : ^UBYTE,
     IN size : UWORD,
@@ -757,18 +746,19 @@ FN ExpInitializeMagazineType (
 
     magtype^.Size = size
 
-    status := ExCreateMagazineCache (
-        mmnode, // mmnode
+    status := MmCreateObjectCache (
+        kenode, // kenode
         name, // name
-        (size + 1) * SIZEOF ^VOID, // size
-        MM_NONPAGED_POOL, // poolindex
-        'Magz', // tag
-        OUT magtype^.MagazineCache, // ptr
+        0, // flags
+        (size + 1) * SIZEOF ^VOID, // objectsize
+        TRUE, // magazinecached
+        FALSE, // pageable
+        OUT magtype^.ObjectCache, // ptr
     )
 
 #ENTERSECTION "INITtext"
     IF OsError ( status ) THEN
-        KeCrash ( "ExpInitializeMagazineType: failed to create pool cache\n" )
+        KeCrash ( "ExpInitializeMagazineType: failed to create object cache\n" )
     END
 #LEAVESECTION
 
@@ -820,11 +810,11 @@ END
 ]
 
 #SECTION "INITtext"
-FN ExpInitializeMagazineCache (
+FN ExpInitializeMagazineCachesForNode (
     IN kenode : ^KeuNode,
 )
 
-    // Initialize the pool cache.
+    // Initialize the magazine cache package.
     //
     // NOTE: We always create as many per-cpu caches in each pool cache as there
     //       are the maximum number of CPUs in the any node, not just in the
@@ -833,45 +823,59 @@ FN ExpInitializeMagazineCache (
     //       fewer processors and could perform an invalid memory access if it
     //       tries to access the per-cpu cache with the old index.
 
-    mmnode := kenode^.Exp
+    expnode := kenode^.Exp
 
-    ExpInitializeMagazineCacheList ( &mmnode^.PgMagazineCacheList )
-    ExpInitializeMagazineCacheList ( &mmnode^.NpMagazineCacheList )
+    ExpInitializeMagazineCacheList ( &expnode^.PgMagazineCacheList )
+    ExpInitializeMagazineCacheList ( &expnode^.NpMagazineCacheList )
 
-    // Initialize a slab cache to allocate pool caches from.
+    // Initialize an object cache to allocate magazine caches from.
 
-    ExpInitializeSlabCache (
-        mmnode, // mmnode
-        &mmnode^.MagazineCacheSlabs, // scache
+    status := MmCreateObjectCache (
+        kenode, // kenode
+        "Magazine Caches", // name
+        0, // flags
         SIZEOF ExpMagazineCache +
-        KeQueryMostProcessorsInAnyNode () * SIZEOF ExpMagazineCachePerCpu, // size
-        MM_NONPAGED_POOL, // poolindex
-        'PoCa', // tag
+        KeQueryMostProcessorsInAnyNode () *
+        SIZEOF ExpMagazineCachePerCpu, // objectsize
+        FALSE, // magazinecached
+        FALSE, // pageable
+        OUT expnode^.MagazineCacheCache, // objectcache
     )
 
-    // Initialize a slab cache to allocate slab caches from.
-
-    ExpInitializeSlabCache (
-        mmnode, // mmnode
-        &mmnode^.SlabCacheSlabs, // scache
-        SIZEOF ExpSlabCache, // size
-        MM_NONPAGED_POOL, // poolindex
-        'PoSl', // tag
-    )
+#ENTERSECTION "INITtext"
+    IF OsError ( status ) THEN
+        KeCrash ( "ExpInitializeMagazineCache: failed to create\n" )
+    END
+#LEAVESECTION
 
     // Initialize the magazine types.
 
     ExpInitializeMagazineType (
-        mmnode, // mmnode
-        &mmnode^.MagazineTypeTable[MMP_MAGAZINE_SMALL], // magtype
-        "Small Block Magazines", // name
-        MMP_SMALL_MAGAZINE_SIZE, // size
+        kenode, // kenode
+        &expnode^.MagazineTypeTable[EXP_MAGAZINE_SMALL], // magtype
+        "Small Magazines", // name
+        EXP_SMALL_MAGAZINE_SIZE, // size
     )
 
     ExpInitializeMagazineType (
-        mmnode, // mmnode
-        &mmnode^.MagazineTypeTable[MMP_MAGAZINE_LARGE], // magtype
-        "Large Block Magazines", // name
-        MMP_LARGE_MAGAZINE_SIZE, // size
+        kenode, // kenode
+        &expnode^.MagazineTypeTable[EXP_MAGAZINE_MEDIUM], // magtype
+        "Medium Magazines", // name
+        EXP_MEDIUM_MAGAZINE_SIZE, // size
     )
+END
+
+#SECTION "INITtext"
+FN ExpInitializeMagazineCaches ()
+
+    // Initialize magazine caches for all nodes.
+
+    i := 0
+    nodes := KeQueryNodeCount ()
+
+    WHILE i < nodes DO
+        ExpInitializeMagazineCachesForNode ( KeNumaNodeById ( i ) )
+
+        i += 1
+    END
 END
