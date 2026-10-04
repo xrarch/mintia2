@@ -223,7 +223,13 @@ FN (ExArenaLookupTagF) MmpLookupMappedArenaTag (
         (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
     )
 
-    RETURN vpe^.MappedArenaTag
+    tag := vpe^.MappedArenaTag
+
+    IF remove THEN
+        vpe^.MappedArenaTag = NULLPTR
+    END
+
+    RETURN tag
 END
 
 FN (ExArenaInsertTagF) MmpInsertMappedArenaTag (
@@ -272,7 +278,7 @@ FN MmpInitializeMappedPages (
         "NonpagedMappedArena", // name
         kenode, // kenode
         0, // flags
-        NULLPTR, // tagcallbacks
+        &tagcallbacks, // tagcallbacks
         &importcallbacks, // importcallbacks
         0, // quantumcachemax
         FALSE, // pageable
@@ -296,7 +302,7 @@ FN MmpInitializeMappedPages (
         "PagedMappedArena", // name
         kenode, // kenode
         0, // flags
-        NULLPTR, // tagcallbacks
+        &tagcallbacks, // tagcallbacks
         &importcallbacks, // importcallbacks
         0, // quantumcachemax
         TRUE, // pageable
