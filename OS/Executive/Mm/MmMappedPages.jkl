@@ -85,10 +85,13 @@ FN (ExArenaImportF) MmpImportNonpageable (
 
             // Free everything we just did.
 
-            i = 0
+#IF BLD_CHK
             colorptr = address
+#END
 
-            WHILE i < pages DO
+            WHILE i DO
+                i -= 1
+
                 ptecontents := pte[i]
 
                 KeAssert ( MmpIsPteValid ( ptecontents ) )
@@ -102,8 +105,6 @@ FN (ExArenaImportF) MmpImportNonpageable (
 
                 colorptr += RTL_PAGE_SIZE
 #END
-
-                i += 1
             END
 
             status = OS_STATUS_NO_MEMORY
