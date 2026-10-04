@@ -499,13 +499,17 @@ FN MmuInitializeStage1 ()
         mmnode^.PagefileState^.CommitRemaining += mmnode^.AvailablePageCount
 
         IF kenode^.ProcessorCount != 0 THEN
+            // Initialize the VPN DB.
+
+            MmpInitializeVpnDb ( kenode )
+
             // Initialize the system virtual address allocator.
 
             MmpInitializeSystemVa ( kenode )
 
-            // Initialize the VPN DB.
+            // Initialize the mapped page allocator.
 
-            MmpInitializeVpnDb ( kenode )
+            MmpInitializeMappedPages ( kenode )
 
             // Initialize the object cache package.
 

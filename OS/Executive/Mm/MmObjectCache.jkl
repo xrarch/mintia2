@@ -28,11 +28,10 @@ KE_CACHE_LINE_END
 
     Node : ^KeuNode,
     MagazineCache : ^ExpMagazineCache,
-    SlabArena : ^ExpArena,
     ObjectSize : ULONG,
-    SlabBytes : ULONG,
     ObjectsPerSlab : UINT,
     SlabPages : UBYTE,
+    Pageable : UBYTE,
 
 KE_CACHE_LINE_END
 
@@ -96,10 +95,11 @@ EXPORT FN MmAllocateFromObjectCache (
 
     mmnode := objectcache^.Node^.Mmp
 
-    status := ExAllocateFromArena (
-        objectcache^.SlabArena, // arena
+    status := MmAllocateMappedPages (
+        objectcache^.Node, // kenode
         flags, // flags
-        objectcache^.SlabBytes, // size
+        objectcache^.SlabPages, // pages
+        objectcache^.Pageable, // pageable
         OUT object, // address
     )
 
@@ -115,10 +115,11 @@ EXPORT FN MmAllocateFromObjectCache (
 
         KeReleaseLockLower ( &objectcache^.Lock, ipl )
 
-        ExFreeToArena (
-            objectcache^.SlabArena, // arena
-            object, // address
-            objectcache^.SlabBytes, // size
+        MmFreeMappedPages (
+            objectcache^.Node, // kenode
+            object, // ptr
+            objectcache^.SlabPages, // pages
+            objectcache^.Pageable, // pageable
         )
 
         GOTO Retry
@@ -234,11 +235,12 @@ FN (ExMagazineCacheFreeF) MmpFreeToObjectCache (
 
     KeReleaseLockLower ( &objectcache^.Lock, ipl )
 
-    ExFreeToArena (
-        objectcache^.SlabArena, // arena
+    MmFreeMappedPages (
+        objectcache^.Node, // kenode
         mmnode^.DynamicSpaceBase +
         (MmpVpeToVpn ( mmnode, vpe ) << RTL_PAGE_SHIFT), // address
-        objectcache^.SlabBytes, // size
+        objectcache^.SlabPages, // pages
+        objectcache^.Pageable, // pageable
     )
 END
 
@@ -400,13 +402,13 @@ EXPORT FN MmCreateObjectCache (
     RtlInitializeList ( &objectcache^.PartialSlabListHead )
 
     objectcache^.SlabPages = MmpCalculateGoodSlabSize ( objectsize )
-    objectcache^.SlabBytes = objectcache^.SlabPages << RTL_PAGE_SHIFT
 
-    objectcache^.ObjectsPerSlab = objectcache^.SlabBytes / objectsize
+    objectcache^.ObjectsPerSlab =
+        (objectcache^.SlabPages << RTL_PAGE_SHIFT) / objectsize
 
     KeAssert ( objectcache^.ObjectsPerSlab != 1 )
 
-    objectcache^.SlabArena = mmnode^.SlabArenas[NOT NOT pageable]
+    objectcache^.Pageable = NOT NOT pageable
 
     KeInitializeLock ( &objectcache^.Lock, "ObjectCache" )
 
@@ -449,249 +451,6 @@ EXPORT FN MmDeleteObjectCache (
     MmpFreeObjectCache ( objectcache )
 END
 
-FN (ExArenaImportF) MmpImportNonpageable (
-    IN context : ^VOID,
-    IN importarena : ^ExpArena,
-    IN flags : UWORD,
-    IN size : UWORD,
-    OUT address : ^VOID,
-) : OsStatus
-
-    // Import into the nonpaged arena.
-
-    mmnode := CAST context TO ^MmpNode
-
-    pages := size >> RTL_PAGE_SHIFT
-
-    // First charge commit for these pages.
-
-    status := MmuChargeCommit (
-        mmnode, // mmnode
-        pages, // pages
-        flags, // flags
-    )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    // Now allocate the virtual addresses from the dynamic space arena.
-
-    status = MmpAllocateDynamicPages (
-        mmnode, // mmnode
-        pages, // pages
-        flags, // flags
-        OUT address, // ptr
-    )
-
-    IF OsError ( status ) THEN
-        GOTO Error1
-    END
-
-    // Create a range of VPEs for the pages in the span.
-
-    status = MmpCreateVpes (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-        size >> RTL_PAGE_SHIFT, // pages
-        flags, // flags
-    )
-
-    IF OsError ( status ) THEN
-        GOTO Error2
-    END
-
-    i := 0
-    pte := MmpPteAddress ( address )
-    colorptr := address
-
-    WHILE i < pages DO
-        // Allocate a page frame to place here.
-
-@Retry
-
-        pfe := MmpAllocatePage (
-            mmnode, // mmnode
-            flags, // flags
-            MmpVirtualAddressColor ( colorptr ), // color
-        )
-
-        IF NOT pfe THEN
-            IF flags & MM_ALLOCATE_WAIT THEN
-                // Caller said we should wait here for more pages.
-
-                MmpWaitForPages (
-                    mmnode, // mmnode
-                    flags & MM_ALLOCATE_LOW, // low
-                )
-
-                GOTO Retry
-            END
-
-            // Free everything we just did.
-
-            i = 0
-            colorptr = address
-
-            WHILE i < pages DO
-                ptecontents := pte[i]
-
-                KeAssert ( MmpIsPteValid ( ptecontents ) )
-
-                pte[i] = MMP_INVALID_KERNEL_PTE
-
-                MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
-
-#IF BLD_CHK
-                KeuFlushMyTbAddress ( colorptr )
-
-                colorptr += RTL_PAGE_SIZE
-#END
-
-                i += 1
-            END
-
-            status = OS_STATUS_NO_MEMORY
-
-            GOTO Error3
-        END
-
-        // Map the page frame.
-        // Note that no TB entry exists for this page in any CPU if we've been
-        // given it by the dynamic space allocator.
-
-        pte[i] = MmpBuildPoolPte ( MmpPfeToPfn ( pfe ) )
-
-        i += 1
-        colorptr += RTL_PAGE_SIZE
-    END
-
-    RETURN OS_STATUS_SUCCESS
-
-@Error3
-
-    MmpUnreferenceVpes (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-        pages, // pages
-    )
-
-@Error2
-
-    MmpReleaseDynamicPages (
-        mmnode, // mmnode
-        address, // ptr
-        pages, // pages
-        FALSE, // flush
-    )
-
-@Error1
-
-    MmuUnchargeCommit (
-        mmnode, // mmnode
-        pages, // pages
-    )
-
-    RETURN status
-END
-
-FN (ExArenaFreeF) MmpFreeNonpageable (
-    IN context : ^VOID,
-    IN importarena : ^ExpArena,
-    IN address : ^VOID,
-    IN size : UWORD,
-)
-
-    // Free a nonpageable slab.
-
-    mmnode := CAST context TO ^MmpNode
-    pages := size >> RTL_PAGE_SHIFT
-
-    pte := MmpPteAddress ( address )
-    i := 0
-
-#IF BLD_CHK
-    ptr := address
-#END
-
-    WHILE i < pages DO
-        ptecontents := pte[i]
-
-        KeAssert ( MmpIsPteValid ( ptecontents ) )
-
-        pte[i] = MMP_INVALID_KERNEL_PTE
-
-        MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
-
-#IF BLD_CHK
-        KeuFlushMyTbAddress ( ptr )
-
-        ptr += RTL_PAGE_SIZE
-#END
-
-        i += 1
-    END
-
-    MmpUnreferenceVpes (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-        pages, // pages
-    )
-
-    MmpReleaseDynamicPages (
-        mmnode, // mmnode
-        address, // ptr
-        pages, // pages
-        TRUE, // flush
-    )
-
-    MmuUnchargeCommit (
-        mmnode, // mmnode
-        pages, // pages
-    )
-END
-
-FN (ExArenaLookupTagF) MmpLookupSlabArenaTag (
-    IN context : ^VOID,
-    IN address : ^VOID,
-    IN remove : UWORD,
-) : ^ExpArenaTag
-
-    // Look up the slab arena tag.
-    // Do nothing on removal since we unreference the VPE upon freeing the
-    // underlying imported span.
-
-    mmnode := CAST context TO ^MmpNode
-
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
-
-    RETURN vpe^.U.ObjectCache.SlabArenaTag
-END
-
-FN (ExArenaInsertTagF) MmpInsertSlabArenaTag (
-    IN context : ^VOID,
-    IN address : ^VOID,
-    IN flags : UWORD,
-    IN tag : ^ExpArenaTag,
-) : OsStatus
-
-    // Insert the slab arena tag.
-
-    mmnode := CAST context TO ^MmpNode
-
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
-
-    vpe^.U.ObjectCache.SlabArenaTag = tag
-
-    RETURN OS_STATUS_SUCCESS
-END
-
 #SECTION "INITtext"
 FN MmpInitializeObjectCaches (
     IN kenode : ^KeuNode,
@@ -712,61 +471,9 @@ FN MmpInitializeObjectCaches (
 
     KeInitializeLock ( &mmnode^.ObjectCacheListLock, "ObjectCacheList" )
 
-    // Create the two slab arenas, one for each type of pageability.
-
-    tagcallbacks : ExArenaTagCallbacks
-    tagcallbacks.Context = mmnode
-    tagcallbacks.LookupTag = &MmpLookupSlabArenaTag
-    tagcallbacks.InsertTag = &MmpInsertSlabArenaTag
-
-    importcallbacks : ExArenaImportCallbacks
-    importcallbacks.Context = mmnode
-    importcallbacks.Import = &MmpImportNonpageable
-    importcallbacks.Free = &MmpFreeNonpageable
-    importcallbacks.ImportQuantumShift = RTL_PAGE_SHIFT + 3
-
-    status := ExCreateArena (
-        "NonpagedSlabs", // name
-        kenode, // kenode
-        0, // flags
-        NULLPTR, // tagcallbacks
-        &importcallbacks, // importcallbacks
-        0, // quantumcachemax
-        FALSE, // pageable
-        RTL_PAGE_SHIFT, // quantumshift
-        mmnode^.DynamicSpaceArena, // importarena
-        OUT mmnode^.SlabArenas[FALSE], // arena
-    )
-
-    KeAssert ( NOT OsError ( status ) )
-
-    ExuRegisterPopulatorArena ( mmnode^.SlabArenas[FALSE] )
-
-    // TEMP
-#IF 0
-    importcallbacks.Import = &MmpImportPageable
-    importcallbacks.Free = &MmpFreePageable
-    importcallbacks.ImportQuantumShift = RTL_PAGE_SHIFT + 4
-#END
-
-    status = ExCreateArena (
-        "PagedSlabs", // name
-        kenode, // kenode
-        0, // flags
-        NULLPTR, // tagcallbacks
-        &importcallbacks, // importcallbacks
-        0, // quantumcachemax
-        TRUE, // pageable
-        RTL_PAGE_SHIFT, // quantumshift
-        mmnode^.DynamicSpaceArena, // importarena
-        OUT mmnode^.SlabArenas[TRUE], // arena
-    )
-
-    KeAssert ( NOT OsError ( status ) )
-
     // Create the object cache cache.
 
-    status = MmCreateObjectCache (
+    status := MmCreateObjectCache (
         kenode, // kenode
         "ObjectCacheCache", // name
         0, // flags
@@ -777,38 +484,4 @@ FN MmpInitializeObjectCaches (
     )
 
     KeAssert ( NOT OsError ( status ) )
-END
-
-FN MmAllocateMappedPages (
-    IN kenode : ^KeuNode,
-    IN flags : UWORD,
-    IN pages : UWORD,
-    IN pageable : UWORD,
-    OUT ptr : ^VOID,
-) : OsStatus
-
-    // Allocate a number of pages from the slab arena.
-
-    RETURN ExAllocateFromArena (
-        kenode^.Mmp^.SlabArenas[NOT NOT pageable], // arena
-        flags, // flags
-        pages << RTL_PAGE_SHIFT, // size
-        OUT ptr, // address
-    )
-END
-
-FN MmFreeMappedPages (
-    IN kenode : ^KeuNode,
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-    IN pageable : UWORD,
-)
-
-    // Free a number of pages to the slab arena.
-
-    ExFreeToArena (
-        kenode^.Mmp^.SlabArenas[NOT NOT pageable], // arena
-        ptr, // address
-        pages << RTL_PAGE_SHIFT, // size
-    )
 END

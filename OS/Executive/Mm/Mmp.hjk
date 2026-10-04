@@ -154,6 +154,10 @@ EXTERN FN MmpInitializePools (
     IN kenode : ^KeuNode,
 )
 
+EXTERN FN MmpInitializeMappedPages (
+    IN kenode : ^KeuNode,
+)
+
 #DEFINE MMP_QUICK_PER_CPU 4
 
 EXTERN FN MmpInitializeQuickPages (
@@ -386,7 +390,7 @@ KE_CACHE_LINE_END
     PagefileState : ^MmpPagefileState,
     MdlCache : ^MmpObjectCache,
     DynamicSpaceArena : ^ExpArena,
-    SlabArenas : ^ExpArena[2],
+    MappedArenas : ^ExpArena[2],
 
     PoolTable : ^MmpPool[MM_MAXIMUM_POOL],
 
@@ -470,7 +474,6 @@ STRUCT MmpVpePoolConsumer
 END
 
 STRUCT MmpVpeObjectConsumer
-    SlabArenaTag : ^ExpArenaTag,
     SlabControl : ^MmpVpe,
     SlabListEntry : RtlListEntry,
     FreeListHead : ^^VOID,
@@ -484,6 +487,7 @@ END
 
 STRUCT MmpVpe
     DynamicSpaceArenaTag : ^ExpArenaTag,
+    MappedArenaTag : ^ExpArenaTag,
     U : MmpVpeConsumerData,
 END
 
