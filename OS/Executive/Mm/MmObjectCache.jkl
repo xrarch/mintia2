@@ -49,6 +49,8 @@ EXPORT FN MmAllocateFromObjectCache (
 
     // Allocate an object.
 
+    objectsize := objectcache^.ObjectSize
+
 @Retry
 
     IF objectcache^.MagazineCache THEN
@@ -166,7 +168,6 @@ EXPORT FN MmAllocateFromObjectCache (
 
     max = objectcache^.ObjectsPerSlab
     i = 1
-    objectsize := objectcache^.ObjectSize
     ptr : ^^VOID = object + objectsize
 
     WHILE i < max DO
@@ -181,8 +182,7 @@ EXPORT FN MmAllocateFromObjectCache (
 
 @Success
 
-    (CAST object TO ^ULONG)[0] = tag
-    object += RTL_ALIGN_BYTES
+    (CAST (object + objectsize - SIZEOF ULONG) TO ^ULONG)^ = tag
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -260,11 +260,12 @@ EXPORT FN MmFreeToObjectCache (
 
     // Free the object to the object cache.
 
-    object -= RTL_ALIGN_BYTES
+    objecttag :=
+        (CAST (object + objectcache^.ObjectSize - SIZEOF ULONG) TO ^ULONG)^
 
-    IF (CAST object TO ^ULONG)[0] != tag THEN
+    IF objecttag != tag THEN
         KeCrash ( "MmFreeToObjectCache: incorrect tag (expected %x, saw %x\n",
-            tag, (CAST object TO ^ULONG)[0] )
+            tag, objecttag )
     END
 
     IF objectcache^.MagazineCache THEN
@@ -367,19 +368,25 @@ EXPORT FN MmCreateObjectCache (
     IN objectsize : UWORD,
     IN magazinecached : UWORD,
     IN pageable : UWORD,
+    IN align : UWORD,
     OUT objectcache : ^MmpObjectCache,
 ) : OsStatus
 
     // Create an object cache.
+    // Alignment must be a power of two.
 
     KeAssert ( objectsize < MMP_LARGE_OBJECT )
     KeAssert ( objectsize != 0 )
 
-    // Make room for a tag.
+    IF align < RTL_ALIGN_BYTES THEN
+        align = RTL_ALIGN_BYTES
+    END
 
-    objectsize += RTL_ALIGN_BYTES
+    // Make room for a tag at the end.
 
-    objectsize = (objectsize + RTL_ALIGN_BYTES - 1) & -RTL_ALIGN_BYTES
+    objectsize += SIZEOF ULONG
+
+    objectsize = (objectsize + align - 1) & -align
 
     status : OsStatus
 
@@ -502,6 +509,7 @@ FN MmpInitializeObjectCaches (
         SIZEOF MmpObjectCache, // objectsize
         FALSE, // magazinecached
         FALSE, // pageable
+        KE_CACHE_ALIGN, // align
         OUT mmnode^.ObjectCacheCache, // objectcache
     )
 

@@ -4,16 +4,21 @@
 
 #INCLUDE "Obp.hjk"
 
-#MACRO ObpCalculatePagedBlockSize ( bodysize ) [
-    (SIZEOF ObuHeader + SIZEOF ObpCommonHeader + (bodysize))
+#MACRO ObpCalculatePagedBlockSize ( bodysize, align ) [
+    (((SIZEOF ObuHeader + SIZEOF ObpCommonHeader + align - 1) & -align) +
+    (bodysize))
 ]
 
-#MACRO ObpCalculateNpBlockSize ( bodysize ) [
-    (SIZEOF ObpCommonHeader + (bodysize))
+#MACRO ObpCalculateNpBlockSize ( bodysize, align ) [
+    (((SIZEOF ObpCommonHeader + align - 1) & -align) + (bodysize))
 ]
 
-#MACRO ObpCalculateNpHeaderSize ( pgsize ) [
-    (SIZEOF ObuHeader + (pgsize))
+#MACRO ObpCalculateNpHeaderSize ( pgsize, align ) [
+    (((SIZEOF ObuHeader + align - 1) & -align) + (pgsize))
+]
+
+#MACRO ObpAlignmentAmount ( size, align ) [
+    ((((size) + align - 1) & -align) - (size))
 ]
 
 #ENTERSECTION "INITtext"
@@ -29,16 +34,36 @@ FN ObuInitializeType (
 
     npsize : UWORD
     psize : UWORD
+    npalign := RTL_ALIGN_BYTES
+    palign := RTL_ALIGN_BYTES
 
     id := type^.TypeIdentifier
 
     IF type^.IsPaged THEN
         npsize = 0
-        psize = ObpCalculatePagedBlockSize ( type^.TypicalBodySize )
+
+        palign = type^.Align
+
+        IF palign < RTL_ALIGN_BYTES THEN
+            palign = RTL_ALIGN_BYTES
+        END
+
+        psize = ObpCalculatePagedBlockSize ( type^.TypicalBodySize, palign )
 
     ELSE
-        npsize = ObpCalculateNpBlockSize ( type^.TypicalBodySize )
-        psize = ObpCalculateNpHeaderSize ( type^.TypicalPgBodySize )
+        npalign = type^.Align
+        palign = type^.PgAlign
+
+        IF npalign < RTL_ALIGN_BYTES THEN
+            npalign = RTL_ALIGN_BYTES
+        END
+
+        IF palign < RTL_ALIGN_BYTES THEN
+            palign = RTL_ALIGN_BYTES
+        END
+
+        npsize = ObpCalculateNpBlockSize ( type^.TypicalBodySize, npalign )
+        psize = ObpCalculateNpHeaderSize ( type^.TypicalPgBodySize, palign )
     END
 
     typenamelen := RtlMeasureString ( type^.Name )
@@ -113,6 +138,9 @@ FN ObuInitializeType (
             pernodetype^.CachedPgBodySize = psize
             pernodetype^.CachedNpBodySize = npsize
 
+            pernodetype^.Align = npalign
+            pernodetype^.PgAlign = palign
+
             IF npsize THEN
                 status = MmCreateObjectCache (
                     kenode, // kenode
@@ -121,6 +149,7 @@ FN ObuInitializeType (
                     npsize, // objectsize
                     TRUE, // magazinecached
                     FALSE, // pageable
+                    npalign, // align
                     OUT pernodetype^.NpPartCache, // ptr
                 )
 
@@ -137,6 +166,7 @@ FN ObuInitializeType (
                     psize, // objectsize
                     TRUE, // magazinecached
                     TRUE, // pageable
+                    palign, // align
                     OUT pernodetype^.PgPartCache, // ptr
                 )
 
@@ -176,11 +206,13 @@ FN ObuAllocateObject (
 
     IF type^.IsPaged THEN
         npsize = 0
-        psize = ObpCalculatePagedBlockSize ( obparams^.BodySize )
+        psize = ObpCalculatePagedBlockSize ( obparams^.BodySize, type^.PgAlign )
 
     ELSE
-        npsize = ObpCalculateNpBlockSize ( obparams^.BodySize )
-        psize = ObpCalculateNpHeaderSize ( obparams^.PagedBodySize )
+        npsize = ObpCalculateNpBlockSize ( obparams^.BodySize, type^.Align )
+
+        psize =
+            ObpCalculateNpHeaderSize ( obparams^.PagedBodySize, type^.PgAlign )
     END
 
     // Charge pool quota.
@@ -279,11 +311,34 @@ FN ObuAllocateObject (
     header : ^ObuHeader
     commonheader : ^ObpCommonHeader
 
+    // Calculate pointers to the headers. Place them at the end of the
+    // alignment region so that a constant offset before the object can be used
+    // to find them.
+
+    // Note that we mutate nppart and pgpart here because currently we never
+    // use them for freeing or whatever, there are no more error cases after
+    // this. If one day there are then beware.
+
     IF type^.IsPaged THEN
+        pgpart += ObpAlignmentAmount (
+            SIZEOF ObuHeader + SIZEOF ObpCommonHeader, // size
+            type^.PgAlign, // align
+        )
+
         header = pgpart
         commonheader = pgpart + SIZEOF ObuHeader
 
     ELSE
+        pgpart += ObpAlignmentAmount (
+            SIZEOF ObuHeader, // size
+            type^.PgAlign, // align
+        )
+
+        nppart += ObpAlignmentAmount (
+            SIZEOF ObpCommonHeader, // size
+            type^.Align, // align
+        )
+
         header = pgpart
         commonheader = nppart
     END
@@ -408,6 +463,11 @@ FN ObuFreeObject (
     IF type^.IsPaged THEN
         // Only a single part.
 
+        header -= ObpAlignmentAmount (
+            SIZEOF ObuHeader + SIZEOF ObpCommonHeader, // size
+            type^.PgAlign, // align
+        )
+
         IF flags & OBP_PG_FROM_CACHE THEN
             MmFreeToObjectCache (
                 type^.PgPartCache, // cache
@@ -425,6 +485,11 @@ FN ObuFreeObject (
     ELSE
         // Two parts.
 
+        header -= ObpAlignmentAmount (
+            SIZEOF ObuHeader, // size
+            type^.PgAlign, // align
+        )
+
         IF flags & OBP_PG_FROM_CACHE THEN
             MmFreeToObjectCache (
                 type^.PgPartCache, // cache
@@ -438,6 +503,11 @@ FN ObuFreeObject (
                 type^.Tag, // tag
             )
         END
+
+        object -= ObpAlignmentAmount (
+            SIZEOF ObpCommonHeader, // size
+            type^.Align, // align
+        )
 
         IF flags & OBP_NP_FROM_CACHE THEN
             MmFreeToObjectCache (

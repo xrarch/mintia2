@@ -203,6 +203,13 @@ EXTERN FN KeuDetachProcess (
 )
 
 STRUCT KeuThread
+
+#IF BLD_MP
+    Spinlock : KepSpinlock,
+#END
+
+KE_CACHE_LINE_END
+
     WaitBlockTable : ^KepWaitBlock,
     Context : ^OsContext,
     Process : ^KeuProcess,
@@ -216,10 +223,6 @@ STRUCT KeuThread
 #IF BLD_MP
     AffinityPrb : ^KepPrb,
     CurrentPrb : ^KepPrb,
-#END
-
-#IF BLD_MP
-    Spinlock : KepSpinlock,
 #END
 
     SignalMask : ULONG[2],
