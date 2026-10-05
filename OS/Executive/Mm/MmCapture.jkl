@@ -125,13 +125,13 @@ FN (KeAbortableF) MmpSafeCaptureString (
     // Capture the data and length fields.
     // This can take an exception if we got a bad string pointer.
 
-    data := src^.Data
+    data := VOLATILE src^.Data
 
     IF data >= KE_USER_SPACE_END THEN
         RETURN OS_STATUS_READ_FAULT
     END
 
-    len := src^.Length
+    len := VOLATILE src^.Length
 
     IF len > ctx^.MaximumLength THEN
         RETURN OS_STATUS_STRING_TOO_LONG
