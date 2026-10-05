@@ -127,6 +127,8 @@ FN ObuInitializeType (
         kenode := KeNumaNodeById ( i )
 
         IF kenode^.ProcessorCount != 0 THEN
+            obpnode := kenode^.Obp
+
             pernodetype := &kenode^.ObTypes[id]
 
             RtlCopyBytes (
@@ -159,19 +161,58 @@ FN ObuInitializeType (
             END
 
             IF psize THEN
-                status = MmCreateObjectCache (
-                    kenode, // kenode
-                    pgname, // name
-                    0, // flags
-                    psize, // objectsize
-                    TRUE, // magazinecached
-                    TRUE, // pageable
-                    palign, // align
-                    OUT pernodetype^.PgPartCache, // ptr
-                )
+                pernodetype^.PgPartCache = NULLPTR
 
-                IF OsError ( status ) THEN
-                    KeCrash ( error, type^.Name, "failed to alloc pg cache\n" )
+                IF psize <=
+                    ObpCalculatePagedBlockSize ( 0, KE_CACHE_ALIGN ) THEN
+
+                    // Share the common paged header cache.
+                    //
+                    // Many nonpaged object types have no paged body and this
+                    // common cache prevents them all from redundantly having
+                    // their own cache for the same size paged part which just
+                    // contains our header.
+
+                    IF NOT obpnode^.PagedHeaderCache THEN
+                        // Need to create it first.
+
+                        status = MmCreateObjectCache (
+                            kenode, // kenode
+                            "PagedHeaderCache", // name
+                            0, // flags
+                            ObpCalculatePagedBlockSize ( 0, KE_CACHE_ALIGN ),
+                            TRUE, // magazinecached
+                            TRUE, // pageable
+                            KE_CACHE_ALIGN, // align
+                            OUT obpnode^.PagedHeaderCache, // ptr
+                        )
+
+                        IF OsError ( status ) THEN
+                            obpnode^.PagedHeaderCache = NULLPTR
+                        END
+                    END
+
+                    IF obpnode^.PagedHeaderCache THEN
+                        pernodetype^.PgPartCache = obpnode^.PagedHeaderCache
+                    END
+                END
+
+                IF NOT pernodetype^.PgPartCache THEN
+                    status = MmCreateObjectCache (
+                        kenode, // kenode
+                        pgname, // name
+                        0, // flags
+                        psize, // objectsize
+                        TRUE, // magazinecached
+                        TRUE, // pageable
+                        palign, // align
+                        OUT pernodetype^.PgPartCache, // ptr
+                    )
+
+                    IF OsError ( status ) THEN
+                        KeCrash ( error, type^.Name,
+                            "failed to alloc pg cache\n" )
+                    END
                 END
             END
         END
