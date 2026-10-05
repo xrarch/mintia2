@@ -2,14 +2,13 @@
 // Parses configuration files for loadable modules.
 //
 
-#INCLUDE "Iop.hjk"
+#INCLUDE "IopCatalog.hjk"
 
 STRUCT IopParseContext
     Text : ^UBYTE,
     Size : UWORD,
     Index : UWORD,
-    ClassListHead : ^IopKnownClass,
-    ClassListTail : ^IopKnownClass,
+    ClassListHead : RtlListEntry,
 END
 
 #MACRO IopIsWhitespace ( c ) [ ((c) == ' ' OR (c) == '\t' OR (c) == '\n') ]
@@ -53,6 +52,7 @@ FN IopConsumeToken (
     IN parse : ^IopParseContext,
     IN buffer : ^UBYTE,
     IN bufsize : UWORD,
+    OUT tokenlength : UWORD,
 ) : UWORD
 
     // Consume a token into the buffer. Returns FALSE if EOF was encountered.
@@ -61,7 +61,7 @@ FN IopConsumeToken (
         RETURN FALSE
     END
 
-    i := 0
+    tokenlength = 0
 
     // Make sure there's enough room for the null terminator.
 
@@ -74,19 +74,104 @@ FN IopConsumeToken (
             BREAK
         END
 
-        IF i >= bufsize THEN
+        IF tokenlength >= bufsize THEN
             RETURN FALSE
         END
         
-        buffer[i] = c
-        i += 1
+        buffer[tokenlength] = c
+        tokenlength += 1
 
         parse^.Index += 1
     END
 
-    buffer[i] = 0
+    buffer[tokenlength] = 0
 
     RETURN TRUE
+END
+
+#SECTION "PAGEtext"
+FN IopParseClass ( 
+    IN parse : ^IopParseContext,
+) : OsStatus
+
+    // Parse a class definition.
+    // This just consists of pairs of strings that end up as key-value pairs in
+    // the properties dictionary.
+
+    knownclass : ^IopKnownClass
+
+    status := IopCreateKnownClass (
+        OUT knownclass, // knownclass
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    name : RtlString
+    value : RtlString
+
+    namebuf : UBYTE[64]
+    valuebuf : UBYTE[64]
+
+    name.Data = &namebuf[0]
+    value.Data = &valuebuf[0]
+
+    WHILE TRUE DO
+        IF NOT IopConsumeToken (
+            parse, // parse
+            &namebuf[0], // buffer
+            64, // bufsize
+            OUT name.Length, // tokenlength
+        ) THEN
+
+            status = OS_STATUS_SYNTAX_ERROR
+
+            GOTO Exit
+        END
+
+        IF RtlCompareString ( &namebuf[0], "END" ) == 0 THEN
+            BREAK
+        END
+
+        IF NOT IopConsumeToken (
+            parse, // parse
+            &valuebuf[0], // buffer
+            64, // bufsize
+            OUT value.Length, // tokenlength
+        ) THEN
+
+            status = OS_STATUS_SYNTAX_ERROR
+
+            GOTO Exit
+        END
+
+        status = IopSetKnownClassProperty (
+            knownclass, // knownclass
+            &name, // name
+            &value, // value
+            FALSE, // canupdate
+        )
+
+        IF OsError ( status ) THEN
+            GOTO Exit
+        END
+    END
+
+    RtlInsertAtTailList (
+        &parse^.ClassListHead, // head
+        &knownclass^.Entry, // entry
+    )
+
+    status = OS_STATUS_SUCCESS
+
+@Exit
+
+    IF OsError ( status ) THEN
+        IopDeleteKnownClass ( knownclass )
+    END
+
+    RETURN status
 END
 
 #SECTION "PAGEtext"
@@ -97,14 +182,24 @@ FN IopParseDefinition (
     // Parse a definition.
 
     buf : UBYTE[32]
+    tokenlength : UWORD
 
     WHILE IopConsumeToken (
         parse, // parse
         &buf[0], // buffer
         32, // bufsize
+        OUT tokenlength, // tokenlength
     ) DO
 
-        // RtlPrint ( "%s ", &buf[0] )
+        status := OS_STATUS_SYNTAX_ERROR
+
+        IF RtlCompareString ( &buf[0], "CLASS" ) == 0 THEN
+            status = IopParseClass ( parse )
+        END
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
     END
 
     RETURN 0
@@ -114,7 +209,7 @@ END
 FN IopParseConfiguration (
     IN configtext : ^UBYTE,
     IN configsize : UWORD,
-    OUT class : ^IopKnownClass,
+    OUT knownclass : ^IopKnownClass,
 ) : OsStatus
 
     // Parse the given configuration file data and return a list of
@@ -124,13 +219,23 @@ FN IopParseConfiguration (
     parse.Text = configtext
     parse.Size = configsize
     parse.Index = 0
-    parse.ClassListHead = NULLPTR
-    parse.ClassListTail = NULLPTR
+
+    RtlInitializeList ( &parse.ClassListHead )
 
     WHILE TRUE DO
         status := IopParseDefinition ( &parse )
 
         IF OsError ( status ) THEN
+            listhead := &parse.ClassListHead
+            listentry := listhead^.Next
+
+            WHILE listentry != listhead DO
+                knownclass = CONTAINEROF listentry TO IopKnownClass.Entry
+                listentry = listentry^.Next
+
+                IopDeleteKnownClass ( knownclass )
+            END
+
             RETURN status
         END
 
@@ -139,7 +244,11 @@ FN IopParseConfiguration (
         END
     END
 
-    class = parse.ClassListHead
+    knownclass = NULLPTR
+
+    IF NOT RtlEmptyList ( &parse.ClassListHead ) THEN
+        knownclass = CONTAINEROF parse.ClassListHead.Next TO IopKnownClass.Entry
+    END
 
     RETURN OS_STATUS_SUCCESS
 END

@@ -3,10 +3,109 @@
 // driver matching.
 //
 
-#INCLUDE "Iop.hjk"
+#INCLUDE "IopCatalog.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
 IopCatalogLock : KeLock = KE_INITIAL_LOCK
+
+#SECTION "PAGEtext"
+FN IopCreateKnownClass (
+    OUT knownclass : ^IopKnownClass,
+) : OsStatus
+
+    // Create a known class structure.
+
+    status := MmAllocatePool (
+        TRUE, // pageable
+        SIZEOF IopKnownClass, // bytes
+        'IoKc', // tag
+        MM_ALLOCATE_WAIT, // flags
+        OUT knownclass, // ptr
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Initialize the dictionary.
+
+    ExuInitializeDictionary ( &knownclass^.Properties )
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN IopSetKnownClassProperty (
+    IN knownclass : ^IopKnownClass,
+    IN name : ^RtlString,
+    IN value : ^RtlString,
+    IN canupdate : UWORD,
+) : OsStatus
+
+    // Set the given property in a known class structure.
+
+    // Convert value to a referenced interned string.
+
+    str := ExFindName ( value )
+
+    IF NOT str THEN
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    oldvalue : ^ExuName
+
+    status := ExInsertInDictionary (
+        &knownclass^.Properties, // dict
+        name, // key
+        str, // value
+        canupdate, // canupdate
+        OUT oldvalue, // oldvalue
+    )
+
+    IF OsError ( status ) THEN
+        ExUnreferenceName ( str )
+
+    ELSEIF oldvalue THEN
+        ExUnreferenceName ( oldvalue )
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN (ExEnumerateDictionaryF) IopDeleteKnownClassProperty (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+    IN value : ^VOID,
+    IN context : ^VOID,
+)
+
+    // Delete a property of a known class.
+
+    // All we have to do is unreference the value string.
+
+    ExUnreferenceName ( value )
+END
+
+#SECTION "PAGEtext"
+FN IopDeleteKnownClass (
+    IN knownclass : ^IopKnownClass,
+)
+
+    // Delete a known class structure.
+
+    ExEnumerateDictionary (
+        &knownclass^.Properties, // dict
+        &IopDeleteKnownClassProperty, // func
+        NULLPTR, // context
+        TRUE, // delete
+    )
+
+    MmFreePool (
+        knownclass, // ptr
+        'IoKc', // tag
+    )
+END
 
 #SECTION "PAGEtext"
 FN IopForgetModule (

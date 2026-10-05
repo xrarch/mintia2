@@ -1,0 +1,32 @@
+//
+// Private header file for the I/O Catalog.
+//
+
+#INCLUDE "Iop.hjk"
+
+STRUCT IopKnownClass
+    Name : ^UBYTE,
+    Entry : RtlListEntry,
+    Properties : ExuDictionary,
+END
+
+EXTERN FN IopParseConfiguration (
+    IN configtext : ^UBYTE,
+    IN configsize : UWORD,
+    OUT knownclass : ^IopKnownClass,
+) : OsStatus
+
+EXTERN FN IopCreateKnownClass (
+    OUT knownclass : ^IopKnownClass,
+) : OsStatus
+
+EXTERN FN IopDeleteKnownClass (
+    IN knownclass : ^IopKnownClass,
+)
+
+EXTERN FN IopSetKnownClassProperty (
+    IN knownclass : ^IopKnownClass,
+    IN name : ^RtlString,
+    IN value : ^RtlString,
+    IN canupdate : UWORD,
+) : OsStatus

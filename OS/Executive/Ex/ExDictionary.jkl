@@ -175,11 +175,14 @@ EXPORT FN ExInsertInDictionary (
     IN key : ^RtlString,
     IN value : ^VOID,
     IN canupdate : UWORD,
+    OUT oldvalue : ^VOID,
 ) : OsStatus
 
     // Insert the given key-value pair into the dictionary.
     // If canupdate is TRUE, the key will be updated if it already exists.
     // Otherwise an error will be returned if it already exists.
+
+    oldvalue = NULLPTR
 
     hash := ExpHash ( key^.Data )
 
@@ -198,6 +201,7 @@ EXPORT FN ExInsertInDictionary (
 
         // Update.
 
+        oldvalue = entry^.Value
         entry^.Value = value
 
         RETURN OS_STATUS_SUCCESS
