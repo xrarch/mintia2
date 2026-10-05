@@ -504,6 +504,13 @@ FN ObuFreeObject (
             )
         END
 
+        // Calculate the pointer to the object by subtracting the size of the
+        // common header that precedes it in memory, and the offset by which
+        // the common header was pushed forward in order to make the object
+        // body aligned.
+
+        object -= SIZEOF ObpCommonHeader
+
         object -= ObpAlignmentAmount (
             SIZEOF ObpCommonHeader, // size
             type^.Align, // align
@@ -512,13 +519,13 @@ FN ObuFreeObject (
         IF flags & OBP_NP_FROM_CACHE THEN
             MmFreeToObjectCache (
                 type^.NpPartCache, // cache
-                object - SIZEOF ObpCommonHeader, // ptr
+                object, // ptr
                 type^.Tag, // tag
             )
 
         ELSE
             MmFreePool (
-                object - SIZEOF ObpCommonHeader, // ptr
+                object, // ptr
                 type^.Tag, // tag
             )
         END
