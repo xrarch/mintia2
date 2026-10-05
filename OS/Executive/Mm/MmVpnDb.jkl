@@ -226,13 +226,15 @@ END
 
 FN MmpUnreferenceVpes (
     IN mmnode : ^MmpNode,
-    IN vpn : UWORD,
+    IN address : ^VOID,
     IN pages : UWORD,
 ) : OsStatus
 
     // Unreference the specified number of VPEs.
     // We want to reduce the number of CAS operations on the VPNDB reference
     // counter, so we allow unreferencing ranges of VPEs at a time here.
+
+    vpn := MmpAddressToDynamicSpaceVpn ( mmnode, address )
 
     KeAssert ( vpn < mmnode^.KeNode^.DynamicSpaceSize )
     KeAssert ( vpn + pages < mmnode^.KeNode^.DynamicSpaceSize )
@@ -274,7 +276,7 @@ END
 
 FN MmpCreateVpes (
     IN mmnode : ^MmpNode,
-    IN vpn : UWORD,
+    IN address : ^VOID,
     IN pages : UWORD,
     IN flags : UWORD,
 ) : OsStatus
@@ -282,6 +284,8 @@ FN MmpCreateVpes (
     // Create the specified number of VPEs.
     // We want to reduce the number of CAS operations on the VPNDB reference
     // counter, so we allow creating ranges of VPEs at a time here.
+
+    vpn := MmpAddressToDynamicSpaceVpn ( mmnode, address )
 
     KeAssert ( vpn < mmnode^.KeNode^.DynamicSpaceSize )
     KeAssert ( vpn + pages < mmnode^.KeNode^.DynamicSpaceSize )
@@ -313,7 +317,7 @@ FN MmpCreateVpes (
             IF i THEN
                 MmpUnreferenceVpes (
                     mmnode, // mmnode
-                    vpn, // vpn
+                    address, // address
                     i, // pages
                 )
             END
@@ -330,11 +334,13 @@ END
 
 FN MmpCreateVpe (
     IN mmnode : ^MmpNode,
-    IN vpn : UWORD,
+    IN address : ^VOID,
     IN flags : UWORD,
 ) : OsStatus
 
     // Create a single VPE.
+
+    vpn := MmpAddressToDynamicSpaceVpn ( mmnode, address )
 
     RETURN MmpReferenceVpnDbPage (
         mmnode, // mmnode

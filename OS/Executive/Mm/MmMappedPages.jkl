@@ -47,7 +47,7 @@ FN (ExArenaImportF) MmpImportNonpageable (
 
     status = MmpCreateVpes (
         mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+        address, // address
         size >> RTL_PAGE_SHIFT, // pages
         flags, // flags
     )
@@ -128,7 +128,7 @@ FN (ExArenaImportF) MmpImportNonpageable (
 
     MmpUnreferenceVpes (
         mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+        address, // address
         pages, // pages
     )
 
@@ -190,7 +190,7 @@ FN (ExArenaFreeF) MmpFreeNonpageable (
 
     MmpUnreferenceVpes (
         mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+        address, // address
         pages, // pages
     )
 
@@ -219,10 +219,7 @@ FN (ExArenaLookupTagF) MmpLookupMappedArenaTag (
 
     mmnode := CAST context TO ^MmpNode
 
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
+    vpe := MmpAddressToVpe ( mmnode, address )
 
     tag := vpe^.MappedArenaTag
 
@@ -244,10 +241,7 @@ FN (ExArenaInsertTagF) MmpInsertMappedArenaTag (
 
     mmnode := CAST context TO ^MmpNode
 
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
+    vpe := MmpAddressToVpe ( mmnode, address )
 
     vpe^.MappedArenaTag = tag
 

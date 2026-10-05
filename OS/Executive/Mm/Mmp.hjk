@@ -387,12 +387,23 @@ EXTERN FN MmpGarbageCollectVpnDb (
     IN mmnode : ^MmpNode,
 )
 
-#MACRO MmpFindVpe ( mmnode, vpn ) [
-    (CAST ((mmnode)^.VpnDbBase + ((vpn) * MMP_VPE_SIZE)) TO ^MmpVpe)
+#MACRO MmpAddressToDynamicSpaceVpn ( mmnode, address ) [
+    (CAST ((address) - (mmnode)^.DynamicSpaceBase) >> RTL_PAGE_SHIFT TO UWORD)
 ]
 
-#MACRO MmpVpeToVpn ( mmnode, vpe ) [
-    ((vpe - (mmnode)^.VpnDbBase) / MMP_VPE_SIZE)
+#MACRO MmpAddressToVpe ( mmnode, address ) [
+    (CAST (mmnode)^.VpnDbBase +
+    (MmpAddressToDynamicSpaceVpn ( mmnode, address ) *
+    MMP_VPE_SIZE) TO ^MmpVpe)
+]
+
+#MACRO MmpVpeToDynamicSpaceVpn ( mmnode, vpe ) [
+    (CAST (vpe - (mmnode)^.VpnDbBase) / MMP_VPE_SIZE TO UWORD)
+]
+
+#MACRO MmpVpeToAddress ( mmnode, vpe ) [
+    (CAST (MmpVpeToDynamicSpaceVpn ( mmnode, vpe ) << RTL_PAGE_SHIFT) +
+        (mmnode)^.DynamicSpaceBase TO ^VOID)
 ]
 
 STRUCT MmpVpeObjectConsumer
@@ -417,13 +428,13 @@ END
 
 EXTERN FN MmpCreateVpe (
     IN mmnode : ^MmpNode,
-    IN vpn : UWORD,
+    IN address : ^VOID,
     IN flags : UWORD,
 ) : OsStatus
 
 EXTERN FN MmpCreateVpes (
     IN mmnode : ^MmpNode,
-    IN vpn : UWORD,
+    IN address : ^VOID,
     IN pages : UWORD,
     IN flags : UWORD,
 ) : OsStatus
@@ -438,7 +449,7 @@ EXTERN FN MmpUnreferenceVpe (
 
 EXTERN FN MmpUnreferenceVpes (
     IN mmnode : ^MmpNode,
-    IN vpn : UWORD,
+    IN address : ^VOID,
     IN pages : UWORD,
 ) : OsStatus
 

@@ -85,10 +85,7 @@ FN MmAllocatePoolEx (
             RETURN status
         END
 
-        vpe := MmpFindVpe (
-            mmnode, // mmnode
-            (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-        )
+        vpe := MmpAddressToVpe ( mmnode, ptr )
 
         // Indicate page-aligned.
 
@@ -147,10 +144,7 @@ FN MmFreePool (
     kenode := KeNumaNodeFromSpacePointer ( ptr )
     mmnode := kenode^.Mmp
 
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
+    vpe := MmpAddressToVpe ( mmnode, ptr )
 
     pageable := vpe^.U.ObjectCache.PoolCacheIndex1
     index := vpe^.U.ObjectCache.PoolCacheIndex2

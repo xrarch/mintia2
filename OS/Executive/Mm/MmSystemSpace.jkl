@@ -14,10 +14,7 @@ FN (ExArenaLookupTagF) MmpLookupDynamicSpaceTag (
 
     mmnode := CAST context TO ^MmpNode
 
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
+    vpe := MmpAddressToVpe ( mmnode, address )
 
     tag := vpe^.DynamicSpaceArenaTag
 
@@ -45,7 +42,7 @@ FN (ExArenaInsertTagF) MmpInsertDynamicSpaceTag (
 
     status := MmpCreateVpe (
         mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
+        address, // address
         flags, // flags
     )
 
@@ -53,10 +50,7 @@ FN (ExArenaInsertTagF) MmpInsertDynamicSpaceTag (
         RETURN status
     END
 
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (address - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
+    vpe := MmpAddressToVpe ( mmnode, address )
 
     vpe^.DynamicSpaceArenaTag = tag
 

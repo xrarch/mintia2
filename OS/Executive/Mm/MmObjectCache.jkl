@@ -130,10 +130,7 @@ EXPORT FN MmAllocateFromObjectCache (
         GOTO Retry
     END
 
-    vpe = MmpFindVpe (
-        mmnode, // mmnode
-        (object - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
+    vpe = MmpAddressToVpe ( mmnode, object )
 
     // Initialize the VPE to describe the slab.
     // Note that the SlabArena's import function already created the VPEs.
@@ -201,10 +198,7 @@ FN (ExMagazineCacheFreeF) MmpFreeToObjectCache (
 
     mmnode := objectcache^.Node^.Mmp
 
-    vpe := MmpFindVpe (
-        mmnode, // mmnode
-        (ptr - mmnode^.DynamicSpaceBase) >> RTL_PAGE_SHIFT, // vpn
-    )
+    vpe := MmpAddressToVpe ( mmnode, ptr )
 
     // Find the control VPE for the slab in case this is in the middle of a
     // multi-page slab.
@@ -252,8 +246,7 @@ FN (ExMagazineCacheFreeF) MmpFreeToObjectCache (
 
     MmFreeMappedPages (
         objectcache^.Node, // kenode
-        mmnode^.DynamicSpaceBase +
-        (MmpVpeToVpn ( mmnode, vpe ) << RTL_PAGE_SHIFT), // address
+        MmpVpeToAddress ( mmnode, vpe ), // address
         objectcache^.SlabPages, // pages
         objectcache^.Pageable, // pageable
     )
