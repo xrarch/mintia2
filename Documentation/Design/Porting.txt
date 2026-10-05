@@ -1,0 +1,25 @@
+Highly unfinished notes for porting MINTIA2.
+
+To a new architecture:
+
+  - Architecture-specific code resides within directories bearing the name of
+    the architecture inside of generic subsystem directories. This all needs to
+    be replaced. Looking at existing architecture-specific code is recommended,
+    and some of it may be copypastable.
+
+  - Memory management assumes the architecture specific code presents the page
+    table as a virtually linear array of PTEs, indexed by virtual page number.
+    This is accomplished using "recursive mapping" on currently supported
+    architectures that use multi-level page tables, but can also be accomplished
+    on other architectures by explicitly mapping the page tables in a virtually
+    linear fashion. PTEs that are not mapping anything must be set to either
+    have their hardware valid bit disabled, or cause a page fault upon access
+    of their containing page table.
+
+To a new platform:
+
+  - Platform-specific code resides in a hardware abstraction layer subsystem,
+    or HAL. For example, the XR/station HAL is in HalXr, the fox32 HAL is in
+    HalFox, and the Aphelion HAL is in HalAphelion. When the system is ported
+    to a new platform of an architecture it already supports, only a HAL needs
+    to be written.
