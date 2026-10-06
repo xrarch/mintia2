@@ -5,14 +5,14 @@
 #INCLUDE "Mmp.hjk"
 
 FN (ExArenaLookupTagF) MmpLookupDynamicSpaceTag (
-    IN context : ^VOID,
+    IN arena : ^ExpArena,
     IN address : ^VOID,
     IN remove : UWORD,
 ) : ^ExpArenaTag
 
     // Look up the dynamic space tag.
 
-    mmnode := CAST context TO ^MmpNode
+    mmnode := KeNumaNodeFromSpacePointer ( arena )^.Mmp
 
     vpe := MmpAddressToVpe ( mmnode, address )
 
@@ -30,7 +30,7 @@ FN (ExArenaLookupTagF) MmpLookupDynamicSpaceTag (
 END
 
 FN (ExArenaInsertTagF) MmpInsertDynamicSpaceTag (
-    IN context : ^VOID,
+    IN arena : ^ExpArena,
     IN address : ^VOID,
     IN flags : UWORD,
     IN tag : ^ExpArenaTag,
@@ -38,7 +38,7 @@ FN (ExArenaInsertTagF) MmpInsertDynamicSpaceTag (
 
     // Insert the dynamic space tag.
 
-    mmnode := CAST context TO ^MmpNode
+    mmnode := KeNumaNodeFromSpacePointer ( arena )^.Mmp
 
     status := MmpCreateVpe (
         mmnode, // mmnode
@@ -57,6 +57,55 @@ FN (ExArenaInsertTagF) MmpInsertDynamicSpaceTag (
     RETURN OS_STATUS_SUCCESS
 END
 
+#IF BLD_MP
+
+FN (KeuAfterShootdownF) MmpDynamicSpaceCallback (
+    IN process : ^KeuProcess,
+    IN context : ^VOID,
+    IN ptr : ^VOID,
+    IN pages : UWORD,
+)
+
+    // Perform the deferred free for dynamic space.
+
+    mmnode := MmpKeProcessToNode ( process )
+
+    ExFreeMultipleToArena (
+        mmnode^.DynamicSpaceArena, // arena
+        ptr, // address
+        pages << RTL_PAGE_SHIFT, // size
+    )
+
+    KeIncrementPtr (
+        &mmnode^.DynamicPagesPendingFLush, // ptr
+        -pages, // inc
+    )
+END
+
+FN (ExArenaClearF) MmpClearDynamicSpace (
+    IN arena : ^ExpArena,
+    IN size : UWORD,
+) : UWORD
+
+    // Check if there are enough virtual pages pending shootdown that it might
+    // be worthwhile to flush them in order to clear up space in the dynamic
+    // space arena since an allocation is about to fail.
+    //
+    // Return TRUE if the allocation should be retried or FALSE otherwise.
+
+    mmnode := KeNumaNodeFromSpacePointer ( arena )^.Mmp
+
+    IF mmnode^.DynamicPagesPendingFLush < size THEN
+        RETURN FALSE
+    END
+
+    KeuFlushShootdowns ( MmpNodeToKeProcess ( mmnode ) )
+
+    RETURN TRUE
+END
+
+#END
+
 #SECTION "INITtext"
 FN MmpInitializeSystemVa (
     IN kenode : ^KeuNode,
@@ -71,9 +120,14 @@ FN MmpInitializeSystemVa (
     mmnode := kenode^.Mmp
 
     tagcallbacks : ExArenaTagCallbacks
-    tagcallbacks.Context = mmnode
     tagcallbacks.LookupTag = &MmpLookupDynamicSpaceTag
     tagcallbacks.InsertTag = &MmpInsertDynamicSpaceTag
+
+#IF BLD_MP
+    clearfunc := &MmpClearDynamicSpace
+#ELSE
+    clearfunc := NULLPTR
+#END
 
     status := ExCreateArena (
         "DynamicSpace", // name
@@ -85,6 +139,7 @@ FN MmpInitializeSystemVa (
         FALSE, // pageable
         RTL_PAGE_SHIFT, // quantumshift
         NULLPTR, // importarena
+        clearfunc, // clearfunc
         OUT mmnode^.DynamicSpaceArena, // arena
     )
 
@@ -150,28 +205,6 @@ FN MmpAllocateDynamicPages (
     RETURN status
 END
 
-#IF BLD_MP
-
-FN (KeuAfterShootdownF) MmpDynamicSpaceCallback (
-    IN process : ^KeuProcess,
-    IN context : ^VOID,
-    IN ptr : ^VOID,
-    IN pages : UWORD,
-)
-
-    // Perform the deferred free for dynamic space.
-
-    mmnode := MmpKeProcessToNode ( process )
-
-    ExFreeMultipleToArena (
-        mmnode^.DynamicSpaceArena, // arena
-        ptr, // address
-        pages << RTL_PAGE_SHIFT, // size
-    )
-END
-
-#END
-
 FN MmpReleaseDynamicPages (
     IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
@@ -192,6 +225,11 @@ FN MmpReleaseDynamicPages (
             pages, // pages
             &MmpDynamicSpaceCallback, // callback
             TRUE, // canflush
+        )
+
+        KeIncrementPtr (
+            &mmnode^.DynamicPagesPendingFLush, // ptr
+            pages, // inc
         )
 
         LEAVE

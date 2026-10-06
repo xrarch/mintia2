@@ -43,9 +43,10 @@ KE_CACHE_LINE_END
     TagCallbacks : ExArenaTagCallbacks,
     ImportCallbacks : ExArenaImportCallbacks,
     QuantumCaches : ExpQuantumCache[EXP_MAX_QUANTUM_CACHES + 1],
+    ImportArena : ^ExpArena,
+    Clear : ExArenaClearF,
     QuantumCacheMaximum : ULONG,
     QuantumShift : ULONG,
-    ImportArena : ^ExpArena,
 
 KE_CACHE_LINE_END
 
@@ -69,14 +70,13 @@ KE_CACHE_LINE_END
 END
 
 FN (ExArenaLookupTagF) ExpArenaLookupTag (
-    IN context : ^VOID,
+    IN arena : ^ExpArena,
     IN address : ^VOID,
     IN remove : UWORD,
 ) : ^ExpArenaTag
 
     // Lookup a tag by address, and remove it if requested.
 
-    arena := CAST context TO ^ExpArena
     tag : ^ExpArenaTag
 
     ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
@@ -148,15 +148,13 @@ FN (RtlAvlLessThanF) ExpArenaCompareTagsBySize (
 END
 
 FN (ExArenaInsertTagF) ExpArenaInsertTag (
-    IN context : ^VOID,
+    IN arena : ^ExpArena,
     IN address : ^VOID,
     IN flags : UWORD,
     IN tag : ^ExpArenaTag,
 ) : OsStatus
 
     // Insert a tag into the lookup tree by address.
-
-    arena := CAST context TO ^ExpArena
 
     ipl := KeAcquireLockExclusiveRaise ( &arena^.Lock )
 
@@ -722,7 +720,6 @@ FN ExpFreeToArena (
         // Free the span to the source.
 
         arena^.ImportCallbacks.Free (
-            arena^.ImportCallbacks.Context, // context
             arena^.ImportArena, // importarena
             address, // address
             size, // size
@@ -860,7 +857,6 @@ FN ExAllocateFromArena (
             importsize := (size + importminimum - 1) & -importminimum
 
             status = arena^.ImportCallbacks.Import (
-                arena^.ImportCallbacks.Context, // context
                 arena^.ImportArena, // importarena
                 flags, // flags
                 importsize, // size
@@ -885,7 +881,6 @@ FN ExAllocateFromArena (
                     KeReleaseLockLower ( &arena^.Lock, ipl )
 
                     arena^.ImportCallbacks.Free (
-                        arena^.ImportCallbacks.Context, // context
                         arena^.ImportArena, // importarena
                         address, // address
                         importsize, // size
@@ -920,6 +915,18 @@ FN ExAllocateFromArena (
             )
 
             retries += 1
+
+            GOTO Retry
+        END
+
+        IF arena^.Clear AND
+            arena^.Clear (
+                arena, // arena
+                size, // size
+            ) THEN
+
+            // The clear function thinks it might have cleared up enough room,
+            // so retry.
 
             GOTO Retry
         END
@@ -981,7 +988,7 @@ FN ExAllocateFromArena (
     // Insert the allocated tag in the arena's lookup structure.
 
     status = arena^.TagCallbacks.InsertTag (
-        arena^.TagCallbacks.Context, // context
+        arena, // arena
         address, // address
         flags, // flags
         alloctag, // tag
@@ -1023,7 +1030,7 @@ FN ExFreeToArena (
     END
 
     tag := arena^.TagCallbacks.LookupTag (
-        arena^.TagCallbacks.Context, // context
+        arena, // arena
         address, // address
         TRUE, // remove
     )
@@ -1048,7 +1055,7 @@ FN ExFreeMultipleToArena (
 
     WHILE size DO
         tag := arena^.TagCallbacks.LookupTag (
-            arena^.TagCallbacks.Context, // context
+            arena, // arena
             address, // address
             TRUE, // remove
         )
@@ -1081,7 +1088,7 @@ FN (ExMagazineCacheFreeF) ExpFreeQuantumCache (
     arena := qcache^.Arena
 
     tag := arena^.TagCallbacks.LookupTag (
-        arena^.TagCallbacks.Context, // context
+        arena, // arena
         ptr, // address
         TRUE, // remove
     )
@@ -1097,7 +1104,6 @@ FN (ExMagazineCacheFreeF) ExpFreeQuantumCache (
 END
 
 FN (ExArenaImportF) ExDefaultArenaImport (
-    IN context : ^VOID,
     IN importarena : ^ExpArena,
     IN flags : UWORD,
     IN size : UWORD,
@@ -1113,7 +1119,6 @@ FN (ExArenaImportF) ExDefaultArenaImport (
 END
 
 FN (ExArenaFreeF) ExDefaultArenaFree (
-    IN context : ^VOID,
     IN importarena : ^ExpArena,
     IN address : ^VOID,
     IN size : UWORD,
@@ -1173,6 +1178,7 @@ FN ExCreateArena (
     IN pageable : UWORD,
     IN quantumshift : UWORD,
     IN importarena : ^ExpArena,
+    IN clearfunc : ExArenaClearF,
     OUT arena : ^ExpArena,
 ) : OsStatus
 
@@ -1231,7 +1237,6 @@ FN ExCreateArena (
     arena^.ImportArena = importarena
 
     IF NOT tagcallbacks THEN
-        arena^.TagCallbacks.Context = arena
         arena^.TagCallbacks.LookupTag = &ExpArenaLookupTag
         arena^.TagCallbacks.InsertTag = &ExpArenaInsertTag
     
@@ -1279,6 +1284,8 @@ FN ExCreateArena (
     RtlInitializeList ( &arena^.ImporterListHead )
 
     KeInitializeLock ( &arena^.ImporterLock, "ArenaImporterLock" )
+
+    arena^.Clear = clearfunc
 
     i := 1
 

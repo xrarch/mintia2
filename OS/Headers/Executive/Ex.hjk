@@ -175,26 +175,24 @@ EXTERN FN ExEnumerateDictionary (
 )
 
 FNPTR ExArenaLookupTagF (
-    IN context : ^VOID,
+    IN arena : ^ExpArena,
     IN address : ^VOID,
     IN remove : UWORD,
 ) : ^ExpArenaTag
 
 FNPTR ExArenaInsertTagF (
-    IN context : ^VOID,
+    IN arena : ^ExpArena,
     IN address : ^VOID,
     IN flags : UWORD,
     IN tag : ^ExpArenaTag,
 ) : OsStatus
 
 STRUCT ExArenaTagCallbacks
-    Context : ^VOID,
     LookupTag : ExArenaLookupTagF,
     InsertTag : ExArenaInsertTagF,
 END
 
 FNPTR ExArenaImportF (
-    IN context : ^VOID,
     IN importarena : ^ExpArena,
     IN flags : UWORD,
     IN size : UWORD,
@@ -202,14 +200,17 @@ FNPTR ExArenaImportF (
 ) : OsStatus
 
 FNPTR ExArenaFreeF (
-    IN context : ^VOID,
     IN importarena : ^ExpArena,
     IN address : ^VOID,
     IN size : UWORD,
 )
 
+FNPTR ExArenaClearF (
+    IN arena : ^ExpArena,
+    IN size : UWORD,
+) : UWORD
+
 STRUCT ExArenaImportCallbacks
-    Context : ^VOID,
     Import : ExArenaImportF,
     Free : ExArenaFreeF,
     ImportQuantumShift : UWORD,
@@ -225,6 +226,7 @@ EXTERN FN ExCreateArena (
     IN pageable : UWORD,
     IN quantumshift : UWORD,
     IN importarena : ^ExpArena,
+    IN clearfunc : ExArenaClearF,
     OUT arena : ^ExpArena,
 ) : OsStatus
 

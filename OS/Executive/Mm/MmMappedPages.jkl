@@ -5,7 +5,6 @@
 #INCLUDE "Mmp.hjk"
 
 FN (ExArenaImportF) MmpImportNonpageable (
-    IN context : ^VOID,
     IN importarena : ^ExpArena,
     IN flags : UWORD,
     IN size : UWORD,
@@ -14,7 +13,7 @@ FN (ExArenaImportF) MmpImportNonpageable (
 
     // Import into the nonpaged arena.
 
-    mmnode := CAST context TO ^MmpNode
+    mmnode := KeNumaNodeFromSpacePointer ( importarena )^.Mmp
 
     pages := size >> RTL_PAGE_SHIFT
 
@@ -152,7 +151,6 @@ FN (ExArenaImportF) MmpImportNonpageable (
 END
 
 FN (ExArenaFreeF) MmpFreeNonpageable (
-    IN context : ^VOID,
     IN importarena : ^ExpArena,
     IN address : ^VOID,
     IN size : UWORD,
@@ -160,7 +158,8 @@ FN (ExArenaFreeF) MmpFreeNonpageable (
 
     // Free a nonpageable slab.
 
-    mmnode := CAST context TO ^MmpNode
+    mmnode := KeNumaNodeFromSpacePointer ( importarena )^.Mmp
+
     pages := size >> RTL_PAGE_SHIFT
 
     pte := MmpPteAddress ( address )
@@ -208,7 +207,7 @@ FN (ExArenaFreeF) MmpFreeNonpageable (
 END
 
 FN (ExArenaLookupTagF) MmpLookupMappedArenaTag (
-    IN context : ^VOID,
+    IN arena : ^ExpArena,
     IN address : ^VOID,
     IN remove : UWORD,
 ) : ^ExpArenaTag
@@ -217,7 +216,7 @@ FN (ExArenaLookupTagF) MmpLookupMappedArenaTag (
     // Do nothing on removal since we unreference the VPE upon freeing the
     // underlying imported span.
 
-    mmnode := CAST context TO ^MmpNode
+    mmnode := KeNumaNodeFromSpacePointer ( arena )^.Mmp
 
     vpe := MmpAddressToVpe ( mmnode, address )
 
@@ -231,7 +230,7 @@ FN (ExArenaLookupTagF) MmpLookupMappedArenaTag (
 END
 
 FN (ExArenaInsertTagF) MmpInsertMappedArenaTag (
-    IN context : ^VOID,
+    IN arena : ^ExpArena,
     IN address : ^VOID,
     IN flags : UWORD,
     IN tag : ^ExpArenaTag,
@@ -239,7 +238,7 @@ FN (ExArenaInsertTagF) MmpInsertMappedArenaTag (
 
     // Insert the slab arena tag.
 
-    mmnode := CAST context TO ^MmpNode
+    mmnode := KeNumaNodeFromSpacePointer ( arena )^.Mmp
 
     vpe := MmpAddressToVpe ( mmnode, address )
 
@@ -259,12 +258,10 @@ FN MmpInitializeMappedPages (
     // Create the two slab arenas, one for each type of pageability.
 
     tagcallbacks : ExArenaTagCallbacks
-    tagcallbacks.Context = mmnode
     tagcallbacks.LookupTag = &MmpLookupMappedArenaTag
     tagcallbacks.InsertTag = &MmpInsertMappedArenaTag
 
     importcallbacks : ExArenaImportCallbacks
-    importcallbacks.Context = mmnode
     importcallbacks.Import = &MmpImportNonpageable
     importcallbacks.Free = &MmpFreeNonpageable
     importcallbacks.ImportQuantumShift = RTL_PAGE_SHIFT + 3
@@ -279,6 +276,7 @@ FN MmpInitializeMappedPages (
         FALSE, // pageable
         RTL_PAGE_SHIFT, // quantumshift
         mmnode^.DynamicSpaceArena, // importarena
+        NULLPTR, // clearfunc
         OUT mmnode^.MappedArenas[FALSE], // arena
     )
 
@@ -303,6 +301,7 @@ FN MmpInitializeMappedPages (
         TRUE, // pageable
         RTL_PAGE_SHIFT, // quantumshift
         mmnode^.DynamicSpaceArena, // importarena
+        NULLPTR, // clearfunc
         OUT mmnode^.MappedArenas[TRUE], // arena
     )
 
