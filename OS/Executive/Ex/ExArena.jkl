@@ -50,12 +50,6 @@ KE_CACHE_LINE_END
 
 KE_CACHE_LINE_END
 
-    ImporterLock : KeLock,
-    ImporterListHead : RtlListEntry,
-    ImporterListEntry : RtlListEntry,
-
-KE_CACHE_LINE_END
-
     // Keyed by size.
     FreeTree : RtlAvlNode,
 
@@ -278,18 +272,6 @@ FN ExDeleteArena (
 
     KeReleaseLock ( &expnode^.ArenaListLock )
 
-    importarena := arena^.ImportArena
-
-    IF importarena THEN
-        // Remove from the imported arena's list of importers.
-
-        ipl = KeAcquireLockExclusiveRaise ( &importarena^.ImporterLock )
-
-        RtlRemoveEntryList ( &arena^.ImporterListEntry )
-
-        KeReleaseLockLower ( &importarena^.ImporterLock, ipl )
-    END
-
     // Delete all of the quantum caches.
 
     i := 1
@@ -329,28 +311,7 @@ FN ExpAdjustQuantumCaches (
     IN purge : UWORD,
 )
 
-    // Adjust the arena's quantum caches, along with those of all arenas that
-    // import from it.
-
-    IF NOT RtlEmptyList ( &arena^.ImporterListHead ) THEN
-        ipl := KeAcquireLockExclusiveRaise ( &arena^.ImporterLock )
-
-        listhead := &arena^.ImporterListHead
-        listentry := arena^.ImporterListHead.Next
-
-        WHILE listentry != listhead DO
-            importer := CONTAINEROF listentry TO ExpArena.ImporterListEntry
-
-            ExpAdjustQuantumCaches (
-                importer, // arena
-                purge, // purge
-            )
-
-            listentry = listentry^.Next
-        END
-
-        KeReleaseLockLower ( &arena^.ImporterLock, ipl )
-    END
+    // Adjust the arena's quantum caches.
 
     i := 1
 
@@ -1137,21 +1098,6 @@ FN ExpInsertArenaInLists (
 
     // Nonpaged helper for inserting the arena in the lists.
 
-    // Insert in the imported arena's list.
-
-    importarena := arena^.ImportArena
-
-    IF importarena THEN
-        ipl := KeAcquireLockExclusiveRaise ( &importarena^.ImporterLock )
-
-        RtlInsertAtTailList (
-            &importarena^.ImporterListHead, // listhead
-            &arena^.ImporterListEntry, // entry
-        )
-
-        KeReleaseLockLower ( &importarena^.ImporterLock, ipl )
-    END
-
     // Insert in the per-node arena list.
     // This list is to be used for user introspection.
 
@@ -1280,10 +1226,6 @@ FN ExCreateArena (
 
     RtlInitializeList ( &arena^.TagReserveListHead )
     arena^.TagReserveCount = 0
-
-    RtlInitializeList ( &arena^.ImporterListHead )
-
-    KeInitializeLock ( &arena^.ImporterLock, "ArenaImporterLock" )
 
     arena^.Clear = clearfunc
 
