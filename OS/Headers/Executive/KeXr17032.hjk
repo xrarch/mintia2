@@ -17,6 +17,8 @@
 
 #END
 
+#DEFINE KE_CACHE_ALIGN 16
+
 #MACRO KeMemoryBarrier () [
     BARRIER
     INSERTASM "mb"
@@ -39,6 +41,8 @@
 #MACRO KeWriteMemoryBarrier () [ BARRIER ]
 
 #MACRO KeCurrentNodeLocalProcessorId () [ 0 ]
+
+#DEFINE KE_CACHE_ALIGN 4
 
 #END
 
@@ -67,8 +71,6 @@
 #MACRO KepStashNodePtr ( prb, kenode ) [
     NOTHING (CAST ((prb) + 0xFF4) TO ^^KeuNode)[0] = (kenode)
 ]
-
-#DEFINE KE_CACHE_ALIGN 16
 
 #DEFINE KE_SYSTEM_SPACE 0x80000000
 
