@@ -1,6 +1,20 @@
 //
 // Implements a spinlock-guarded request queue. Intended for devices.
 //
+// Enables a simple form of request flow control by giving each request a "cost"
+// representing how many of some driver-specific resource it will consume to
+// start, and a "maximum" representing how many such resources are available.
+//
+// Supports two request sorting policies:
+//
+//  - KE_REQUEST_QUEUE_FIFO: Requests are processed in insertion order.
+//
+//  - KE_REQUEST_QUEUE_KEY: Requests are processed in increasing order of an
+//                          opaque key value. Requests with lower key values are
+//                          only started when all non-decreasing keys have been
+//                          exhausted. (Optimized for spinning rust disk
+//                          drivers).
+//
 
 #INCLUDE "Kep.hjk"
 
