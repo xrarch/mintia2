@@ -114,7 +114,7 @@ EXPORT FN KeInsertRequestQueue (
         IF request^.SortKey <= queue^.Pivot THEN
             // We are currently processing entries with a key larger than the
             // current pivot. Since we're less or equal, toggle the index to
-            // insert us into the "next" queue.
+            // insert us into the "next" queue. (This is an XOR.)
 
             current $= 1
         END
@@ -194,9 +194,9 @@ FN KepStartRequests (
     IF NOT request OR
         queue^.Current + request^.Cost > queue^.Maximum THEN
 
-        // No next request or it would be too expensive.
-
         KepReleaseRequestQueue ( queue, ipl )
+
+        // No next request or the queue is too busy to start it now.
 
         LEAVE
     END
