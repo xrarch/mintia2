@@ -16,11 +16,15 @@
 //              automatically raise and lower IPL appropriately).
 //
 // Lazy APCs:   LAPCs are dispatched whenever a thread is executing in usermode,
-//              upon return to usermode from the kernel, and whenever the thread
-//              takes a KE_USER_MODE wait. They can take page faults and can
-//              acquire (almost) any lock, since a KE_USER_MODE waiter is
-//              guaranteed not to be holding the vast majority of internal locks
-//              at wait time.
+//              and upon return to usermode from the kernel. They can take page
+//              faults and can acquire any lock, since none can be held at
+//              dispatch time.
+//
+//              Formerly, they could also be dispatched during KE_USER_MODE
+//              waits in order to make them useful for latency-sensitive uses,
+//              but design shifted away from this and this consideration ended
+//              up only being a burden on other LAPC use cases like thread
+//              suspension.
 //
 // User APCs:   UAPCs are special as they cause code to be executed in usermode
 //              instead of kernel mode. They are dispatched only when the kernel
@@ -244,8 +248,6 @@ EXPORT FN KeEnqueueLapc (
         &apc^.Entry, // entry
     )
 
-    thread^.PendingEventsSet |= KEP_THREAD_PENDING_LAPC
-
     apc^.Enqueued = TRUE
 
     apc^.Context1 = context1
@@ -256,26 +258,8 @@ EXPORT FN KeEnqueueLapc (
 
     thread^.UserInterrupt = TRUE
 
-    IF (thread^.Status == KE_THREAD_WAITING
 #IF BLD_MP
-        OR (thread^.Status == KE_THREAD_RUNNING AND
-        thread^.WaitState == KEP_THREAD_WAIT_TRY)
-#END
-        ) AND thread^.WaitIpl == KEP_IPL_LOW AND
-        thread^.WaitMode == KE_USER_MODE THEN
-
-        // The thread was in a usermode wait, so wake him up with a kernel APC
-        // status so that he tries to wait again and dispatches his lazy APC
-        // queue at that time.
-
-        KepUnwaitThread (
-            thread, // thread,
-            OS_STATUS_KERNEL_APC, // status
-            priorityboost, // priorityboost
-        )
-
-#IF BLD_MP
-    ELSEIF thread^.Status == KE_THREAD_RUNNING AND
+    IF thread^.Status == KE_THREAD_RUNNING AND
         thread^.CurrentMode == KE_USER_MODE THEN
 
         KeMemoryBarrier ()
@@ -287,8 +271,8 @@ EXPORT FN KeEnqueueLapc (
             thread^.CurrentPrb, // target
             KEP_IPI_ASYNCHRONOUS, // type
         )
-#END
     END
+#END
 
     KepReleaseThread ( thread, ipl )
 
@@ -416,7 +400,7 @@ FN KepDispatchLazyApcQueue (
     KepDispatchKernelModeApcs (
         current, // thread
         &current^.LapcListHead, // head
-        KEP_THREAD_PENDING_LAPC, // pendingbit
+        0, // pendingbit
     )
 END
 

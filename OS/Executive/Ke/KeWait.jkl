@@ -547,18 +547,6 @@ FN KepWaitCheck (
         RETURN OS_STATUS_TRY_AGAIN
 #END
 
-    ELSEIF waitmode == KE_USER_MODE AND
-        bits & KEP_THREAD_PENDING_LAPC THEN
-
-        // There are pending lazy APCs and this is a usermode wait,
-        // so dispatch them and retry.
-
-        KepReleaseThread ( thread, KEP_IPL_LOW )
-
-        KepDispatchLazyApcQueue ( thread )
-
-        RETURN OS_STATUS_TRY_AGAIN
-
     ELSEIF alertable == KE_UNALERTABLE THEN
         // Wait was unalertable.
 
