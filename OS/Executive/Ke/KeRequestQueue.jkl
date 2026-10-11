@@ -1,9 +1,16 @@
 //
-// Implements a spinlock-guarded request queue. Intended for devices.
+// Implements a spinlock-guarded request queue. Intended for device drivers.
+// Safe to use from mixed DPC and thread context.
 //
 // Enables a simple form of request flow control by giving each request a "cost"
 // representing how many of some driver-specific resource it will consume to
-// start, and a "maximum" representing how many such resources are available.
+// start, and each queue has a "maximum" representing how many such resources
+// are available. New requests will be started automatically as resources become
+// available due to cancellation and completion of previously started requests.
+//
+// The driver is expected to provide its own book-keeping for things like
+// enumerating started requests (if needed) and also lifetime guarantees for
+// the queue and its requests.
 //
 // Supports two request sorting policies:
 //
