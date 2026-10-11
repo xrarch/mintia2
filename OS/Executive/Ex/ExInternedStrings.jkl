@@ -4,6 +4,17 @@
 
 #INCLUDE "Exp.hjk"
 
+STRUCT ExpName
+    // The RtlString must be at the start to align with ExName.
+    String : RtlString,
+
+    Entry : RtlAvlNode,
+
+    References : ULONG,
+
+    BucketIndex : UBYTE,
+END
+
 #SECTION "INITtext"
 FN ExpInitializeNamesForNode (
     IN expnode : ^ExpNode,
@@ -49,8 +60,8 @@ FN (RtlAvlLessThanF) ExpCompareNameNodes (
     // Return whether A < B, lexicographically.
 
     RETURN CAST RtlCompareRtlString (
-        ExNameToString ( CONTAINEROF a TO ExuName.Entry ), // str1
-        ExNameToString ( CONTAINEROF b TO ExuName.Entry ), // str2
+        &(CONTAINEROF a TO ExpName.Entry)^.String, // str1
+        &(CONTAINEROF b TO ExpName.Entry)^.String, // str2
     ) TO WORD < 0
 END
 
@@ -81,7 +92,7 @@ END
 #SECTION "PAGEtext"
 EXPORT FN ExFindName (
     IN str : ^RtlString,
-) : ^ExuName
+) : ^ExName
 
     // Find a name in the string internment buckets.
 
@@ -116,11 +127,11 @@ EXPORT FN ExFindName (
             BREAK
         END
 
-        checknode := CONTAINEROF avlnode TO ExuName.Entry
+        checknode := CONTAINEROF avlnode TO ExpName.Entry
 
         res := CAST RtlCompareRtlString (
             str, // str1
-            ExNameToString ( checknode ), // str2
+            &checknode^.String, // str2
         ) TO WORD
 
         IF res == 0 THEN
@@ -133,7 +144,7 @@ EXPORT FN ExFindName (
 
             KeReleaseLock ( &bucket^.Lock )
 
-            RETURN checknode
+            RETURN CAST checknode TO ^ExName
         END
 
         IF res < 0 THEN
@@ -143,12 +154,12 @@ EXPORT FN ExFindName (
         END
     END
 
-    node : ^ExuName
+    node : ^ExpName
 
     status := MmAllocatePoolEx (
         kenode, // kenode
         TRUE, // pageable
-        SIZEOF ExuName + SIZEOF RtlString + len + 1, // bytes
+        SIZEOF ExpName + len + 1, // bytes
         'Name', // tag
         0, // flags
         OUT node, // ptr
@@ -171,13 +182,13 @@ EXPORT FN ExFindName (
     node^.References = 1
     node^.BucketIndex = hash & (EXP_NAME_BUCKETS - 1)
 
-    newstr := ExNameToString ( node )
+    newstr := &node^.String
 
     newstr^.Length = len
-    newstr^.Data = CAST newstr + SIZEOF RtlString TO ^UBYTE
+    newstr^.Data = CAST (node + SIZEOF ExpName) TO ^UBYTE
 
     RtlCopyBytes (
-        newstr + SIZEOF RtlString, // dest
+        newstr^.Data, // dest
         str^.Data, // src
         len + 1, // sz
     )
@@ -194,17 +205,19 @@ EXPORT FN ExFindName (
 
     KeReleaseLock ( &bucket^.Lock )
 
-    RETURN node
+    RETURN CAST node TO ^ExName
 END
 
 #SECTION "PAGEtext"
 EXPORT FN ExUnreferenceName (
-    IN name : ^ExuName,
+    IN name : ^ExName,
 )
 
     // Unreference the name node.
 
-    refcount := name^.References
+    expname := CAST name TO ^ExpName
+
+    refcount := expname^.References
 
     KeAssert ( refcount != 0 )
 
@@ -216,7 +229,7 @@ EXPORT FN ExUnreferenceName (
         END
 
         new := KeCompareSwapUlong (
-            &name^.References, // ptr
+            &expname^.References, // ptr
             refcount - 1, // newvalue
             refcount, // expectedvalue
         )
@@ -228,9 +241,9 @@ EXPORT FN ExUnreferenceName (
         refcount = new
     END
 
-    expnode := KeNumaNodeFromSpacePointer ( name )^.Exp
+    expnode := KeNumaNodeFromSpacePointer ( expname )^.Exp
 
-    bucket := &expnode^.NameBuckets[name^.BucketIndex]
+    bucket := &expnode^.NameBuckets[expname^.BucketIndex]
 
     // Lock the bucket.
 
@@ -239,7 +252,7 @@ EXPORT FN ExUnreferenceName (
     // Decrement the reference count.
 
     oldcount := KeIncrementUlong (
-        &name^.References, // ptr
+        &expname^.References, // ptr
         0xFFFFFFFF, // ulong
     )
 
@@ -248,7 +261,7 @@ EXPORT FN ExUnreferenceName (
 
         RtlRemoveAvl (
             &bucket^.TreeRoot, // root
-            &name^.Entry, // node
+            &expname^.Entry, // node
         )
 
         KeReleaseLock ( &bucket^.Lock )
@@ -256,7 +269,7 @@ EXPORT FN ExUnreferenceName (
         // Free outside the bucket lock.
 
         MmFreePool (
-            name, // ptr
+            expname, // ptr
             'Name', // tag
         )
 
@@ -270,15 +283,17 @@ END
 
 #SECTION "PAGEtext"
 EXPORT FN ExReferenceName (
-    IN name : ^ExuName,
+    IN name : ^ExName,
 )
 
     // Reference the name node.
 
-    KeAssert ( name^.References != 0 )
+    expname := CAST name TO ^ExpName
+
+    KeAssert ( expname^.References != 0 )
 
     KeIncrementUlong (
-        &name^.References, // ptr
+        &expname^.References, // ptr
         1, // inc
     )
 END
@@ -320,17 +335,4 @@ EXPORT FN ExDuplicateString (
     )
 
     RETURN status
-END
-
-// The following functions are defined as macros for speed purposes within the
-// Executive but are exported as real functions for the benefit of kernel
-// modules, so we don't need to export these structures.
-
-#UNDEFINE ExNameToString
-
-EXPORT FN ExNameToString (
-    IN name : ^ExuName,
-) : ^RtlString
-
-    RETURN CAST ((name) + SIZEOF ExuName) TO ^RtlString
 END
