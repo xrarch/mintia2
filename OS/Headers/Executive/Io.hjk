@@ -9,6 +9,89 @@
 
 #INCLUDE "<ll>/System/OsFile.hjk"
 
+UNION IopRequestLinks
+    Sorted : RtlHeapEntry,
+    List : RtlListEntry,
+END
+
+#DEFINE IO_REQUEST_ORDER_FIFO 0
+#DEFINE IO_REQUEST_ORDER_INCREASING 1
+#DEFINE IO_REQUEST_ORDER_MINIMUM 2
+
+STRUCT IoRequestEntry
+    Entry : IopRequestLinks,
+    SortKey : UWORD,
+    Status : ULONG,
+    Cost : UINT,
+    HeapIndex : UBYTE,
+END
+
+#MACRO IoInitializeRequest ( request, sortkey, cost ) [
+    NOTHING (request)^.Cost = (cost)
+    NOTHING (request)^.SortKey = (sortkey)
+    NOTHING (request)^.Status = KEP_REQUEST_NONE
+    NOTHING (request)^.HeapIndex = 0
+]
+
+FNPTR IoRequestStartF (
+    IN request : ^IoRequestEntry,
+)
+
+FNPTR IoRequestCompleteF (
+    IN request : ^IoRequestEntry,
+    IN cancelled : UWORD,
+) : UWORD
+
+STRUCT IopRequestSortedHead
+    Roots : ^RtlHeapEntry[2],
+END
+
+UNION IopRequestHeads
+    Sorted : IopRequestSortedHead,
+    List : RtlListEntry,
+END
+
+STRUCT IoRequestQueue
+    Head : IopRequestHeads,
+    Pivot : UWORD,
+    StartFunction : IoRequestStartF,
+    CompleteFunction : IoRequestCompleteF,
+
+    Current : UINT,
+    Maximum : UINT,
+
+    SortPolicy : UBYTE,
+    CurrentQueueIndex : UBYTE,
+END
+
+EXTERN FN IoInitializeRequestQueue (
+    IN queue : ^IoRequestQueue,
+    IN sortpolicy : UWORD,
+    IN startfunc : IoRequestStartF,
+    IN completefunc : IoRequestCompleteF,
+    IN maximum : UWORD,
+)
+
+EXTERN FN IoCompleteRequestQueue (
+    IN queue : ^IoRequestQueue,
+    IN request : ^IoRequestEntry,
+) : UWORD
+
+EXTERN FN IoCancelRequestQueue (
+    IN queue : ^IoRequestQueue,
+    IN request : ^IoRequestEntry,
+) : UWORD
+
+EXTERN FN IoFinishCancelRequestQueue (
+    IN queue : ^IoRequestQueue,
+    IN request : ^IoRequestEntry,
+)
+
+EXTERN FN IoInsertRequestQueue (
+    IN queue : ^IoRequestQueue,
+    IN request : ^IoRequestEntry,
+)
+
 FNPTR IoOpenFileObjectF (
     IN process : ^PsuProcess,
     IN file : ^IoFile,
@@ -193,7 +276,7 @@ STRUCT IoPacket // aka "IOP"
 
     // Links for generic device-specific queue of pending IOPs.
 
-    RequestEntry : KeRequestEntry,
+    RequestEntry : IoRequestEntry,
 
     // IOL list head.
 
