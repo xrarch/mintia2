@@ -90,18 +90,18 @@ EXPORT FN KeInsertRequestQueue (
         queue^.Current += request^.Cost
         queue^.Pivot = request^.SortKey
 
-        request^.Status = KEP_REQUEST_CURRENT
-
         KepReleaseRequestQueue ( queue, ipl )
 
         // Start the request.
+
+        request^.Status = KEP_REQUEST_CURRENT
 
         queue^.StartFunction ( request )
 
         LEAVE
     END
 
-    // The queue is busy 
+    // The queue is busy so insert the request for deferred processing.
 
     IF queue^.SortPolicy THEN
         // This is a sorted request queue.
@@ -129,10 +129,6 @@ EXPORT FN KeInsertRequestQueue (
 
         request^.HeapIndex = current
 
-        // Set inserted.
-
-        request^.Status = KEP_REQUEST_ENQUEUED
-
     ELSE
         // This is a non-sorted request queue.
 
@@ -142,13 +138,13 @@ EXPORT FN KeInsertRequestQueue (
             &queue^.Head.List, // head
             &request^.Entry.List, // entry
         )
-
-        // Set inserted.
-
-        request^.Status = KEP_REQUEST_ENQUEUED
     END
 
     KepReleaseRequestQueue ( queue, ipl )
+
+    // Set inserted.
+
+    request^.Status = KEP_REQUEST_ENQUEUED
 END
 
 FN KepStartRequests (
@@ -225,11 +221,11 @@ FN KepStartRequests (
     queue^.Current += request^.Cost
     queue^.Pivot = request^.SortKey
 
-    request^.Status = KEP_REQUEST_CURRENT
-
     KepReleaseRequestQueue ( queue, ipl )
 
     // Start the request.
+
+    request^.Status = KEP_REQUEST_CURRENT
 
     queue^.StartFunction ( request )
 
@@ -247,24 +243,28 @@ EXPORT FN KeCompleteRequestQueue (
     // start any that can now be started. Returns TRUE if completed, FALSE
     // otherwise.
 
-    ipl := KepAcquireRequestQueue ( queue )
+    status := request^.Status
 
-    KeAssert ( (request^.Status == KEP_REQUEST_CURRENT) OR
-        (request^.Status == KEP_REQUEST_CANCELLED) )
+    WHILE TRUE DO
+        KeAssert ( (status == KEP_REQUEST_CURRENT) OR
+            (status == KEP_REQUEST_CANCELLED) )
 
-    IF request^.Status != KEP_REQUEST_CURRENT THEN
-        KepReleaseRequestQueue ( queue, ipl )
+        IF status == KEP_REQUEST_CANCELLED THEN
+            RETURN FALSE
+        END
 
-        RETURN FALSE
+        newstatus := KeCompareSwapUlong (
+            &request^.Status, // ptr
+            KEP_REQUEST_COMPLETED, // newvalue
+            status, // expectedvalue
+        )
+
+        IF newstatus == status THEN
+            BREAK
+        END
+
+        status = newstatus
     END
-
-    // Set as completed.
-
-    request^.Status = KEP_REQUEST_COMPLETED
-
-    // The request is still current, so decrement the current cost.
-
-    queue^.Current -= request^.Cost
 
     // Invoke callback to free up any structures associated with this
     // entry's cost.
@@ -273,6 +273,12 @@ EXPORT FN KeCompleteRequestQueue (
         request, // request
         FALSE, // cancelled
     )
+
+    // The request was still current, so decrement the current cost.
+
+    ipl := KepAcquireRequestQueue ( queue )
+
+    queue^.Current -= request^.Cost
 
     KepReleaseRequestQueue ( queue, ipl )
 
@@ -290,79 +296,84 @@ EXPORT FN KeCancelRequestQueue (
 
     // Cancel the given request. Returns TRUE if cancelled, FALSE otherwise.
 
-    cancelled := FALSE
-
-    ipl := KepAcquireRequestQueue ( queue )
-
-    KeAssert ( (request^.Status == KEP_REQUEST_ENQUEUED) OR
-        (request^.Status == KEP_REQUEST_CURRENT) OR
-        (request^.Status == KEP_REQUEST_COMPLETED) )
-
+    ipl : UWORD
     status := request^.Status
 
-    IF status == KEP_REQUEST_COMPLETED THEN
-        GOTO Exit
-    END
+    WHILE TRUE DO
+        KeAssert ( (request^.Status == KEP_REQUEST_ENQUEUED) OR
+            (request^.Status == KEP_REQUEST_CURRENT) OR
+            (request^.Status == KEP_REQUEST_COMPLETED) )
 
-    // Hasn't been completed yet, which means its still cancellable.
-
-    cancelled = TRUE
-
-    request^.Status = KEP_REQUEST_CANCELLED
-
-    IF status == KEP_REQUEST_ENQUEUED THEN
-        // It was enqueued, so we have to remove it from the queue
-        // structure.
-
-        IF queue^.SortPolicy == KE_REQUEST_QUEUE_FIFO THEN
-            // Remove from the FIFO list.
-
-            RtlRemoveEntryList ( &request^.Entry.List )
-
-        ELSE
-            // Remove from the appropriate min heap.
-
-            RtlRemoveFromHeap (
-                &KepCompareRequests, // comparisonfunc
-                &queue^.Head.Sorted.Roots[request^.HeapIndex], // rootptr
-                &request^.Entry.Sorted, // entry
-            )
+        IF status == KEP_REQUEST_COMPLETED THEN
+            RETURN FALSE
         END
 
-        GOTO Exit
+        newstatus := KeCompareSwapUlong (
+            &request^.Status, // ptr
+            KEP_REQUEST_CANCELLED, // newvalue
+            status, // expectedvalue
+        )
+
+        IF newstatus == status THEN
+            BREAK
+        END
+
+        status = newstatus
     END
 
-    // The request is current, so the callback needs to be invoked to allow
-    // the driver to do whatever is necessary.
-    //
-    // This callback returns a value indicating whether new requests can be
-    // immediately started. If not, then the driver promises to call
-    // KeFinishCancelRequestQueue later on the request in order to remove its
-    // cost and allow more requests to be started.
+    IF status == KEP_REQUEST_CURRENT THEN
+        // The request is current, so the callback needs to be invoked to allow
+        // the driver to do whatever is necessary.
+        //
+        // This callback returns a value indicating whether new requests can be
+        // immediately started. If not, then the driver promises to call
+        // KeFinishCancelRequestQueue later on the request in order to remove
+        // its cost and allow more requests to be started.
 
-    IF queue^.CompleteFunction (
-        request, // request
-        TRUE, // cancelled
-    ) THEN
+        IF queue^.CompleteFunction (
+            request, // request
+            TRUE, // cancelled
+        ) THEN
 
-        // Decrement the cost.
+            ipl = KepAcquireRequestQueue ( queue )
 
-        queue^.Current -= request^.Cost
+            queue^.Current -= request^.Cost
 
-        KepReleaseRequestQueue ( queue, ipl )
+            KepReleaseRequestQueue ( queue, ipl )
 
-        // Try to start any requests that can be started.
+            // Try to start any requests that can be started.
 
-        KepStartRequests ( queue )
+            KepStartRequests ( queue )
+        END
 
         RETURN TRUE
     END
 
-@Exit
+    KeAssert ( status == KEP_REQUEST_ENQUEUED )
+
+    // It was enqueued, so we have to remove it from the queue
+    // structure.
+
+    ipl = KepAcquireRequestQueue ( queue )
+
+    IF queue^.SortPolicy == KE_REQUEST_QUEUE_FIFO THEN
+        // Remove from the FIFO list.
+
+        RtlRemoveEntryList ( &request^.Entry.List )
+
+    ELSE
+        // Remove from the appropriate min heap.
+
+        RtlRemoveFromHeap (
+            &KepCompareRequests, // comparisonfunc
+            &queue^.Head.Sorted.Roots[request^.HeapIndex], // rootptr
+            &request^.Entry.Sorted, // entry
+        )
+    END
 
     KepReleaseRequestQueue ( queue, ipl )
 
-    RETURN cancelled
+    RETURN TRUE
 END
 
 EXPORT FN KeFinishCancelRequestQueue (
@@ -373,11 +384,11 @@ EXPORT FN KeFinishCancelRequestQueue (
     // Finish cancelling the given request. This just decrements the current
     // cost and attempts to start more requests.
 
-    ipl := KepAcquireRequestQueue ( queue )
-
     KeAssert ( request^.Status == KEP_REQUEST_CANCELLED )
 
     // Decrement the cost.
+
+    ipl := KepAcquireRequestQueue ( queue )
 
     queue^.Current -= request^.Cost
 
