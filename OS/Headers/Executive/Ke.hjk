@@ -611,9 +611,9 @@ UNION KepRequestLinks
     List : RtlListEntry,
 END
 
-#DEFINE KE_REQUEST_QUEUE_FIFO 0
-#DEFINE KE_REQUEST_QUEUE_KEY 1
-#DEFINE KE_REQUEST_QUEUE_COST 2
+#DEFINE KE_REQUEST_ORDER_FIFO 0
+#DEFINE KE_REQUEST_ORDER_INCREASING 1
+#DEFINE KE_REQUEST_ORDER_MINIMUM 2
 
 STRUCT KeRequestEntry
     Entry : KepRequestLinks,
@@ -623,21 +623,11 @@ STRUCT KeRequestEntry
     HeapIndex : UBYTE,
 END
 
-#MACRO KeInitializeCostRequest ( request, cost ) [
-    NOTHING (request)^.Cost = (cost)
-    NOTHING (request)^.SortKey = (cost)
-    NOTHING (request)^.Status = KEP_REQUEST_NONE
-]
-
-#MACRO KeInitializeSortedRequest ( request, sortkey, cost ) [
+#MACRO KeInitializeRequest ( request, sortkey, cost ) [
     NOTHING (request)^.Cost = (cost)
     NOTHING (request)^.SortKey = (sortkey)
     NOTHING (request)^.Status = KEP_REQUEST_NONE
-]
-
-#MACRO KeInitializeFifoRequest ( request, cost ) [
-    NOTHING (request)^.Cost = (cost)
-    NOTHING (request)^.Status = KEP_REQUEST_NONE
+    NOTHING (request)^.HeapIndex = 0
 ]
 
 FNPTR KeRequestStartF (
@@ -659,10 +649,6 @@ UNION KepRequestHeads
 END
 
 STRUCT KeRequestQueue
-#IF BLD_MP
-    Spinlock : KepSpinlock,
-#END
-
     Head : KepRequestHeads,
     Pivot : UWORD,
     StartFunction : KeRequestStartF,
