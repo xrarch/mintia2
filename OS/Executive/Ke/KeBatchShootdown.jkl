@@ -128,22 +128,27 @@ FN KeuBatchShootdown (
         GOTO Retry
     END
 
-    // Try to coalesce with the last entered shootdown.
+    // Try to coalesce with a previously entered shootdown.
+    // Currently iterating the array should be faster than using something
+    // fancier like an interval tree because there are only 8 slots.
 
     index := percpu^.Index
     entry : ^KepBatchedShootdown
 
-    IF index != 0 THEN
-        entry = &percpu^.Table[index - 1]
+    i := index
+
+    WHILE i DO
+        i -= 1
+        entry = &percpu^.Table[i]
 
         IF entry^.Callback == callback AND
             entry^.Context == context AND
             ((entry^.Ptr + (entry^.Pages << RTL_PAGE_SHIFT) == ptr) OR
             (ptr + (pages << RTL_PAGE_SHIFT) == entry^.Ptr)) THEN
 
-            // This shootdown is directly contiguous with the last one that
+            // This shootdown is directly contiguous with another one that
             // was inserted and has the same callback and context. So we
-            // can just extend the last one.
+            // can just extend that one instead of taking another slot.
 
             entry^.Pages += pages
 
@@ -157,7 +162,25 @@ FN KeuBatchShootdown (
         END
     END
 
-    // Nope, add a new entry.
+    IF NOT state^.HasPendingFlushes THEN
+        // Indicate that something productive is to be gained by doing a flush.
+        // We don't just unconditionally set this to TRUE because it would
+        // cause its cache line to aggressively migrate around, so we check
+        // if it's FALSE first.
+
+        // Setting this to TRUE is intentionally not guarded by any lock in
+        // particular, but we place it before the release below in order to get
+        // caught by its release barrier.
+
+        // It should also be done before directly executing the callback below
+        // upon the event that the batch is full, to make sure that the TB
+        // flush this range needs actually occurs (otherwise there are races
+        // possible in KeuFlushShootdowns that might cause it not to happen).
+
+        state^.HasPendingFlushes = TRUE
+    END
+
+    // Add a new entry.
 
     IF index >= KEP_MAXIMUM_SHOOTDOWN_BATCH THEN
         // The batch is full, do it immediately.
@@ -186,19 +209,6 @@ FN KeuBatchShootdown (
     entry^.Context = context
 
     percpu^.Index = index + 1
-
-    IF NOT state^.HasPendingFlushes THEN
-        // Indicate that something productive is to be gained by doing a flush.
-        // We don't just unconditionally set this to TRUE because it would
-        // cause its cache line to aggressively migrate around, so we check
-        // if it's FALSE first.
-
-        // Setting this to TRUE is intentionally not guarded by any lock in
-        // particular, but we place it before the release below in order to get
-        // caught by its release barrier.
-
-        state^.HasPendingFlushes = TRUE
-    END
 
     KeReleaseLockLower ( &percpu^.Lock, ipl )
 
