@@ -135,9 +135,16 @@ EXTERN FN KeOrUlongRelaxed (
     IN bitset : ULONG,
 ) : ULONG
 
+#DEFINE KeIncrementUlongMp [KeIncrementUlong]
+
 #ELSE
 
 #DEFINE KeOrUlongRelaxed [KeOrUlong]
+
+#MACRO KeIncrementUlongMp ( ptr, inc ) [
+    NOTHING (ptr)^
+    NOTHING (ptr)^ += (inc)
+]
 
 #END
 

@@ -57,11 +57,14 @@ FN KepWakeBalancedQueue (
 
     KepAcquireObjectElevated ( &queue^.Header )
 
-    KeAssert ( queue^.ActiveThreadCount != 0 )
+    oldcount := KeIncrementUlongMp (
+        &queue^.ActiveThreadCount, // ptr
+        0xFFFFFFFF, // inc
+    )
 
-    queue^.ActiveThreadCount -= 1
+    KeAssert ( oldcount != 0 )
 
-    IF queue^.ActiveThreadCount < queue^.MaximumThreadCount AND
+    IF oldcount <= queue^.MaximumThreadCount AND
         queue^.Header.WaiterCount AND
         NOT RtlEmptyList ( &queue^.ItemListHead ) THEN
 
@@ -246,11 +249,10 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
         KepReleaseThreadListElevated ( kepnode )
 
-        KepAcquireObjectElevated ( &queue^.Header )
-
-        queue^.ActiveThreadCount += 1
-
-        KepReleaseObjectElevated ( &queue^.Header )
+        KeIncrementUlongMp (
+            &queue^.ActiveThreadCount, // ptr
+            1, // inc
+        )
     END
 
     // The thread is now definitely associated with this queue, and won't become
@@ -340,25 +342,4 @@ FN KeuRundownBalancedQueue (
     END
 
     KepReleaseThreadList ( kepnode, ipl )
-END
-
-FN KepIndicateActiveBalancedQueue (
-    IN thread : ^KeuThread,
-)
-
-    // Indicate that a thread associated with a balanced queue is awake.
-
-    KepAcquireThreadElevated ( thread )
-
-    queue := thread^.BalancedQueue
-
-    IF queue THEN
-        KepAcquireObjectElevated ( &queue^.Header )
-
-        queue^.ActiveThreadCount += 1
-
-        KepReleaseObjectElevated ( &queue^.Header )
-    END
-
-    KepReleaseThreadElevated ( thread )
 END

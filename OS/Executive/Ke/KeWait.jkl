@@ -70,13 +70,19 @@ END
 
 #ELSE
 
-#MACRO KepTryCompleteWait ( thread, waitstatus ) [
-    ((thread)^.WaitStatus == OS_STATUS_WAIT_PLACEHOLDER)
+FN KepTryCompleteWait (
+    IN thread : ^KeuThread,
+    IN waitstatus : UWORD,
+) : UWORD
 
-    IF (thread)^.WaitStatus == OS_STATUS_WAIT_PLACEHOLDER THEN
-        (thread)^.WaitStatus = (waitstatus)
+    IF thread^.WaitStatus == OS_STATUS_WAIT_PLACEHOLDER THEN
+        thread^.WaitStatus = waitstatus
+
+        RETURN TRUE
     END
-]
+
+    RETURN FALSE
+END
 
 #END
 
@@ -109,13 +115,6 @@ END
         // Cancel the timer.
 
         KeDequeueTimer ( &thread^.Timeout )
-    END
-
-    // If we're associated with a balanced queue, we have to indicate that we're
-    // awake now.
-
-    IF thread^.BalancedQueue THEN
-        KepIndicateActiveBalancedQueue ( thread )
     END
 ]
 
@@ -289,16 +288,17 @@ FN KepUnwaitThread (
     // If we're here, the thread was definitely waiting. This means
     // that its wait block table is valid and full of initialized wait blocks.
 
-    // Returns TRUE if we unwaited the thread, FALSE if someone else beat us to
-    // it.
+    // If status is nonzero then we try to atomically claim the wait, and
+    // return TRUE if we unwaited the thread, FALSE if someone else beat us to
+    // it. It should always be nonzero unless the wait was previously claimed
+    // (which can happen in cases of KepSatisfyObject).
 
     IF status THEN
-        completed := KepTryCompleteWait (
+        IF NOT KepTryCompleteWait (
             thread, // thread
             status, // waitstatus
-        )
+        ) THEN
 
-        IF NOT completed THEN
             RETURN FALSE
         END
     END
@@ -340,6 +340,18 @@ FN KepUnwaitThread (
         KepUpdateInteractivity (
             thread, // thread
             FALSE, // deferupdate
+        )
+    END
+
+    // If it's associated with a balanced queue, we have to indicate that it's
+    // awake now.
+
+    queue := thread^.BalancedQueue
+
+    IF queue THEN
+        KeIncrementUlongMp (
+            &queue^.ActiveThreadCount, // ptr
+            1, // inc
         )
     END
 
@@ -399,11 +411,15 @@ FN KepDeferredUnwaitThreads (
     WHILE thread DO
         next := thread^.NextToUnwait
 
+        KepAcquireThreadElevated ( thread )
+
         KepUnwaitThread (
             thread, // thread
             0, // status
             thread^.PriorityBoost, // priorityboost
         )
+
+        KepReleaseThreadElevated ( thread )
 
         thread = next
     END
@@ -447,12 +463,11 @@ FN KepSatisfyObject (
             wakestatus = waitblock^.WakeStatus
         END
 
-        completed := KepTryCompleteWait (
+        IF NOT KepTryCompleteWait (
             thread, // thread
             wakestatus, // wakestatus
-        )
+        ) THEN
 
-        IF NOT completed THEN
             // Somebody else woke the thread and is responsible for unwaiting.
 
             GOTO Continue
@@ -695,60 +710,26 @@ EXPORT FN KeWaitForObjects (
 
         signal := object^.SignalCount
 
-        IF NOT signal OR
-            (object^.Type == KEP_DISPATCH_BALANCED_QUEUE AND
-            KepQueueObject ( object )^.ActiveThreadCount >
+        IF signal AND
+            (object^.Type != KEP_DISPATCH_BALANCED_QUEUE OR
+            KepQueueObject ( object )^.ActiveThreadCount <=
             KepQueueObject ( object )^.MaximumThreadCount) THEN
 
-            // Enqueue our wait block to the object.
+            // Already signaled. Our wait has been satisfied before it began.
+            // Try to atomically claim the wait completion on behalf of this
+            // object and if that works, and it's not a notification event,
+            // consume a signal count.
 
-            IF object^.Type == KEP_DISPATCH_BALANCED_QUEUE THEN
-                // Insert at head so that worker threads are scheduled in a LIFO
-                // order, which promotes cache locality.
+            IF KepTryCompleteWait (
+                thread, // thread
+                i, // waitstatus
+            ) AND object^.Type != KEP_DISPATCH_EVENT_NOTIF THEN
 
-                RtlInsertAtHeadList (
-                    &object^.WaitListHead, // head
-                    &waitblock^.Entry, // entry
-                )
+                object^.SignalCount = signal - 1
 
-            ELSE
-                RtlInsertAtTailList (
-                    &object^.WaitListHead, // head
-                    &waitblock^.Entry, // entry
-                )
-            END
+                // If this is a balanced queue it must contain an item.
 
-            // Increment waiter count.
-
-            KeAssert ( object^.WaiterCount != 0xFFFFFFFF )
-
-            object^.WaiterCount += 1
-
-            // Release the object lock.
-
-            KepReleaseObjectElevated ( object )
-
-            waitblock += SIZEOF KepWaitBlock
-            i += 1
-
-            CONTINUE
-        END
-
-        // Already signaled. Our wait has been satisfied before it began.
-
-        status = KepTryCompleteWait (
-            thread, // thread
-            i, // waitstatus
-        )
-
-        IF status THEN
-            // If this isn't a notification event, consume the count.
-
-            IF object^.Type != KEP_DISPATCH_EVENT_NOTIF THEN
                 IF object^.Type == KEP_DISPATCH_BALANCED_QUEUE THEN
-                    // This is a balanced queue and it has a non-zero signal
-                    // count, so it must contain an item. Take it now.
-
                     // Grab the item.
 
                     item := KepQueueObject ( object )^.ItemListHead.Next
@@ -761,37 +742,58 @@ EXPORT FN KeWaitForObjects (
 
                     RtlRemoveEntryList ( item )
                 END
-
-                object^.SignalCount = signal - 1
             END
+
+            KepReleaseObjectElevated ( object )
+
+            KepReleaseThreadElevated ( thread )
+
+            // Back out of the wait by simply removing our wait blocks from all
+            // of the objects that we enqueued them to.
+
+            j := 0
+            waitblock = &waitblocktable[0]
+
+            WHILE j < i DO
+                KepDequeueWaitBlock ( object, waitblock )
+
+                j += 1
+                waitblock += SIZEOF KepWaitBlock
+            END
+
+            status = thread^.WaitStatus
+
+            KepLowerIpl ( ipl )
+
+            RETURN status
         END
+
+        // Enqueue our wait block to the object.
+
+        IF object^.Type == KEP_DISPATCH_BALANCED_QUEUE THEN
+            // Insert at head so that worker threads are scheduled in a LIFO
+            // order, which promotes cache locality.
+
+            RtlInsertAtHeadList (
+                &object^.WaitListHead, // head
+                &waitblock^.Entry, // entry
+            )
+
+        ELSE
+            RtlInsertAtTailList (
+                &object^.WaitListHead, // head
+                &waitblock^.Entry, // entry
+            )
+        END
+
+        KeAssert ( object^.WaiterCount != 0xFFFFFFFF )
+
+        object^.WaiterCount += 1
 
         KepReleaseObjectElevated ( object )
 
-        KepReleaseThreadElevated ( thread )
-
-        // Back out of the wait by simply removing our wait blocks from all
-        // of the objects that we enqueued them to.
-        //
-        // At this point "i" is equivalent to the maximum object index we
-        // reached before we aborted, and "status" is equivalent to whatever
-        // we should return when we leave.
-
-        j := 0
-        waitblock = &waitblocktable[0]
-
-        WHILE j < i DO
-            KepDequeueWaitBlock ( object, waitblock )
-
-            j += 1
-            waitblock += SIZEOF KepWaitBlock
-        END
-
-        status = thread^.WaitStatus
-
-        KepLowerIpl ( ipl )
-
-        RETURN status
+        waitblock += SIZEOF KepWaitBlock
+        i += 1
     END
 
     // Capture the start time.
