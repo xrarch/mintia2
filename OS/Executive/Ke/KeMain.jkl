@@ -156,6 +156,8 @@ FN KepInitializePrb (
     prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
     prb^.IdleDeferredIpiEvents = 0
     prb^.InIdleLoop = TRUE
+
+    prb^.DeferredUnwaitThreadListHead = NULLPTR
 #END
 
     KeInitializeDpc (
@@ -377,6 +379,11 @@ FN KepInitializeNode (
     // Initialize the stack cache spinlock.
 
     KepInitializeSpinlock ( &kepnode^.StackCacheLock, "StackCache" )
+
+    // Initialize the balanced queue thread list spinlock.
+
+    KepInitializeSpinlock ( &kepnode^.BalancedQueueThreadListLock,
+        "BalancedQueueThreadList" )
 
     // Initialize the work balancing DPC.
 

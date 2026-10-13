@@ -123,6 +123,8 @@ EXPORT FN KeEnqueueTimer (
 
     timer^.EnqueuedTo = prb
 
+@FixedTime
+
     // Capture the current time.
 
     KepCaptureCurrentTicks ( &timer^.ExpiryTime )
@@ -147,18 +149,21 @@ EXPORT FN KeEnqueueTimer (
     // Check overflow.
 
     IF RtlUquadLtUquad ( &timer^.ExpiryTime, &previousvalue ) THEN
-        // Only way the new value < old value is if overflow occurred.
-        // Note that since ticks count milliseconds and they are 64 bits, this
-        // can only occur once every 500 million years of system uptime with
-        // reasonably small intervals. Along with making sure the Planet of the
-        // Apes can still enjoy MINTIA, this is mostly to stop malicious/broken
-        // code from enqueuing timers that expire in the past.
+        // Only way new < old is overflow. Ticks count milliseconds and are 64
+        // bits, so this takes 500 million years of uptime with reasonable
+        // intervals and shouldn't occur naturally. To make things sane, just
+        // set the interval to 1 millisecond and try again.
 
-        timer^.EnqueuedTo = NULLPTR
+        newinterval : RtlUquad
 
-        KepReleaseTimerAndTree ( timer, prb, ipl )
+        RtlSetUquadToUlong (
+            &newinterval, // uquad
+            1, // ulong
+        )
 
-        RETURN FALSE
+        interval = &newinterval
+
+        GOTO FixedTime
     END
 
     // Insert it in the timer tree structure.

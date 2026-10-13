@@ -270,6 +270,7 @@ KE_CACHE_LINE_END
 #IF BLD_MP
     StealWork : UBYTE,
     InIdleLoop : UBYTE,
+    DeferredUnwaitThreadListHead : ^KeuThread,
 #END
 
 KE_CACHE_LINE_END
@@ -365,12 +366,6 @@ END
 #DEFINE KEP_DISPATCH_EVENT_SYNCH 2
 #DEFINE KEP_DISPATCH_BALANCED_QUEUE 3
 
-#DEFINE KEP_WB_DEQUEUED 2
-
-#DEFINE KEP_THREAD_WAIT_TRY 1
-#DEFINE KEP_THREAD_WAIT_SATISFIED 2
-#DEFINE KEP_THREAD_WAIT_COMMITTED 3
-
 #DEFINE KEP_IDLE_QUEUE 1
 #DEFINE KEP_TIMESHARED_QUEUE 2
 #DEFINE KEP_REAL_TIME_QUEUE 3
@@ -387,8 +382,6 @@ END
 #MACRO KepSignalIsUnmaskable ( signal ) [
     (signal == OS_SIGNAL_KILL)
 ]
-
-#DEFINE KEP_QUEUE_REMOVAL_LOCKS 32
 
 #DEFINE KEP_TURNSTILE_CHAINS 64
 
@@ -429,8 +422,10 @@ KE_CACHE_LINE_END
 
     TurnstileChains : (KE_CACHE_LINE KepTurnstileChain)[KEP_TURNSTILE_CHAINS],
 
+KE_CACHE_LINE_END
+
 #IF BLD_MP
-    QueueRemovalLocks : (KE_CACHE_LINE KepSpinlock)[KEP_QUEUE_REMOVAL_LOCKS],
+    BalancedQueueThreadListLock : KepSpinlock,
 #END
 
 KE_CACHE_LINE_END
@@ -578,13 +573,36 @@ EXTERN FN KepSatisfyObject (
     IN priorityboost : UWORD,
     IN all : UWORD,
     IN status : OsStatus,
-) : ^KeuThread
+) : UWORD
 
 EXTERN FN KepUnwaitThread (
     IN thread : ^KeuThread,
-    IN status : OsStatus,
+    IN status : UWORD,
+    IN priorityboost : UWORD,
+) : UWORD
+
+#IF BLD_MP
+
+EXTERN FN KepDeferredUnwaitThread (
+    IN thread : ^KeuThread,
     IN priorityboost : UWORD,
 )
+
+EXTERN FN KepDeferredUnwaitThreads (
+    IN prb : ^KepPrb,
+)
+
+#ELSE
+
+#MACRO KepDeferredUnwaitThread ( thread, priorityboost ) [
+    KepUnwaitThread (
+        thread, // thread
+        0, // status
+        priorityboost, // priorityboost
+    )
+]
+
+#END
 
 EXTERN FN KepYield (
     IN current : ^KeuThread,
@@ -612,6 +630,10 @@ EXTERN FN KepDispatchUserInterrupts ()
 
 EXTERN FN KepWakeBalancedQueue (
     IN queue : ^KeBalancedQueue,
+)
+
+EXTERN FN KepIndicateActiveBalancedQueue (
+    IN thread : ^KeuThread,
 )
 
 EXTERN FN KepDisassociateFromBalancedQueue (
@@ -860,44 +882,6 @@ EXTERN FN KepLockDepAcquireSpinlockInPrb (
     KepReleaseSpinlock ( &(object)^.Spinlock )
 ]
 
-#IF ( == BLD_BITS 64 )
-
-#DEFINE KEP_QUEUE_SHIFT 6
-
-#ELSE
-
-#DEFINE KEP_QUEUE_SHIFT 5
-
-#END
-
-#MACRO KepQueueLockIndex ( queue ) [
-    (((queue) >> KEP_QUEUE_SHIFT) & (KEP_QUEUE_REMOVAL_LOCKS - 1))
-]
-
-#MACRO KepComputeQueueRemovalLockAddress ( lock, queue ) [
-    KeAssert ( KeIsPointerInNodeSpace ( queue ) )
-
-    kenode := KeNumaNodeFromSpacePointer ( queue )
-
-    lock := &kenode^.Kep^.QueueRemovalLocks[KepQueueLockIndex(queue)]
-]
-
-#MACRO KepAcquireQueueRemoval ( lock ) [
-    KepAcquireSpinlockRaise ( lock )
-]
-
-#MACRO KepReleaseQueueRemoval ( lock, ipl ) [
-    KepReleaseSpinlockLower ( lock, ipl )
-]
-
-#MACRO KepAcquireQueueRemovalElevated ( lock ) [
-    KepAcquireSpinlock ( lock )
-]
-
-#MACRO KepReleaseQueueRemovalElevated ( lock ) [
-    KepReleaseSpinlock ( lock )
-]
-
 #MACRO KepAcquireThread ( thread ) [
     KepAcquireSpinlockRaise ( &(thread)^.Spinlock )
 ]
@@ -959,20 +943,6 @@ EXTERN FN KepStealWork ()
 #MACRO KepAcquireObjectElevated ( object ) []
 
 #MACRO KepReleaseObjectElevated ( object ) []
-
-#MACRO KepComputeQueueRemovalLockAddress ( lock, queue ) []
-
-#MACRO KepAcquireQueueRemoval ( lock ) [
-    KepRaiseIpl ( KEP_IPL_DPC )
-]
-
-#MACRO KepReleaseQueueRemoval ( lock, ipl ) [
-    KepLowerIpl ( ipl )
-]
-
-#MACRO KepAcquireQueueRemovalElevated ( lock ) []
-
-#MACRO KepReleaseQueueRemovalElevated ( lock ) []
 
 #MACRO KepAcquireThread ( thread ) [
     KepRaiseIpl ( KEP_IPL_DPC )

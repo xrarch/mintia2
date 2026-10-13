@@ -221,6 +221,7 @@ KE_CACHE_LINE_END
     QueueItem : ^RtlListEntry,
 
 #IF BLD_MP
+    NextToUnwait : ^KeuThread,
     AffinityPrb : ^KepPrb,
     CurrentPrb : ^KepPrb,
 #END
@@ -228,7 +229,7 @@ KE_CACHE_LINE_END
     SignalMask : ULONG[2],
     SignalAcceptMask : ULONG[2],
     SignalDeliverOnWaitMask : ULONG[2],
-    WaitStatus : OsStatus,
+    WaitStatus : ULONG,
     SleepMs : ULONG,
     RunMs : ULONG,
     StateMs : ULONG,
@@ -254,12 +255,11 @@ KE_CACHE_LINE_END
     PendingEventsSet : UBYTE,
     PendingApcLevelInt : UBYTE,
 
-    WaitState : UBYTE,
-
 #IF BLD_MP
     Pinned : UBYTE,
     Switching : UBYTE,
     CurrentMode : UBYTE,
+    PriorityBoost : UBYTE,
 #END
 
     BestowedPriority : UBYTE,

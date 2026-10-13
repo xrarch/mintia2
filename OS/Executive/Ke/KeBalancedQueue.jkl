@@ -11,13 +11,51 @@
 
 #INCLUDE "Kep.hjk"
 
+#IF BLD_MP
+
+#MACRO KepAcquireThreadList ( kepnode ) [
+    KepAcquireSpinlockRaise ( &(kepnode)^.BalancedQueueThreadListLock )
+]
+
+#MACRO KepReleaseThreadList ( kepnode, oldipl ) [
+    KepReleaseSpinlockLower (
+        &(kepnode)^.BalancedQueueThreadListLock, // spinlock
+        oldipl, // oldipl
+    )
+]
+
+#MACRO KepAcquireThreadListElevated ( kepnode ) [
+    KepAcquireSpinlock ( &(kepnode)^.BalancedQueueThreadListLock )
+]
+
+#MACRO KepReleaseThreadListElevated ( kepnode ) [
+    KepReleaseSpinlock ( &(kepnode)^.BalancedQueueThreadListLock )
+]
+
+#ELSE
+
+#MACRO KepAcquireThreadList ( kepnode ) [
+    KepRaiseIpl ( KEP_IPL_DPC )
+]
+
+#MACRO KepReleaseThreadList ( kepnode, ipl ) [
+    KepLowerIpl ( ipl )
+]
+
+#MACRO KepAcquireThreadListElevated ( kepnode ) []
+
+#MACRO KepReleaseThreadListElevated ( kepnode ) []
+
+#END
+
 FN KepWakeBalancedQueue (
     IN queue : ^KeBalancedQueue,
 )
 
     // A thread associated with this queue has disassociated from it, or is
-    // going to sleep. See if we should wake up another thread. Queue removal
-    // lock and object lock are held.
+    // going to sleep. See if we should wake up another thread.
+
+    KepAcquireObjectElevated ( &queue^.Header )
 
     KeAssert ( queue^.ActiveThreadCount != 0 )
 
@@ -43,16 +81,15 @@ FN KepWakeBalancedQueue (
             OS_STATUS_KERNEL_APC, // status
         )
     END
+
+    KepReleaseObjectElevated ( &queue^.Header )
 END
 
 FN KepDisassociateFromBalancedQueue (
     IN thread : ^KeuThread,
 )
 
-    // Disassociate the thread from any balanced queue it is part of.
-    // The thread must be the current thread.
-
-    KeAssert ( KeCurrentThread () == thread )
+    // Disassociate the thread from the balanced queue it takes items from.
 
     oldqueue := thread^.BalancedQueue
 
@@ -60,26 +97,22 @@ FN KepDisassociateFromBalancedQueue (
         LEAVE
     END
 
-    KepComputeQueueRemovalLockAddress ( lock, oldqueue )
+    kepnode := KeNumaNodeFromSpacePointer ( oldqueue )^.Kep
 
-    ipl := KepAcquireQueueRemoval ( lock )
+    KepAcquireThreadListElevated ( kepnode )
 
-    // Since we acquired the queue removal lock, we might have gotten
+    // Before we acquired the thread list lock, we might have gotten
     // removed from the old queue, so check that we're still associated.
 
     IF thread^.BalancedQueue THEN
-        KepAcquireObjectElevated ( &oldqueue^.Header )
-
         RtlRemoveEntryList ( &thread^.BalancedQueueEntry )
 
         KepWakeBalancedQueue ( oldqueue )
 
-        KepReleaseObjectElevated ( &oldqueue^.Header )
-
         thread^.BalancedQueue = NULLPTR
     END
 
-    KepReleaseQueueRemoval ( lock, ipl )
+    KepReleaseThreadListElevated ( kepnode )
 END
 
 EXPORT FN KeInitializeBalancedQueue (
@@ -186,29 +219,34 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
     ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
-    IF thread^.BalancedQueue != queue THEN
+    oldqueue := thread^.BalancedQueue
+
+    IF oldqueue != queue THEN
         // Associate the thread with this queue.
         // Note that this queue will not be ran down while we're trying to
         // remove an item, because the Executive is holding a reference to the
         // associated object.
 
-        IF thread^.BalancedQueue THEN
-            // Remove the thread from its current queue and insert it into this
-            // queue. This may involve waking a waiter on the old queue.
-            // The queue removal spinlock is superior to all the dispatcher
-            // locks, so we can awaken threads and so on with it held.
+        IF oldqueue THEN
+            // Remove the thread from its current queue.
 
             KepDisassociateFromBalancedQueue ( thread )
         END
 
         thread^.BalancedQueue = queue
 
-        KepAcquireObjectElevated ( &queue^.Header )
+        kepnode := KeNumaNodeFromSpacePointer ( queue )^.Kep
+
+        KepAcquireThreadListElevated ( kepnode )
 
         RtlInsertAtTailList (
             &queue^.ThreadListHead, // head
             &thread^.BalancedQueueEntry, // entry
         )
+
+        KepReleaseThreadListElevated ( kepnode )
+
+        KepAcquireObjectElevated ( &queue^.Header )
 
         queue^.ActiveThreadCount += 1
 
@@ -277,11 +315,9 @@ FN KeuRundownBalancedQueue (
     // would imply a reference, and as it is being deleted, there must be zero
     // references. We have to disassociate all threads from this queue.
 
-    KepComputeQueueRemovalLockAddress ( lock, queue )
+    kepnode := KeNumaNodeFromSpacePointer ( queue )^.Kep
 
-    ipl := KepAcquireQueueRemoval ( lock )
-
-    KepAcquireObjectElevated ( &queue^.Header )
+    ipl := KepAcquireThreadList ( kepnode )
 
     head := &queue^.ThreadListHead
     listentry := head^.Next
@@ -292,12 +328,37 @@ FN KeuRundownBalancedQueue (
         // No need to remove the thread's list entry, just setting the queue
         // pointer to NULLPTR is sufficient.
 
+        // Acquire thread lock to protect queue lifetime from its perspective.
+
+        KepAcquireThreadElevated ( thread )
+
         thread^.BalancedQueue = NULLPTR
+
+        KepReleaseThreadElevated ( thread )
 
         listentry = listentry^.Next
     END
 
-    KepReleaseObjectElevated ( &queue^.Header )
+    KepReleaseThreadList ( kepnode, ipl )
+END
 
-    KepReleaseQueueRemoval ( lock, ipl )
+FN KepIndicateActiveBalancedQueue (
+    IN thread : ^KeuThread,
+)
+
+    // Indicate that a thread associated with a balanced queue is awake.
+
+    KepAcquireThreadElevated ( thread )
+
+    queue := thread^.BalancedQueue
+
+    IF queue THEN
+        KepAcquireObjectElevated ( &queue^.Header )
+
+        queue^.ActiveThreadCount += 1
+
+        KepReleaseObjectElevated ( &queue^.Header )
+    END
+
+    KepReleaseThreadElevated ( thread )
 END

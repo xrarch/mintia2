@@ -91,6 +91,12 @@ FN (KepSoftwareInterruptHandlerF) KepDpcInterrupt ()
         KepDispatchDpcQueue ( prb )
     END
 
+#IF BLD_MP
+    IF prb^.DeferredUnwaitThreadListHead THEN
+        KepDeferredUnwaitThreads ( prb )
+    END
+#END
+
     IF prb^.CheckInteractivity THEN
         prb^.CheckInteractivity = FALSE
 

@@ -165,8 +165,6 @@ FN KeuInitializeThread (
     thread^.CurrentMode = KE_KERNEL_MODE
 #END
 
-    thread^.WaitState = KEP_THREAD_WAIT_SATISFIED
-
     thread^.IgnoreEventCount = 0
 
     // Initialize signal state.
@@ -392,12 +390,8 @@ FN KepWakeThreadForSignal (
     // Check if the thread needs to be awoken to receive a signal.
     // Thread lock is held.
 
-    IF (thread^.Status == KE_THREAD_WAITING
-#IF BLD_MP
-        OR (thread^.Status == KE_THREAD_RUNNING AND
-        thread^.WaitState == KEP_THREAD_WAIT_TRY)
-#END
-        ) AND thread^.WaitIpl == KEP_IPL_LOW THEN
+    IF thread^.Status == KE_THREAD_WAITING AND
+        thread^.WaitIpl == KEP_IPL_LOW THEN
 
         // The thread is waiting and may need to be awoken.
 
@@ -735,17 +729,17 @@ FN KeuExitThread (
         &thread^.UapcListHead, // head
     )
 
-    // Remove the thread from any balanced queue it is currently attached to.
+    // Raise IPL.
 
-    KepDisassociateFromBalancedQueue ( thread )
+    ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
     // Make sure the thread is set terminated.
 
     thread^.Terminated = TRUE
 
-    // Raise IPL.
+    // Remove the thread from any balanced queue it is currently attached to.
 
-    ipl := KepRaiseIpl ( KEP_IPL_DPC )
+    KepDisassociateFromBalancedQueue ( thread )
 
     // Signal our termination event with raised IPL to ensure we make it out of
     // here quickly (not immediately preempted by a higher priority waiter).
