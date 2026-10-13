@@ -543,9 +543,12 @@ EXPORT FN KeWaitForObjects (
     // prior to the blocking decision being made, or an object is already
     // signaled), then this function will return to the caller. The caller must
     // be prepared for either case.
+    //
+    // objecttable can be NULLPTR in which case the wait blocks in
+    // waitblocktable are assumed to be preinitialized with object pointers.
+    // (This is primarily for the re-waiting case of continuations).
 
-    // The following parameters should never be given by executive callers and
-    // should have been rejected by the object manager.
+    status : OsStatus
 
     KeAssert ( objectcount <= 0xFF )
 
@@ -615,13 +618,13 @@ EXPORT FN KeWaitForObjects (
 
     KepAcquireThreadElevated ( thread )
 
-    status : OsStatus = 0
-
     bits := thread^.PendingEventsSet
 
     IF bits THEN
         // Ensure that everything is in order for the thread to wait, and that
         // no events should interrupt said wait.
+
+        status = 0
 
         IF ipl == KEP_IPL_APC THEN
             // IPL >= KEP_IPL_APC masks out all events.

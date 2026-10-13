@@ -110,7 +110,7 @@ FN KepDisassociateFromBalancedQueue (
     IF thread^.BalancedQueue THEN
         RtlRemoveEntryList ( &thread^.BalancedQueueEntry )
 
-        KepWakeBalancedQueue ( oldqueue )
+        KepWakeBalancedQueue ( thread^.BalancedQueue )
 
         thread^.BalancedQueue = NULLPTR
     END
@@ -230,11 +230,7 @@ EXPORT FN KeRemoveFromBalancedQueue (
         // remove an item, because the Executive is holding a reference to the
         // associated object.
 
-        IF oldqueue THEN
-            // Remove the thread from its current queue.
-
-            KepDisassociateFromBalancedQueue ( thread )
-        END
+        KepDisassociateFromBalancedQueue ( thread )
 
         thread^.BalancedQueue = queue
 
