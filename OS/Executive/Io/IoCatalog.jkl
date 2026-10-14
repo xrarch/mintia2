@@ -3,13 +3,13 @@
 // driver matching.
 //
 
-#INCLUDE "IopCatalog.hjk"
+#INCLUDE "Iop.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
 IopCatalogLock : KeLock = KE_INITIAL_LOCK
 
 #SECTION "PAGEtext"
-FN IopCreateKnownClass (
+EXPORT FN IoCreateKnownClass (
     OUT knownclass : ^IopKnownClass,
 ) : OsStatus
 
@@ -35,7 +35,22 @@ FN IopCreateKnownClass (
 END
 
 #SECTION "PAGEtext"
-FN IopSetKnownClassProperty (
+EXPORT FN IoGetKnownClassProperty (
+    IN knownclass : ^IopKnownClass,
+    IN name : ^RtlString,
+) : ^RtlString
+
+    // Return the value of a given property in the known class, or NULLPTR
+    // if none.
+
+    RETURN ExLookupDictionary (
+        &knownclass^.Properties, // dict
+        name, // key
+    )
+END
+
+#SECTION "PAGEtext"
+EXPORT FN IoSetKnownClassProperty (
     IN knownclass : ^IopKnownClass,
     IN name : ^RtlString,
     IN value : ^RtlString,
@@ -88,7 +103,7 @@ FN (ExEnumerateDictionaryF) IopDeleteKnownClassProperty (
 END
 
 #SECTION "PAGEtext"
-FN IopDeleteKnownClass (
+EXPORT FN IoDeleteKnownClass (
     IN knownclass : ^IopKnownClass,
 )
 
@@ -181,7 +196,7 @@ END
 FN IopInitializeCatalog ()
 
     // Initialize the IO Catalog.
-    //
+
     // We need to process all of the configuration files loaded by the
     // bootloader.
 

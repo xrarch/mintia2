@@ -2,7 +2,7 @@
 // Parses configuration files for loadable modules.
 //
 
-#INCLUDE "IopCatalog.hjk"
+#INCLUDE "Iop.hjk"
 
 STRUCT IopParseContext
     Text : ^UBYTE,
@@ -100,7 +100,7 @@ FN IopParseClass (
 
     knownclass : ^IopKnownClass
 
-    status := IopCreateKnownClass (
+    status := IoCreateKnownClass (
         OUT knownclass, // knownclass
     )
 
@@ -146,7 +146,7 @@ FN IopParseClass (
             GOTO Exit
         END
 
-        status = IopSetKnownClassProperty (
+        status = IoSetKnownClassProperty (
             knownclass, // knownclass
             &name, // name
             &value, // value
@@ -168,7 +168,7 @@ FN IopParseClass (
 @Exit
 
     IF OsError ( status ) THEN
-        IopDeleteKnownClass ( knownclass )
+        IoDeleteKnownClass ( knownclass )
     END
 
     RETURN status
@@ -233,7 +233,7 @@ FN IopParseConfiguration (
                 knownclass = CONTAINEROF listentry TO IopKnownClass.Entry
                 listentry = listentry^.Next
 
-                IopDeleteKnownClass ( knownclass )
+                IoDeleteKnownClass ( knownclass )
             END
 
             RETURN status
