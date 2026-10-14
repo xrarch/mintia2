@@ -609,7 +609,6 @@ EXPORT FN KeWaitForObjects (
     // Store the wait block table in the thread.
 
     thread^.WaitBlockTable = waitblocktable
-    thread^.WaitCount = objectcount
 
     // Acquire the thread lock to check for interrupting events.
 
@@ -734,12 +733,7 @@ EXPORT FN KeWaitForObjects (
 
                 KepReleaseObjectElevated ( object )
 
-                // Fudge the wait count so that we only dequeue the wait blocks
-                // we had processed up to this point after we awake.
-
-                thread^.WaitCount = i
-
-                GOTO Yield
+                GOTO Wait
             END
 
             IF object^.Type != KEP_DISPATCH_EVENT_NOTIF THEN
@@ -864,7 +858,12 @@ EXPORT FN KeWaitForObjects (
         &starttime, // src
     )
 
-@Yield
+@Wait
+
+    // Set the wait count to however many objects we really enqueued (not
+    // necessarily the same as objectcount, see the GOTO above).
+
+    thread^.WaitCount = i
 
     // If we're associated with a balanced queue, we have to indicate that we
     // are blocking so that someone else can be awoken.
