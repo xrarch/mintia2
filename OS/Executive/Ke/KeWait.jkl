@@ -444,6 +444,7 @@ FN KepSatisfyObject (
 
     WHILE listentry != listhead DO
         waitblock := CONTAINEROF listentry TO KepWaitBlock.Entry
+        listentry = listentry^.Next
 
         thread := waitblock^.Thread
 
@@ -470,7 +471,7 @@ FN KepSatisfyObject (
 
             // Somebody else woke the thread and is responsible for unwaiting.
 
-            GOTO Continue
+            CONTINUE
         END
 
         KepDeferredUnwaitThread (
@@ -485,10 +486,6 @@ FN KepSatisfyObject (
         END
 
         satisfied = TRUE
-
-@Continue
-
-        listentry = listentry^.Next
     END
 
     RETURN satisfied
