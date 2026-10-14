@@ -309,6 +309,8 @@ EXPORT FN KeSuspendThread (
         RETURN 0
     END
 
+    enqueuelapc := FALSE
+
     ipl := KepAcquireObject ( &thread^.SuspendHeader )
 
     count := thread^.SuspendCount
@@ -324,18 +326,25 @@ EXPORT FN KeSuspendThread (
             // If the suspension APC isn't enqueued, do that now to get the
             // thread to wait on this suspension object.
 
-            IF NOT thread^.SuspendLapc.Enqueued THEN
-                KeEnqueueLapc (
-                    &thread^.SuspendLapc, // apc
-                    0, // priorityboost
-                    0, // context1
-                    0, // context2
-                )
-            END
+            enqueuelapc = NOT thread^.SuspendLapc.Enqueued
         END
     END
 
-    KepReleaseObject ( &thread^.SuspendHeader, ipl )
+    KepReleaseObjectElevated ( &thread^.SuspendHeader )
+
+    // Enqueue the suspension LAPC outside the object lock or there will be
+    // a lock ordering inversion.
+
+    IF enqueuelapc THEN
+        KeEnqueueLapc (
+            &thread^.SuspendLapc, // apc
+            0, // priorityboost
+            0, // context1
+            0, // context2
+        )
+    END
+
+    KepLowerIpl ( ipl )
 
     RETURN count
 END
