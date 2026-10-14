@@ -346,20 +346,13 @@ FN KepBoostPriority (
             // other random waiter chain. This should be very rare and also
             // harmless.
 
-            KepReleaseChainElevated ( chain )
+            KepReleaseChain ( chain, KEP_IPL_APC )
 
             LEAVE
         END
 #ELSE
         owner = turnstile^.Owner
 #END
-
-        IF owner == original THEN
-            // A cycle in the lock dependency chain indicates deadlock.
-            // Crash here or else we'll spin forever.
-
-            KeCrash ( "Turnstile waiter cycle (deadlock!)\n" )
-        END
     END
 
     KepReleaseThread ( owner, KEP_IPL_APC )
