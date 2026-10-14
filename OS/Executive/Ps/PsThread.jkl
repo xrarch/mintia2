@@ -59,6 +59,8 @@ FN PsuReallocateRemoteTurnstile ()
 
     thread^.Turnstile = newts
 
+    KeuTurnstileDeletionBarrier ( oldts )
+
     MmFreeToObjectCache (
         KeNumaNodeFromSpacePointer ( oldts )^.Psp^.TurnstileCache, // cache
         oldts, // ptr
@@ -106,11 +108,13 @@ FN PspPerformEagerThreadCleanup (
     // started with, and it might be on a remote node, so recompute the node
     // pointer from the turnstile's pointer.
 
+    turnstile := thread^.Tcb.Turnstile
+
+    KeuTurnstileDeletionBarrier ( turnstile )
+
     MmFreeToObjectCache (
-        KeNumaNodeFromSpacePointer (
-            thread^.Tcb.Turnstile
-        )^.Psp^.TurnstileCache, // cache
-        thread^.Tcb.Turnstile, // ptr
+        KeNumaNodeFromSpacePointer ( turnstile )^.Psp^.TurnstileCache, // cache
+        turnstile, // ptr
         'Turn', // tag
     )
 

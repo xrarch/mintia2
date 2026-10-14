@@ -97,6 +97,11 @@ STRUCT KepTurnstile
     Owner : ^KeuThread,
 
     Event : KeEvent,
+
+#IF BLD_MP
+    PinCount : ULONG,
+#END
+
 END
 
 EXTERN FN KeuInitializeThread (
@@ -536,7 +541,22 @@ EXTERN FN KeuReaperBarrier (
 #ELSE
     NOTHING (turnstile)^.Spinlock = KEP_INITIAL_SPINLOCK
 #END
+    NOTHING (turnstile)^.PinCount = 0
 #END
     NOTHING (turnstile)^.Free = NULLPTR
     NOTHING (turnstile)^.WaiterHeapRoot = NULLPTR
 ]
+
+#IF BLD_MP
+
+#MACRO KeuTurnstileDeletionBarrier ( turnstile ) [
+    WHILE VOLATILE (turnstile)^.PinCount != 0 DO
+        KeSpinPause ()
+    END
+]
+
+#ELSE
+
+#MACRO KeuTurnstileDeletionBarrier ( turnstile ) []
+
+#END

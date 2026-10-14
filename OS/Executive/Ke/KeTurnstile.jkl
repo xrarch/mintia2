@@ -161,15 +161,13 @@ FN KepBoostPriority (
     IN owner : ^KeuThread,
     IN chain : ^KepTurnstileChain,
     IN turnstile : ^KepTurnstile,
-) : UWORD
+)
 
     // As required, boost the priority of the owner thread and all of the
     // threads upon which it depends to make progress.
     //
     // Entered at KEP_IPL_DPC with chain lock held, left at KEP_IPL_APC with no
     // locks held.
-    //
-    // Returns whether a retry is required.
 
     original := owner
 
@@ -297,43 +295,51 @@ FN KepBoostPriority (
         END
 
 #IF BLD_MP
-        kenode := KeNumaNodeFromArbitraryPointer ( turnstile^.Key )
+        // Capture turnstile key as a unique identifier so we can tell if it
+        // changes while locks are dropped.
 
-        chain = &kenode^.Kep^.TurnstileChains[KepTurnstileHash(turnstile^.Key)]
+        key := turnstile^.Key
 
-        // Try to acquire the chain spinlock. Note that this is out of order
-        // with respect to the thread lock, so we only try-acquire it and retry
-        // the entire lock operation if we fail. Also note that try-acquire
-        // spins many times rather than trying once and just giving up, just in
-        // case the holder holds it along a codepath that never contends on the
-        // out of order spinlock we're currently holding (which is most common).
+        // Guard against turnstile deletion while locks are dropped.
 
-        IF NOT KepTryAcquireSpinlock ( &chain^.Spinlock ) THEN
-            // Failed to acquire it.
+        KeIncrementUlong (
+            &turnstile^.PinCount, // ptr
+            1, // inc
+        )
 
-            KepReleaseThread ( owner, KEP_IPL_APC )
+        // Drop thread lock.
 
-            // Indicate to caller that a retry is needed.
+        KepReleaseThreadElevated ( owner )
 
-            RETURN TRUE
-        END
+        kenode := KeNumaNodeFromArbitraryPointer ( key )
 
-        IF turnstile^.Event.Header.SignalCount THEN
+        chain = &kenode^.Kep^.TurnstileChains[KepTurnstileHash(key)]
+
+        KepAcquireChainElevated ( chain )
+
+        newkey := turnstile^.Key
+        signalcount := turnstile^.Event.Header.SignalCount
+
+        // Decrement turnstile pin count to unguard against its deletion.
+
+        KeIncrementUlong (
+            &turnstile^.PinCount, // ptr
+            0xFFFFFFFF, // inc
+        )
+
+        IF newkey != key OR
+            signalcount THEN
+
             // The turnstile was awoken before we could acquire the chain
             // spinlock.
 
             KepReleaseChainElevated ( chain )
 
-            BREAK
+            LEAVE
         END
-#END
-
-        KepReleaseThreadElevated ( owner )
-
-        // Acquire the spinlock of the current owning thread of this next
-        // turnstile.
-
+#ELSE
         owner = turnstile^.Owner
+#END
 
         IF owner == original THEN
             // A cycle in the lock dependency chain indicates deadlock.
@@ -344,10 +350,6 @@ FN KepBoostPriority (
     END
 
     KepReleaseThread ( owner, KEP_IPL_APC )
-
-    // Indicate to caller that no retry is necessary.
-
-    RETURN FALSE
 END
 
 EXTERN FN MmuWriteFaultOnLockWord (
@@ -559,21 +561,16 @@ FN KepBlockOnLock (
         END
     END
 
-    IF NOT owner THEN
-        // No owner so don't do priority inheritance.
+    IF owner THEN
+        KepBoostPriority (
+            thread, // thread
+            owner, // owner
+            chain, // chain
+            turnstile, // turnstile
+        )
 
+    ELSE
         KepReleaseChain ( chain, KEP_IPL_APC )
-
-    ELSEIF KepBoostPriority (
-        thread, // thread
-        owner, // owner
-        chain, // chain
-        turnstile, // turnstile
-    ) THEN
-
-        // Failed to try-acquire a spinlock. Unwind everything and retry.
-
-        GOTO UnreferenceAndLeave
     END
 
     // Wait on the turnstile event.
