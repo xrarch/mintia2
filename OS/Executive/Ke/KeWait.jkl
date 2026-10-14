@@ -723,11 +723,29 @@ EXPORT FN KeWaitForObjects (
             // object and if that works, and it's not a notification event,
             // consume a signal count.
 
-            IF KepTryCompleteWait (
+            IF NOT KepTryCompleteWait (
                 thread, // thread
                 i, // waitstatus
-            ) AND object^.Type != KEP_DISPATCH_EVENT_NOTIF THEN
+            ) THEN
 
+                // We lost the race to complete our own wait so there is a
+                // deferred unwait pending. The best thing to do now is to just
+                // commit to a wait so that that unwait can occur. The effect
+                // is kind of a barrier where we wait for it to be processed.
+                // It'd be more difficult to try to intercept and cancel the
+                // deferred unwait somehow and this case should be quite rare.
+
+                KepReleaseObjectElevated ( object )
+
+                // Fudge the wait count so that we only dequeue the wait blocks
+                // we had processed up to this point after we awake.
+
+                thread^.WaitCount = i
+
+                GOTO Yield
+            END
+
+            IF object^.Type != KEP_DISPATCH_EVENT_NOTIF THEN
                 object^.SignalCount = signal - 1
 
                 // If this is a balanced queue it must contain an item.
@@ -751,8 +769,8 @@ EXPORT FN KeWaitForObjects (
 
             KepReleaseThreadElevated ( thread )
 
-            // Back out of the wait by simply removing our wait blocks from all
-            // of the objects that we enqueued them to.
+            // Back out of the wait by simply removing our wait blocks from
+            // all of the objects that we enqueued them to.
 
             j := 0
             waitblock = &waitblocktable[0]
@@ -835,12 +853,7 @@ EXPORT FN KeWaitForObjects (
         thread^.WaitHasTimeout = TRUE
     END
 
-    // If we're associated with a balanced queue, we have to indicate that we
-    // are blocking so that someone else can be awoken.
-
-    IF thread^.BalancedQueue THEN
-        KepWakeBalancedQueue ( thread^.BalancedQueue )
-    END
+    KeAssert ( thread != &KEP_CURRENT_PRB^.IdleThread )
 
     // Save information that may later be needed for a retry.
 
@@ -854,7 +867,14 @@ EXPORT FN KeWaitForObjects (
         &starttime, // src
     )
 
-    KeAssert ( thread != &KEP_CURRENT_PRB^.IdleThread )
+@Yield
+
+    // If we're associated with a balanced queue, we have to indicate that we
+    // are blocking so that someone else can be awoken.
+
+    IF thread^.BalancedQueue THEN
+        KepWakeBalancedQueue ( thread^.BalancedQueue )
+    END
 
     // Set the thread status to WAITING.
 
