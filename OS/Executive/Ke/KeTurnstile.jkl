@@ -295,9 +295,10 @@ FN KepBoostPriority (
         END
 
 #IF BLD_MP
-        // Capture turnstile key as a unique identifier so we can tell if it
-        // changes while locks are dropped.
+        // Capture turnstile generation as a unique identifier so we can tell if
+        // it changes while locks are dropped.
 
+        generation := turnstile^.Generation
         key := turnstile^.Key
 
         // Guard against turnstile deletion while locks are dropped.
@@ -318,7 +319,9 @@ FN KepBoostPriority (
         KepAcquireChainElevated ( chain )
 
         newkey := turnstile^.Key
+        newgeneration := turnstile^.Generation
         signalcount := turnstile^.Event.Header.SignalCount
+        owner = turnstile^.Owner
 
         // Decrement turnstile pin count to unguard against its deletion.
 
@@ -328,10 +331,20 @@ FN KepBoostPriority (
         )
 
         IF newkey != key OR
+            newgeneration != generation OR
             signalcount THEN
 
-            // The turnstile was awoken before we could acquire the chain
-            // spinlock.
+            // Something changed; this link in the waiter chain must have been
+            // broken while we had locks dropped. We know we don't need to retry
+            // because we already boosted the last owner and he will have
+            // bestowed that boost upon anybody new he has contended with in the
+            // time since he stopped waiting for this lock, so we can just leave
+            // now.
+
+            // Note that it's possible for the generation count of the turnstile
+            // to fully wrap around, and then we might boost a fragment of some
+            // other random waiter chain. This should be very rare and also
+            // harmless.
 
             KepReleaseChainElevated ( chain )
 
@@ -493,7 +506,9 @@ FN KepBlockOnLock (
             turnstile^.Owner = owner
 
 #IF BLD_MP
-            KeAssert ( KepSpinlockIsReleased( &turnstile^.Spinlock ) )
+            KeAssert ( KepSpinlockIsReleased ( &turnstile^.Spinlock ) )
+
+            turnstile^.Generation += 1
 #END
 
             KeAssert ( turnstile^.WaiterHeapRoot == NULLPTR )
