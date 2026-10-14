@@ -177,7 +177,11 @@ END
 // Assume the average context size for an IoLocation is 4 UWORDs, which is
 // 16 bytes on 32-bit and 32 bytes on 64-bit.
 
-#DEFINE IO_LOCATION_AVERAGE_CONTEXT [(SIZEOF UWORD * 4)]
+#DEFINE IO_LOCATION_AVERAGE_CONTEXT_WORDS 4
+
+#DEFINE IO_LOCATION_AVERAGE_CONTEXT [
+    (IO_LOCATION_AVERAGE_CONTEXT_WORDS * SIZEOF UWORD)
+]
 
 FNPTR IoLocationCompletionF (
     IN iol : ^IoLocation,
@@ -213,7 +217,7 @@ END
 STRUCT IopInlinedLocation
     Location : IoLocation,
 
-    Context : UBYTE[IO_LOCATION_AVERAGE_CONTEXT],
+    Context : UWORD[IO_LOCATION_AVERAGE_CONTEXT_WORDS],
 END
 
 // The IOP should be freed upon completion.
