@@ -6,7 +6,7 @@
 
 PUBLIC ExuExecutiveModule : ^ExuLoadedModule
 
-ExpModuleLoadingLock : KeLock = KE_INITIAL_LOCK
+ExpModuleLoadingLock : KeLock
 
 ExpKnownModuleDictionary : ExuDictionary
 
@@ -173,13 +173,20 @@ FN ExpInitializeModules ()
 
     // Initialize the loadable modules package.
 
+
+#LEAVESECTION
+    KeInitializeLock ( &ExpModuleLoadingLock, "ModuleLoadingLock" )
+#ENTERSECTION "INITtext"
+
     // Initialize the module type.
 
     ObuInitializeType ( &ExpModuleType )
 
     // Initialize the known modules dictionary.
 
+#LEAVESECTION
     ExuInitializeDictionary ( &ExpKnownModuleDictionary )
+#ENTERSECTION "INITtext"
 
     // Create a "known module" for the kernel itself.
 

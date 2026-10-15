@@ -6,7 +6,7 @@
 #INCLUDE "Iop.hjk"
 #INCLUDE "../../Loader/Headers/Loader.hjk"
 
-IopCatalogLock : KeLock = KE_INITIAL_LOCK
+IopCatalogLock : KeLock
 
 #SECTION "PAGEtext"
 EXPORT FN IoCreateKnownClass (
@@ -162,6 +162,10 @@ END
 FN IopInitializeCatalog ()
 
     // Initialize the IO Catalog.
+
+#LEAVESECTION
+    KeInitializeLock ( &IopCatalogLock, "CatalogLock" )
+#ENTERSECTION "INITtext"
 
     // We need to process all of the configuration files loaded by the
     // bootloader.
