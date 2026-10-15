@@ -168,11 +168,26 @@ EXTERN FN ExInsertInDictionary (
     OUT oldvalue : ^VOID,
 ) : OsStatus
 
+EXTERN FN ExInsertStringInDictionary (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+    IN value : ^RtlString,
+    IN canupdate : UWORD,
+    IN oldvalue : ^^VOID,
+) : OsStatus
+
 EXTERN FN ExEnumerateDictionary (
     IN dict : ^ExuDictionary,
     IN func : ExEnumerateDictionaryF,
     IN context : ^VOID,
     IN delete : UWORD,
+)
+
+EXTERN FN (ExEnumerateDictionaryF) ExDeleteStringDictionaryEntry (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+    IN value : ^VOID,
+    IN context : ^VOID,
 )
 
 FNPTR ExArenaLookupTagF (

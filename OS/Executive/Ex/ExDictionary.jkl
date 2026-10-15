@@ -279,3 +279,72 @@ EXPORT FN ExEnumerateDictionary (
         listentry = next
     END
 END
+
+#SECTION "PAGEtext"
+EXPORT FN ExInsertStringInDictionary (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+    IN value : ^RtlString,
+    IN canupdate : UWORD,
+    IN oldvalue : ^^VOID,
+) : OsStatus
+
+    // Insert a string value into the dictionary.
+
+    // The string's lifetime is determined by the caller so we need to make a
+    // new string that we own.
+
+    internedvalue := ExFindName ( value )
+
+    IF NOT internedvalue THEN
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    // Now insert in the dictionary.
+
+    oldstring : ^ExName
+
+    status := ExInsertInDictionary (
+        dict, // dict
+        key, // key
+        internedvalue, // value
+        canupdate, // canupdate
+        OUT oldstring, // oldvalue
+    )
+
+    IF OsError ( status ) THEN
+        ExUnreferenceName ( internedvalue )
+
+        RETURN status
+    END
+
+    IF oldstring THEN
+        IF oldvalue THEN
+            // Return it.
+
+            oldvalue^ = oldstring
+
+        ELSE
+            // Unreference it.
+
+            ExUnreferenceName ( oldstring )
+        END
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+EXPORT FN (ExEnumerateDictionaryF) ExDeleteStringDictionaryEntry (
+    IN dict : ^ExuDictionary,
+    IN key : ^RtlString,
+    IN value : ^VOID,
+    IN context : ^VOID,
+)
+
+    // Delete a string entry of a dictionary.
+
+    // All we have to do is unreference the value string.
+
+    ExUnreferenceName ( value )
+END

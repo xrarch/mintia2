@@ -59,47 +59,13 @@ EXPORT FN IoSetKnownClassProperty (
 
     // Set the given property in a known class structure.
 
-    // Convert value to a referenced interned string.
-
-    str := ExFindName ( value )
-
-    IF NOT str THEN
-        RETURN OS_STATUS_NO_MEMORY
-    END
-
-    oldvalue : ^ExName
-
-    status := ExInsertInDictionary (
+    RETURN ExInsertStringInDictionary (
         &knownclass^.Properties, // dict
         name, // key
-        str, // value
+        value, // value
         canupdate, // canupdate
-        OUT oldvalue, // oldvalue
+        NULLPTR, // oldvalue
     )
-
-    IF OsError ( status ) THEN
-        ExUnreferenceName ( str )
-
-    ELSEIF oldvalue THEN
-        ExUnreferenceName ( oldvalue )
-    END
-
-    RETURN status
-END
-
-#SECTION "PAGEtext"
-FN (ExEnumerateDictionaryF) IopDeleteKnownClassProperty (
-    IN dict : ^ExuDictionary,
-    IN key : ^RtlString,
-    IN value : ^VOID,
-    IN context : ^VOID,
-)
-
-    // Delete a property of a known class.
-
-    // All we have to do is unreference the value string.
-
-    ExUnreferenceName ( value )
 END
 
 #SECTION "PAGEtext"
@@ -111,7 +77,7 @@ EXPORT FN IoDeleteKnownClass (
 
     ExEnumerateDictionary (
         &knownclass^.Properties, // dict
-        &IopDeleteKnownClassProperty, // func
+        &ExDeleteStringDictionaryEntry, // func
         NULLPTR, // context
         TRUE, // delete
     )

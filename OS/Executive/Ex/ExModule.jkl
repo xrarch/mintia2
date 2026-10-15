@@ -8,63 +8,7 @@ PUBLIC ExuExecutiveModule : ^ExuLoadedModule
 
 ExpModuleLoadingLock : KeLock = KE_INITIAL_LOCK
 
-ExpKnownModuleLookupTree : RtlAvlNode
-
-#SECTION "PAGEtext"
-FN ExpLookupKnownModule (
-    IN name : ^RtlString,
-) : ^ExuKnownModule
-
-    // Look up a known module by name. Assumes the module loading lock is held.
-
-    // Look up the name in the tree, which is an AVL tree keyed by string and
-    // ordered lexicographically.
-
-    avlnode := ExpKnownModuleLookupTree.Right
-
-    WHILE TRUE DO
-        IF NOT avlnode THEN
-            // Didn't find it.
-
-            RETURN NULLPTR
-        END
-
-        knownmodule := CONTAINEROF avlnode TO ExuKnownModule.Entry
-
-        res := CAST RtlCompareRtlString (
-            name, // str1
-            &knownmodule^.Name, // str2
-        ) TO WORD
-
-        IF res == 0 THEN
-            // Found it! Return it.
-
-            RETURN knownmodule
-        END
-
-        IF res < 0 THEN
-            avlnode = avlnode^.Left
-        ELSE
-            avlnode = avlnode^.Right
-        END
-    END
-
-    KeAssert ( FALSE )
-END
-
-#SECTION "PAGEtext"
-FN (RtlAvlLessThanF) ExpCompareKnownModuleNames (
-    IN a : ^RtlAvlNode,
-    IN b : ^RtlAvlNode,
-) : UWORD
-
-    // Compare the names.
-
-    RETURN CAST RtlCompareRtlString (
-        &(CONTAINEROF a TO ExuKnownModule.Entry)^.Name, // str1
-        &(CONTAINEROF b TO ExuKnownModule.Entry)^.Name, // str2
-    ) TO WORD < 0
-END
+ExpKnownModuleDictionary : ExuDictionary
 
 #SECTION "PAGEtext"
 FN ExuLookupKnownModule (
@@ -79,7 +23,10 @@ FN ExuLookupKnownModule (
 
     KeAcquireLockExclusive ( &ExpModuleLoadingLock )
 
-    knownmodule := ExpLookupKnownModule ( name )
+    knownmodule := CAST ExLookupDictionary (
+        &ExpKnownModuleDictionary, // dict
+        name, // key
+    ) TO ^ExuKnownModule
 
     IF knownmodule OR NOT create THEN
         // Found it, or we didn't find it and don't wanna create it.
@@ -100,35 +47,26 @@ FN ExuLookupKnownModule (
         GOTO Exit
     END
 
-    // Initialize the name.
+    // Insert it into the dictionary.
 
-    status = ExDuplicateString (
-        &knownmodule^.Name, // outputstring
-        name, // inputstring
-        TRUE, // pageable
-        'KnMs', // tag
+    oldvalue : ^VOID
+
+    status = ExInsertInDictionary (
+        &ExpKnownModuleDictionary, // dict
+        name, // key
+        knownmodule, // value
+        FALSE, // canupdate
+        OUT oldvalue, // oldvalue
     )
 
     IF OsError ( status ) THEN
-        // Failed to duplicate the name string.
-
         MmFreePool (
-            knownmodule, // ptr
+            knownmodule, // knownmodule
             'KnMo', // tag
         )
 
-        knownmodule = NULLPTR
-
         GOTO Exit
     END
-
-    // Insert it into the lookup tree.
-
-    RtlInsertAvl (
-        &ExpKnownModuleLookupTree, // root
-        &knownmodule^.Entry, // node
-        &ExpCompareKnownModuleNames, // comparisonfunc
-    )
 
     // Initialize as not having an associated loaded module.
 
@@ -238,6 +176,10 @@ FN ExpInitializeModules ()
     // Initialize the module type.
 
     ObuInitializeType ( &ExpModuleType )
+
+    // Initialize the known modules dictionary.
+
+    ExuInitializeDictionary ( &ExpKnownModuleDictionary )
 
     // Create a "known module" for the kernel itself.
 
