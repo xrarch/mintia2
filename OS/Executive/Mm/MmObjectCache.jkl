@@ -382,11 +382,9 @@ EXPORT FN MmCreateObjectCache (
         align = RTL_ALIGN_BYTES
     END
 
-    // Make room for a tag at the end.
+    // Make room for a tag at the end and align.
 
-    objectsize += SIZEOF ULONG
-
-    objectsize = (objectsize + align - 1) & -align
+    objectsize = MmRealBlockSize ( objectsize, align )
 
     status : OsStatus
 

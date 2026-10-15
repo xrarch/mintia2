@@ -167,3 +167,15 @@ EXTERN FN MmFreeMappedPages (
     IN pages : UWORD,
     IN pageable : UWORD,
 )
+
+#MACRO MmBlockOverhead ( bytes ) [
+    (SIZEOF ULONG)
+]
+
+#MACRO MmRealBlockSize ( bytes, align ) [
+    ((((bytes) + MmBlockOverhead ( bytes )) + (align) - 1) & -(align))
+]
+
+#MACRO MmUsableSpaceOfBlock ( bytes, align ) [
+    (bytes - MmBlockOverhead ( bytes ))
+]

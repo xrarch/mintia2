@@ -4,9 +4,26 @@
 
 #INCLUDE "Mmp.hjk"
 
+// Cache line the object size array so that an extra miss as a result of
+// cache line crossing won't occur.
+
+// Also, subtract SIZEOF ULONG from each one to account for the 4 byte tag
+// added by MmObjectCache to each one and avoid it rounding up and wasting
+// space.
+
 #SECTION "text"
-MmpObjectSizes : UINT[] = {
-    32, 64, 96, 160, 256, 384, 576, 864, 1312, 1984, 2976,
+MmpObjectSizes : KE_CACHE_LINE UINT[] = {
+    MmUsableSpaceOfBlock ( 32, RTL_ALIGN_BYTES ),
+    MmUsableSpaceOfBlock ( 48, RTL_ALIGN_BYTES ),
+    MmUsableSpaceOfBlock ( 80, RTL_ALIGN_BYTES ),
+    MmUsableSpaceOfBlock ( 128, RTL_ALIGN_BYTES ),
+    MmUsableSpaceOfBlock ( 192, RTL_ALIGN_BYTES ),
+    MmUsableSpaceOfBlock ( 288, RTL_ALIGN_BYTES ),
+    MmUsableSpaceOfBlock ( 432, RTL_ALIGN_BYTES ),
+    MmUsableSpaceOfBlock ( 656, RTL_ALIGN_BYTES ),
+    MmUsableSpaceOfBlock ( 992, RTL_ALIGN_BYTES ),
+    MmUsableSpaceOfBlock ( 1472, RTL_ALIGN_BYTES ),
+    MmUsableSpaceOfBlock ( 2208, RTL_ALIGN_BYTES ),
 }
 
 #SECTION "INITtext"
