@@ -10,9 +10,7 @@ STRUCT IouClass
 
     Superclass : ^IouClass,
 
-    Module : ^ExuLoadedModule,
-
-    Entry : RtlAvlNode,
+    Module : ^ExuModule,
 
     DispatchTable : ^IoPacketBasedCallF,
 
@@ -22,9 +20,9 @@ STRUCT IouClass
     DispatchTableSize : UINT,
 END
 
-IopClassLookupTree : RtlAvlNode
+IopClassLock : KeLock
 
-IopClassLock : KeLock = KE_INITIAL_LOCK
+IopClassDictionary : ExuDictionary
 
 FN (IoPacketBasedCallF) IopUninitializedDispatch (
     IN packet : ^IoPacket,
@@ -35,64 +33,21 @@ FN (IoPacketBasedCallF) IopUninitializedDispatch (
 END
 
 #SECTION "PAGEtext"
-FN (RtlAvlLessThanF) IopCompareClassNames (
-    IN a : ^RtlAvlNode,
-    IN b : ^RtlAvlNode,
-) : UWORD
-
-    // Compare the class names.
-
-    RETURN CAST RtlCompareRtlString (
-        &(CONTAINEROF a TO IouClass.Entry)^.Name, // str1
-        &(CONTAINEROF b TO IouClass.Entry)^.Name, // str2
-    ) TO WORD < 0
-END
-
-#SECTION "PAGEtext"
 FN IopLookupClass (
     IN name : ^RtlString,
 ) : ^IouClass
 
     // Look up an IO class by name. Assumes the global class lock is held.
 
-    // Look up the name in the tree, which is an AVL tree keyed by string and
-    // ordered lexicographically.
-
-    avlnode := IopClassLookupTree.Right
-
-    WHILE TRUE DO
-        IF NOT avlnode THEN
-            // Didn't find it.
-
-            RETURN NULLPTR
-        END
-
-        class := CONTAINEROF avlnode TO IouClass.Entry
-
-        res := CAST RtlCompareRtlString (
-            name, // str1
-            &class^.Name, // str2
-        ) TO WORD
-
-        IF res == 0 THEN
-            // Found it! Return the class.
-
-            RETURN class
-        END
-
-        IF res < 0 THEN
-            avlnode = avlnode^.Left
-        ELSE
-            avlnode = avlnode^.Right
-        END
-    END
-
-    KeAssert ( FALSE )
+    RETURN ExLookupDictionary (
+        &IopClassDictionary, // dict
+        name, // key
+    )
 END
 
 #SECTION "PAGEtext"
 FN IouCreateClass (
-    IN module : ^ExuLoadedModule,
+    IN module : ^ExuModule,
     IN classname : ^RtlString,
     IN superclass : ^IouClass,
     IN dispatchtable : ^IoPacketBasedCallF,
@@ -168,11 +123,21 @@ FN IouCreateClass (
         mydispatch += SIZEOF IoPacketBasedCallF
     END
 
-    // Insert into the class lookup tree.
+    // Insert into the class dictionary.
 
     KeAcquireLockExclusive ( &IopClassLock )
 
-    IF IopLookupClass ( &class^.Name ) THEN
+    oldvalue : ^VOID
+
+    status = ExInsertInDictionary (
+        &IopClassDictionary, // dict
+        classname, // key
+        class, // value
+        FALSE, // canupdate
+        OUT oldvalue, // oldvalue
+    )
+
+    IF OsError ( status ) THEN
         // A class by this name already exists.
 
         KeReleaseLock ( &IopClassLock )
@@ -182,14 +147,8 @@ FN IouCreateClass (
             'Clas', // tag
         )
 
-        RETURN OS_STATUS_IOCLASS_ALREADY_EXISTS
+        RETURN status
     END
-
-    RtlInsertAvl (
-        &IopClassLookupTree, // root
-        &class^.Entry, // node
-        &IopCompareClassNames, // comparisonfunc
-    )
 
     // Increment the superclass's subclass count.
 
@@ -217,13 +176,13 @@ FN IouDeleteClass (
     KeAssert ( class^.InstantiationCount == 0 )
     KeAssert ( class^.SubclassCount == 0 )
 
-    // Remove from the lookup tree.
+    // Remove from the dictionary.
 
     KeAcquireLockExclusive ( &IopClassLock )
 
-    RtlRemoveAvl (
-        &IopClassLookupTree, // root
-        &class^.Entry, // entry
+    ExRemoveFromDictionary (
+        &IopClassDictionary, // dict
+        &class^.Name, // key
     )
 
     class^.Superclass^.SubclassCount -= 1
@@ -245,7 +204,7 @@ FN IouLoadClassByName (
 
 @Retry
 
-    KeAcquireLockShared ( &IopClassLock )
+    KeAcquireLockExclusive ( &IopClassLock )
 
     class := IopLookupClass ( name )
 
@@ -270,7 +229,7 @@ FN IouLoadClassByName (
 
     KeReleaseLock ( &IopClassLock )
 
-    IF class^.Module^.Flags & EXU_MODULE_LOADING THEN
+    IF class^.Module^.KnownModule^.Flags & IOP_MODULE_LOADING THEN
         // The module is still loading, so wait for that to finish before we use
         // any of its classes.
 
@@ -288,9 +247,11 @@ FN IopInitializeObjectRuntime ()
 
     // Initialize the object runtime.
 
-    // Initialize the class name lookup tree.
+    KeInitializeLock ( &IopClassLock, "ClassLock" )
 
-    RtlInitializeAvl ( &IopClassLookupTree )
+    // Initialize the class dictionary.
+
+    ExuInitializeDictionary ( &IopClassDictionary )
 END
 
 #LEAVESECTION

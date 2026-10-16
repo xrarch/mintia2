@@ -106,22 +106,11 @@ STRUCT ExuEventCounter
     References : ULONG,
 END
 
-#DEFINE EXU_MODULE_UNLOADING 1
-#DEFINE EXU_MODULE_LOADING 2
-
-STRUCT ExuKnownModule
-    Name : RtlString,
-
-    LoadedModule : ^ExuLoadedModule,
-
-    Entry : RtlAvlNode,
+STRUCT ExuModule
+    KnownModule : ^IopKnownModule,
 END
 
-STRUCT ExuLoadedModule
-    KnownModule : ^ExuKnownModule,
-
-    Flags : ULONG,
-END
+EXTERN ExuExecutiveModule : ^ExuModule
 
 EXTERN FN ExuInitializeMagazineCaches (
     IN kenode : ^KeuNode,

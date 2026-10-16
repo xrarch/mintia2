@@ -4,80 +4,7 @@
 
 #INCLUDE "Exp.hjk"
 
-PUBLIC ExuExecutiveModule : ^ExuLoadedModule
-
-ExpModuleLoadingLock : KeLock
-
-ExpKnownModuleDictionary : ExuDictionary
-
-#SECTION "PAGEtext"
-FN ExuLookupKnownModule (
-    IN name : ^RtlString,
-    IN create : UWORD,
-) : ^ExuKnownModule
-
-    // Look up a known module, or register it.
-    //
-    // If create is FALSE, a return value of NULLPTR means it wasn't found.
-    // If create is TRUE, a return value of NULLPTR means insufficient memory.
-
-    KeAcquireLockExclusive ( &ExpModuleLoadingLock )
-
-    knownmodule := CAST ExLookupDictionary (
-        &ExpKnownModuleDictionary, // dict
-        name, // key
-    ) TO ^ExuKnownModule
-
-    IF knownmodule OR NOT create THEN
-        // Found it, or we didn't find it and don't wanna create it.
-        // In either case just return what we have.
-
-        GOTO Exit
-    END
-
-    status := MmAllocatePool (
-        TRUE, // pageable
-        SIZEOF ExuKnownModule, // bytes
-        'KnMo', // tag
-        MM_ALLOCATE_WAIT, // flags
-        OUT knownmodule, // ptr
-    )
-
-    IF OsError ( status ) THEN
-        GOTO Exit
-    END
-
-    // Insert it into the dictionary.
-
-    oldvalue : ^VOID
-
-    status = ExInsertInDictionary (
-        &ExpKnownModuleDictionary, // dict
-        name, // key
-        knownmodule, // value
-        FALSE, // canupdate
-        OUT oldvalue, // oldvalue
-    )
-
-    IF OsError ( status ) THEN
-        MmFreePool (
-            knownmodule, // knownmodule
-            'KnMo', // tag
-        )
-
-        GOTO Exit
-    END
-
-    // Initialize as not having an associated loaded module.
-
-    knownmodule^.LoadedModule = NULLPTR
-
-@Exit
-
-    KeReleaseLock ( &ExpModuleLoadingLock )
-
-    RETURN knownmodule
-END
+PUBLIC ExuExecutiveModule : ^ExuModule
 
 #SECTION "PAGEtext"
 FN (ObuTypeDeleteF) ExpDeleteModuleObject (
@@ -92,26 +19,17 @@ FN (ObuTypeDeleteF) ExpDeleteModuleObject (
     RETURN TRUE
 END
 
-STRUCT ExpModuleContext
-    KnownModule : ^ExuKnownModule,
-END
-
 #SECTION "PAGEtext"
 FN (ObuTypeInitializeF) ExpInitializeModuleObject (
     IN object : ^VOID,
     IN context : ^VOID,
 ) : OsStatus
 
-    // Initialize an ExuLoadedModule object.
+    // Initialize an ExuModule object.
 
-    module := CAST object TO ^ExuLoadedModule
-    ctx := CAST context TO ^ExpModuleContext
+    module := CAST object TO ^ExuModule
 
-    // Set the known module that this loaded module will be associated with.
-
-    module^.KnownModule = ctx^.KnownModule
-
-    module^.Flags = 0
+    module^.KnownModule = NULLPTR
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -127,35 +45,31 @@ ExpModuleType : ObuType = {
     [TypeIdentifier] = OS_MODULE_TYPE,
     [Tag] = 'Modu',
 
-    [TypicalBodySize] = SIZEOF ExuLoadedModule,
+    [TypicalBodySize] = SIZEOF ExuModule,
 
-    [Align] = ALIGNOF ExuLoadedModule,
+    [Align] = ALIGNOF ExuModule,
 
     [IsPaged] = FALSE,
 }
 
 #SECTION "PAGEtext"
 FN ExpCreateModule (
-    IN knownmodule : ^ExuKnownModule,
-    OUT module : ^ExuLoadedModule,
+    OUT module : ^ExuModule,
 ) : OsStatus
 
-    // Create an ExuLoadedModule object.
+    // Create an ExuModule object.
 
-    ctx : ExpModuleContext
-
-    ctx.KnownModule = knownmodule
 
     obparams : ObParameters
 
     ObInitializeParameters (
         &obparams, // obparams
         OS_MODULE_TYPE, // typeid
-        &ctx, // context
+        NULLPTR, // context
         PsuSystemCredentials (), // cred
         OS_ACCESS_OWNER_ALL, // access
         0, // flags
-        SIZEOF ExuLoadedModule, // bodysize
+        SIZEOF ExuModule, // bodysize
         0, // pagedbodysize
         0, // npquotabias
         0, // pgquotabias
@@ -173,47 +87,15 @@ FN ExpInitializeModules ()
 
     // Initialize the loadable modules package.
 
-
-#LEAVESECTION
-    KeInitializeLock ( &ExpModuleLoadingLock, "ModuleLoadingLock" )
-#ENTERSECTION "INITtext"
-
     // Initialize the module type.
 
     ObuInitializeType ( &ExpModuleType )
 
-    // Initialize the known modules dictionary.
-
-#LEAVESECTION
-    ExuInitializeDictionary ( &ExpKnownModuleDictionary )
-#ENTERSECTION "INITtext"
-
-    // Create a "known module" for the kernel itself.
-
-    kernelname : RtlString
-
-    RtlInitializeString ( &kernelname, "mintia.sys" )
-
-    knownmodule := ExuLookupKnownModule (
-        &kernelname, // name
-        TRUE, // create
-    )
-
-    IF NOT knownmodule THEN
-        KeCrash (
-            "%s: failed to create known module\n", // fmt
-            "ExpInitializeModules",
-        )
-    END
-
-    // Now create a special ExuLoadedModule to represent the executive binary
+    // Now create a special ExuModule to represent the executive binary
     // and IO classes implemented therein.
 
-    module : ^ExuLoadedModule
-
     status := ExpCreateModule (
-        knownmodule, // knownmodule
-        OUT module, // module
+        OUT ExuExecutiveModule, // module
     )
 
     IF OsError ( status ) THEN
@@ -222,14 +104,6 @@ FN ExpInitializeModules ()
             "ExpInitializeModules",
         )
     END
-
-    // Set the known module to point here.
-
-    knownmodule^.LoadedModule = module
-
-    // Set the special executive module pointer.
-
-    ExuExecutiveModule = module
 END
 
 #LEAVESECTION

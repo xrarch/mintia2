@@ -8,6 +8,73 @@
 
 IopCatalogLock : KeLock
 
+IopKnownModuleDictionary : ExuDictionary
+
+#SECTION "PAGEtext"
+FN IopLookupKnownModule (
+    IN name : ^RtlString,
+    IN create : UWORD,
+    OUT knownmodule : ^IopKnownModule
+) : OsStatus
+
+    // Look up a known module, or register it.
+    // Catalog lock is held.
+    //
+    // If create is FALSE, a return value of NULLPTR means it wasn't found.
+    // If create is TRUE, a return value of NULLPTR means insufficient memory.
+
+    knownmodule = CAST ExLookupDictionary (
+        &IopKnownModuleDictionary, // dict
+        name, // key
+    ) TO ^IopKnownModule
+
+    IF knownmodule OR NOT create THEN
+        // Found it, or we didn't find it and don't wanna create it.
+        // In either case just return what we have.
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    status := MmAllocatePool (
+        TRUE, // pageable
+        SIZEOF IopKnownModule, // bytes
+        'KnMo', // tag
+        MM_ALLOCATE_WAIT, // flags
+        OUT knownmodule, // ptr
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
+
+    // Insert it into the dictionary.
+
+    oldvalue : ^VOID
+
+    status = ExInsertInDictionary (
+        &IopKnownModuleDictionary, // dict
+        name, // key
+        knownmodule, // value
+        FALSE, // canupdate
+        OUT oldvalue, // oldvalue
+    )
+
+    IF OsError ( status ) THEN
+        MmFreePool (
+            knownmodule, // knownmodule
+            'KnMo', // tag
+        )
+
+        RETURN status
+    END
+
+    // Initialize as not having an associated loaded module.
+
+    knownmodule^.Module = NULLPTR
+
+    RETURN OS_STATUS_SUCCESS
+END
+
 #SECTION "PAGEtext"
 EXPORT FN IoCreateKnownClass (
     OUT knownclass : ^IopKnownClass,
@@ -166,6 +233,37 @@ FN IopInitializeCatalog ()
 #LEAVESECTION
     KeInitializeLock ( &IopCatalogLock, "CatalogLock" )
 #ENTERSECTION "INITtext"
+
+    // Initialize the known modules dictionary.
+
+#LEAVESECTION
+    ExuInitializeDictionary ( &IopKnownModuleDictionary )
+#ENTERSECTION "INITtext"
+
+    // Create a "known module" for the kernel itself.
+
+    kernelname : RtlString
+
+    RtlInitializeString ( &kernelname, "mintia.sys" )
+
+    knownmodule : ^IopKnownModule
+
+    status := IopLookupKnownModule (
+        &kernelname, // name
+        TRUE, // create
+        OUT knownmodule, // knownmodule
+    )
+
+    IF OsError ( status ) THEN
+        KeCrash (
+            "%s: failed to create known module\n", // fmt
+            "IopInitializeCatalog",
+        )
+    END
+
+    // Set the known module to point to the executive module.
+
+    knownmodule^.Module = ExuExecutiveModule
 
     // We need to process all of the configuration files loaded by the
     // bootloader.
