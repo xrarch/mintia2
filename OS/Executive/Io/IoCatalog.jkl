@@ -45,33 +45,33 @@ FN IouLoadClassByName (
 
     eventcounter : ^ExuEventCounter
 
+    IF knownmodule^.Flags & IOP_MODULE_LOADING THEN
+        // Someone else is loading it, wait for them to finish and then
+        // retry.
+
+        eventcounter = knownmodule^.LoadEvent
+
+        KeAssert ( eventcounter != NULLPTR )
+
+        KeReleaseLock ( &IopCatalogLock )
+
+        KeWaitForSingleObject (
+            KE_KERNEL_MODE, // waitmode
+            FALSE, // alertable
+            NULLPTR, // timeout
+            &eventcounter^.Event.Header, // object
+            NULLPTR, // continuation
+        )
+
+        ExUnreferenceEventCounter ( eventcounter )
+
+        GOTO Retry
+    END
+
     module := knownmodule^.Module
 
     IF NOT module THEN
         // The module isn't loaded yet.
-
-        IF knownmodule^.Flags & IOP_MODULE_LOADING THEN
-            // Someone else is loading it, wait for them to finish and then
-            // retry.
-
-            eventcounter = knownmodule^.LoadEvent
-
-            KeAssert ( eventcounter != NULLPTR )
-
-            KeReleaseLock ( &IopCatalogLock )
-
-            KeWaitForSingleObject (
-                KE_KERNEL_MODE, // waitmode
-                FALSE, // alertable
-                NULLPTR, // timeout
-                &eventcounter^.Event.Header, // object
-                NULLPTR, // continuation
-            )
-
-            ExUnreferenceEventCounter ( eventcounter )
-
-            GOTO Retry
-        END
 
         // We have to load it.
 
@@ -111,20 +111,22 @@ FN IouLoadClassByName (
 
     // The module exists, so reference it.
 
-    IF NOT ObConditionallyReferenceObject ( module ) THEN
-        // Treat a failure of the conditional reference as the module being
-        // gone from the catalog, because it pretty much is.
-
-        KeReleaseLock ( &IopCatalogLock )
-
-        RETURN OS_STATUS_UNKNOWN_IOCLASS
-    END
+    status = OS_STATUS_SUCCESS
 
     class = knownclass^.Class
 
+    IF NOT ObConditionallyReferenceObject ( module ) THEN
+        // Treat a failure of the conditional reference as the module being
+        // gone from the catalog, because it logically is; it is now in the
+        // process of being unloaded and deleted but hasn't been removed from
+        // the catalog yet.
+
+        status = OS_STATUS_UNKNOWN_IOCLASS
+    END
+
     KeReleaseLock ( &IopCatalogLock )
 
-    RETURN OS_STATUS_SUCCESS
+    RETURN status
 END
 
 #SECTION "PAGEtext"
