@@ -6,8 +6,6 @@
 #INCLUDE "Iop.hjk"
 
 STRUCT IouClass
-    Name : RtlString,
-
     Superclass : ^IouClass,
 
     Module : ^ExuModule,
@@ -20,29 +18,12 @@ STRUCT IouClass
     DispatchTableSize : UINT,
 END
 
-IopClassLock : KeLock
-
-IopClassDictionary : ExuDictionary
-
 FN (IoPacketBasedCallF) IopUninitializedDispatch (
     IN packet : ^IoPacket,
     IN trampoline : ^IoTrampoline,
 ) : OsStatus
 
     KeCrash ( "Uninitialized dispatch table entry\n" )
-END
-
-#SECTION "PAGEtext"
-FN IopLookupClass (
-    IN name : ^RtlString,
-) : ^IouClass
-
-    // Look up an IO class by name. Assumes the global class lock is held.
-
-    RETURN ExLookupDictionary (
-        &IopClassDictionary, // dict
-        name, // key
-    )
 END
 
 #SECTION "PAGEtext"
@@ -69,9 +50,6 @@ FN IouCreateClass (
     IF OsError ( status ) THEN
         RETURN status
     END
-
-    class^.Name.Data = classname^.Data
-    class^.Name.Length = classname^.Length
 
     class^.Superclass = superclass
 
@@ -123,38 +101,12 @@ FN IouCreateClass (
         mydispatch += SIZEOF IoPacketBasedCallF
     END
 
-    // Insert into the class dictionary.
-
-    KeAcquireLockExclusive ( &IopClassLock )
-
-    oldvalue : ^VOID
-
-    status = ExInsertInDictionary (
-        &IopClassDictionary, // dict
-        classname, // key
-        class, // value
-        FALSE, // canupdate
-        OUT oldvalue, // oldvalue
-    )
-
-    IF OsError ( status ) THEN
-        // A class by this name already exists.
-
-        KeReleaseLock ( &IopClassLock )
-
-        MmFreePool (
-            class, // ptr
-            'Clas', // tag
-        )
-
-        RETURN status
-    END
-
     // Increment the superclass's subclass count.
 
-    superclass^.SubclassCount += 1
-
-    KeReleaseLock ( &IopClassLock )
+    KeIncrementUlong (
+        &superclass^.SubclassCount, // ptr
+        1, // inc
+    )
 
     // Increment the reference count of the superclass's module.
 
@@ -176,69 +128,14 @@ FN IouDeleteClass (
     KeAssert ( class^.InstantiationCount == 0 )
     KeAssert ( class^.SubclassCount == 0 )
 
-    // Remove from the dictionary.
-
-    KeAcquireLockExclusive ( &IopClassLock )
-
-    ExRemoveFromDictionary (
-        &IopClassDictionary, // dict
-        &class^.Name, // key
+    KeIncrementUlong (
+        &class^.Superclass^.SubclassCount, // ptr
+        0xFFFFFFFF, // inc
     )
-
-    class^.Superclass^.SubclassCount -= 1
-
-    KeReleaseLock ( &IopClassLock )
 
     // Unreference the superclass's module.
 
     ObUnreferenceObject ( class^.Superclass^.Module )
-END
-
-#SECTION "PAGEtext"
-FN IouLoadClassByName (
-    IN name : ^RtlString,
-) : ^IouClass
-
-    // Load an IO class by name. Returns a referenced pointer to the class or
-    // NULLPTR if we don't know what this class is.
-
-@Retry
-
-    KeAcquireLockExclusive ( &IopClassLock )
-
-    class := IopLookupClass ( name )
-
-    IF NOT class OR
-        NOT ObConditionallyReferenceObject ( class^.Module ) THEN
-
-        // Didn't find the class or failed to reference it. If we failed to
-        // reference it, then it is actively being deleted (that is, the module
-        // that implements it is being unloaded), and we should treat this like
-        // the normal module load case.
-
-        KeReleaseLock ( &IopClassLock )
-
-        // TODO: Check the IO Catalog for a module that implements this
-        //       class, and load it if found. If we find such a module, retry
-        //       the lookup. Otherwise, return NULLPTR.
-
-        KeCrash ( "NYI IouLoadClassByName\n" )
-
-        GOTO Retry
-    END
-
-    KeReleaseLock ( &IopClassLock )
-
-    IF class^.Module^.KnownModule^.Flags & IOP_MODULE_LOADING THEN
-        // The module is still loading, so wait for that to finish before we use
-        // any of its classes.
-
-        KeCrash ( "NYI IouLoadClassByName 2\n" )
-    END
-
-    // Return the referenced class.
-
-    RETURN class
 END
 
 #ENTERSECTION "INITtext"
@@ -247,11 +144,7 @@ FN IopInitializeObjectRuntime ()
 
     // Initialize the object runtime.
 
-    KeInitializeLock ( &IopClassLock, "ClassLock" )
-
-    // Initialize the class dictionary.
-
-    ExuInitializeDictionary ( &IopClassDictionary )
+    // ...
 END
 
 #LEAVESECTION

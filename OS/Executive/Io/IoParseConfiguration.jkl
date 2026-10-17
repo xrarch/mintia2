@@ -230,7 +230,9 @@ FN IopParseConfiguration (
             listentry := listhead^.Next
 
             WHILE listentry != listhead DO
-                knownclass = CONTAINEROF listentry TO IopKnownClass.Entry
+                knownclass =
+                    CONTAINEROF listentry TO IopKnownClass.Entry
+
                 listentry = listentry^.Next
 
                 IoDeleteKnownClass ( knownclass )
@@ -247,7 +249,8 @@ FN IopParseConfiguration (
     knownclass = NULLPTR
 
     IF NOT RtlEmptyList ( &parse.ClassListHead ) THEN
-        knownclass = CONTAINEROF parse.ClassListHead.Next TO IopKnownClass.Entry
+        knownclass =
+            CONTAINEROF parse.ClassListHead.Next TO IopKnownClass.Entry
     END
 
     RETURN OS_STATUS_SUCCESS

@@ -9,6 +9,121 @@
 IopCatalogLock : KeLock
 
 IopKnownModuleDictionary : ExuDictionary
+IopKnownClassDictionary : ExuDictionary
+
+#SECTION "PAGEtext"
+FN IouLoadClassByName (
+    IN name : ^RtlString,
+    OUT class : ^IouClass,
+) : OsStatus
+
+    // Load an IO class by name. Returns a referenced pointer to the class or
+    // an error status.
+
+    status : OsStatus
+
+@Retry
+
+    KeAcquireLockExclusive ( &IopCatalogLock )
+
+@RetryLockHeld
+
+    knownclass := CAST ExLookupDictionary (
+        &IopKnownClassDictionary, // dict
+        name, // key
+    ) TO ^IopKnownClass
+
+    IF NOT knownclass THEN
+        // Don't know of this class.
+
+        KeReleaseLock ( &IopCatalogLock )
+
+        RETURN OS_STATUS_UNKNOWN_IOCLASS
+    END
+
+    knownmodule := knownclass^.KnownModule
+
+    eventcounter : ^ExuEventCounter
+
+    module := knownmodule^.Module
+
+    IF NOT module THEN
+        // The module isn't loaded yet.
+
+        IF knownmodule^.Flags & IOP_MODULE_LOADING THEN
+            // Someone else is loading it, wait for them to finish and then
+            // retry.
+
+            eventcounter = knownmodule^.LoadEvent
+
+            KeAssert ( eventcounter != NULLPTR )
+
+            KeReleaseLock ( &IopCatalogLock )
+
+            KeWaitForSingleObject (
+                KE_KERNEL_MODE, // waitmode
+                FALSE, // alertable
+                NULLPTR, // timeout
+                &eventcounter^.Event.Header, // object
+                NULLPTR, // continuation
+            )
+
+            ExUnreferenceEventCounter ( eventcounter )
+
+            GOTO Retry
+        END
+
+        // We have to load it.
+
+        status = ExAllocateEventCounter (
+            MM_ALLOCATE_WAIT, // flags
+            OUT eventcounter, // eventcounter
+        )
+
+        IF OsError ( status ) THEN
+            KeReleaseLock ( &IopCatalogLock )
+
+            RETURN status
+        END
+
+        knownmodule^.Flags |= IOP_MODULE_LOADING
+        knownmodule^.LoadEvent = eventcounter
+
+        KeReleaseLock ( &IopCatalogLock )
+
+        // Now actually load the module, synchronized by the load event.
+
+        KeCrash ( "NYI IouLoadClassByName: load\n" )
+
+        KeAcquireLockExclusive ( &IopCatalogLock )
+
+        KeSignalEvent (
+            &eventcounter^.Event, // event
+            0, // priorityboost
+        )
+
+        ExUnreferenceEventCounter ( eventcounter )
+
+        GOTO RetryLockHeld
+    END
+
+    // The module exists, so reference it.
+
+    IF NOT ObConditionallyReferenceObject ( module ) THEN
+        // Treat a failure of the conditional reference as the module being
+        // gone from the catalog, because it pretty much is.
+
+        KeReleaseLock ( &IopCatalogLock )
+
+        RETURN OS_STATUS_UNKNOWN_IOCLASS
+    END
+
+    class = knownclass^.Class
+
+    KeReleaseLock ( &IopCatalogLock )
+
+    RETURN OS_STATUS_SUCCESS
+END
 
 #SECTION "PAGEtext"
 FN IopLookupKnownModule (
@@ -72,6 +187,12 @@ FN IopLookupKnownModule (
 
     knownmodule^.Module = NULLPTR
 
+    knownmodule^.Flags = 0
+
+    RtlInitializeList ( &knownmodule^.KnownClassListHead )
+
+    knownmodule^.LoadEvent = NULLPTR
+
     RETURN OS_STATUS_SUCCESS
 END
 
@@ -94,7 +215,7 @@ EXPORT FN IoCreateKnownClass (
         RETURN status
     END
 
-    // Initialize the dictionary.
+    // Initialize the properties dictionary.
 
     ExuInitializeDictionary ( &knownclass^.Properties )
 
@@ -236,9 +357,9 @@ FN IopInitializeCatalog ()
 
     // Initialize the known modules dictionary.
 
-#LEAVESECTION
     ExuInitializeDictionary ( &IopKnownModuleDictionary )
-#ENTERSECTION "INITtext"
+
+    ExuInitializeDictionary ( &IopKnownClassDictionary )
 
     // Create a "known module" for the kernel itself.
 
