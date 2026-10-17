@@ -465,7 +465,9 @@ FN BlLookupSymbol (
     WHILE i < count DO
         symbol := &symtable[i]
 
-        IF RtlCompareString ( strtab + symbol^.NameOffset, name ) == 0 THEN
+        IF RtlCompareString ( strtab + symbol^.NameOffset, name ) == 0 AND
+            symbol^.Type == XLO_SYMBOL_EXPORT THEN
+
             // Found it.
 
             sectionheader := &sectiontable[symbol^.SectionIndex]
