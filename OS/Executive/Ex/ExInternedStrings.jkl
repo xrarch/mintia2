@@ -11,8 +11,6 @@ STRUCT ExpName
     Entry : RtlAvlNode,
 
     References : ULONG,
-
-    BucketIndex : UBYTE,
 END
 
 #SECTION "INITtext"
@@ -180,7 +178,6 @@ EXPORT FN ExFindName (
     // Initialize the name.
 
     node^.References = 1
-    node^.BucketIndex = hash & (EXP_NAME_BUCKETS - 1)
 
     newstr := &node^.String
 
@@ -243,7 +240,9 @@ EXPORT FN ExUnreferenceName (
 
     expnode := KeNumaNodeFromSpacePointer ( expname )^.Exp
 
-    bucket := &expnode^.NameBuckets[expname^.BucketIndex]
+    hash := ExpHash ( expname^.String.Data )
+
+    bucket := &expnode^.NameBuckets[hash & (EXP_NAME_BUCKETS - 1)]
 
     // Lock the bucket.
 
