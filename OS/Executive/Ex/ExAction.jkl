@@ -141,7 +141,9 @@ EXPORT FN ExPrepareWaitForAction (
             GOTO Exit
         END
 
-        waitable^.References = 1
+        // One reference for me (a waiter) and one for the waker.
+
+        waitable^.References = 2
 
         KeInitializeLockWithOwner (
             &waitable^.Lock, // ptr
