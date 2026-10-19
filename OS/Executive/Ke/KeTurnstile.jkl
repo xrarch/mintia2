@@ -1135,9 +1135,7 @@ EXPORT FN KeTryConvertLockToExclusive (
         IF current & KEP_LOCK_WRITE_LOCKED THEN
             // Already exclusive.
 
-            KeAssert ( current & KEP_LOCK_BITS == thread )
-
-            RETURN TRUE
+            RETURN current & KEP_LOCK_BITS == thread
         END
 
         IF current & KEP_LOCK_BITS != KEP_LOCK_SHARE_INC THEN
@@ -1173,4 +1171,41 @@ EXPORT FN KeTryConvertLockToExclusive (
 
         current = new
     END
+END
+
+EXPORT FN KeBlockOnLock (
+    IN lock : ^KeLock,
+)
+
+    // Block on the lock until it is not held (and propagate a priority boost).
+
+    // Very similar to KeAcquireLockExclusive but without trying to take it
+    // myself. Intended for use in lightweight mechanisms for waiting on another
+    // thread to finish doing something in a way that inherits resource
+    // priorities.
+
+    current := lock^.Ptr
+
+    IF current == 0 THEN
+        // The lock is already free.
+
+        LEAVE
+    END
+
+    // Make sure this isn't a recursive lock which is prohibited.
+
+    KeAssert ( (current & KEP_LOCK_WRITE_LOCKED == 0) OR
+        (current & KEP_LOCK_BITS != KeCurrentThread () ) )
+
+    // If the lock is nonzero, one of the following is true:
+    //
+    // - The lock is held exclusively.
+    // - The lock is held shared.
+    //
+    // In either case we need to sleep on the turnstile and then return.
+
+    KepBlockOnLock (
+        lock, // lock
+        current, // current
+    )
 END
