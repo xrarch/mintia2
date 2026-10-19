@@ -7,17 +7,37 @@
 
 #INCLUDE "<ll>/Executive/Ke.hjk"
 
-EXTERN FN ExAllocateEventCounter (
+STRUCT ExAction
+    Ptr : ^VOID,
+END
+
+#DEFINE EXP_ACTION_OWNER 1
+#DEFINE EXP_ACTION_BEING_PREPARED 2
+
+#MACRO ExInitializeAction ( action ) [
+    NOTHING (action)^.Ptr = NULLPTR
+]
+
+#MACRO ExStartAction ( action ) [
+    NOTHING (action)^.Ptr = (KeCurrentThread () | EXP_ACTION_OWNER)
+]
+
+#MACRO ExIsActionInProgress ( action ) [
+    ((action)^.Ptr != NULLPTR)
+]
+
+EXTERN FN ExPrepareWaitForAction (
+    IN action : ^ExAction,
     IN flags : UWORD,
-    OUT counter : ^ExuEventCounter,
+    OUT waitable : ^ExpAction,
 ) : OsStatus
 
-EXTERN FN ExReferenceEventCounter (
-    IN counter : ^ExuEventCounter,
+EXTERN FN ExWaitForActionCompletion (
+    IN waitable : ^ExpAction,
 )
 
-EXTERN FN ExUnreferenceEventCounter (
-    IN counter : ^ExuEventCounter,
+EXTERN FN ExCompleteAction (
+    IN action : ^ExAction,
 )
 
 STRUCT ExName
@@ -298,4 +318,14 @@ EXTERN FN ExCreateMagazineCache (
     IN freefunc : ExMagazineCacheFreeF,
     IN context : ^VOID,
     OUT magazinecache : ^ExpMagazineCache,
+) : OsStatus
+
+EXTERN FN ExUnloadLibrary (
+    IN library : ^ExuLibrary,
+)
+
+EXTERN FN ExLoadLibrary (
+    IN path : ^RtlString,
+    IN name : ^RtlString,
+    OUT library : ^ExuLibrary,
 ) : OsStatus

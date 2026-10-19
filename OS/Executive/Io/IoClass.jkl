@@ -8,7 +8,7 @@
 STRUCT IouClass
     Superclass : ^IouClass,
 
-    Module : ^ExuModule,
+    KnownModule : ^IopKnownModule,
 
     DispatchTable : ^IoPacketBasedCallF,
 
@@ -28,7 +28,7 @@ END
 
 #SECTION "PAGEtext"
 FN IouCreateClass (
-    IN module : ^ExuModule,
+    IN knownmodule : ^IopKnownModule,
     IN classname : ^RtlString,
     IN superclass : ^IouClass,
     IN dispatchtable : ^IoPacketBasedCallF,
@@ -56,7 +56,7 @@ FN IouCreateClass (
     class^.InstantiationCount = 0
     class^.SubclassCount = 0
 
-    class^.Module = module
+    class^.KnownModule = knownmodule
 
     // Enough space was allocated at the end of the class object for the
     // dispatch table.
@@ -110,7 +110,7 @@ FN IouCreateClass (
 
     // Increment the reference count of the superclass's module.
 
-    ObReferenceObject ( superclass^.Module )
+    IopReferenceModule ( superclass^.KnownModule )
 
     RETURN status
 END
@@ -135,7 +135,7 @@ FN IouDeleteClass (
 
     // Unreference the superclass's module.
 
-    ObUnreferenceObject ( class^.Superclass^.Module )
+    IopUnreferenceModule ( class^.Superclass^.KnownModule )
 END
 
 #ENTERSECTION "INITtext"

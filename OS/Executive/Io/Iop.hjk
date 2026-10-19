@@ -45,7 +45,7 @@ END
 ]
 
 STRUCT IopKnownClass
-    Name : RtlString,
+    Name : ^ExName,
 
     Entry : RtlListEntry,
 
@@ -59,14 +59,25 @@ END
 #DEFINE IOP_MODULE_LOADING 1
 
 STRUCT IopKnownModule
+    Path : ^ExName,
+    Name : ^ExName,
+
     KnownClassListHead : RtlListEntry,
 
-    Module : ^ExuModule,
+    Library : ^ExuLibrary,
 
-    LoadEvent : ^ExuEventCounter,
+    LoadAction : ExAction,
 
-    Flags : ULONG,
+    ClassReferences : ULONG,
 END
+
+EXTERN FN IopReferenceModule (
+    IN knownmodule : ^IopKnownModule,
+)
+
+EXTERN FN IopUnreferenceModule (
+    IN knownmodule : ^IopKnownModule,
+)
 
 EXTERN FN IopParseConfiguration (
     IN configtext : ^UBYTE,

@@ -44,6 +44,12 @@ FN (ExWorkItemF) MmpAdjustPagedCacheWorker (
         )
     END
 
+    IF kenode^.Id == 0 THEN
+        // Boot node also reaps libraries.
+
+        ExuReapLibraries ( empty )
+    END
+
     ExuAdjustMagazineCaches (
         kenode, // kenode
         TRUE, // paged

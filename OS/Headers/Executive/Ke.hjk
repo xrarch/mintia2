@@ -778,3 +778,10 @@ EXTERN KepAssertionMessage : UBYTE[]
 #MACRO KeLockOwner ( lock ) [
     (CAST (lock)^.Ptr & KEP_LOCK_BITS TO ^KeuThread)
 ]
+
+#MACRO KeInitializeLockWithOwner ( lock, owner ) [
+    NOTHING (lock)^.Ptr = (owner) | KEP_LOCK_WRITE_LOCKED
+#IF BLD_LOCKDEP
+    NOTHING (lock)^.Class = NULLPTR
+#END
+]

@@ -1,0 +1,240 @@
+//
+// Implements actions, which are little refcounted memory blocks that can be
+// waited upon for another thread to finish performing some action, without
+// requiring complicated lifetime guarantees.
+//
+// These are an abstraction atop KeLock.
+//
+
+#INCLUDE "Exp.hjk"
+
+STRUCT ExpAction
+    Lock : KeLock,
+    References : ULONG,
+END
+
+#SECTION "INITtext"
+FN ExpInitializeActionsForNode (
+    IN kenode : ^KeuNode,
+)
+
+    // Initialize the action cache.
+
+    IF NOT kenode^.Exp THEN
+        LEAVE
+    END
+
+    status := MmCreateObjectCache (
+        kenode, // kenode
+        "Actions", // name
+        0, // flags
+        SIZEOF ExpAction, // objectsize
+        TRUE, // magazinecached
+        FALSE, // pageable
+        RTL_ALIGN_BYTES, // align
+        OUT kenode^.Exp^.ActionCache, // ptr
+    )
+
+#ENTERSECTION "INITtext"
+    IF OsError ( status ) THEN
+        KeCrash ( "ExpInitializeActions: failed to create cache\n" )
+    END
+#LEAVESECTION
+
+END
+
+#SECTION "INITtext"
+FN ExpInitializeActions ()
+
+    // Initialize the action caches.
+
+    i := 0
+    nodes := KeQueryNodeCount ()
+
+    WHILE i < nodes DO
+        kenode := KeNumaNodeById ( i )
+
+        ExpInitializeActionsForNode ( kenode )
+
+        i += 1
+    END
+END
+
+FN ExpUnreferenceActionWaitable (
+    IN waitable : ^ExpAction,
+)
+
+    oldcount := KeIncrementUlong (
+        &waitable^.References, // ptr
+        0xFFFFFFFF, // inc
+    )
+
+    IF oldcount == 1 THEN
+        // We're the last waiter and responsible for freeing the waitable.
+
+        expnode := KeNumaNodeFromSpacePointer ( waitable )^.Exp
+
+        MmFreeToObjectCache (
+            expnode^.ActionCache, // objectcache
+            waitable, // waitable
+            'ExAc', // tag
+        )
+    END
+END
+
+EXPORT FN ExPrepareWaitForAction (
+    IN action : ^ExAction,
+    IN flags : UWORD,
+    OUT waitable : ^ExpAction,
+) : OsStatus
+
+    // Get a waitable action block in preparation for waiting on the action's
+    // completion to be signaled.
+
+    originalvalue := action^.Ptr
+    new : ^VOID
+    status := OS_STATUS_SUCCESS
+
+    WHILE TRUE DO
+        // CAS loop to set the BEING_PREPARED bit.
+
+        IF originalvalue == NULLPTR THEN
+            // Already completed.
+
+            RETURN status
+        END
+
+        new = CAST KeCompareSwapPtr (
+            &action^.Ptr, // ptr
+            originalvalue | EXP_ACTION_BEING_PREPARED, // newvalue
+            originalvalue, // expectedvalue
+        ) TO ^VOID
+
+        IF new == originalvalue THEN
+            BREAK
+        END
+
+        originalvalue = new
+    END
+
+    waitable = originalvalue
+
+    IF waitable & EXP_ACTION_OWNER THEN
+        // The action hasn't been waited on yet, so we need to allocate the
+        // reference counted KeLock for it, initialized to be held exclusive by
+        // the owner (whose pointer is stored in the action).
+
+        owner := waitable & ~EXP_ACTION_OWNER
+
+        expnode := KeCurrentVolatileNode ()^.Exp
+
+        status = MmAllocateFromObjectCache (
+            expnode^.ActionCache, // cache
+            flags, // flags
+            'ExAc', // tag
+            OUT waitable, // ptr
+        )
+
+        IF OsError ( status ) THEN
+            waitable = NULLPTR
+
+            GOTO Exit
+        END
+
+        waitable^.References = 1
+
+        KeInitializeLockWithOwner (
+            &waitable^.Lock, // ptr
+            owner, // owner
+        )
+
+    ELSE
+        // There's already a waitable to block on so just increment the
+        // reference count.
+
+        KeIncrementUlong (
+            &waitable^.References, // ptr
+            1, // inc
+        )
+    END
+
+@Exit
+
+    originalvalue |= EXP_ACTION_BEING_PREPARED
+
+    WHILE TRUE DO
+        // CAS loop to clear the BEING_PREPARED bit.
+
+        new = CAST KeCompareSwapPtr (
+            &action^.Ptr, // ptr
+            waitable, // newvalue
+            originalvalue, // expectedvalue
+        ) TO ^VOID
+
+        IF new == originalvalue THEN
+            BREAK
+        END
+
+        originalvalue = new
+
+        IF originalvalue == NULLPTR THEN
+            // Already completed.
+
+            IF waitable != NULLPTR THEN
+                // We are responsible for removing two references,
+                // because we took one as a waiter, and we also raced with
+                // the waker whose reference is logically yielded to us so
+                // that the waitable doesn't disappear from under us.
+
+                ExpUnreferenceActionWaitable ( waitable )
+                ExpUnreferenceActionWaitable ( waitable )
+            END
+
+            BREAK
+        END
+    END
+
+    RETURN status
+END
+
+EXPORT FN ExWaitForActionCompletion (
+    IN waitable : ^ExpAction,
+)
+
+    // Wait for an action to be completed by the thread performing it.
+
+    IF NOT waitable THEN
+        LEAVE
+    END
+
+    KeBlockOnLock ( &waitable^.Lock )
+
+    ExpUnreferenceActionWaitable ( waitable )
+END
+
+EXPORT FN ExCompleteAction (
+    IN action : ^ExAction,
+)
+
+    // Complete the action.
+
+    waitable := CAST KeFetchAndSetPtr (
+        &action^.Ptr, // ptr
+        NULLPTR, // newvalue
+    ) TO ^ExpAction
+
+    IF waitable & EXP_ACTION_OWNER == 0 THEN
+        // There are waiters who need to be awoken.
+
+        KeReleaseLock ( &waitable^.Lock )
+
+        IF waitable & EXP_ACTION_BEING_PREPARED == 0 THEN
+            // We did not race with someone preparing their wait, so we own
+            // the final reference on the waitable and should release it. If
+            // we did, then they now own it and will release it when they
+            // notice we completed it.
+
+            ExpUnreferenceActionWaitable ( waitable )
+        END
+    END
+END

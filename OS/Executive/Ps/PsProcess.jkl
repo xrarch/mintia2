@@ -128,34 +128,12 @@ FN PspSignalActivation (
 
     paged := process^.Paged
 
-    KeAcquireLockExclusive ( &paged^.ActivationLock )
-
-    event := paged^.ActivationEvent
-
-    IF NOT event THEN
-        // Already activated.
-
-        KeReleaseLock ( &paged^.ActivationLock )
-
-        LEAVE
-    END
-
     paged^.ActivationStatus = status
 
-    paged^.ActivationEvent = NULLPTR
-
-    KeReleaseLock ( &paged^.ActivationLock )
-
-    // Wake anyone awaiting activation of this process.
-
     KeSignalEvent (
-        &event^.Event, // event
+        &process^.ActivationEvent, // event
         0, // priorityboost
     )
-
-    // Decrement the reference count on the event counter.
-
-    ExUnreferenceEventCounter ( event )
 END
 
 #SECTION "PAGEtext"
@@ -194,15 +172,12 @@ FN PspExitProcess (
 
     MmuUninitializeProcess ( process )
 
-    // If activation hasn't been signaled, do so now in order to get rid of the
-    // activation event counter.
+    // If activation hasn't been signaled, do so now.
 
-    IF paged^.ActivationEvent THEN
-        PspSignalActivation (
-            process, // process
-            paged^.TerminationStatus, // status
-        )
-    END
+    KeSignalEvent (
+        &process^.ActivationEvent, // event
+        0, // priorityboost
+    )
 
     // Signal the termination event.
 
@@ -463,18 +438,14 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
     paged^.RundownDefermentCount = 1
 
-    // Create the activation event.
+    // Initialize the activation event.
 
-    status = ExAllocateEventCounter (
-        MM_ALLOCATE_WAIT, // flags
-        OUT paged^.ActivationEvent, // ptr
+    KeInitializeEvent (
+        &process^.ActivationEvent, // event
+        "Activation", // name
+        TRUE, // notification
+        FALSE, // signalstate
     )
-
-    IF OsError ( status ) THEN
-        GOTO Error5
-    END
-
-    KeInitializeLock ( &paged^.ActivationLock, "ActivationLock" )
 
     paged^.ActivationStatus = 0
     paged^.TerminationStatus = OS_STATUS_SUCCESS
@@ -493,7 +464,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
         )
 
         IF OsError ( status ) THEN
-            GOTO Error6
+            GOTO Error5
         END
     END
 
@@ -548,10 +519,6 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
     IF paged^.Job THEN
         PspExitJobProcess ( process )
     END
-
-@Error6
-
-    ExUnreferenceEventCounter ( paged^.ActivationEvent )
 
 @Error5
 
@@ -940,9 +907,7 @@ FN OsSignalActivationProcess (
     )
 END
 
-#MACRO PspAwaitActivationCommonFinish ( event, process, waitstatus ) [
-    ExUnreferenceEventCounter ( event )
-
+#MACRO PspAwaitActivationCommonFinish ( process, waitstatus ) [
     ObUnreferenceObject ( process )
 
     IF waitstatus == 0 THEN
@@ -958,7 +923,6 @@ FN (KeContinuationF) PspAwaitActivationFinish (
 
     // Woke up from the wait for activation. Perform exit processing.
 
-    event : ^ExuEventCounter = continuation^.Parameter1
     process : ^PsuProcess = continuation^.Parameter2
 
     // KeReturnToUserContinuation will return whatever is in Parameter1 as the
@@ -968,7 +932,7 @@ FN (KeContinuationF) PspAwaitActivationFinish (
     continuation^.Parameter1 = CAST process^.Paged^.ActivationStatus TO ^VOID
     continuation^.Parameter2 = NULLPTR
 
-    PspAwaitActivationCommonFinish ( event, process, waitstatus )
+    PspAwaitActivationCommonFinish ( process, waitstatus )
 
     KeReturnToUserContinuation (
         continuation, // continuation
@@ -1016,44 +980,23 @@ FN OsAwaitActivationProcess (
         RETURN status
     END
 
-    paged := process^.Paged
-
-    KeAcquireLockExclusive ( &paged^.ActivationLock )
-
-    event := paged^.ActivationEvent
-
-    IF NOT event THEN
-        // Already activated.
-
-        KeReleaseLock ( &paged^.ActivationLock )
-
-        activationstatus = paged^.ActivationStatus
-
-        ObUnreferenceObject ( process )
-
-        RETURN OS_STATUS_SUCCESS
-    END
-
-    ExReferenceEventCounter ( event )
-
-    KeReleaseLock ( &paged^.ActivationLock )
-
     // Wait on the event counter.
 
     continuation := KeGetContinuation ()
     continuation^.Function = &PspAwaitActivationFinish
-    continuation^.Parameter1 = event
     continuation^.Parameter2 = process
 
     status = KeWaitForSingleObject (
         KE_USER_MODE, // waitmode
         KE_ALERTABLE, // alertable
         timeout, // timeout
-        &event^.Event.Header, // object
+        &process^.ActivationEvent.Header, // object
         continuation, // continuation
     )
 
-    PspAwaitActivationCommonFinish ( event, process, status )
+    PspAwaitActivationCommonFinish ( process, status )
+
+    activationstatus = process^.Paged^.ActivationStatus
 
     RETURN status
 END

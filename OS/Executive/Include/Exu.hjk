@@ -101,18 +101,21 @@ STRUCT ExuEvent
     Event : KeEvent,
 END
 
-STRUCT ExuEventCounter
-    // Event must be at the start so that the event counter can be
-    // fed directly into the kernel wait primitives.
-    Event : KeEvent,
+STRUCT ExuLibrary
+    Name : ^ExName,
+
+    ReapListEntry : RtlListEntry,
+
+    Action : ExAction,
+
     References : ULONG,
+
+    Loading : UBYTE,
 END
 
-STRUCT ExuModule
-    KnownModule : ^IopKnownModule,
-END
-
-EXTERN ExuExecutiveModule : ^ExuModule
+EXTERN FN ExuReapLibraries (
+    IN all : UWORD,
+)
 
 EXTERN FN ExuInitializeMagazineCaches (
     IN kenode : ^KeuNode,

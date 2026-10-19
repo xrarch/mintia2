@@ -1,0 +1,369 @@
+//
+// Implements support for dynamically (un)loadable kernel mode libraries.
+//
+
+#INCLUDE "Exp.hjk"
+#INCLUDE "../../Loader/Headers/Loader.hjk"
+
+ExpLibraryCacheLock : KeLock
+
+ExpLibraryDictionary : ExuDictionary
+
+ExpLibraryReapListHeads : RtlListEntry[2]
+ExpLibraryReapLists : ^RtlListEntry[2]
+
+#DEFINE EXP_LIBRARY_REAP_NOW 0
+#DEFINE EXP_LIBRARY_REAP_LATER 1
+
+#SECTION "PAGEtext"
+EXPORT FN ExUnloadLibrary (
+    IN library : ^ExuLibrary,
+)
+
+    // Unload a library.
+
+    KeAcquireLockExclusive ( &ExpLibraryCacheLock )
+
+    library^.References -= 1
+
+    IF library^.References == 0 THEN
+        // Place on the reap-later list.
+
+        RtlInsertAtTailList (
+            ExpLibraryReapLists[EXP_LIBRARY_REAP_LATER], // listhead
+            &library^.ReapListEntry, // entry
+        )
+    END
+
+    KeReleaseLock ( &ExpLibraryCacheLock )
+END
+
+#SECTION "PAGEtext"
+EXPORT FN ExLoadLibrary (
+    IN path : ^RtlString,
+    IN name : ^RtlString,
+    OUT library : ^ExuLibrary,
+) : OsStatus
+
+    // Load a library at the given path, with the given symbolic name.
+    // If a symbolic name is provided then an existing library with the same
+    // name is searched for and returned if found.
+
+    // If no name is provided then a new instance of the library is loaded
+    // unconditionally. Such a library will not be cached and will therefore
+    // not participate in deferred deletion, so this can be a performance
+    // concern.
+
+    // The path is relative to the system directory.
+
+@Retry
+
+    status := OS_STATUS_SUCCESS
+    event : ^ExuEventCounter
+
+    IF name THEN
+        KeAcquireLockExclusive ( &ExpLibraryCacheLock )
+
+        library = ExLookupDictionary (
+            &ExpLibraryDictionary, // dict
+            name, // key
+        )
+
+        IF library THEN
+            IF NOT ExIsActionInProgress ( &library^.Action ) THEN
+                // The library is fully loaded so just increment the reference
+                // count and return it.
+
+                IF library^.References == 0 THEN
+                    // Was on a reap list so take it off.
+
+                    RtlRemoveEntryList ( &library^.ReapListEntry )
+                END
+
+                library^.References += 1
+
+                KeReleaseLock ( &ExpLibraryCacheLock )
+
+                RETURN OS_STATUS_SUCCESS
+            END
+
+            // Someone else is in the process of loading the library.
+            // We need to wait for them to complete that.
+
+            waitable : ^ExpAction
+
+            status = ExPrepareWaitForAction (
+                &library^.Action, // action
+                MM_ALLOCATE_WAIT, // flags
+                OUT waitable, // waitable
+            )
+
+            KeReleaseLock ( &ExpLibraryCacheLock )
+
+            IF OsError ( status ) THEN
+                RETURN status
+            END
+
+            ExWaitForActionCompletion ( waitable )
+
+            GOTO Retry
+        END
+    END
+
+    // Have to create a new library structure and load the library.
+
+    status = MmAllocatePool (
+        FALSE, // pageable
+        SIZEOF ExuLibrary, // bytes
+        'ExLb', // tag
+        MM_ALLOCATE_WAIT, // flags
+        OUT library, // ptr
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    library^.Name = NULLPTR
+    library^.References = 1
+
+    IF name THEN
+        library^.Name = ExFindName ( name )
+
+        IF NOT library^.Name THEN
+            status = OS_STATUS_NO_MEMORY
+
+            GOTO Exit1
+        END
+
+        oldvalue : ^VOID
+
+        status = ExInsertInDictionary (
+            &ExpLibraryDictionary, // dict
+            name, // key
+            library, // value
+            FALSE, // canupdate
+            OUT oldvalue, // oldvalue
+        )
+
+        IF OsError ( status ) THEN
+            GOTO Exit2
+        END
+
+        // Now release the lock and perform the actual loading outside of it.
+
+        ExStartAction ( &library^.Action )
+
+        KeReleaseLock ( &ExpLibraryCacheLock )
+    END
+
+    IF path THEN
+        // Perform the actual loading.
+
+        // Note that we allow path to be NULLPTR in which case we do nothing
+        // here and leave it up to the caller to initialize this library.
+        // This is primarily for setting up libraries loaded by the bootloader.
+
+        KeCrash ( "TODO\n" )
+    END
+
+    IF name THEN
+        ExCompleteAction ( &library^.Action )
+    END
+
+    RETURN OS_STATUS_SUCCESS
+
+@Exit3
+
+    KeAcquireLockExclusive ( &ExpLibraryCacheLock )
+
+    IF name THEN
+        ExCompleteAction ( &library^.Action )
+    END
+
+    ExRemoveFromDictionary (
+        &ExpLibraryDictionary, // dict
+        name, // key
+    )
+
+@Exit2
+
+    IF name THEN
+        ExUnreferenceName ( library^.Name )
+    END
+
+@Exit1
+
+    MmFreePool (
+        library, // ptr
+        'ExLb', // tag
+    )
+
+@Exit
+
+    IF name THEN
+        KeReleaseLock ( &ExpLibraryCacheLock )
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+FN ExpDeleteLibrary (
+    IN library : ^ExuLibrary,
+)
+
+    // Delete a library.
+
+    KeAssert ( library^.References == 0 )
+
+    // Release memory used for sections and headers of the library.
+
+    KeCrash ( "TODO\n" )
+
+    // Unreference all of the libraries depended upon by this one.
+
+    KeCrash ( "TODO\n" )
+
+    // Free the library structure.
+
+    ExUnreferenceName ( library^.Name )
+
+    MmFreePool (
+        library, // ptr
+        'ExLb', // tag
+    )
+END
+
+FN ExuReapLibraries (
+    IN all : UWORD,
+)
+
+    // Called periodically on the boot node to reap libraries with a reference
+    // count of zero.
+
+    toreap : RtlListEntry
+    library : ^ExuLibrary
+
+@Again
+
+    // Take library lock.
+
+    KeAcquireLockExclusive ( &ExpLibraryCacheLock )
+
+    // Swap reap list pointers. This makes it so that a library whose reference
+    // count drops to zero will not be reaped until at least one full reaping
+    // period in the future.
+
+    reapnow := ExpLibraryReapLists[EXP_LIBRARY_REAP_NOW]
+    reaplater := ExpLibraryReapLists[EXP_LIBRARY_REAP_LATER]
+
+    ExpLibraryReapLists[EXP_LIBRARY_REAP_LATER] = reapnow
+    ExpLibraryReapLists[EXP_LIBRARY_REAP_NOW] = reaplater
+
+    // Now capture the entire list of libraries to reap now into our local
+    // list head and make the old reap now list empty.
+
+    toreap.Next = reapnow^.Next
+    toreap.Prev = reapnow^.Prev
+
+    toreap.Next^.Prev = &toreap
+    toreap.Prev^.Next = &toreap
+
+    RtlInitializeList ( reapnow )
+
+    // Unpublish all of these libraries.
+
+    listentry := toreap.Next
+
+    WHILE listentry != &toreap DO
+        library = CONTAINEROF listentry TO ExuLibrary.ReapListEntry
+
+        KeAssert ( library^.References == 0 )
+
+        ExRemoveFromDictionary (
+            &ExpLibraryDictionary, // dict
+            &library^.Name^.String, // key
+        )
+
+        listentry = listentry^.Next
+    END
+
+    // They're fully in our custody now so we can do the rest of the deletion
+    // work outside the library lock.
+
+    KeReleaseLock ( &ExpLibraryCacheLock )
+
+    listentry = toreap.Next
+
+    WHILE listentry != &toreap DO
+        library = CONTAINEROF listentry TO ExuLibrary.ReapListEntry
+        listentry = listentry^.Next
+
+        ExpDeleteLibrary ( library )
+    END
+
+    IF all THEN
+        // Go again to reap the ones on the other list too. Happens when the
+        // system is in need of memory.
+
+        all = FALSE
+
+        GOTO Again
+    END
+END
+
+#ENTERSECTION "INITtext"
+
+FN ExpInitializeLibraries ()
+
+    // Initialize the loadable libraries package.
+
+    // Initialize the reap list for libraries with zero references.
+
+    RtlInitializeList ( &ExpLibraryReapListHeads[0] )
+    RtlInitializeList ( &ExpLibraryReapListHeads[1] )
+
+    ExpLibraryReapLists[EXP_LIBRARY_REAP_NOW] = &ExpLibraryReapListHeads[0]
+    ExpLibraryReapLists[EXP_LIBRARY_REAP_LATER] = &ExpLibraryReapListHeads[1]
+
+    // Initialize the lock.
+
+#LEAVESECTION
+    KeInitializeLock ( &ExpLibraryCacheLock, "LibraryCache" )
+#ENTERSECTION "INITtext"
+
+    // Initialize the dictionary.
+
+    ExuInitializeDictionary ( &ExpLibraryDictionary )
+
+    // Set up special library structures for all of the modules loaded by the
+    // bootloader.
+
+    listhead := &KeuLoaderBlock.DllListHead
+    listentry := listhead^.Next
+
+    WHILE listhead != listentry DO
+        bldll := CONTAINEROF listentry TO BlDll.Entry
+        listentry = listentry^.Next
+
+        library : ^ExuLibrary
+        name : RtlString
+
+        RtlInitializeString ( &name, &bldll^.Name[0] )
+
+        status := ExLoadLibrary (
+            NULLPTR, // path
+            &name, // name
+            OUT library, // library
+        )
+
+        IF OsError ( status ) THEN
+            KeCrash ( "Failed to set up initial library structures\n" )
+        END
+
+        bldll^.FreeSpace = library
+    END
+END
+
+#LEAVESECTION

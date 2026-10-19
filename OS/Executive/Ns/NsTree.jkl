@@ -616,7 +616,7 @@ FN NsuLookupEntryByPath (
     currentspace := params^.InitialHandle.Subspace
 
     WHILE TRUE DO
-        IF currententry^.Flags & NSU_ENTRY_TRANSITION THEN
+        IF ExIsActionInProgress ( &currententry^.Action ) THEN
             // We've stumbled on a transition entry. We need to wait with
             // the tree lock dropped and then retry our entire lookup.
             // It is possible for the very first entry (which we already
@@ -626,29 +626,25 @@ FN NsuLookupEntryByPath (
             // entry so that we can't get multiple concurrent renames on the
             // same thing.
 
-            // The event was stashed in the object pointer.
+            waitable : ^ExpAction
 
-            event = currententry^.Object
-
-            ExReferenceEventCounter ( event )
+            status = ExPrepareWaitForAction (
+                &currententry^.Action, // action
+                MM_ALLOCATE_WAIT, // flags
+                OUT waitable, // waitable
+            )
 
             // Drop the lock.
 
             NspUnlockTree ()
 
-            // Wait on the event counter.
+            IF OsError ( status ) THEN
+                GOTO Exit
+            END
 
-            KeWaitForSingleObject (
-                KE_KERNEL_MODE, // waitmode
-                FALSE, // alertable
-                NULLPTR, // timeout
-                &event^.Event.Header, // object
-                NULLPTR, // continuation
-            )
+            // Wait on the action.
 
-            // Unreference the event counter.
-
-            ExUnreferenceEventCounter ( event )
+            ExWaitForActionCompletion ( waitable )
 
             // Re-take the lock.
 
@@ -969,17 +965,6 @@ FN NsuLookupEntryByPath (
         // Then the lock is reacquired and the transition entry is awoken and
         // destroyed.
 
-        status = ExAllocateEventCounter (
-            MM_ALLOCATE_WAIT, // flags
-            OUT event, // ptr
-        )
-
-        IF OsError ( status ) THEN
-            NspUnlockTree ()
-
-            GOTO Exit
-        END
-
         IF NOT child THEN
             // Create a new entry.
 
@@ -991,8 +976,6 @@ FN NsuLookupEntryByPath (
 
             IF NOT child THEN
                 NspUnlockTree ()
-
-                ExUnreferenceEventCounter ( event )
 
                 status = OS_STATUS_NO_MEMORY
 
@@ -1015,9 +998,9 @@ FN NsuLookupEntryByPath (
             child^.Flags = NSU_ENTRY_TRANSITION
         END
 
-        // Stash the event counter.
+        // Start the action.
 
-        child^.Object = event
+        ExStartAction ( &child^.Action )
 
         // Unlock the namespace tree.
 
@@ -1131,16 +1114,7 @@ FN NsuLookupEntryByPath (
 
         NspLockTreeExclusive ()
 
-        IF event^.Event.Header.WaiterCount THEN
-            // Wake any collided threads.
-
-            KeSignalEvent (
-                &event^.Event, // event
-                0, // priorityboost
-            )
-        END
-
-        ExUnreferenceEventCounter ( event )
+        ExCompleteAction ( &child^.Action )
 
         IF OsError ( status ) THEN
             IF status == OS_STATUS_NOT_FOUND THEN

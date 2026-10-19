@@ -43,90 +43,76 @@ FN IouLoadClassByName (
 
     knownmodule := knownclass^.KnownModule
 
-    eventcounter : ^ExuEventCounter
-
-    IF knownmodule^.Flags & IOP_MODULE_LOADING THEN
+    IF ExIsActionInProgress ( &knownmodule^.LoadAction ) THEN
         // Someone else is loading it, wait for them to finish and then
         // retry.
 
-        eventcounter = knownmodule^.LoadEvent
+        waitable : ^ExpAction
 
-        KeAssert ( eventcounter != NULLPTR )
+        status = ExPrepareWaitForAction (
+            &knownmodule^.LoadAction, // action
+            MM_ALLOCATE_WAIT, // flags
+            OUT waitable, // waitable
+        )
 
         KeReleaseLock ( &IopCatalogLock )
 
-        KeWaitForSingleObject (
-            KE_KERNEL_MODE, // waitmode
-            FALSE, // alertable
-            NULLPTR, // timeout
-            &eventcounter^.Event.Header, // object
-            NULLPTR, // continuation
-        )
+        IF OsError ( status ) THEN
+            RETURN status
+        END
 
-        ExUnreferenceEventCounter ( eventcounter )
+        ExWaitForActionCompletion ( waitable )
 
         GOTO Retry
     END
 
-    module := knownmodule^.Module
+    library := knownmodule^.Library
 
-    IF NOT module THEN
-        // The module isn't loaded yet.
+    IF library THEN
+        // The library exists, so reference it and return.
 
-        // We have to load it.
+        knownmodule^.ClassReferences += 1
 
-        status = ExAllocateEventCounter (
-            MM_ALLOCATE_WAIT, // flags
-            OUT eventcounter, // eventcounter
-        )
-
-        IF OsError ( status ) THEN
-            KeReleaseLock ( &IopCatalogLock )
-
-            RETURN status
-        END
-
-        knownmodule^.Flags |= IOP_MODULE_LOADING
-        knownmodule^.LoadEvent = eventcounter
+        class = knownclass^.Class
 
         KeReleaseLock ( &IopCatalogLock )
 
-        // Now actually load the module, synchronized by the load event.
+        KeAssert ( class != NULLPTR )
 
-        KeCrash ( "NYI IouLoadClassByName: load\n" )
-
-        KeAcquireLockExclusive ( &IopCatalogLock )
-
-        KeSignalEvent (
-            &eventcounter^.Event, // event
-            0, // priorityboost
-        )
-
-        ExUnreferenceEventCounter ( eventcounter )
-
-        knownmodule^.Flags &= ~IOP_MODULE_LOADING
-
-        GOTO RetryLockHeld
+        RETURN OS_STATUS_SUCCESS
     END
 
-    // The module exists, so reference it.
+    // The library isn't loaded yet.
 
-    status = OS_STATUS_SUCCESS
+    KeAssert ( knownmodule^.ClassReferences == 0 )
 
-    class = knownclass^.Class
-
-    IF NOT ObConditionallyReferenceObject ( module ) THEN
-        // Treat a failure of the conditional reference as the module being
-        // gone from the catalog, because it logically is; it is now in the
-        // process of being unloaded and deleted but hasn't been removed from
-        // the catalog yet.
-
-        status = OS_STATUS_UNKNOWN_IOCLASS
-    END
+    ExStartAction ( &knownmodule^.LoadAction )
 
     KeReleaseLock ( &IopCatalogLock )
 
-    RETURN status
+    status = ExLoadLibrary (
+        &knownmodule^.Path^.String, // path
+        &knownmodule^.Name^.String, // name
+        OUT library, // library
+    )
+
+    IF OsError ( status ) THEN
+        ExCompleteAction ( &knownmodule^.LoadAction )
+
+        RETURN status
+    END
+
+    // Look up and call the DrvInitialize routine.
+
+    KeCrash ( "TODO call DrvInitialize\n" )
+
+    KeAcquireLockExclusive ( &IopCatalogLock )
+
+    ExCompleteAction ( &knownmodule^.LoadAction )
+
+    knownmodule^.Library = library
+
+    GOTO RetryLockHeld
 END
 
 #SECTION "PAGEtext"
@@ -187,15 +173,15 @@ FN IopLookupKnownModule (
         RETURN status
     END
 
-    // Initialize as not having an associated loaded module.
+    // Initialize as not having an associated loaded library.
 
-    knownmodule^.Module = NULLPTR
+    knownmodule^.Library = NULLPTR
 
-    knownmodule^.Flags = 0
+    knownmodule^.ClassReferences = 0
 
     RtlInitializeList ( &knownmodule^.KnownClassListHead )
 
-    knownmodule^.LoadEvent = NULLPTR
+    ExInitializeAction ( &knownmodule^.LoadAction )
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -349,6 +335,57 @@ FN IopProcessConfiguration (
     RETURN status
 END
 
+#SECTION "PAGEtext"
+FN IopReferenceModule (
+    IN knownmodule : ^IopKnownModule,
+)
+
+    // Increment the module's class reference count.
+
+    KeAcquireLockExclusive ( &IopCatalogLock )
+
+    KeAssert ( knownmodule^.ClassReferences != 0 )
+
+    knownmodule^.ClassReferences += 1
+
+    KeReleaseLock ( &IopCatalogLock )
+END
+
+#SECTION "PAGEtext"
+FN IopUnreferenceModule (
+    IN knownmodule : ^IopKnownModule,
+)
+
+    // Decrement the module's class reference count.
+
+    KeAcquireLockExclusive ( &IopCatalogLock )
+
+    KeAssert ( knownmodule^.ClassReferences != 0 )
+
+    knownmodule^.ClassReferences -= 1
+
+    IF knownmodule^.ClassReferences != 0 THEN
+        KeReleaseLock ( &IopCatalogLock )
+
+        LEAVE
+    END
+
+    // Unload the library.
+
+    library := knownmodule^.Library
+    knownmodule^.Library = NULLPTR
+
+    ExStartAction ( &knownmodule^.LoadAction )
+
+    KeReleaseLock ( &IopCatalogLock )
+
+    KeCrash ( "TODO call DrvUninitialize\n" )
+
+    ExUnloadLibrary ( library )
+
+    ExCompleteAction ( &knownmodule^.LoadAction )
+END
+
 #ENTERSECTION "INITtext"
 
 FN IopInitializeCatalog ()
@@ -365,36 +402,38 @@ FN IopInitializeCatalog ()
 
     ExuInitializeDictionary ( &IopKnownClassDictionary )
 
-    // Create a "known module" for the kernel itself.
+    // Create known modules for all of the bootloader's initial modules.
 
-    kernelname : RtlString
+    listhead := &KeuLoaderBlock.DllListHead
+    listentry := listhead^.Next
 
-    RtlInitializeString ( &kernelname, "mintia.sys" )
+    WHILE listhead != listentry DO
+        bldll := CONTAINEROF listentry TO BlDll.Entry
+        listentry = listentry^.Next
 
-    knownmodule : ^IopKnownModule
+        name : RtlString
+        RtlInitializeString ( &name, &bldll^.Name[0] )
 
-    status := IopLookupKnownModule (
-        &kernelname, // name
-        TRUE, // create
-        OUT knownmodule, // knownmodule
-    )
+        knownmodule : ^IopKnownModule
 
-    IF OsError ( status ) THEN
-        KeCrash (
-            "%s: failed to create known module\n", // fmt
-            "IopInitializeCatalog",
+        status := IopLookupKnownModule (
+            &name, // name
+            TRUE, // create
+            OUT knownmodule, // knownmodule
         )
+
+        IF OsError ( status ) THEN
+            KeCrash ( "Failed to set up initial known module structures\n" )
+        END
+
+        knownmodule^.ClassReferences = 1
+        knownmodule^.Library = bldll^.FreeSpace
     END
 
-    // Set the known module to point to the executive module.
+    // Process all of the configuration files loaded by the bootloader.
 
-    knownmodule^.Module = ExuExecutiveModule
-
-    // We need to process all of the configuration files loaded by the
-    // bootloader.
-
-    listhead := &KeuLoaderBlock.ResourceListHead
-    listentry := listhead^.Next
+    listhead = &KeuLoaderBlock.ResourceListHead
+    listentry = listhead^.Next
 
     WHILE listentry != listhead DO
         rsrc := CONTAINEROF listentry TO BlResource.Entry
