@@ -243,6 +243,9 @@ FN ExuReapLibraries (
     // count of zero.
 
     toreap : RtlListEntry
+
+    RtlInitializeList ( &toreap )
+
     library : ^ExuLibrary
 
 @Again
@@ -264,13 +267,18 @@ FN ExuReapLibraries (
     // Now capture the entire list of libraries to reap now into our local
     // list head and make the old reap now list empty.
 
-    toreap.Next = reapnow^.Next
-    toreap.Prev = reapnow^.Prev
+    IF NOT RtlEmptyList ( reapnow ) THEN
+        headentry := reapnow^.Next
+        tailentry := reapnow^.Prev
 
-    toreap.Next^.Prev = &toreap
-    toreap.Prev^.Next = &toreap
+        toreap.Prev = tailentry
+        tailentry^.Next = &toreap
 
-    RtlInitializeList ( reapnow )
+        toreap.Next = headentry
+        headentry^.Prev = &toreap
+
+        RtlInitializeList ( reapnow )
+    END
 
     // Unpublish all of these libraries.
 
