@@ -18,14 +18,7 @@ FN BlLoadDriver (
         RETURN NULLPTR
     END
 
-    IF NOT BlLookupSymbol (
-        dll, // dll
-        "DrvInitialize", // name
-        OUT dll^.DriverEntrypoint, // value
-    ) THEN
-
-        dll^.DriverEntrypoint = NULLPTR
-
+    IF NOT dll^.DriverEntrypoint THEN
         RtlPrint ( "WARNING: Driver '%s' had no entrypoint\n", name )
     END
 

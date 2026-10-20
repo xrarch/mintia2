@@ -667,5 +667,14 @@ FN BlLoadDll (
 
     BlpRemapCodeSections ( dll )
 
+    IF NOT BlLookupSymbol (
+        dll, // dll
+        "DrvInitialize", // name
+        OUT dll^.DriverEntrypoint, // value
+    ) THEN
+
+        dll^.DriverEntrypoint = NULLPTR
+    END
+
     RETURN dll
 END
