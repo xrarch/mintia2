@@ -89,7 +89,9 @@ EXPORT FN ExPrepareWaitForAction (
 ) : OsStatus
 
     // Get a waitable action block in preparation for waiting on the action's
-    // completion to be signaled.
+    // completion to be signaled. Caller is responsible for preventing multiple
+    // instances of ExPrepareWaitForAction from executing simultaneously on
+    // the same ExAction.
 
     originalvalue := action^.Ptr
     new : ^VOID
@@ -208,6 +210,7 @@ EXPORT FN ExWaitForActionCompletion (
 )
 
     // Wait for an action to be completed by the thread performing it.
+    // No synchronization required by the caller.
 
     IF NOT waitable THEN
         LEAVE
@@ -223,6 +226,8 @@ EXPORT FN ExCompleteAction (
 )
 
     // Complete the action.
+    // No synchronization required by the caller except for the lifetime of the
+    // ExAction.
 
     waitable := CAST KeFetchAndSetPtr (
         &action^.Ptr, // ptr
