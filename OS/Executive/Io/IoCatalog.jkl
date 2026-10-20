@@ -124,9 +124,6 @@ FN IopLookupKnownModule (
 
     // Look up a known module, or register it.
     // Catalog lock is held.
-    //
-    // If create is FALSE, a return value of NULLPTR means it wasn't found.
-    // If create is TRUE, a return value of NULLPTR means insufficient memory.
 
     knownmodule = CAST ExLookupDictionary (
         &IopKnownModuleDictionary, // dict
@@ -267,11 +264,12 @@ EXPORT FN IoDeleteKnownClass (
 END
 
 #SECTION "PAGEtext"
-FN IopForgetModule (
-    IN modulename : ^UBYTE,
+FN IopForgetKnownClasses (
+    IN knownmodule : ^IopKnownModule,
 ) : OsStatus
 
-    // Forcibly forget a module. The catalog lock is held on entry.
+    // Forcibly forget a module's known classes. The catalog lock is held on
+    // entry.
 
     // First look up the module.
 
@@ -289,14 +287,14 @@ END
 
 #SECTION "PAGEtext"
 FN IopProcessConfiguration (
-    IN modulename : ^UBYTE,
+    IN modulename : ^RtlString,
     IN configtext : ^UBYTE,
     IN configsize : UWORD,
 ) : OsStatus
 
     // Process a driver configuration file.
 
-    class : ^IopKnownClass
+    knownclass : ^IopKnownClass
 
     // First parse the configuration and create an IopKnownClass for each
     // described class.
@@ -304,7 +302,7 @@ FN IopProcessConfiguration (
     status := IopParseConfiguration (
         configtext, // configtext
         configsize, // configsize
-        OUT class, // class
+        OUT knownclass, // class
     )
 
     IF OsError ( status ) THEN
@@ -313,12 +311,24 @@ FN IopProcessConfiguration (
 
     // Now take the catalog lock.
 
+    knownmodule : ^IopKnownModule
+
     KeAcquireLockExclusive ( &IopCatalogLock )
 
-    // If we already processed a configuration file for this module, we want to
-    // forget whatever we learned there. 
+    status = IopLookupKnownModule (
+        modulename, // name
+        TRUE, // create
+        OUT knownmodule, // knownmodule
+    )
 
-    status = IopForgetModule ( modulename )
+    IF OsError ( status ) THEN
+        GOTO Exit
+    END
+
+    // If we already processed a configuration file for this module, we want to
+    // forget whatever we learned there.
+
+    status = IopForgetKnownClasses ( knownmodule )
 
     IF OsError ( status ) THEN
         GOTO Exit
@@ -331,6 +341,10 @@ FN IopProcessConfiguration (
 @Exit
 
     KeReleaseLock ( &IopCatalogLock )
+
+    IF OsError ( status ) THEN
+        IopDeleteKnownClassList ( knownclass )
+    END
 
     RETURN status
 END
@@ -404,6 +418,8 @@ FN IopInitializeCatalog ()
 
     // Create known modules for all of the bootloader's initial modules.
 
+    name : RtlString
+
     listhead := &KeuLoaderBlock.DllListHead
     listentry := listhead^.Next
 
@@ -411,7 +427,6 @@ FN IopInitializeCatalog ()
         bldll := CONTAINEROF listentry TO BlDll.Entry
         listentry = listentry^.Next
 
-        name : RtlString
         RtlInitializeString ( &name, &bldll^.Name[0] )
 
         knownmodule : ^IopKnownModule
@@ -439,8 +454,10 @@ FN IopInitializeCatalog ()
         rsrc := CONTAINEROF listentry TO BlResource.Entry
 
         IF rsrc^.IoConfig THEN
+            RtlInitializeString ( &name, &rsrc^.Name[0] )
+
             IopProcessConfiguration (
-                &rsrc^.Name[0], // modulename
+                &name, // modulename
                 rsrc^.Data, // configtext
                 rsrc^.Size, // configsize
             )

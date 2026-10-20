@@ -8,7 +8,7 @@ STRUCT IopParseContext
     Text : ^UBYTE,
     Size : UWORD,
     Index : UWORD,
-    ClassListHead : RtlListEntry,
+    ClassListHead : ^IopKnownClass,
 END
 
 #MACRO IopIsWhitespace ( c ) [ ((c) == ' ' OR (c) == '\t' OR (c) == '\n') ]
@@ -158,10 +158,8 @@ FN IopParseClass (
         END
     END
 
-    RtlInsertAtTailList (
-        &parse^.ClassListHead, // head
-        &knownclass^.Entry, // entry
-    )
+    knownclass^.Entry.Next = CAST parse^.ClassListHead TO ^VOID
+    parse^.ClassListHead = knownclass
 
     status = OS_STATUS_SUCCESS
 
@@ -206,6 +204,22 @@ FN IopParseDefinition (
 END
 
 #SECTION "PAGEtext"
+FN IopDeleteKnownClassList (
+    IN knownclass : ^IopKnownClass,
+)
+
+    // Delete a list of known classes produced by IopParseConfiguration.
+
+    WHILE knownclass DO
+        next := CAST knownclass^.Entry.Next TO ^IopKnownClass
+
+        IoDeleteKnownClass ( knownclass )
+
+        knownclass = next 
+    END
+END
+
+#SECTION "PAGEtext"
 FN IopParseConfiguration (
     IN configtext : ^UBYTE,
     IN configsize : UWORD,
@@ -213,30 +227,19 @@ FN IopParseConfiguration (
 ) : OsStatus
 
     // Parse the given configuration file data and return a list of
-    // IouKnownClass which represent the information found therein.
+    // IopKnownClass which represent the information found therein.
 
     parse : IopParseContext
     parse.Text = configtext
     parse.Size = configsize
     parse.Index = 0
-
-    RtlInitializeList ( &parse.ClassListHead )
+    parse.ClassListHead = NULLPTR
 
     WHILE TRUE DO
         status := IopParseDefinition ( &parse )
 
         IF OsError ( status ) THEN
-            listhead := &parse.ClassListHead
-            listentry := listhead^.Next
-
-            WHILE listentry != listhead DO
-                knownclass =
-                    CONTAINEROF listentry TO IopKnownClass.Entry
-
-                listentry = listentry^.Next
-
-                IoDeleteKnownClass ( knownclass )
-            END
+            IopDeleteKnownClassList ( parse.ClassListHead )
 
             RETURN status
         END
@@ -246,12 +249,7 @@ FN IopParseConfiguration (
         END
     END
 
-    knownclass = NULLPTR
-
-    IF NOT RtlEmptyList ( &parse.ClassListHead ) THEN
-        knownclass =
-            CONTAINEROF parse.ClassListHead.Next TO IopKnownClass.Entry
-    END
+    knownclass = parse.ClassListHead
 
     RETURN OS_STATUS_SUCCESS
 END
