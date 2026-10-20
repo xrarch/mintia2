@@ -326,7 +326,10 @@ FN BlpDoImports (
     WHILE i < count DO
         import := &importtable[i]
 
-        idll := BlLoadDll ( stringtable + import^.NameOffset )
+        idll := BlLoadDll (
+            stringtable + import^.NameOffset, // path
+            NULLPTR, // name
+        )
 
         IF NOT idll THEN
             RETURN FALSE
@@ -485,10 +488,15 @@ FN BlLookupSymbol (
 END
 
 FN BlLoadDll (
+    IN path : ^UBYTE,
     IN name : ^UBYTE,
 ) : ^BlDll
 
     // First look for the DLL in the list.
+
+    IF NOT name THEN
+        name = path
+    END
 
     dll := BlpFindDll ( name )
 
@@ -506,7 +514,7 @@ FN BlLoadDll (
 
     // Nope! Gotta load it now.
 
-    file := BlpOpenDll ( name )
+    file := BlpOpenDll ( path )
 
     IF NOT file THEN
         RETURN NULLPTR

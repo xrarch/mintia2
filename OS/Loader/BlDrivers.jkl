@@ -5,10 +5,14 @@
 #INCLUDE "Bl.hjk"
 
 FN BlLoadDriver (
+    IN path : ^UBYTE,
     IN name : ^UBYTE,
 ) : ^BlDll
 
-    dll := BlLoadDll ( name )
+    dll := BlLoadDll (
+        path, // path
+        name, // name
+    )
 
     IF NOT dll THEN
         RETURN NULLPTR
@@ -46,7 +50,10 @@ FN BlLoadExtension (
 
     // Try to load the module.
 
-    dll := BlLoadDriver ( &dllpath[0] )
+    dll := BlLoadDriver (
+        &dllpath[0], // path
+        name, // name
+    )
 
     RETURN dll
 END

@@ -48,7 +48,10 @@ FN BlMain () : UWORD
         execname = "mintia.sys"
     END
 
-    exec := BlLoadDll ( execname )
+    exec := BlLoadDll (
+        execname, // path
+        NULLPTR, // name
+    )
 
     IF NOT exec THEN
         BlCrash ( "Failed to load the Executive.\n" )
@@ -71,7 +74,10 @@ FN BlMain () : UWORD
     IF BlGetExistenceArg ( "-dbg" ) THEN
         // Load the debugger.
 
-        dbg := BlLoadDll ( "sysdbg.sys" )
+        dbg := BlLoadDll (
+            "sysdbg.sys", // path
+            NULLPTR, // name
+        )
 
         IF dbg THEN
             IF NOT BlLookupSymbol (
@@ -87,7 +93,10 @@ FN BlMain () : UWORD
     IF BlGetExistenceArg ( "-tests" ) THEN
         // Load the kernel tests.
 
-        tests := BlLoadDll ( "ktests.sys" )
+        tests := BlLoadDll (
+            "ktests.sys", // path
+            NULLPTR, // name
+        )
 
         IF tests THEN
             IF NOT BlLookupSymbol (
