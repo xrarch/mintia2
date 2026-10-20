@@ -104,7 +104,29 @@ FN IouLoadClassByName (
 
     // Look up and call the DrvInitialize routine.
 
-    KeCrash ( "TODO call DrvInitialize\n" )
+    initialize : IoDriverInitialize = ExLookupSymbolLibrary (
+        library, // library
+        "DrvInitialize", // symbol
+    )
+
+    IF initialize THEN
+        status = initialize ( knownmodule )
+
+        IF OsError ( status ) THEN
+            // Driver failed to initialize, so unload.
+
+            ExUnloadLibrary ( library )
+
+            ExCompleteAction ( &knownmodule^.LoadAction )
+
+            RETURN status
+        END
+    END
+
+    knownmodule^.Uninitialize = ExLookupSymbolLibrary (
+        library, // library
+        "DrvUninitialize", // symbol
+    )
 
     KeAcquireLockExclusive ( &IopCatalogLock )
 
@@ -162,12 +184,13 @@ FN IopLookupKnownModule (
     )
 
     IF OsError ( status ) THEN
-        MmFreePool (
-            knownmodule, // knownmodule
-            'KnMo', // tag
-        )
+        GOTO Exit
+    END
 
-        RETURN status
+    knownmodule^.Name = ExFindName ( name )
+
+    IF NOT knownmodule^.Name THEN
+        GOTO Exit2
     END
 
     // Initialize as not having an associated loaded library.
@@ -181,6 +204,22 @@ FN IopLookupKnownModule (
     ExInitializeAction ( &knownmodule^.LoadAction )
 
     RETURN OS_STATUS_SUCCESS
+
+@Exit2
+
+    ExRemoveFromDictionary (
+        &IopKnownModuleDictionary, // dict
+        name, // key
+    )
+
+@Exit
+
+    MmFreePool (
+        knownmodule, // knownmodule
+        'KnMo', // tag
+    )
+
+    RETURN status
 END
 
 #SECTION "PAGEtext"
@@ -393,7 +432,7 @@ FN IopUnreferenceModule (
 
     KeReleaseLock ( &IopCatalogLock )
 
-    KeCrash ( "TODO call DrvUninitialize\n" )
+    knownmodule^.Uninitialize ( knownmodule )
 
     ExUnloadLibrary ( library )
 
@@ -443,6 +482,10 @@ FN IopInitializeCatalog ()
 
         knownmodule^.ClassReferences = 1
         knownmodule^.Library = bldll^.FreeSpace
+        knownmodule^.Initialize = bldll^.DriverEntrypoint
+        knownmodule^.Uninitialize = NULLPTR
+
+        bldll^.FreeSpace = knownmodule
     END
 
     // Process all of the configuration files loaded by the bootloader.
@@ -464,6 +507,28 @@ FN IopInitializeCatalog ()
         END
 
         listentry = listentry^.Next
+    END
+
+    // Call the initialization routines for each of the drivers loaded at
+    // boot time.
+
+    listhead = &KeuLoaderBlock.DllListHead
+    listentry = listhead^.Next
+
+    WHILE listhead != listentry DO
+        bldll := CONTAINEROF listentry TO BlDll.Entry
+        listentry = listentry^.Next
+
+        knownmodule : ^IopKnownModule = bldll^.FreeSpace
+
+        IF knownmodule^.Initialize THEN
+            status := knownmodule^.Initialize ( knownmodule )
+
+            IF OsError ( status ) THEN
+                KeCrash ( "Failed to initialize boot driver %s\n",
+                    knownmodule^.Name^.String.Data )
+            END
+        END
     END
 END
 
