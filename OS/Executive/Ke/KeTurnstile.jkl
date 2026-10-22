@@ -1184,28 +1184,30 @@ EXPORT FN KeBlockOnLock (
     // thread to finish doing something in a way that inherits resource
     // priorities.
 
-    current := lock^.Ptr
+    WHILE TRUE DO
+        current := lock^.Ptr
 
-    IF current == 0 THEN
-        // The lock is already free.
+        IF current == 0 THEN
+            // The lock is already free.
 
-        LEAVE
+            LEAVE
+        END
+
+        // Make sure this isn't a recursive lock which is prohibited.
+
+        KeAssert ( (current & KEP_LOCK_WRITE_LOCKED == 0) OR
+            (current & KEP_LOCK_BITS != KeCurrentThread () ) )
+
+        // If the lock is nonzero, one of the following is true:
+        //
+        // - The lock is held exclusively.
+        // - The lock is held shared.
+        //
+        // In either case we need to sleep on the turnstile and then return.
+
+        KepBlockOnLock (
+            lock, // lock
+            current, // current
+        )
     END
-
-    // Make sure this isn't a recursive lock which is prohibited.
-
-    KeAssert ( (current & KEP_LOCK_WRITE_LOCKED == 0) OR
-        (current & KEP_LOCK_BITS != KeCurrentThread () ) )
-
-    // If the lock is nonzero, one of the following is true:
-    //
-    // - The lock is held exclusively.
-    // - The lock is held shared.
-    //
-    // In either case we need to sleep on the turnstile and then return.
-
-    KepBlockOnLock (
-        lock, // lock
-        current, // current
-    )
 END
