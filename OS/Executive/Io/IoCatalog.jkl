@@ -8,13 +8,13 @@
 
 IopCatalogLock : KeLock
 
-IopKnownModuleDictionary : ExuDictionary
+IopModuleDictionary : ExuDictionary
 IopKnownClassDictionary : ExuDictionary
 
 #SECTION "PAGEtext"
-FN IouLoadClassByName (
+FN IopLoadClassByName (
     IN name : ^RtlString,
-    OUT class : ^IouClass,
+    OUT class : ^IopClass,
 ) : OsStatus
 
     // Load an IO class by name. Returns a referenced pointer to the class or
@@ -41,16 +41,16 @@ FN IouLoadClassByName (
         RETURN OS_STATUS_UNKNOWN_IOCLASS
     END
 
-    knownmodule := knownclass^.KnownModule
+    module := knownclass^.Module
 
-    IF ExIsActionInProgress ( &knownmodule^.LoadAction ) THEN
+    IF ExIsActionInProgress ( &module^.LoadAction ) THEN
         // Someone else is loading it, wait for them to finish and then
         // retry.
 
         waitable : ^ExpActionWaitable
 
         status = ExPrepareWaitForAction (
-            &knownmodule^.LoadAction, // action
+            &module^.LoadAction, // action
             MM_ALLOCATE_WAIT, // flags
             OUT waitable, // waitable
         )
@@ -66,12 +66,12 @@ FN IouLoadClassByName (
         GOTO Retry
     END
 
-    library := knownmodule^.Library
+    library := module^.Library
 
     IF library THEN
         // The library exists, so reference it and return.
 
-        knownmodule^.ClassReferences += 1
+        module^.ClassReferences += 1
 
         class = knownclass^.Class
 
@@ -84,15 +84,15 @@ FN IouLoadClassByName (
 
     // The library isn't loaded yet.
 
-    KeAssert ( knownmodule^.ClassReferences == 0 )
+    KeAssert ( module^.ClassReferences == 0 )
 
-    ExStartAction ( &knownmodule^.LoadAction )
+    ExStartAction ( &module^.LoadAction )
 
     KeReleaseLock ( &IopCatalogLock )
 
     status = ExLoadLibrary (
-        &knownmodule^.Path^.String, // path
-        &knownmodule^.Name^.String, // name
+        &module^.Path^.String, // path
+        &module^.Name^.String, // name
         OUT library, // library
     )
 
@@ -108,7 +108,7 @@ FN IouLoadClassByName (
     )
 
     IF initialize THEN
-        status = initialize ( knownmodule )
+        status = initialize ( module )
 
         IF OsError ( status ) THEN
             // Driver failed to initialize, so unload.
@@ -119,7 +119,7 @@ FN IouLoadClassByName (
         END
     END
 
-    knownmodule^.Uninitialize = ExLookupSymbolLibrary (
+    module^.Uninitialize = ExLookupSymbolLibrary (
         library, // library
         "DrvUninitialize", // symbol
     )
@@ -128,7 +128,7 @@ FN IouLoadClassByName (
 
     KeAcquireLockExclusive ( &IopCatalogLock )
 
-    ExCompleteAction ( &knownmodule^.LoadAction )
+    ExCompleteAction ( &module^.LoadAction )
 
     IF OsError ( status ) THEN
         KeReleaseLock ( &IopCatalogLock )
@@ -138,27 +138,27 @@ FN IouLoadClassByName (
 
     // Successfully loaded the library, so retry.
 
-    knownmodule^.Library = library
+    module^.Library = library
 
     GOTO RetryLockHeld
 END
 
 #SECTION "PAGEtext"
-FN IopLookupKnownModule (
+FN IopLookupModule (
     IN name : ^RtlString,
     IN create : UWORD,
-    OUT knownmodule : ^IopKnownModule
+    OUT module : ^IopModule
 ) : OsStatus
 
     // Look up a known module, or register it.
     // Catalog lock is held.
 
-    knownmodule = CAST ExLookupDictionary (
-        &IopKnownModuleDictionary, // dict
+    module = CAST ExLookupDictionary (
+        &IopModuleDictionary, // dict
         name, // key
-    ) TO ^IopKnownModule
+    ) TO ^IopModule
 
-    IF knownmodule OR NOT create THEN
+    IF module OR NOT create THEN
         // Found it, or we didn't find it and don't wanna create it.
         // In either case just return what we have.
 
@@ -167,10 +167,10 @@ FN IopLookupKnownModule (
 
     status := MmAllocatePool (
         TRUE, // pageable
-        SIZEOF IopKnownModule, // bytes
+        SIZEOF IopModule, // bytes
         'KnMo', // tag
         MM_ALLOCATE_WAIT, // flags
-        OUT knownmodule, // ptr
+        OUT module, // ptr
     )
 
     IF OsError ( status ) THEN
@@ -182,9 +182,9 @@ FN IopLookupKnownModule (
     oldvalue : ^VOID
 
     status = ExInsertInDictionary (
-        &IopKnownModuleDictionary, // dict
+        &IopModuleDictionary, // dict
         name, // key
-        knownmodule, // value
+        module, // value
         FALSE, // canupdate
         OUT oldvalue, // oldvalue
     )
@@ -193,35 +193,35 @@ FN IopLookupKnownModule (
         GOTO Exit
     END
 
-    knownmodule^.Name = ExFindName ( name )
+    module^.Name = ExFindName ( name )
 
-    IF NOT knownmodule^.Name THEN
+    IF NOT module^.Name THEN
         GOTO Exit2
     END
 
     // Initialize as not having an associated loaded library.
 
-    knownmodule^.Library = NULLPTR
+    module^.Library = NULLPTR
 
-    knownmodule^.ClassReferences = 0
+    module^.ClassReferences = 0
 
-    RtlInitializeList ( &knownmodule^.KnownClassListHead )
+    RtlInitializeList ( &module^.KnownClassListHead )
 
-    ExInitializeAction ( &knownmodule^.LoadAction )
+    ExInitializeAction ( &module^.LoadAction )
 
     RETURN OS_STATUS_SUCCESS
 
 @Exit2
 
     ExRemoveFromDictionary (
-        &IopKnownModuleDictionary, // dict
+        &IopModuleDictionary, // dict
         name, // key
     )
 
 @Exit
 
     MmFreePool (
-        knownmodule, // knownmodule
+        module, // module
         'KnMo', // tag
     )
 
@@ -229,7 +229,7 @@ FN IopLookupKnownModule (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN IoCreateKnownClass (
+FN IopCreateKnownClass (
     OUT knownclass : ^IopKnownClass,
 ) : OsStatus
 
@@ -255,7 +255,7 @@ EXPORT FN IoCreateKnownClass (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN IoGetKnownClassProperty (
+FN IopGetKnownClassProperty (
     IN knownclass : ^IopKnownClass,
     IN name : ^RtlString,
 ) : ^RtlString
@@ -270,7 +270,7 @@ EXPORT FN IoGetKnownClassProperty (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN IoSetKnownClassProperty (
+FN IopSetKnownClassProperty (
     IN knownclass : ^IopKnownClass,
     IN name : ^RtlString,
     IN value : ^RtlString,
@@ -289,7 +289,7 @@ EXPORT FN IoSetKnownClassProperty (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN IoDeleteKnownClass (
+EXPORT FN IopDeleteKnownClass (
     IN knownclass : ^IopKnownClass,
 )
 
@@ -310,7 +310,7 @@ END
 
 #SECTION "PAGEtext"
 FN IopForgetKnownClasses (
-    IN knownmodule : ^IopKnownModule,
+    IN module : ^IopModule,
 ) : OsStatus
 
     // Forcibly forget a module's known classes. The catalog lock is held on
@@ -356,14 +356,14 @@ FN IopProcessConfiguration (
 
     // Now take the catalog lock.
 
-    knownmodule : ^IopKnownModule
+    module : ^IopModule
 
     KeAcquireLockExclusive ( &IopCatalogLock )
 
-    status = IopLookupKnownModule (
+    status = IopLookupModule (
         modulename, // name
         TRUE, // create
-        OUT knownmodule, // knownmodule
+        OUT module, // module
     )
 
     IF OsError ( status ) THEN
@@ -373,7 +373,7 @@ FN IopProcessConfiguration (
     // If we already processed a configuration file for this module, we want to
     // forget whatever we learned there.
 
-    status = IopForgetKnownClasses ( knownmodule )
+    status = IopForgetKnownClasses ( module )
 
     IF OsError ( status ) THEN
         GOTO Exit
@@ -396,34 +396,34 @@ END
 
 #SECTION "PAGEtext"
 FN IopReferenceModule (
-    IN knownmodule : ^IopKnownModule,
+    IN module : ^IopModule,
 )
 
     // Increment the module's class reference count.
 
     KeAcquireLockExclusive ( &IopCatalogLock )
 
-    KeAssert ( knownmodule^.ClassReferences != 0 )
+    KeAssert ( module^.ClassReferences != 0 )
 
-    knownmodule^.ClassReferences += 1
+    module^.ClassReferences += 1
 
     KeReleaseLock ( &IopCatalogLock )
 END
 
 #SECTION "PAGEtext"
 FN IopUnreferenceModule (
-    IN knownmodule : ^IopKnownModule,
+    IN module : ^IopModule,
 )
 
     // Decrement the module's class reference count.
 
     KeAcquireLockExclusive ( &IopCatalogLock )
 
-    KeAssert ( knownmodule^.ClassReferences != 0 )
+    KeAssert ( module^.ClassReferences != 0 )
 
-    knownmodule^.ClassReferences -= 1
+    module^.ClassReferences -= 1
 
-    IF knownmodule^.ClassReferences != 0 THEN
+    IF module^.ClassReferences != 0 THEN
         KeReleaseLock ( &IopCatalogLock )
 
         LEAVE
@@ -431,20 +431,20 @@ FN IopUnreferenceModule (
 
     // Unload the library.
 
-    library := knownmodule^.Library
-    knownmodule^.Library = NULLPTR
+    library := module^.Library
+    module^.Library = NULLPTR
 
-    ExStartAction ( &knownmodule^.LoadAction )
+    ExStartAction ( &module^.LoadAction )
 
     KeReleaseLock ( &IopCatalogLock )
 
-    knownmodule^.Uninitialize ( knownmodule )
+    module^.Uninitialize ( module )
 
     ExUnloadLibrary ( library )
 
     KeAcquireLockExclusive ( &IopCatalogLock )
 
-    ExCompleteAction ( &knownmodule^.LoadAction )
+    ExCompleteAction ( &module^.LoadAction )
 
     KeReleaseLock ( &IopCatalogLock )
 END
@@ -461,7 +461,7 @@ FN IopInitializeCatalog ()
 
     // Initialize the known modules dictionary.
 
-    ExuInitializeDictionary ( &IopKnownModuleDictionary )
+    ExuInitializeDictionary ( &IopModuleDictionary )
 
     ExuInitializeDictionary ( &IopKnownClassDictionary )
 
@@ -478,24 +478,24 @@ FN IopInitializeCatalog ()
 
         RtlInitializeString ( &name, &bldll^.Name[0] )
 
-        knownmodule : ^IopKnownModule
+        module : ^IopModule
 
-        status := IopLookupKnownModule (
+        status := IopLookupModule (
             &name, // name
             TRUE, // create
-            OUT knownmodule, // knownmodule
+            OUT module, // module
         )
 
         IF OsError ( status ) THEN
             KeCrash ( "Failed to set up initial known module structures\n" )
         END
 
-        knownmodule^.ClassReferences = 1
-        knownmodule^.Library = bldll^.FreeSpace
-        knownmodule^.Initialize = bldll^.DriverEntrypoint
-        knownmodule^.Uninitialize = NULLPTR
+        module^.ClassReferences = 1
+        module^.Library = bldll^.FreeSpace
+        module^.Initialize = bldll^.DriverEntrypoint
+        module^.Uninitialize = NULLPTR
 
-        bldll^.FreeSpace = knownmodule
+        bldll^.FreeSpace = module
     END
 
     // Process all of the configuration files loaded by the bootloader.
@@ -529,14 +529,14 @@ FN IopInitializeCatalog ()
         bldll := CONTAINEROF listentry TO BlDll.Entry
         listentry = listentry^.Next
 
-        knownmodule : ^IopKnownModule = bldll^.FreeSpace
+        module : ^IopModule = bldll^.FreeSpace
 
-        IF knownmodule^.Initialize THEN
-            status := knownmodule^.Initialize ( knownmodule )
+        IF module^.Initialize THEN
+            status := module^.Initialize ( module )
 
             IF OsError ( status ) THEN
                 KeCrash ( "Failed to initialize boot driver %s\n",
-                    knownmodule^.Name^.String.Data )
+                    module^.Name^.String.Data )
             END
         END
     END

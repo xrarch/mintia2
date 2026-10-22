@@ -51,14 +51,14 @@ STRUCT IopKnownClass
 
     Properties : ExuDictionary,
 
-    KnownModule : ^IopKnownModule,
+    Module : ^IopModule,
 
-    Class : ^IouClass,
+    Class : ^IopClass,
 END
 
 #DEFINE IOP_MODULE_LOADING 1
 
-STRUCT IopKnownModule
+STRUCT IopModule
     Path : ^ExName,
     Name : ^ExName,
 
@@ -75,11 +75,11 @@ STRUCT IopKnownModule
 END
 
 EXTERN FN IopReferenceModule (
-    IN knownmodule : ^IopKnownModule,
+    IN module : ^IopModule,
 )
 
 EXTERN FN IopUnreferenceModule (
-    IN knownmodule : ^IopKnownModule,
+    IN module : ^IopModule,
 )
 
 EXTERN FN IopParseConfiguration (
@@ -89,5 +89,25 @@ EXTERN FN IopParseConfiguration (
 ) : OsStatus
 
 EXTERN FN IopDeleteKnownClassList (
+    IN knownclass : ^IopKnownClass,
+)
+
+EXTERN FN IopSetKnownClassProperty (
+    IN knownclass : ^IopKnownClass,
+    IN name : ^RtlString,
+    IN value : ^RtlString,
+    IN canupdate : UWORD,
+) : OsStatus
+
+EXTERN FN IopGetKnownClassProperty (
+    IN knownclass : ^IopKnownClass,
+    IN name : ^RtlString,
+) : ^RtlString
+
+EXTERN FN IopCreateKnownClass (
+    OUT knownclass : ^IopKnownClass,
+) : OsStatus
+
+EXTERN FN IopDeleteKnownClass (
     IN knownclass : ^IopKnownClass,
 )

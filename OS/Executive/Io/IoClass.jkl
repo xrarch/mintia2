@@ -5,10 +5,10 @@
 
 #INCLUDE "Iop.hjk"
 
-STRUCT IouClass
-    Superclass : ^IouClass,
+STRUCT IopClass
+    Superclass : ^IopClass,
 
-    KnownModule : ^IopKnownModule,
+    Module : ^IopModule,
 
     DispatchTable : ^IoPacketBasedCallF,
 
@@ -27,13 +27,13 @@ FN (IoPacketBasedCallF) IopUninitializedDispatch (
 END
 
 #SECTION "PAGEtext"
-FN IouCreateClass (
-    IN knownmodule : ^IopKnownModule,
+FN IopCreateClass (
+    IN module : ^IopModule,
     IN classname : ^RtlString,
-    IN superclass : ^IouClass,
+    IN superclass : ^IopClass,
     IN dispatchtable : ^IoPacketBasedCallF,
     IN dispatchtablesize : UWORD,
-    OUT class : ^IouClass,
+    OUT class : ^IopClass,
 ) : OsStatus
 
     // Register a new IO class.
@@ -41,7 +41,7 @@ FN IouCreateClass (
 
     status := MmAllocatePool (
         FALSE, // pageable
-        SIZEOF IouClass + dispatchtablesize, // bytes
+        SIZEOF IopClass + dispatchtablesize, // bytes
         'Clas', // tag
         MM_ALLOCATE_WAIT, // flags
         OUT class, // ptr
@@ -56,12 +56,12 @@ FN IouCreateClass (
     class^.InstantiationCount = 0
     class^.SubclassCount = 0
 
-    class^.KnownModule = knownmodule
+    class^.Module = module
 
     // Enough space was allocated at the end of the class object for the
     // dispatch table.
 
-    mydispatch := CAST (class + SIZEOF IouClass) TO ^IoPacketBasedCallF
+    mydispatch := CAST (class + SIZEOF IopClass) TO ^IoPacketBasedCallF
 
     class^.DispatchTable = mydispatch
     class^.DispatchTableSize = dispatchtablesize
@@ -110,14 +110,14 @@ FN IouCreateClass (
 
     // Increment the reference count of the superclass's module.
 
-    IopReferenceModule ( superclass^.KnownModule )
+    IopReferenceModule ( superclass^.Module )
 
     RETURN status
 END
 
 #SECTION "PAGEtext"
-FN IouDeleteClass (
-    IN class : ^IouClass,
+FN IopDeleteClass (
+    IN class : ^IopClass,
 )
 
     // Delete a class.
@@ -135,7 +135,7 @@ FN IouDeleteClass (
 
     // Unreference the superclass's module.
 
-    IopUnreferenceModule ( class^.Superclass^.KnownModule )
+    IopUnreferenceModule ( class^.Superclass^.Module )
 END
 
 #ENTERSECTION "INITtext"

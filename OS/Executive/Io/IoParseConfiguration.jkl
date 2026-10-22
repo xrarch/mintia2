@@ -100,7 +100,7 @@ FN IopParseClass (
 
     knownclass : ^IopKnownClass
 
-    status := IoCreateKnownClass (
+    status := IopCreateKnownClass (
         OUT knownclass, // knownclass
     )
 
@@ -146,7 +146,7 @@ FN IopParseClass (
             GOTO Exit
         END
 
-        status = IoSetKnownClassProperty (
+        status = IopSetKnownClassProperty (
             knownclass, // knownclass
             &name, // name
             &value, // value
@@ -166,7 +166,7 @@ FN IopParseClass (
 @Exit
 
     IF OsError ( status ) THEN
-        IoDeleteKnownClass ( knownclass )
+        IopDeleteKnownClass ( knownclass )
     END
 
     RETURN status
@@ -213,7 +213,7 @@ FN IopDeleteKnownClassList (
     WHILE knownclass DO
         next := CAST knownclass^.Entry.Next TO ^IopKnownClass
 
-        IoDeleteKnownClass ( knownclass )
+        IopDeleteKnownClass ( knownclass )
 
         knownclass = next 
     END
