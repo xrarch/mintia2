@@ -33,6 +33,10 @@ EXPORT FN ExUnloadLibrary (
 
     // Unload a library.
 
+    // Does not instantly unload the library but instead places it on a queue
+    // to be unloaded later if it is not ExLoadLibrary'd off that queue in the
+    // meanwhile. This forms a "library cache" mechanism.
+
     KeAcquireLockExclusive ( &ExpLibraryCacheLock )
 
     library^.References -= 1
@@ -63,7 +67,7 @@ EXPORT FN ExLoadLibrary (
     // If no name is provided then a new instance of the library is loaded
     // unconditionally. Such a library will not be cached and will therefore
     // not participate in deferred deletion, so this can be a performance
-    // concern.
+    // concern for consumers to keep in mind.
 
     // The path is relative to the system directory.
 
@@ -73,6 +77,9 @@ EXPORT FN ExLoadLibrary (
     event : ^ExuEventCounter
 
     IF name THEN
+        // There was a symbolic name so look up the dictionary to see if we
+        // already have a library going by that name.
+
         KeAcquireLockExclusive ( &ExpLibraryCacheLock )
 
         library = ExLookupDictionary (
@@ -81,6 +88,9 @@ EXPORT FN ExLoadLibrary (
         )
 
         IF library THEN
+            // We do have a library, which might either be in a fully loaded
+            // state or is in the process of being loaded by another thread.
+
             IF NOT ExIsActionInProgress ( &library^.Action ) THEN
                 // The library is fully loaded so just increment the reference
                 // count and return it.
@@ -109,6 +119,9 @@ EXPORT FN ExLoadLibrary (
                 OUT waitable, // waitable
             )
 
+            // Wait for the other thread to complete the load outside of the
+            // library cache lock.
+
             KeReleaseLock ( &ExpLibraryCacheLock )
 
             IF OsError ( status ) THEN
@@ -121,7 +134,12 @@ EXPORT FN ExLoadLibrary (
         END
     END
 
-    // Have to create a new library structure and load the library.
+    // There is no library going by that symbolic name (or the caller did not
+    // pass in a name), so we have to load it. Note that if a symbolic name was
+    // provided, we are currently still holding the library cache lock,
+    // otherwise we never took it.
+
+    // Create a new library structure.
 
     status = MmAllocatePool (
         FALSE, // pageable
@@ -139,6 +157,8 @@ EXPORT FN ExLoadLibrary (
     library^.References = 1
 
     IF name THEN
+        // Intern the symbolic name string.
+
         library^.Name = ExFindName ( name )
 
         IF NOT library^.Name THEN
@@ -146,6 +166,9 @@ EXPORT FN ExLoadLibrary (
 
             GOTO Exit1
         END
+
+        // Insert the library in the lookup dictionary, keyed by its symbolic
+        // name.
 
         oldvalue : ^VOID
 
@@ -161,22 +184,30 @@ EXPORT FN ExLoadLibrary (
             GOTO Exit2
         END
 
-        // Now release the lock and perform the actual loading outside of it.
+        // Now set the library's action started, so that other threads that
+        // look up the library can wait for us to finish loading it. Then
+        // release the lock and perform the loading work outside of it so that
+        // we don't block other library lookups or loads from happening in
+        // parallel.
 
         ExStartAction ( &library^.Action )
 
         KeReleaseLock ( &ExpLibraryCacheLock )
     END
 
-    IF path THEN
-        // Perform the actual loading.
+    // If path is NULLPTR, then we do nothing and leave it up to the caller to
+    // initialize this library. This is meant for setting up special boot-time
+    // libraries.
 
-        // Note that we allow path to be NULLPTR in which case we do nothing
-        // here and leave it up to the caller to initialize this library.
-        // This is primarily for setting up libraries loaded by the bootloader.
+    IF path THEN
+        // There is a path, so perform the actual loading.
 
         KeCrash ( "TODO\n" )
     END
+
+    // We finished loading the library, so if there is a symbolic name (which
+    // means the library can be looked up by others), set the action completed
+    // under the library cache lock and wake up anyone waiting for us. 
 
     IF name THEN
         KeAcquireLockExclusive ( &ExpLibraryCacheLock )
@@ -232,11 +263,11 @@ FN ExpDeleteLibrary (
 
     KeAssert ( library^.References == 0 )
 
-    // Release memory used for sections and headers of the library.
+    // Unreference all of the libraries depended upon by this one.
 
     KeCrash ( "TODO\n" )
 
-    // Unreference all of the libraries depended upon by this one.
+    // Release memory used for sections and headers of the library.
 
     KeCrash ( "TODO\n" )
 
@@ -312,10 +343,11 @@ FN ExuReapLibraries (
         listentry = listentry^.Next
     END
 
-    // They're fully in our custody now so we can do the rest of the deletion
-    // work outside the library lock.
-
     KeReleaseLock ( &ExpLibraryCacheLock )
+
+    // The libraries can no longer be looked up in the dictionary, so they are
+    // now just inert hunks of bytes in our custody. We can do the rest of the
+    // deletion work outside the library cache lock.
 
     listentry = toreap.Next
 
@@ -327,8 +359,9 @@ FN ExuReapLibraries (
     END
 
     IF all THEN
-        // Go again to reap the ones on the other list too. Happens when the
-        // system is in need of memory.
+        // If the caller said to reap all libraries aggressively, then go again
+        // to reap the ones on the other list too. Happens when the system is
+        // in need of memory.
 
         all = FALSE
 
