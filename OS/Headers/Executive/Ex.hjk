@@ -8,32 +8,31 @@
 #INCLUDE "<ll>/Executive/Ke.hjk"
 
 STRUCT ExAction
-    Ptr : ^VOID,
+    Waitable : ^ExpActionWaitable,
 END
 
-#DEFINE EXP_ACTION_OWNER 1
-#DEFINE EXP_ACTION_BEING_PREPARED 2
+#DEFINE EXP_ACTION_WAITABLE_PTR 1
 
 #MACRO ExInitializeAction ( action ) [
-    NOTHING (action)^.Ptr = NULLPTR
+    NOTHING (action)^.Waitable = NULLPTR
 ]
 
 #MACRO ExStartAction ( action ) [
-    NOTHING (action)^.Ptr = (KeCurrentThread () | EXP_ACTION_OWNER)
+    NOTHING (action)^.Waitable = CAST KeCurrentThread () TO ^VOID
 ]
 
 #MACRO ExIsActionInProgress ( action ) [
-    ((action)^.Ptr != NULLPTR)
+    ((action)^.Waitable != NULLPTR)
 ]
 
 EXTERN FN ExPrepareWaitForAction (
     IN action : ^ExAction,
     IN flags : UWORD,
-    OUT waitable : ^ExpAction,
+    OUT waitable : ^ExpActionWaitable,
 ) : OsStatus
 
 EXTERN FN ExWaitForActionCompletion (
-    IN waitable : ^ExpAction,
+    IN waitable : ^ExpActionWaitable,
 )
 
 EXTERN FN ExCompleteAction (

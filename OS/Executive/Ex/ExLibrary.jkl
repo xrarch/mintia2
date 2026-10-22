@@ -101,7 +101,7 @@ EXPORT FN ExLoadLibrary (
             // Someone else is in the process of loading the library.
             // We need to wait for them to complete that.
 
-            waitable : ^ExpAction
+            waitable : ^ExpActionWaitable
 
             status = ExPrepareWaitForAction (
                 &library^.Action, // action
@@ -179,7 +179,11 @@ EXPORT FN ExLoadLibrary (
     END
 
     IF name THEN
+        KeAcquireLockExclusive ( &ExpLibraryCacheLock )
+
         ExCompleteAction ( &library^.Action )
+
+        KeReleaseLock ( &ExpLibraryCacheLock )
     END
 
     RETURN OS_STATUS_SUCCESS

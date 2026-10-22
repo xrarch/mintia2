@@ -47,7 +47,7 @@ FN IouLoadClassByName (
         // Someone else is loading it, wait for them to finish and then
         // retry.
 
-        waitable : ^ExpAction
+        waitable : ^ExpActionWaitable
 
         status = ExPrepareWaitForAction (
             &knownmodule^.LoadAction, // action
@@ -97,9 +97,7 @@ FN IouLoadClassByName (
     )
 
     IF OsError ( status ) THEN
-        ExCompleteAction ( &knownmodule^.LoadAction )
-
-        RETURN status
+        GOTO Exit
     END
 
     // Look up and call the DrvInitialize routine.
@@ -117,9 +115,7 @@ FN IouLoadClassByName (
 
             ExUnloadLibrary ( library )
 
-            ExCompleteAction ( &knownmodule^.LoadAction )
-
-            RETURN status
+            GOTO Exit
         END
     END
 
@@ -128,9 +124,19 @@ FN IouLoadClassByName (
         "DrvUninitialize", // symbol
     )
 
+@Exit
+
     KeAcquireLockExclusive ( &IopCatalogLock )
 
     ExCompleteAction ( &knownmodule^.LoadAction )
+
+    IF OsError ( status ) THEN
+        KeReleaseLock ( &IopCatalogLock )
+
+        RETURN status
+    END
+
+    // Successfully loaded the library, so retry.
 
     knownmodule^.Library = library
 
@@ -436,7 +442,11 @@ FN IopUnreferenceModule (
 
     ExUnloadLibrary ( library )
 
+    KeAcquireLockExclusive ( &IopCatalogLock )
+
     ExCompleteAction ( &knownmodule^.LoadAction )
+
+    KeReleaseLock ( &IopCatalogLock )
 END
 
 #ENTERSECTION "INITtext"
