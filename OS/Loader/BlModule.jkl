@@ -606,7 +606,8 @@ FN BlLoadDll (
     dll^.Head = headva
     dll^.HeadLength = headsz
     dll^.Timestamp = header.Timestamp
-    dll^.DriverEntrypoint = NULLPTR
+    dll^.Initialize = NULLPTR
+    dll^.ClassTable = NULLPTR
     dll^.Base = NULLPTR
 
     // Insert in the DLL list.
@@ -666,10 +667,19 @@ FN BlLoadDll (
     IF NOT BlLookupSymbol (
         dll, // dll
         "DrvInitialize", // name
-        OUT dll^.DriverEntrypoint, // value
+        OUT dll^.Initialize, // value
     ) THEN
 
-        dll^.DriverEntrypoint = NULLPTR
+        dll^.Initialize = NULLPTR
+    END
+
+    IF NOT BlLookupSymbol (
+        dll, // dll
+        "DrvClassTable", // name
+        OUT dll^.ClassTable, // value
+    ) THEN
+
+        dll^.ClassTable = NULLPTR
     END
 
     RETURN dll

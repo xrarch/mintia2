@@ -323,13 +323,25 @@ EXTERN FN ExUnloadLibrary (
     IN library : ^ExuLibrary,
 )
 
+#DEFINE EX_LOAD_LIBRARY_KEEP_HEADERS 1
+
 EXTERN FN ExLoadLibrary (
     IN path : ^RtlString,
     IN name : ^RtlString,
+    IN loadflags : UWORD,
     OUT library : ^ExuLibrary,
+    OUT cached : UWORD,
 ) : OsStatus
 
 EXTERN FN ExLookupSymbolLibrary (
     IN library : ^ExuLibrary,
     IN symbol : ^UBYTE,
 ) : ^VOID
+
+EXTERN FN ExJettisonHeadersLibrary (
+    IN library : ^ExuLibrary,
+)
+
+EXTERN FN ExForgetLibrary (
+    IN name : ^RtlString,
+)

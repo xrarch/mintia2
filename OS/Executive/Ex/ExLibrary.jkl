@@ -22,8 +22,34 @@ EXPORT FN ExLookupSymbolLibrary (
 ) : ^VOID
 
     // Look up the exported symbol or return NULLPTR if not found.
+    // Caller should have exclusive custody of the library.
+
+    IF library^.Flags & EX_LOAD_LIBRARY_KEEP_HEADERS == 0 THEN
+        // The headers aren't present so return.
+
+        RETURN NULLPTR
+    END
 
     KeCrash ( "TODO ExLookupSymbolLibrary" )
+END
+
+#SECTION "PAGEtext"
+EXPORT FN ExJettisonHeadersLibrary (
+    IN library : ^ExuLibrary,
+)
+
+    // Jettison library headers to save space.
+    // Caller should have exclusive custody of the library.
+
+    IF library^.Flags & EX_LOAD_LIBRARY_KEEP_HEADERS == 0 THEN
+        // The headers aren't present so return.
+
+        LEAVE
+    END
+
+    library^.Flags &= ~EX_LOAD_LIBRARY_KEEP_HEADERS
+
+    KeCrash ( "TODO ExJettisonHeadersLibrary" )
 END
 
 #SECTION "PAGEtext"
@@ -57,7 +83,9 @@ END
 EXPORT FN ExLoadLibrary (
     IN path : ^RtlString,
     IN name : ^RtlString,
+    IN loadflags : UWORD,
     OUT library : ^ExuLibrary,
+    OUT cached : UWORD,
 ) : OsStatus
 
     // Load a library at the given path, with the given symbolic name.
@@ -70,6 +98,8 @@ EXPORT FN ExLoadLibrary (
     // concern for consumers to keep in mind.
 
     // The path is relative to the system directory.
+
+    cached = FALSE
 
 @Retry
 
@@ -103,6 +133,8 @@ EXPORT FN ExLoadLibrary (
                 library^.References += 1
 
                 KeReleaseLock ( &ExpLibraryCacheLock )
+
+                cached = TRUE
 
                 RETURN OS_STATUS_SUCCESS
             END
@@ -152,6 +184,7 @@ EXPORT FN ExLoadLibrary (
 
     library^.Name = NULLPTR
     library^.References = 1
+    library^.Flags = loadflags
 
     IF name THEN
         // Intern the symbolic name string.
@@ -196,6 +229,9 @@ EXPORT FN ExLoadLibrary (
 
     IF path THEN
         // There is a path, so perform the actual loading.
+
+        // Make sure to retain headers for ExLookupSymbolLibrary if
+        // EX_LOAD_LIBRARY_KEEP_HEADERS is specified.
 
         KeCrash ( "TODO\n" )
     END
@@ -364,6 +400,53 @@ FN ExuReapLibraries (
     END
 END
 
+#SECTION "PAGEtext"
+EXPORT FN ExForgetLibrary (
+    IN name : ^RtlString,
+)
+
+    // If a library is in the cache and has a reference count of 0 then
+    // forcibly free it fully.
+
+    KeAcquireLockExclusive ( &ExpLibraryCacheLock )
+
+    library := CAST ExLookupDictionary (
+        &ExpLibraryDictionary, // dict
+        name, // key
+    ) TO ^ExuLibrary
+
+    IF NOT library OR
+        library^.References != 0 THEN
+
+        // Not in the cache or not a zero reference count.
+
+        KeReleaseLock ( &ExpLibraryCacheLock )
+
+        LEAVE
+    END
+
+    // The reference count was zero which means it must be on a reap list, so
+    // remove it.
+
+    RtlRemoveEntryList ( &library^.ReapListEntry )
+
+    // Now unpublish it.
+
+    ExRemoveFromDictionary (
+        &ExpLibraryDictionary, // dict
+        &library^.Name^.String, // key
+    )
+
+    // It's fully in our custody now so we can do the rest of the deletion work
+    // outside of the library cache lock.
+
+    KeReleaseLock ( &ExpLibraryCacheLock )
+
+    // Delete it the rest of the way.
+
+    ExpDeleteLibrary ( library )
+END
+
 #ENTERSECTION "INITtext"
 
 FN ExpInitializeLibraries ()
@@ -405,7 +488,9 @@ FN ExpInitializeLibraries ()
         status := ExLoadLibrary (
             NULLPTR, // path
             &name, // name
+            0, // loadflags
             OUT: library, // library
+            OUT: cached, // cached
         )
 
         IF OsError ( status ) THEN

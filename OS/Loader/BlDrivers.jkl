@@ -9,20 +9,10 @@ FN BlLoadDriver (
     IN name : ^UBYTE,
 ) : ^BlDll
 
-    dll := BlLoadDll (
+    RETURN BlLoadDll (
         path, // path
         name, // name
     )
-
-    IF NOT dll THEN
-        RETURN NULLPTR
-    END
-
-    IF NOT dll^.DriverEntrypoint THEN
-        RtlPrint ( "WARNING: Driver '%s' had no entrypoint\n", name )
-    END
-
-    RETURN dll
 END
 
 FN BlLoadExtension (

@@ -70,7 +70,7 @@ STRUCT IopModule
     Path : ^ExName,
     Name : ^ExName,
 
-    KnownClassListHead : RtlListEntry,
+    ClassListHead : RtlListEntry,
 
     Library : ^ExuLibrary,
 
@@ -78,6 +78,7 @@ STRUCT IopModule
 
     Initialize : IoDriverInitialize,
     Uninitialize : IoDriverUninitialize,
+    ClassTable : ^IoClassEntry,
 
     ClassReferences : ULONG,
 END
@@ -117,5 +118,9 @@ EXTERN FN IopCreateClass (
 ) : OsStatus
 
 EXTERN FN IopDeleteClass (
+    IN class : ^IopClass,
+)
+
+EXTERN FN IopUninitializeClass (
     IN class : ^IopClass,
 )

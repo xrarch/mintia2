@@ -12,6 +12,41 @@ IopModuleDictionary : ExuDictionary
 IopClassDictionary : ExuDictionary
 
 #SECTION "PAGEtext"
+FN IopInitializeLoadedModule (
+    IN module : ^IopModule,
+) : OsStatus
+
+    // A module has been loaded and now has to be initialized.
+
+    status : OsStatus
+
+    // Call the DrvInitialize routine.
+
+    IF module^.Initialize THEN
+        status = module^.Initialize ( module )
+
+        IF OsError ( status ) THEN
+            RETURN status
+        END
+    END
+
+    // Initialize all of the classes as specified in the class table.
+
+    IF module^.ClassTable THEN
+        // Iterate the class entries up until the first sentinel entry which
+        // has a name of NULLPTR, and initialize loaded classes according to
+        // the information therein.
+
+        // If any of these fail then call the DrvUninitialize routine and exit
+        // with an error status.
+
+        KeCrash ( "TODO IopInitializeLoadedModule\n" )
+    END
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
 FN IopLoadClassByName (
     IN name : ^RtlString,
     OUT class : ^IopClass,
@@ -44,8 +79,7 @@ FN IopLoadClassByName (
     module := class^.Module
 
     IF ExIsActionInProgress ( &module^.LoadAction ) THEN
-        // Someone else is loading it, wait for them to finish and then
-        // retry.
+        // Someone else is loading it.
 
         status = ExPrepareWaitForAction (
             &module^.LoadAction, // action
@@ -58,6 +92,9 @@ FN IopLoadClassByName (
         IF OsError ( status ) THEN
             RETURN status
         END
+
+        // Wait for the other guy to finish loading the module, outside any
+        // locks, and then retry.
 
         ExWaitForActionCompletion ( waitable )
 
@@ -76,9 +113,16 @@ FN IopLoadClassByName (
         RETURN OS_STATUS_SUCCESS
     END
 
-    // The library isn't loaded yet.
-
     KeAssert ( module^.ClassReferences == 0 )
+
+    // The library isn't loaded yet, so we're responsible for doing that.
+    // Start the load action and then load it outside of any locks, so that
+    // anybody else who tries to load this module will wait for us to finish.
+
+    // This might seem redundant because loading the library by symbolic name
+    // will also start an action that is used to scalably wait for a thing to
+    // complete, but ExLibrary's action doesn't cover the potentially lengthy
+    // extra work of initializing an I/O module that we're also gonna be doing.
 
     ExStartAction ( &module^.LoadAction )
 
@@ -87,54 +131,94 @@ FN IopLoadClassByName (
     status = ExLoadLibrary (
         &module^.Path^.String, // path
         &module^.Name^.String, // name
+        EX_LOAD_LIBRARY_KEEP_HEADERS, // flags
         OUT library, // library
+        OUT: cached, // cached
     )
 
     IF OsError ( status ) THEN
+        // Failed to load the library so get outta here.
+
         GOTO Exit
     END
 
-    // Look up and call the DrvInitialize routine.
+    IF NOT cached THEN
+        // The copy of the library we got was not cached, so we just loaded it.
+        // It still has its headers and we need to jettison them to free up
+        // space. Before doing that, we need to look up the symbols our I/O
+        // system cares about.
 
-    initialize : IoDriverInitialize = ExLookupSymbolLibrary (
-        library, // library
-        "DrvInitialize", // symbol
-    )
+        // This might seem scary but the effect of this is just that these
+        // values are "sticky" in the module structure as long as we reuse the
+        // same copy of the library. We're guaranteed to look them up the first
+        // time the module is initialized, so don't fear.
 
-    IF initialize THEN
-        status = initialize ( module )
+        module^.Initialize = ExLookupSymbolLibrary (
+            library, // library
+            "DrvInitialize", // symbol
+        )
 
-        IF OsError ( status ) THEN
-            // Driver failed to initialize, so unload.
+        module^.Uninitialize = ExLookupSymbolLibrary (
+            library, // library
+            "DrvUninitialize", // symbol
+        )
 
-            ExUnloadLibrary ( library )
+        module^.ClassTable = ExLookupSymbolLibrary (
+            library, // library
+            "DrvClassTable", // symbol
+        )
 
-            GOTO Exit
-        END
+        // Jettison library headers to save space.
+
+        ExJettisonHeadersLibrary ( library )
     END
 
-    module^.Uninitialize = ExLookupSymbolLibrary (
-        library, // library
-        "DrvUninitialize", // symbol
-    )
+    // Now do the common module initialization stuff.
+    // This is made common so that the boot module path can call the same
+    // thing.
+
+    status = IopInitializeLoadedModule ( module )
+
+    IF OsError ( status ) THEN
+        // Failed to initialize the module so unload the library and get outta
+        // here.
+
+        ExUnloadLibrary ( library )
+    END
 
 @Exit
 
+    // Take the catalog lock.
+
     KeAcquireLockExclusive ( &IopCatalogLock )
+
+    // Complete the action under the catalog lock in order to wake up anyone
+    // waiting for us to finish initializing the module.
 
     ExCompleteAction ( &module^.LoadAction )
 
     IF OsError ( status ) THEN
+        // There was a failure so just return.
+
         KeReleaseLock ( &IopCatalogLock )
 
         RETURN status
     END
 
-    // Successfully loaded the library, so retry.
+    // Successfully loaded the library so save that information.
 
     module^.Library = library
 
-    GOTO RetryLockHeld
+    // Now set the module as having 1 ClassReference to reflect the one we're
+    // taking away.
+
+    module^.ClassReferences = 1
+
+    // And return the class.
+
+    KeReleaseLock ( &IopCatalogLock )
+
+    RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
@@ -152,12 +236,21 @@ FN IopLookupModule (
         name, // key
     ) TO ^IopModule
 
-    IF module OR NOT create THEN
-        // Found it, or we didn't find it and don't wanna create it.
-        // In either case just return what we have.
+    IF module THEN
+        // Found the module so return success.
 
         RETURN OS_STATUS_SUCCESS
     END
+
+    IF NOT create THEN
+        // Didn't find the module and didn't wanna create it,
+        // so return an error.
+
+        RETURN OS_STATUS_NOT_FOUND
+    END
+
+    // Didn't find the module, but the caller asked us to create it in that
+    // case, so do that now.
 
     status := MmAllocatePool (
         TRUE, // pageable
@@ -185,19 +278,28 @@ FN IopLookupModule (
         GOTO Exit
     END
 
+    // Intern the name of the module.
+
     module^.Name = ExFindName ( name )
 
     IF NOT module^.Name THEN
         GOTO Exit2
     END
 
-    // Initialize as not having an associated loaded library.
+    // No associated loaded library yet, this module represents just a container
+    // of classes that exists but isn't loaded yet.
 
     module^.Library = NULLPTR
 
+    // No class references yet.
+
     module^.ClassReferences = 0
 
-    RtlInitializeList ( &module^.KnownClassListHead )
+    // Empty class list.
+
+    RtlInitializeList ( &module^.ClassListHead )
+
+    // Unstarted load action.
 
     ExInitializeAction ( &module^.LoadAction )
 
@@ -314,15 +416,28 @@ FN IopForgetModule (
     IN module : ^IopModule,
 ) : OsStatus
 
-    // Forcibly forget a module's known classes. The catalog lock is held on
-    // entry.
+    // Forcibly forget a module from the catalog. This is intended to allow a
+    // module's configuration files to be re-loaded if a new version is
+    // installed. Synchronization is obtained via the module's LoadAction.
 
-    // If the module is currently loaded, unlock the catalog lock and initiate
-    // an unload and then retry the whole operation. If the unload fails,
-    // propagate the status to the caller.
+    IF module^.Library THEN
+        // The module is currently loaded, so initiate an unload (the big kind
+        // that cancels IO requests and stuff) and then retry the whole operation.
+        // If the unload fails, propagate the status to the caller.
 
-    // If the module was found and is unloaded, forget about it from the
-    // catalog.
+        // ...
+
+        RETURN OS_STATUS_TRY_AGAIN
+    END
+
+    // Make sure the memory for the module's library is fully freed so that it
+    // is really reloaded from disk next time.
+
+    ExForgetLibrary ( &module^.Name^.String )
+
+    // The module's classes should now be inert. Delete their structures.
+
+    // ...
 
     RETURN OS_STATUS_NOT_IMPLEMENTED
 END
@@ -394,9 +509,20 @@ FN IopReferenceModule (
 
     // Increment the module's class reference count.
 
-    KeAcquireLockExclusive ( &IopCatalogLock )
+    // Usually happens to retain a reference to a superclass's containing
+    // module when a new class is being loaded.
 
     KeAssert ( module^.ClassReferences != 0 )
+
+    // Do it under the catalog lock.
+
+    // Technically this could be done with an atomic but the catalog lock isn't
+    // anticipated to be a scalability concern since hugely parallel operations
+    // on the system's set of loaded drivers are only done at boot time and
+    // the really lengthy stuff is already done outside the catalog lock, so
+    // that would just burden other codepaths with also needing to use atomics.
+
+    KeAcquireLockExclusive ( &IopCatalogLock )
 
     module^.ClassReferences += 1
 
@@ -408,32 +534,70 @@ FN IopUnreferenceModule (
     IN module : ^IopModule,
 )
 
-    // Decrement the module's class reference count.
-
-    KeAcquireLockExclusive ( &IopCatalogLock )
+    // Decrement the module's class reference count, which may cause the module
+    // to be uninitialized if if drops to zero.
 
     KeAssert ( module^.ClassReferences != 0 )
+
+    // Do it under the catalog lock.
+
+    KeAcquireLockExclusive ( &IopCatalogLock )
 
     module^.ClassReferences -= 1
 
     IF module^.ClassReferences != 0 THEN
+        // That didn't drop the number of references to zero, so just leave.
+
         KeReleaseLock ( &IopCatalogLock )
 
         LEAVE
     END
 
-    // Unload the library.
+    // The module no longer has any references and this instance of it should
+    // be uninitialized.
 
     library := module^.Library
+
+    // Clear the library pointer and start the load action, so that anybody
+    // who tries to look up the module waits for us to finish unloading it
+    // before they try to reload it.
+
     module^.Library = NULLPTR
 
     ExStartAction ( &module^.LoadAction )
 
+    // Release the catalog lock to do lengthy work.
+
     KeReleaseLock ( &IopCatalogLock )
 
-    module^.Uninitialize ( module )
+    // Uninitialize all of the classes, to put them back into an inert and
+    // "unloaded" state. This may recursively unload other modules if they
+    // contain superclasses of this class.
+
+    listhead := &module^.ClassListHead
+    listentry := listhead^.Next
+
+    WHILE listentry != listhead DO
+        class := CONTAINEROF listentry TO IopClass.Entry
+        listentry = listentry^.Next
+
+        IopUninitializeClass ( class )
+    END
+
+    // Call the uninitialize routine, if there is one.
+
+    IF module^.Uninitialize THEN
+        module^.Uninitialize ( module )
+    END
+
+    // Unload the library. Note that this is just unreferencing a cached copy
+    // of it, but nevertheless we aren't allowed to touch it after this since
+    // it could be deleted for real at any time from asynchronous context.
 
     ExUnloadLibrary ( library )
+
+    // Complete the load action under the catalog lock in order to wake up
+    // anybody waiting for us to uninitialize the module.
 
     KeAcquireLockExclusive ( &IopCatalogLock )
 
@@ -452,13 +616,14 @@ FN IopInitializeCatalog ()
     KeInitializeLock ( &IopCatalogLock, "CatalogLock" )
 #ENTERSECTION "INITtext"
 
-    // Initialize the known modules dictionary.
+    // Initialize the module and class dictionaries.
 
     ExuInitializeDictionary ( &IopModuleDictionary )
 
     ExuInitializeDictionary ( &IopClassDictionary )
 
-    // Create known modules for all of the bootloader's initial modules.
+    // Create proper IO module structures for all of the bootloader's initial
+    // modules.
 
     name : RtlString
 
@@ -471,6 +636,8 @@ FN IopInitializeCatalog ()
 
         RtlInitializeString ( &name, &bldll^.Name[0] )
 
+        // Create the IopModule for this module.
+
         status := IopLookupModule (
             &name, // name
             TRUE, // create
@@ -481,10 +648,27 @@ FN IopInitializeCatalog ()
             KeCrash ( "Failed to set up initial known module structures\n" )
         END
 
+        // Initialize it manually.
+
+        // Jam it referenced since we currently never uninitialize bootloaded
+        // modules.
+
         module^.ClassReferences = 1
+
+        // Set the library to the special one created by ExLibrary which was
+        // stashed in the FreeSpace pointer.
+
         module^.Library = bldll^.FreeSpace
-        module^.Initialize = bldll^.DriverEntrypoint
+
+        // Manually set the symbol pointers to the ones looked up by the
+        // bootloader.
+
+        module^.Initialize = bldll^.Initialize
         module^.Uninitialize = NULLPTR
+        module^.ClassTable = bldll^.ClassTable
+
+        // Replace the FreeSpace pointer with a pointer to our module so that
+        // we can use it conveniently in a bit.
 
         bldll^.FreeSpace = module
     END
@@ -522,13 +706,11 @@ FN IopInitializeCatalog ()
 
         module : ^IopModule = bldll^.FreeSpace
 
-        IF module^.Initialize THEN
-            status := module^.Initialize ( module )
+        status := IopInitializeLoadedModule ( module )
 
-            IF OsError ( status ) THEN
-                KeCrash ( "Failed to initialize boot driver %s\n",
-                    module^.Name^.String.Data )
-            END
+        IF OsError ( status ) THEN
+            KeCrash ( "Failed to initialize boot driver %s\n",
+                module^.Name^.String.Data )
         END
     END
 END
