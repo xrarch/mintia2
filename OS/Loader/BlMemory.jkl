@@ -93,8 +93,6 @@ FN BlAllocateMemory (
     bytes += (RTL_MACHINE_WORD_SIZE - 1)
     bytes &= ~(RTL_MACHINE_WORD_SIZE - 1)
 
-    junk : ^BlMemoryDescriptor
-
     IF bytes >= RTL_PAGE_SIZE THEN
         // Allocate a mapped range.
 
@@ -104,7 +102,7 @@ FN BlAllocateMemory (
             BL_KERNEL_STRUCTURES, // preferredva
             FALSE, // fixed
             BL_MEMORY_RECLAIMABLE, // type
-            OUT junk, // desc
+            OUT: junk, // desc
         )
     END
 
@@ -128,7 +126,7 @@ FN BlAllocateMemory (
         BL_KERNEL_STRUCTURES, // preferredva
         FALSE, // fixed
         BL_MEMORY_RECLAIMABLE | BL_BUMP_EXTENSION_FLAG, // type
-        OUT junk, // desc
+        OUT: junk, // desc
     )
 
     IF NOT newptr THEN
@@ -609,8 +607,6 @@ FN BlInitializeNodeMemory (
 
     // Initialize the virtual spaces needed by this node.
 
-    desc : ^BlMemoryDescriptor
-
     // Allocate the per-node structure.
 
     totalsize := BL_NODE_SIZE
@@ -622,7 +618,7 @@ FN BlInitializeNodeMemory (
         blnode^.NodeSpaceBase + KE_NODE_STRUCTURE_OFFSET, // preferredva
         TRUE, // fixed
         BL_MEMORY_USED, // type
-        OUT desc, // desc
+        OUT: desc, // desc
     )
 
     IF NOT nodestructure THEN

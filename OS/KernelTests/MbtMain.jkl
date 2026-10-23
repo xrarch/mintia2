@@ -117,8 +117,6 @@ FN MandelbrotSpawnCell (
 
     // Spawn a cell drawing thread.
 
-    thread : ^PsuThread
-
     name : RtlString
     RtlInitializeString ( &name, "MandelbrotCell" )
 
@@ -129,7 +127,7 @@ FN MandelbrotSpawnCell (
         CAST gridx TO ^VOID,
         CAST gridy TO ^VOID,
         0,
-        OUT thread,
+        OUT: thread,
     )
 
     IF OsError ( status ) THEN
@@ -198,7 +196,6 @@ FN MbtMain ()
     END
 
     name : RtlString
-    thread : ^PsuThread
     RtlInitializeString ( &name, "MandelbrotMain" )
 
     status := PsCreateExecutiveThread (
@@ -208,7 +205,7 @@ FN MbtMain ()
         NULLPTR, // context1
         NULLPTR, // context2
         0, // flags
-        OUT thread // thread
+        OUT: thread // thread
     )
 
     IF OsError ( status ) THEN

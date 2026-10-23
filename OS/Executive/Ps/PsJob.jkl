@@ -564,14 +564,11 @@ FN OsAddProcessJob (
     // Insert a process into a job object. The process must either not be in a
     // job object, or be in one that is in the same tree as the target job.
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -586,12 +583,10 @@ FN OsAddProcessJob (
         GOTO Exit
     END
 
-    job : ^PsuJob
-
     status = ObuReferenceByHandle (
         jobhandle, // handle
         OS_JOB_TYPE, // typeid
-        OUT job, // object
+        OUT job : ^PsuJob, // object
         OUT access, // access
     )
 
@@ -645,14 +640,11 @@ FN OsRemoveProcessJob (
     // Remove a process from its job object.
     // This will insert it into the parent of the current job.
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -696,14 +688,11 @@ FN OsSignalJob (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    job : ^PsuJob
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_JOB_TYPE, // typeid
-        OUT job, // object
-        OUT access, // access
+        OUT job : ^PsuJob, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -753,13 +742,11 @@ FN PsuCreateJob (
     IF parentjobhandle != OS_NULL_HANDLE THEN
         // A parent job was specified.
 
-        access : UWORD
-
         status = ObuReferenceByHandle (
             parentjobhandle, // handle
             OS_JOB_TYPE, // typeid
             OUT parentjob, // object
-            OUT access, // access
+            OUT: access, // access
         )
 
         IF OsError ( status ) THEN
@@ -775,14 +762,12 @@ FN PsuCreateJob (
         END
     END
 
-    object : ^PsuJob
-
     status = PsuCreateJobObject (
         params, // params
         flags, // flags
         signalonclose, // signalonclose
         parentjob, // parentjob
-        OUT object, // object
+        OUT: object, // object
     )
 
     IF OsError ( status ) THEN

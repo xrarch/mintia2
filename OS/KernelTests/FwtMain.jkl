@@ -49,8 +49,6 @@ FN FwtMain ()
     IF NOT FwtInitGraphics () THEN
         LEAVE
     END
-
-    thread : ^PsuThread
     
     status := MmCreateObjectCache (
         KeCurrentAffinityNode (), // mmnode
@@ -81,7 +79,7 @@ FN FwtMain ()
         NULLPTR, // parameter1
         NULLPTR, // parameter2
         0, // flags
-        OUT thread, // thread
+        OUT: thread, // thread
     )
     
     IF OsError ( status ) THEN

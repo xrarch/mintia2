@@ -2438,13 +2438,10 @@ FN KepStealWork ()
 
     myprb := KEP_CURRENT_PRB
 
-    loadedprb : ^KepPrb
-    garbagecan : ^VOID
-
     KepFindMostAndLeastLoadedProcessor (
         myprb^.Node, // kenode
-        OUT loadedprb, // mostloaded
-        OUT garbagecan, // leastloaded
+        OUT: loadedprb, // mostloaded
+        OUT: garbagecan, // leastloaded
     )
 
     IF loadedprb == myprb THEN
@@ -2493,13 +2490,10 @@ FN (KeDpcF) KepBalanceWork (
     j := 0
 
     WHILE j < max DO
-        mostloaded : ^KepPrb
-        leastloaded : ^KepPrb
-
         KepFindMostAndLeastLoadedProcessor (
             kenode, // kenode
-            OUT mostloaded, // mostloaded
-            OUT leastloaded, // leastloaded
+            OUT: mostloaded, // mostloaded
+            OUT: leastloaded, // leastloaded
         )
 
         IF mostloaded == leastloaded THEN

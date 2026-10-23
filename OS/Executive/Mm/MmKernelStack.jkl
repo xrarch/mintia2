@@ -35,13 +35,11 @@ FN MmuChargeKernelStack (
     // Pre-allocate virtual space for the kernel stack to ensure
     // infallibility of the kernel stack allocation worker.
 
-    kstack : ^VOID
-
     status = MmpAllocateDynamicPages (
         mmnode, // mmnode
         KEU_STACK_PAGES + 1, // pages
         MM_ALLOCATE_WAIT, // flags
-        OUT kstack, // ptr
+        OUT: kstack, // ptr
     )
 
     IF OsError ( status ) THEN

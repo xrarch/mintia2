@@ -20,8 +20,6 @@ FN BlAllocateConfigFile (
     // Drivers directory at boot time) so we want to squish them together to
     // save memory.
 
-    desc : ^BlMemoryDescriptor
-
     IF bytes >= BL_CONFIG_BUMP_EXTENSION THEN
         RETURN BlAllocateMappedRange (
             BlInfoBlock.BootNode, // blnode
@@ -29,7 +27,7 @@ FN BlAllocateConfigFile (
             BL_KERNEL_STRUCTURES, // preferredva
             FALSE, // fixed
             BL_MEMORY_USED, // type
-            OUT desc, // desc
+            OUT: desc, // desc
         )
     END
 
@@ -43,7 +41,7 @@ FN BlAllocateConfigFile (
             BL_KERNEL_STRUCTURES, // preferredva
             FALSE, // fixed
             BL_MEMORY_USED, // type
-            OUT desc, // desc
+            OUT: desc, // desc
         )
 
         IF NOT BlConfigBumpPointer THEN
@@ -105,15 +103,13 @@ FN BlLoadResource (
         filepages += RTL_PAGE_SIZE - 1
         filepages >>= RTL_PAGE_SHIFT
 
-        desc : ^BlMemoryDescriptor
-
         rsrc^.Data = CAST BlAllocateMappedRange (
             BlInfoBlock.BootNode, // blnode
             filepages, // pages
             BL_KERNEL_STRUCTURES, // preferredva
             FALSE, // fixed
             BL_MEMORY_USED, // type
-            OUT desc, // desc
+            OUT: desc, // desc
         ) TO ^UBYTE
     END
 

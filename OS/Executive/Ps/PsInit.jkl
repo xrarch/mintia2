@@ -48,15 +48,13 @@ FN PspCreateId (
     // all relevant ways or people will be able to get a pointer to a bad
     // object.
 
-    entry : ^PspIdEntry
-
     PspLockIdExclusive ()
 
     status := ExuCreateHandle (
         &PspIdTable, // handletable
         &PspIdLock, // lock
         OUT id, // handle
-        OUT entry, // entryptr
+        OUT entry : ^PspIdEntry, // entryptr
     )
 
     IF OsError ( status ) THEN

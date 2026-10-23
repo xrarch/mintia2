@@ -159,14 +159,12 @@ FN (KeAbortableF) MmpSafeCaptureString (
 
     // Allocate a buffer.
 
-    buf : ^UBYTE
-
     status = MmAllocatePool (
         TRUE, // pageable
         len + 1, // bytes
         'CpSt', // tag
         MM_ALLOCATE_WAIT, // flags
-        OUT buf, // ptr
+        OUT buf : ^UBYTE, // ptr
     )
 
     IF OsError ( status ) THEN

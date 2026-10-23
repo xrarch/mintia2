@@ -47,12 +47,10 @@ FN IopLoadClassByName (
         // Someone else is loading it, wait for them to finish and then
         // retry.
 
-        waitable : ^ExpActionWaitable
-
         status = ExPrepareWaitForAction (
             &module^.LoadAction, // action
             MM_ALLOCATE_WAIT, // flags
-            OUT waitable, // waitable
+            OUT: waitable, // waitable
         )
 
         KeReleaseLock ( &IopCatalogLock )
@@ -179,14 +177,12 @@ FN IopLookupModule (
 
     // Insert it into the dictionary.
 
-    oldvalue : ^VOID
-
     status = ExInsertInDictionary (
         &IopModuleDictionary, // dict
         name, // key
         module, // value
         FALSE, // canupdate
-        OUT oldvalue, // oldvalue
+        OUT: oldvalue, // oldvalue
     )
 
     IF OsError ( status ) THEN
@@ -339,15 +335,13 @@ FN IopProcessConfiguration (
 
     // Process a driver configuration file.
 
-    knownclass : ^IopKnownClass
-
     // First parse the configuration and create an IopKnownClass for each
     // described class.
 
     status := IopParseConfiguration (
         configtext, // configtext
         configsize, // configsize
-        OUT knownclass, // class
+        OUT: knownclass, // class
     )
 
     IF OsError ( status ) THEN
@@ -356,14 +350,12 @@ FN IopProcessConfiguration (
 
     // Now take the catalog lock.
 
-    module : ^IopModule
-
     KeAcquireLockExclusive ( &IopCatalogLock )
 
     status = IopLookupModule (
         modulename, // name
         TRUE, // create
-        OUT module, // module
+        OUT: module, // module
     )
 
     IF OsError ( status ) THEN
@@ -478,12 +470,10 @@ FN IopInitializeCatalog ()
 
         RtlInitializeString ( &name, &bldll^.Name[0] )
 
-        module : ^IopModule
-
         status := IopLookupModule (
             &name, // name
             TRUE, // create
-            OUT module, // module
+            OUT: module, // module
         )
 
         IF OsError ( status ) THEN

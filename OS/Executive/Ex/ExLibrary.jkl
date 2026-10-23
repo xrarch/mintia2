@@ -74,7 +74,6 @@ EXPORT FN ExLoadLibrary (
 @Retry
 
     status := OS_STATUS_SUCCESS
-    event : ^ExuEventCounter
 
     IF name THEN
         // There was a symbolic name so look up the dictionary to see if we
@@ -111,12 +110,10 @@ EXPORT FN ExLoadLibrary (
             // Someone else is in the process of loading the library.
             // We need to wait for them to complete that.
 
-            waitable : ^ExpActionWaitable
-
             status = ExPrepareWaitForAction (
                 &library^.Action, // action
                 MM_ALLOCATE_WAIT, // flags
-                OUT waitable, // waitable
+                OUT: waitable, // waitable
             )
 
             // Wait for the other thread to complete the load outside of the
@@ -170,14 +167,12 @@ EXPORT FN ExLoadLibrary (
         // Insert the library in the lookup dictionary, keyed by its symbolic
         // name.
 
-        oldvalue : ^VOID
-
         status = ExInsertInDictionary (
             &ExpLibraryDictionary, // dict
             name, // key
             library, // value
             FALSE, // canupdate
-            OUT oldvalue, // oldvalue
+            OUT: oldvalue, // oldvalue
         )
 
         IF OsError ( status ) THEN
@@ -403,7 +398,6 @@ FN ExpInitializeLibraries ()
         bldll := CONTAINEROF listentry TO BlDll.Entry
         listentry = listentry^.Next
 
-        library : ^ExuLibrary
         name : RtlString
 
         RtlInitializeString ( &name, &bldll^.Name[0] )
@@ -411,7 +405,7 @@ FN ExpInitializeLibraries ()
         status := ExLoadLibrary (
             NULLPTR, // path
             &name, // name
-            OUT library, // library
+            OUT: library, // library
         )
 
         IF OsError ( status ) THEN

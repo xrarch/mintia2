@@ -371,7 +371,6 @@ FN KepBlockOnLock (
 
     turnstile : ^KepTurnstile
     otherturnstile : ^KepTurnstile
-    aborted : UWORD
     owner : ^KeuThread = NULLPTR
 
     // First acquire a pointer to the current thread.
@@ -390,7 +389,7 @@ FN KepBlockOnLock (
 
     IF KeReadPtrAbortOnFault (
         &lock^.Ptr, // ptr
-        OUT aborted, // aborted
+        OUT: aborted, // aborted
     ) != current OR aborted THEN
 
         // Access aborted due to page fault or value of lock word changed.

@@ -168,12 +168,10 @@ FN (DbgCommandF) DbgCommandPcSym ()
         LEAVE
     END
 
-    numval : UWORD
-
     IF NOT RtlStringToNumber (
         &num[0], // src
         32, // bufsize
-        OUT numval, // num
+        OUT: numval, // num
     ) THEN
 
         RtlPrint ( "Usage: pcsym [pc]\n" )
@@ -181,15 +179,11 @@ FN (DbgCommandF) DbgCommandPcSym ()
         LEAVE
     END
 
-    dll : ^BlDll
-    symvalue : ^VOID
-    symname : ^UBYTE
-
     sym := DbgGetSymbolAndDll (
         CAST numval TO ^VOID, // address
-        OUT dll, // dll
-        OUT symvalue, // symvalue
-        OUT symname, // symname
+        OUT: dll, // dll
+        OUT: symvalue, // symvalue
+        OUT: symname, // symname
     )
 
     IF NOT sym THEN
@@ -222,12 +216,10 @@ FN (DbgCommandF) DbgCommandPeekUlong ()
         LEAVE
     END
 
-    numval : UWORD
-
     IF NOT RtlStringToNumber (
         &num[0], // src
         32, // bufsize
-        OUT numval, // num
+        OUT: numval, // num
     ) THEN
 
         RtlPrint ( "Usage: peekl [addr]\n" )
@@ -266,12 +258,10 @@ FN (DbgCommandF) DbgCommandPokeUlong ()
         LEAVE
     END
 
-    numval : UWORD
-
     IF NOT RtlStringToNumber (
         &num[0], // src
         32, // bufsize
-        OUT numval, // num
+        OUT: numval, // num
     ) THEN
 
         RtlPrint ( "Usage: pokel [addr] [value]\n" )
@@ -289,12 +279,10 @@ FN (DbgCommandF) DbgCommandPokeUlong ()
         LEAVE
     END
 
-    newval : UWORD
-
     IF NOT RtlStringToNumber (
         &num[0], // src
         32, // bufsize
-        OUT newval, // num
+        OUT: newval, // num
     ) THEN
 
         RtlPrint ( "Usage: pokel [addr] [value]\n" )
@@ -341,13 +329,10 @@ FN (DbgCommandF) DbgCommandSym ()
         LEAVE
     END
 
-    dll : ^BlDll
-    value : ^VOID
-
     IF NOT DbgGetSymbolValueByName (
         &name[0], // name
-        OUT dll, // dll
-        OUT value, // symvalue
+        OUT: dll, // dll
+        OUT: value, // symvalue
     ) THEN
 
         RtlPrint ( "Couldn't find that symbol\n" )
@@ -396,12 +381,10 @@ FN (DbgCommandF) DbgCommandCpu ()
         GOTO PrintCpuInfo
     END
 
-    numval : UWORD
-
     IF NOT RtlStringToNumber (
         &num[0], // src
         32, // bufsize
-        OUT numval, // num
+        OUT: numval, // num
     ) THEN
 
         RtlPrint ( "Usage: cpu [num]\n" )
@@ -622,12 +605,10 @@ FN (DbgCommandF) DbgCommandThreads ()
         LEAVE
     END
 
-    numval : UWORD
-
     IF NOT RtlStringToNumber (
         &num[0], // src
         32, // bufsize
-        OUT numval, // num
+        OUT: numval, // num
     ) THEN
 
         RtlPrint ( "Usage: threads [proc]\n" )
@@ -709,12 +690,10 @@ FN (DbgCommandF) DbgCommandWait ()
         LEAVE
     END
 
-    numval : UWORD
-
     IF NOT RtlStringToNumber (
         &num[0], // src
         32, // bufsize
-        OUT numval, // num
+        OUT: numval, // num
     ) THEN
 
         RtlPrint ( "Usage: wait [thread]\n" )
@@ -827,12 +806,10 @@ FN (DbgCommandF) DbgCommandTrace ()
         LEAVE
     END
 
-    numval : UWORD
-
     IF NOT RtlStringToNumber (
         &num[0], // src
         32, // bufsize
-        OUT numval, // num
+        OUT: numval, // num
     ) THEN
         RtlPrint ( "Usage: trace [thread]\n" )
 
@@ -887,12 +864,10 @@ FN (DbgCommandF) DbgCommandNode ()
         LEAVE
     END
 
-    numval : UWORD
-
     IF NOT RtlStringToNumber (
         &num[0], // src
         32, // bufsize
-        OUT numval, // num
+        OUT: numval, // num
     ) THEN
 
         RtlPrint ( "Usage: node [id]\n" )
@@ -1133,11 +1108,9 @@ FN (DbgCommandF) DbgCommandLock ()
         LEAVE
     END
 
-    dummy : ^RtlAvlNode
-
     class := KepFindLockClass (
         &classname[0], // name
-        OUT dummy, // outbucket
+        OUT: dummy, // outbucket
     )
 
     classcount := KepActiveLockClasses

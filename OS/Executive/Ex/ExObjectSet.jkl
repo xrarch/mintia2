@@ -48,14 +48,12 @@ EXPORT FN ExAppendSet (
 
     newcapacity := set^.Capacity + EXP_ARRAY_EXTENSION
 
-    newbuffer : ^VOID
-
     status := MmAllocatePool (
         set^.PoolIndex, // poolindex
         newcapacity * RTL_MACHINE_WORD_SIZE, // bytes
         set^.Tag, // tag
         MM_ALLOCATE_WAIT, // flags
-        OUT newbuffer, // ptr
+        OUT: newbuffer, // ptr
     )
 
     IF OsError ( status ) THEN

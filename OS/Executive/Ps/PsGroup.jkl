@@ -317,14 +317,11 @@ FN OsSetGroupProcess (
 
     // Set the group of a process, system service.
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -386,14 +383,12 @@ FN OsOpenGroupByPid (
 
     // Open a group object by PID, system service.
 
-    group : ^PsuProcessGroup
-
     // Get a referenced pointer to the group object.
 
     status := PspReferenceById (
         pid, // pid
         OS_GROUP_TYPE, // type
-        OUT group, // object
+        OUT group : ^PsuProcessGroup, // object
     )
 
     IF OsError ( status ) THEN
@@ -538,14 +533,11 @@ FN OsSignalGroup (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    group : ^PsuProcessGroup
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_GROUP_TYPE, // typeid
-        OUT group, // object
-        OUT access, // access
+        OUT group : ^PsuProcessGroup, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -577,14 +569,11 @@ FN OsNewSessionProcess (
 
     // Put a process into a new session, system service.
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN

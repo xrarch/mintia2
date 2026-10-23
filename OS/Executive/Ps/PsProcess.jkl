@@ -590,14 +590,12 @@ FN OsEnablePrivilegeProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsuProcess
-    access : UWORD
 
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -675,14 +673,11 @@ FN OsDisablePrivilegeProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -752,14 +747,11 @@ FN OsGrantPrivilegeProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -818,14 +810,11 @@ FN OsRevokePrivilegeProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -862,14 +851,11 @@ FN OsSignalProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -966,14 +952,11 @@ FN OsAwaitActivationProcess (
         RETURN status
     END
 
-    process : ^PsuProcess
-    access : UWORD
-
     status = ObuReferenceByHandle (
         handle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -1094,7 +1077,6 @@ FN PsuCreateProcess (
     // Create a process object - handle interface.
 
     kenode : ^KeuNode
-    access : UWORD
     status : OsStatus
 
     IF nodeid == OS_NULL_NODE THEN
@@ -1129,15 +1111,13 @@ FN PsuCreateProcess (
         END
     END
 
-    process : ^PsuProcess
-
     status = PsuCreateProcessObject (
         params, // params
         kenode, // kenode
         name, // name
         quotauid, // quotauid
         flags, // flags
-        OUT process, // process
+        OUT: process, // process
     )
 
     IF OsError ( status ) THEN
@@ -1222,14 +1202,12 @@ FN OsOpenProcessByPid (
 
     // Open a process object by PID, system service.
 
-    process : ^PsuProcess
-
     // Get a referenced pointer to the process object.
 
     status := PspReferenceById (
         pid, // pid
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
+        OUT process : ^PsuProcess, // object
     )
 
     IF OsError ( status ) THEN
@@ -1291,14 +1269,11 @@ FN OsReadStatusProcess (
 
     // Read the termination status of a process, system service.
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -1388,14 +1363,11 @@ FN PsuQueryProcess (
 
     // Query information about a process handle.
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -1456,14 +1428,12 @@ FN PsuQueryProcessByPid (
 
     // Open a process object by PID, system service.
 
-    process : ^PsuProcess
-
     // Get a referenced pointer to the process object.
 
     status := PspReferenceById (
         pid, // pid
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
+        OUT process : ^PsuProcess, // object
     )
 
     IF OsError ( status ) THEN
@@ -1536,14 +1506,11 @@ FN OsSetBasePriorityProcess (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -1670,13 +1637,11 @@ FN OsQueryProcesses (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    buf : ^VOID
-
     status := MmAllocateAndChargeSysBuffer (
         bufsize, // bytes
         TRUE, // pageable
         'PsQu', // tag
-        OUT buf, // ptr
+        OUT: buf, // ptr
     )
 
     IF OsError ( status ) THEN
@@ -1747,14 +1712,11 @@ FN PsuSetQuotaProcess (
 
     // Set the quota for a process, handle interface.
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -1824,14 +1786,11 @@ FN PsuQueryQuotaProcess (
 
     // Query the quota for a process, handle interface.
 
-    process : ^PsuProcess
-    access : UWORD
-
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN

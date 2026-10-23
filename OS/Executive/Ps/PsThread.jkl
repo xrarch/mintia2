@@ -34,13 +34,11 @@ FN PsuReallocateRemoteTurnstile ()
 
     // Replace the turnstile before freeing the old one.
 
-    newts : ^KepTurnstile
-
     status := MmAllocateFromObjectCache (
         KeNumaNodeFromSpacePointer ( thread )^.Psp^.TurnstileCache, // cache
         0, // flags
         'Turn', // tag
-        OUT newts, // ptr
+        OUT newts : ^KepTurnstile, // ptr
     )
 
     IF OsError ( status ) THEN
@@ -323,13 +321,11 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     // Allocate a turnstile.
 
-    turnstile : ^KepTurnstile
-
     status = MmAllocateFromObjectCache (
         kenode^.Psp^.TurnstileCache, // cache
         MM_ALLOCATE_WAIT, // flags
         'Turn', // tag
-        OUT turnstile, // ptr
+        OUT turnstile : ^KepTurnstile, // ptr
     )
 
     IF OsError ( status ) THEN
@@ -675,14 +671,11 @@ FN OsSuspendThread (
 
     // Suspend a thread, system service.
 
-    thread : ^PsuThread
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_THREAD_TYPE, // typeid
-        OUT thread, // object
-        OUT access, // access
+        OUT thread : ^PsuThread, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -712,14 +705,11 @@ FN OsUnsuspendThread (
 
     // Unsuspend a thread, system service.
 
-    thread : ^PsuThread
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_THREAD_TYPE, // typeid
-        OUT thread, // object
-        OUT access, // access
+        OUT thread : ^PsuThread, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -765,14 +755,11 @@ FN OsReadStatusThread (
 
     // Read the termination status of a thread, system service.
 
-    thread : ^PsuThread
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_THREAD_TYPE, // typeid
-        OUT thread, // object
-        OUT access, // access
+        OUT thread : ^PsuThread, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -838,14 +825,11 @@ FN PsuQueryThread (
 
     // Query information about a thread handle.
 
-    thread : ^PsuThread
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_THREAD_TYPE, // typeid
-        OUT thread, // object
-        OUT access, // access
+        OUT thread : ^PsuThread, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -910,14 +894,11 @@ FN OsSignalThread (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    thread : ^PsuThread
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_THREAD_TYPE, // typeid
-        OUT thread, // object
-        OUT access, // access
+        OUT thread : ^PsuThread, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -969,14 +950,11 @@ FN OsMaskSignalThread (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    thread : ^PsuThread
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_THREAD_TYPE, // typeid
-        OUT thread, // object
-        OUT access, // access
+        OUT thread : ^PsuThread, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -1015,14 +993,11 @@ FN OsDeliverOnWaitSignalThread (
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
-    thread : ^PsuThread
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_THREAD_TYPE, // typeid
-        OUT thread, // object
-        OUT access, // access
+        OUT thread : ^PsuThread, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -1055,14 +1030,11 @@ FN OsGetFaultStatusThread (
 
     // Get the status for the last fault that the thread incurred.
 
-    thread : ^PsuThread
-    access : UWORD
-
     status := ObuReferenceByHandle (
         handle, // handle
         OS_THREAD_TYPE, // typeid
-        OUT thread, // object
-        OUT access, // access
+        OUT thread : ^PsuThread, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -1251,9 +1223,6 @@ FN PsuCreateThread (
 
     // Create a thread object - handle interface.
 
-    process : ^PsuProcess
-    access : UWORD
-
     kenode : ^KeuNode
 
     IF nodeid == OS_NULL_NODE THEN
@@ -1282,8 +1251,8 @@ FN PsuCreateThread (
     status := ObuReferenceByHandle (
         processhandle, // handle
         OS_PROCESS_TYPE, // typeid
-        OUT process, // object
-        OUT access, // access
+        OUT process : ^PsuProcess, // object
+        OUT: access, // access
     )
 
     IF OsError ( status ) THEN
@@ -1298,8 +1267,6 @@ FN PsuCreateThread (
         GOTO Exit
     END
 
-    thread : ^PsuThread
-
     status = PsuCreateThreadObject (
         params, // params
         name, // name
@@ -1309,7 +1276,7 @@ FN PsuCreateThread (
         parameter2, // parameter2
         process, // process
         flags, // flags
-        OUT thread, // thread
+        OUT: thread, // thread
     )
 
     IF OsError ( status ) THEN

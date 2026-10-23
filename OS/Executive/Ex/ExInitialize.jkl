@@ -274,15 +274,13 @@ FN ExuInitializeDistanceLists ()
         IF kenode^.ProcessorCount != 0 THEN
             // First allocate the list.
 
-            list : ^^KeuNode
-
             status := MmAllocatePoolEx (
                 kenode, // kenode
                 FALSE, // pageable
                 SIZEOF ^KeuNode * nodes, // bytes
                 'NdDl', // tag
                 0, // flags
-                OUT list, // ptr
+                OUT list : ^^KeuNode, // ptr
             )
 
             IF OsError ( status ) THEN

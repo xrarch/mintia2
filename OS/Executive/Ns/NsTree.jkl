@@ -224,14 +224,12 @@ FN NspCreateEntry (
     // Create a new namespace entry and link it as a child of the parent.
     // Tree lock must be held exclusive.
 
-    entry : ^NsuEntry
-
     status := MmAllocatePool (
         TRUE, // pageable
         SIZEOF NsuEntry, // bytes
         'NsEn', // tag
         MM_ALLOCATE_WAIT, // flags
-        OUT entry, // ptr
+        OUT entry : ^NsuEntry, // ptr
     )
 
     IF OsError ( status ) THEN
@@ -626,12 +624,10 @@ FN NsuLookupEntryByPath (
             // entry so that we can't get multiple concurrent renames on the
             // same thing.
 
-            waitable : ^ExpActionWaitable
-
             status = ExPrepareWaitForAction (
                 &currententry^.Action, // action
                 MM_ALLOCATE_WAIT, // flags
-                OUT waitable, // waitable
+                OUT: waitable, // waitable
             )
 
             // Drop the lock.

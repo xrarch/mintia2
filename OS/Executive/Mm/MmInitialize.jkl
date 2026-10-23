@@ -165,14 +165,12 @@ FN MmpIdentifyUnwireableSections (
         IF type != MMP_WIRED_REGION THEN
             // Create an unwireable region record.
 
-            region : ^MmpUnwireableRegion
-
             status := MmAllocatePool (
                 FALSE, // pageable
                 SIZEOF MmpUnwireableRegion, // bytes
                 'Unwi', // tag
                 0, // flags
-                OUT region, // ptr
+                OUT region : ^MmpUnwireableRegion, // ptr
             )
 
             IF OsError ( status ) THEN
@@ -255,15 +253,13 @@ FN MmpReclaimMemory ()
 
     RtlInitializeList ( &MmpUnwireableList )
 
-    loaderhunk : ^VOID
-
     status := MmAllocatePool (
         FALSE, // pageable
         KeuLoaderBlock.ResourceCount * SIZEOF BlResource +
         KeuLoaderBlock.DllCount * SIZEOF BlDll, // bytes
         'Boot', // tag
         0, // flags
-        OUT loaderhunk, // ptr
+        OUT: loaderhunk, // ptr
     )
 
     IF OsError ( status ) THEN

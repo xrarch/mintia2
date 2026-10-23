@@ -17,14 +17,12 @@ FN (KeContinuationF) ExpWorkQueueLoop (
     queue := CAST continuation^.Parameter1 TO ^KeBalancedQueue
 
     WHILE TRUE DO
-        entry : ^RtlListEntry
-
         status := KeRemoveFromBalancedQueue (
             queue, // queue
             KE_KERNEL_MODE, // waitmode
             FALSE, // alertable
             NULLPTR, // timeout
-            OUT entry, // item
+            OUT: entry, // item
         )
 
         KeAssert ( NOT OsError ( status ) )
@@ -210,8 +208,6 @@ FN ExpInitializeWorkQueuesForNode (
         threads := workthreads[j]
 
         WHILE i < threads DO
-            thread : ^PsuThread
-
             status := PsCreateExecutiveThread (
                 kenode, // kenode
                 &name, // name
@@ -219,7 +215,7 @@ FN ExpInitializeWorkQueuesForNode (
                 &expnode^.WorkQueues[j], // parameter1
                 0, // parameter2
                 OS_THREAD_EAGER_KERNEL_STACK, // flags
-                OUT thread, // thread
+                OUT: thread, // thread
             )
 
             IF OsError ( status ) THEN
