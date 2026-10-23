@@ -8,7 +8,7 @@ STRUCT IopParseContext
     Text : ^UBYTE,
     Size : UWORD,
     Index : UWORD,
-    ClassListHead : ^IopKnownClass,
+    ClassListHead : ^IopClass,
 END
 
 #MACRO IopIsWhitespace ( c ) [ ((c) == ' ' OR (c) == '\t' OR (c) == '\n') ]
@@ -98,8 +98,8 @@ FN IopParseClass (
     // This just consists of pairs of strings that end up as key-value pairs in
     // the properties dictionary.
 
-    status := IopCreateKnownClass (
-        OUT: knownclass, // knownclass
+    status := IopCreateClass (
+        OUT: class, // class
     )
 
     IF OsError ( status ) THEN
@@ -144,8 +144,8 @@ FN IopParseClass (
             GOTO Exit
         END
 
-        status = IopSetKnownClassProperty (
-            knownclass, // knownclass
+        status = IopSetClassProperty (
+            class, // class
             &name, // name
             &value, // value
             FALSE, // canupdate
@@ -156,15 +156,15 @@ FN IopParseClass (
         END
     END
 
-    knownclass^.Entry.Next = CAST parse^.ClassListHead TO ^VOID
-    parse^.ClassListHead = knownclass
+    class^.Entry.Next = CAST parse^.ClassListHead TO ^VOID
+    parse^.ClassListHead = class
 
     status = OS_STATUS_SUCCESS
 
 @Exit
 
     IF OsError ( status ) THEN
-        IopDeleteKnownClass ( knownclass )
+        IopDeleteClass ( class )
     END
 
     RETURN status
@@ -201,18 +201,18 @@ FN IopParseDefinition (
 END
 
 #SECTION "PAGEtext"
-FN IopDeleteKnownClassList (
-    IN knownclass : ^IopKnownClass,
+FN IopDeleteClassList (
+    IN class : ^IopClass,
 )
 
-    // Delete a list of known classes produced by IopParseConfiguration.
+    // Delete a list of classes produced by IopParseConfiguration.
 
-    WHILE knownclass DO
-        next := CAST knownclass^.Entry.Next TO ^IopKnownClass
+    WHILE class DO
+        next := CAST class^.Entry.Next TO ^IopClass
 
-        IopDeleteKnownClass ( knownclass )
+        IopDeleteClass ( class )
 
-        knownclass = next 
+        class = next 
     END
 END
 
@@ -220,11 +220,11 @@ END
 FN IopParseConfiguration (
     IN configtext : ^UBYTE,
     IN configsize : UWORD,
-    OUT knownclass : ^IopKnownClass,
+    OUT knownclass : ^IopClass,
 ) : OsStatus
 
     // Parse the given configuration file data and return a list of
-    // IopKnownClass which represent the information found therein.
+    // IopClass which represent the information found therein.
 
     parse : IopParseContext
     parse.Text = configtext
@@ -236,7 +236,7 @@ FN IopParseConfiguration (
         status := IopParseDefinition ( &parse )
 
         IF OsError ( status ) THEN
-            IopDeleteKnownClassList ( parse.ClassListHead )
+            IopDeleteClassList ( parse.ClassListHead )
 
             RETURN status
         END

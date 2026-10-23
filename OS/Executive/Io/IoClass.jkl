@@ -5,19 +5,6 @@
 
 #INCLUDE "Iop.hjk"
 
-STRUCT IopClass
-    Superclass : ^IopClass,
-
-    Module : ^IopModule,
-
-    DispatchTable : ^IoPacketBasedCallF,
-
-    InstantiationCount : ULONG,
-    SubclassCount : ULONG,
-
-    DispatchTableSize : UINT,
-END
-
 FN (IoPacketBasedCallF) IopUninitializedDispatch (
     IN packet : ^IoPacket,
     IN trampoline : ^IoTrampoline,
@@ -27,24 +14,22 @@ FN (IoPacketBasedCallF) IopUninitializedDispatch (
 END
 
 #SECTION "PAGEtext"
-FN IopCreateClass (
-    IN module : ^IopModule,
-    IN classname : ^RtlString,
+FN IopInitializeClass (
+    IN class : ^IopClass,
     IN superclass : ^IopClass,
     IN dispatchtable : ^IoPacketBasedCallF,
     IN dispatchtablesize : UWORD,
-    OUT class : ^IopClass,
 ) : OsStatus
 
-    // Register a new IO class.
+    // Initialize a loaded instance of a class.
     // Returns NULLPTR upon failure.
 
     status := MmAllocatePool (
         FALSE, // pageable
-        SIZEOF IopClass + dispatchtablesize, // bytes
-        'Clas', // tag
+        dispatchtablesize, // bytes
+        'IoDs', // tag
         MM_ALLOCATE_WAIT, // flags
-        OUT class, // ptr
+        OUT mydispatch : ^IoPacketBasedCallF, // ptr
     )
 
     IF OsError ( status ) THEN
@@ -55,13 +40,6 @@ FN IopCreateClass (
 
     class^.InstantiationCount = 0
     class^.SubclassCount = 0
-
-    class^.Module = module
-
-    // Enough space was allocated at the end of the class object for the
-    // dispatch table.
-
-    mydispatch := CAST (class + SIZEOF IopClass) TO ^IoPacketBasedCallF
 
     class^.DispatchTable = mydispatch
     class^.DispatchTableSize = dispatchtablesize
@@ -116,11 +94,11 @@ FN IopCreateClass (
 END
 
 #SECTION "PAGEtext"
-FN IopDeleteClass (
+FN IopUninitializeClass (
     IN class : ^IopClass,
 )
 
-    // Delete a class.
+    // Uninitialize a loaded instance of a class.
 
     // Make sure there are no instantiations of this class and that any
     // subclasses have disappeared.
@@ -136,6 +114,13 @@ FN IopDeleteClass (
     // Unreference the superclass's module.
 
     IopUnreferenceModule ( class^.Superclass^.Module )
+
+    // Free the dispatch table.
+
+    MmFreePool (
+        class^.DispatchTable, // ptr
+        'IoDs', // tag
+    )
 END
 
 #ENTERSECTION "INITtext"

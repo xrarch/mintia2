@@ -44,16 +44,24 @@ END
     KeInitializeLock ( &(node)^.Lock )
 ]
 
-STRUCT IopKnownClass
-    Name : ^ExName,
-
+STRUCT IopClass
     Entry : RtlListEntry,
 
     Properties : ExuDictionary,
 
     Module : ^IopModule,
 
-    Class : ^IopClass,
+// The remainder of the structure corresponds to a loaded instance of a class
+// and is inert when the module is not loaded.
+
+    Superclass : ^IopClass,
+
+    DispatchTable : ^IoPacketBasedCallF,
+
+    InstantiationCount : ULONG,
+    SubclassCount : ULONG,
+
+    DispatchTableSize : UINT,
 END
 
 #DEFINE IOP_MODULE_LOADING 1
@@ -85,29 +93,29 @@ EXTERN FN IopUnreferenceModule (
 EXTERN FN IopParseConfiguration (
     IN configtext : ^UBYTE,
     IN configsize : UWORD,
-    OUT knownclass : ^IopKnownClass,
+    OUT knownclass : ^IopClass,
 ) : OsStatus
 
-EXTERN FN IopDeleteKnownClassList (
-    IN knownclass : ^IopKnownClass,
+EXTERN FN IopDeleteClassList (
+    IN class : ^IopClass,
 )
 
-EXTERN FN IopSetKnownClassProperty (
-    IN knownclass : ^IopKnownClass,
+EXTERN FN IopSetClassProperty (
+    IN class : ^IopClass,
     IN name : ^RtlString,
     IN value : ^RtlString,
     IN canupdate : UWORD,
 ) : OsStatus
 
-EXTERN FN IopGetKnownClassProperty (
-    IN knownclass : ^IopKnownClass,
+EXTERN FN IopGetClassProperty (
+    IN class : ^IopClass,
     IN name : ^RtlString,
 ) : ^RtlString
 
-EXTERN FN IopCreateKnownClass (
-    OUT knownclass : ^IopKnownClass,
+EXTERN FN IopCreateClass (
+    OUT class : ^IopClass,
 ) : OsStatus
 
-EXTERN FN IopDeleteKnownClass (
-    IN knownclass : ^IopKnownClass,
+EXTERN FN IopDeleteClass (
+    IN class : ^IopClass,
 )

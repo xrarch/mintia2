@@ -9,7 +9,7 @@
 IopCatalogLock : KeLock
 
 IopModuleDictionary : ExuDictionary
-IopKnownClassDictionary : ExuDictionary
+IopClassDictionary : ExuDictionary
 
 #SECTION "PAGEtext"
 FN IopLoadClassByName (
@@ -28,12 +28,12 @@ FN IopLoadClassByName (
 
 @RetryLockHeld
 
-    knownclass := CAST ExLookupDictionary (
-        &IopKnownClassDictionary, // dict
+    class = ExLookupDictionary (
+        &IopClassDictionary, // dict
         name, // key
-    ) TO ^IopKnownClass
+    )
 
-    IF NOT knownclass THEN
+    IF NOT class THEN
         // Don't know of this class.
 
         KeReleaseLock ( &IopCatalogLock )
@@ -41,7 +41,7 @@ FN IopLoadClassByName (
         RETURN OS_STATUS_UNKNOWN_IOCLASS
     END
 
-    module := knownclass^.Module
+    module := class^.Module
 
     IF ExIsActionInProgress ( &module^.LoadAction ) THEN
         // Someone else is loading it, wait for them to finish and then
@@ -71,11 +71,7 @@ FN IopLoadClassByName (
 
         module^.ClassReferences += 1
 
-        class = knownclass^.Class
-
         KeReleaseLock ( &IopCatalogLock )
-
-        KeAssert ( class != NULLPTR )
 
         RETURN OS_STATUS_SUCCESS
     END
@@ -225,58 +221,65 @@ FN IopLookupModule (
 END
 
 #SECTION "PAGEtext"
-FN IopCreateKnownClass (
-    OUT knownclass : ^IopKnownClass,
+FN IopCreateClass (
+    OUT class : ^IopClass,
 ) : OsStatus
 
-    // Create a known class structure.
+    // Create a class structure.
 
     status := MmAllocatePool (
         TRUE, // pageable
-        SIZEOF IopKnownClass, // bytes
+        SIZEOF IopClass, // bytes
         'IoKc', // tag
         MM_ALLOCATE_WAIT, // flags
-        OUT knownclass, // ptr
+        OUT class, // ptr
     )
 
     IF OsError ( status ) THEN
         RETURN status
     END
 
+    // Initialize the part of the class structure that is relevant to the
+    // catalog even when the class is not loaded.
+
     // Initialize the properties dictionary.
 
-    ExuInitializeDictionary ( &knownclass^.Properties )
+    ExuInitializeDictionary ( &class^.Properties )
+
+    // Initialize the module to unloaded.
+
+    class^.Module = NULLPTR
 
     RETURN OS_STATUS_SUCCESS
 END
 
 #SECTION "PAGEtext"
-FN IopGetKnownClassProperty (
-    IN knownclass : ^IopKnownClass,
+FN IopGetClassProperty (
+    IN class : ^IopClass,
     IN name : ^RtlString,
 ) : ^RtlString
 
-    // Return the value of a given property in the known class, or NULLPTR
+    // Return the value of a given property in the class, or NULLPTR
     // if none.
 
     RETURN ExLookupDictionary (
-        &knownclass^.Properties, // dict
+        &class^.Properties, // dict
         name, // key
     )
 END
 
 #SECTION "PAGEtext"
-FN IopSetKnownClassProperty (
-    IN knownclass : ^IopKnownClass,
+FN IopSetClassProperty (
+    IN class : ^IopClass,
     IN name : ^RtlString,
     IN value : ^RtlString,
     IN canupdate : UWORD,
 ) : OsStatus
 
-    // Set the given property in a known class structure.
+    // Set the given property in a class structure.
 
     RETURN ExInsertStringInDictionary (
-        &knownclass^.Properties, // dict
+        &class^.Properties, // dict
         name, // key
         value, // value
         canupdate, // canupdate
@@ -285,40 +288,38 @@ FN IopSetKnownClassProperty (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN IopDeleteKnownClass (
-    IN knownclass : ^IopKnownClass,
+EXPORT FN IopDeleteClass (
+    IN class : ^IopClass,
 )
 
-    // Delete a known class structure.
+    // Delete a class structure.
+    // If it was in a loaded state it should have been unloaded by now
+    // and IopUninitializeClass'd.
 
     ExEnumerateDictionary (
-        &knownclass^.Properties, // dict
+        &class^.Properties, // dict
         &ExDeleteStringDictionaryEntry, // func
         NULLPTR, // context
         TRUE, // delete
     )
 
     MmFreePool (
-        knownclass, // ptr
+        class, // ptr
         'IoKc', // tag
     )
 END
 
 #SECTION "PAGEtext"
-FN IopForgetKnownClasses (
+FN IopForgetModule (
     IN module : ^IopModule,
 ) : OsStatus
 
     // Forcibly forget a module's known classes. The catalog lock is held on
     // entry.
 
-    // First look up the module.
-
-    // If the module wasn't found, nothing to do.
-
-    // If the module was found and is currently loaded, unlock the catalog lock
-    // and initiate an unload and then retry the whole operation. If the unload
-    // fails, propagate the status to the caller.
+    // If the module is currently loaded, unlock the catalog lock and initiate
+    // an unload and then retry the whole operation. If the unload fails,
+    // propagate the status to the caller.
 
     // If the module was found and is unloaded, forget about it from the
     // catalog.
@@ -335,13 +336,13 @@ FN IopProcessConfiguration (
 
     // Process a driver configuration file.
 
-    // First parse the configuration and create an IopKnownClass for each
+    // First parse the configuration and create an IopClass for each
     // described class.
 
     status := IopParseConfiguration (
         configtext, // configtext
         configsize, // configsize
-        OUT: knownclass, // class
+        OUT: class, // class
     )
 
     IF OsError ( status ) THEN
@@ -365,13 +366,13 @@ FN IopProcessConfiguration (
     // If we already processed a configuration file for this module, we want to
     // forget whatever we learned there.
 
-    status = IopForgetKnownClasses ( module )
+    status = IopForgetModule ( module )
 
     IF OsError ( status ) THEN
         GOTO Exit
     END
 
-    // Insert all of the known classes into the IO catalog.
+    // Insert all of the classes into the IO catalog.
 
     // ...
 
@@ -380,7 +381,7 @@ FN IopProcessConfiguration (
     KeReleaseLock ( &IopCatalogLock )
 
     IF OsError ( status ) THEN
-        IopDeleteKnownClassList ( knownclass )
+        IopDeleteClassList ( class )
     END
 
     RETURN status
@@ -455,7 +456,7 @@ FN IopInitializeCatalog ()
 
     ExuInitializeDictionary ( &IopModuleDictionary )
 
-    ExuInitializeDictionary ( &IopKnownClassDictionary )
+    ExuInitializeDictionary ( &IopClassDictionary )
 
     // Create known modules for all of the bootloader's initial modules.
 
