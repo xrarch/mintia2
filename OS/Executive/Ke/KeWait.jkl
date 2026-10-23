@@ -327,20 +327,22 @@ FN KepUnwaitThread (
         END
     END
 
-    // Update the ticks the thread has spent sleeping.
+    IF thread^.WaitMode == KE_USER_MODE THEN
+        // Update the ticks the thread has spent sleeping.
 
-    waitedms := thread^.StateMs
-    currentms := KepLowTick ()
+        waitedms := thread^.StateMs
+        currentms := KepLowTick ()
 
-    IF waitedms < currentms THEN
-        thread^.SleepMs += (currentms - waitedms) << KEP_TICK_SHIFT
+        IF waitedms < currentms THEN
+            thread^.SleepMs += (currentms - waitedms) << KEP_TICK_SHIFT
 
-        // Update interactivity score.
+            // Update interactivity score.
 
-        KepUpdateInteractivity (
-            thread, // thread
-            FALSE, // deferupdate
-        )
+            KepUpdateInteractivity (
+                thread, // thread
+                FALSE, // deferupdate
+            )
+        END
     END
 
     // If it's associated with a balanced queue, we have to indicate that it's
