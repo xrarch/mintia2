@@ -727,6 +727,15 @@ EXPORT FN KeWaitForObjects (
                 // It'd be more difficult to try to intercept and cancel the
                 // deferred unwait somehow and this case should be quite rare.
 
+                // Tell the object that we aborted satisfaction since some
+                // object types may have done something before telling us to
+                // satisfy the wait which they need to undo now.
+
+                object^.Type^.AbortSatisfy (
+                    thread, // thread
+                    object, // object
+                )
+
                 KepReleaseObjectElevated ( object )
 
                 GOTO Wait

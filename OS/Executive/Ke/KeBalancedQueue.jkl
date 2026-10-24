@@ -133,6 +133,17 @@ FN (KepShouldSatisfyF) KepSatisfyBalancedQueue (
         queue^.ActiveThreadCount <= queue^.MaximumThreadCount
 END
 
+FN (KepAbortSatisfyF) KepAbortSatisfyBalancedQueue (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+)
+
+    // Satisfaction was aborted after we initially permitted it. Balanced queue
+    // doesn't have anything to do here.
+
+    NOTHING
+END
+
 FN (KepConsumeF) KepConsumeBalancedQueue (
     IN thread : ^KeuThread,
     IN object : ^KepDispatchHeader,
@@ -182,6 +193,7 @@ END
 #SECTION "text"
 KepBalancedQueueType : KepDispatchObjectType = {
     [ShouldSatisfy] = &KepSatisfyBalancedQueue,
+    [AbortSatisfy] = &KepAbortSatisfyBalancedQueue,
     [Consume] = &KepConsumeBalancedQueue,
     [Enqueue] = &KepEnqueueBalancedQueue,
     [Dequeue] = &KepDequeueWait,
