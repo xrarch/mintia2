@@ -102,7 +102,7 @@ FN KeuInitializeThread (
         thread, // thread
     )
 
-    KepInitializeDispatchObject (
+    KepInitializeQueuedDispatchObject (
         &thread^.SuspendHeader, // hdr
         "Suspended", // name
         &KepNotifEventType, // type
@@ -140,7 +140,7 @@ FN KeuInitializeThread (
         "Timeout", // name
     )
 
-    thread^.TimeoutWaitBlock.Object = &thread^.Timeout.Header
+    thread^.TimeoutWaitBlock.Object = &thread^.Timeout.Header.Header
     thread^.TimeoutWaitBlock.WakeStatus = OS_STATUS_WAIT_TIMEOUT
     thread^.TimeoutWaitBlock.Thread = thread
 
@@ -311,7 +311,7 @@ EXPORT FN KeSuspendThread (
 
     enqueuelapc := FALSE
 
-    ipl := KepAcquireObject ( &thread^.SuspendHeader )
+    ipl := KepAcquireObject ( &thread^.SuspendHeader.Header )
 
     count := thread^.SuspendCount
 
@@ -330,7 +330,7 @@ EXPORT FN KeSuspendThread (
         END
     END
 
-    KepReleaseObjectElevated ( &thread^.SuspendHeader )
+    KepReleaseObjectElevated ( &thread^.SuspendHeader.Header )
 
     // Enqueue the suspension LAPC outside the object lock or there will be
     // a lock ordering inversion.
@@ -356,7 +356,7 @@ EXPORT FN KeUnsuspendThread (
 
     // Unsuspend a thread. Return the old suspension count.
 
-    ipl := KepAcquireObject ( &thread^.SuspendHeader )
+    ipl := KepAcquireObject ( &thread^.SuspendHeader.Header )
 
     count := thread^.SuspendCount
 
@@ -377,7 +377,7 @@ EXPORT FN KeUnsuspendThread (
             // Satisfy any waits.
 
             IF thread^.SuspendHeader.WaiterCount THEN
-                KepSatisfyObject (
+                KepSatisfyQueuedObject (
                     &thread^.SuspendHeader, // object
                     0, // priorityboost
                     TRUE, // all
@@ -387,7 +387,7 @@ EXPORT FN KeUnsuspendThread (
         END
     END
 
-    KepReleaseObject ( &thread^.SuspendHeader, ipl )
+    KepReleaseObject ( &thread^.SuspendHeader.Header, ipl )
 
     RETURN count
 END

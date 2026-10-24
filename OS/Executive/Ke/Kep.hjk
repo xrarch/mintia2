@@ -564,8 +564,8 @@ EXTERN FN (KeInterruptF) KepClockTick (
     IN context : ^OsContext,
 )
 
-EXTERN FN KepSatisfyObject (
-    IN object : ^KepDispatchHeader,
+EXTERN FN KepSatisfyQueuedObject (
+    IN object : ^KepQueuedDispatchHeader,
     IN priorityboost : UWORD,
     IN all : UWORD,
     IN status : OsStatus,
@@ -1113,13 +1113,17 @@ EXTERN KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
 #END
 
 #MACRO KepInitializeDispatchObject ( hdr, name, type ) [
-    RtlInitializeList ( &(hdr)^.WaitListHead )
     NOTHING (hdr)^.Name = (name)
-    NOTHING (hdr)^.WaiterCount = 0
 #IF BLD_MP
     KepInitializeSpinlock ( &(hdr)^.Spinlock, "DispatchObject" )
 #END
     NOTHING (hdr)^.Type = (type)
+]
+
+#MACRO KepInitializeQueuedDispatchObject ( hdr, name, type ) [
+    KepInitializeDispatchObject ( &(hdr)^.Header, name, type )
+    RtlInitializeList ( &(hdr)^.WaitListHead )
+    NOTHING (hdr)^.WaiterCount = 0
 ]
 
 FNPTR KepShouldSatisfyF (
@@ -1138,15 +1142,26 @@ FNPTR KepEnqueueF (
     IN waitblock : ^KepWaitBlock,
 )
 
+FNPTR KepDequeueF (
+    IN object : ^KepDispatchHeader,
+    IN waitblock : ^KepWaitBlock,
+)
+
 STRUCT KepDispatchObjectType
     ShouldSatisfy : KepShouldSatisfyF,
     Consume : KepConsumeF,
     Enqueue : KepEnqueueF,
+    Dequeue : KepDequeueF,
 END
 
 EXTERN KepSynchEventType : KepDispatchObjectType
 
 EXTERN KepNotifEventType : KepDispatchObjectType
+
+EXTERN FN (KepDequeueF) KepDequeueWait (
+    IN object : ^KepDispatchHeader,
+    IN waitblock : ^KepWaitBlock,
+)
 
 EXTERN KepIndexFirstBitClear : UBYTE[256]
 EXTERN KepIndexFirstBitSet : UBYTE[256]

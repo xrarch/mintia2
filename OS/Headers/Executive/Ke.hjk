@@ -301,18 +301,24 @@ FNPTR KeInterruptF (
 )
 
 STRUCT KepDispatchHeader
-    WaitListHead : RtlListEntry,
     Name : ^UBYTE,
     Type : ^KepDispatchObjectType,
 #IF BLD_MP
     Spinlock : KepSpinlock,
 #END
+
+END
+
+STRUCT KepQueuedDispatchHeader
+    Header : KepDispatchHeader,
+
+    WaitListHead : RtlListEntry,
     SignalCount : ULONG,
     WaiterCount : ULONG,
 END
 
 STRUCT KeTimer
-    Header : KepDispatchHeader,
+    Header : KepQueuedDispatchHeader,
 
     EnqueuedTo : ^KepPrb,
     Entry : RtlHeapEntry,
@@ -424,11 +430,11 @@ EXTERN FN KeUnmaskApcs (
 EXTERN FN KeAreApcsDeliverable () : UWORD
 
 STRUCT KeEvent
-    Header : KepDispatchHeader,
+    Header : KepQueuedDispatchHeader,
 END
 
 STRUCT KeSemaphore
-    Header : KepDispatchHeader,
+    Header : KepQueuedDispatchHeader,
 END
 
 EXTERN FN KeSignalProcess (
@@ -563,7 +569,7 @@ EXTERN FN KeWaitForObjects (
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
     IN objectcount : UWORD,
-    IN objecttable : ^^KepDispatchHeader,
+    IN objecttable : ^^VOID,
     IN waitblocktable : ^KepWaitBlock,
     IN continuation : ^KeContinuation,
 ) : OsStatus
@@ -584,12 +590,13 @@ EXTERN FN KeWaitForSingleObject (
     IN waitmode : UWORD,
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
-    IN object : ^KepDispatchHeader,
+    IN object : ^VOID,
     IN continuation : ^KeContinuation,
 ) : OsStatus
 
 STRUCT KeBalancedQueue
-    Header : KepDispatchHeader,
+    Header : KepQueuedDispatchHeader,
+
     ThreadListHead : RtlListEntry,
     ItemListHead : RtlListEntry,
     ActiveThreadCount : ULONG,

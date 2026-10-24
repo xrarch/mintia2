@@ -11,7 +11,9 @@ FN (KepShouldSatisfyF) KepSatisfyWhenSignaled (
 
     // Immediately satisfy a wait on this object when it is signaled.
 
-    RETURN object^.SignalCount
+    queuedobject := CAST object TO ^KepQueuedDispatchHeader
+
+    RETURN queuedobject^.SignalCount
 END
 
 FN (KepConsumeF) KepConsumeSignalCount (
@@ -22,7 +24,9 @@ FN (KepConsumeF) KepConsumeSignalCount (
     // When this object satisfied the thread's wait, that consumes a signal
     // count.
 
-    object^.SignalCount -= 1
+    queuedobject := CAST object TO ^KepQueuedDispatchHeader
+
+    queuedobject^.SignalCount -= 1
 END
 
 FN (KepConsumeF) KepConsumeNoOp (
@@ -43,24 +47,53 @@ FN (KepEnqueueF) KepEnqueueWaitFifo (
 
     // Insert thread at tail so that oldest waiter gets awoken first.
 
+    queuedobject := CAST object TO ^KepQueuedDispatchHeader
+
     RtlInsertAtTailList (
-        &object^.WaitListHead, // head
+        &queuedobject^.WaitListHead, // head
         &waitblock^.Entry, // entry
     )
+
+    KeAssert ( queuedobject^.WaiterCount != 0xFFFFFFFF )
+
+    queuedobject^.WaiterCount += 1
+END
+
+FN (KepDequeueF) KepDequeueWait (
+    IN object : ^KepDispatchHeader,
+    IN waitblock : ^KepWaitBlock,
+)
+
+    // Dequeue the waitblock.
+
+    RtlRemoveEntryList ( &waitblock^.Entry )
+
+    // Decrement waiter count, since this wait block wasn't
+    // satisfied yet.
+
+    queuedobject := CAST object TO ^KepQueuedDispatchHeader
+
+    KeAssert ( queuedobject^.WaiterCount != 0 )
+
+    queuedobject^.WaiterCount -= 1
 END
 
 // Also shared with semaphores.
+#SECTION "text"
 PUBLIC KepSynchEventType : KepDispatchObjectType = {
     [ShouldSatisfy] = &KepSatisfyWhenSignaled,
     [Consume] = &KepConsumeSignalCount,
     [Enqueue] = &KepEnqueueWaitFifo,
+    [Dequeue] = &KepDequeueWait,
 }
 
 // Also shared with timers.
+#SECTION "text"
 PUBLIC KepNotifEventType : KepDispatchObjectType = {
     [ShouldSatisfy] = &KepSatisfyWhenSignaled,
     [Consume] = &KepConsumeNoOp,
     [Enqueue] = &KepEnqueueWaitFifo,
+    [Dequeue] = &KepDequeueWait,
 }
 
 EXPORT FN KeInitializeEvent (
@@ -76,7 +109,7 @@ EXPORT FN KeInitializeEvent (
         type = &KepNotifEventType
     END
 
-    KepInitializeDispatchObject (
+    KepInitializeQueuedDispatchObject (
         &event^.Header, // hdr
         name, // name
         type, // type
@@ -93,12 +126,12 @@ EXPORT FN KeResetEvent (
     IN event : ^KeEvent,
 ) : UWORD
 
-    ipl := KepAcquireObject ( &event^.Header )
+    ipl := KepAcquireObject ( &event^.Header.Header )
 
     old := event^.Header.SignalCount
     event^.Header.SignalCount = 0
 
-    KepReleaseObject ( &event^.Header, ipl )
+    KepReleaseObject ( &event^.Header.Header, ipl )
 
     RETURN old
 END
@@ -110,10 +143,10 @@ EXPORT FN KeSignalEvent (
 
     // Signal the event object and return its previous state.
 
-    ipl := KepAcquireObject ( &event^.Header )
+    ipl := KepAcquireObject ( &event^.Header.Header )
 
     IF event^.Header.SignalCount THEN
-        KepReleaseObject ( &event^.Header, ipl )
+        KepReleaseObject ( &event^.Header.Header, ipl )
 
         RETURN 1
     END
@@ -121,10 +154,10 @@ EXPORT FN KeSignalEvent (
     IF event^.Header.WaiterCount THEN
         // Satisfy waits on the object.
 
-        IF event^.Header.Type == &KepNotifEventType THEN
+        IF event^.Header.Header.Type == &KepNotifEventType THEN
             // Satisfy ALL waits.
 
-            KepSatisfyObject (
+            KepSatisfyQueuedObject (
                 &event^.Header, // object
                 priorityboost, // priorityboost
                 TRUE, // all
@@ -138,7 +171,7 @@ EXPORT FN KeSignalEvent (
         ELSE
             // Satisfy one wait.
 
-            IF NOT KepSatisfyObject (
+            IF NOT KepSatisfyQueuedObject (
                 &event^.Header, // object
                 priorityboost, // priorityboost
                 FALSE, // all
@@ -154,7 +187,7 @@ EXPORT FN KeSignalEvent (
         event^.Header.SignalCount = 1
     END
 
-    KepReleaseObject ( &event^.Header, ipl )
+    KepReleaseObject ( &event^.Header.Header, ipl )
 
     RETURN 0
 END

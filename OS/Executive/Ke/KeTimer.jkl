@@ -34,7 +34,7 @@
 
 #MACRO KepReleaseTimerAndTree ( timer, prb, ipl ) [
     KepReleaseTwoSpinlocksLower (
-        &(timer)^.Header.Spinlock, // lock1
+        &(timer)^.Header.Header.Spinlock, // lock1
         &(prb)^.TimerTreeLock, // lock2
         ipl, // ipl
     )
@@ -87,7 +87,7 @@ EXPORT FN KeInitializeTimer (
     //       custody of the timer package and should never be enqueued on its
     //       own.
 
-    KepInitializeDispatchObject (
+    KepInitializeQueuedDispatchObject (
         &timer^.Header, // header
         name, // name
         &KepNotifEventType, // type
@@ -111,7 +111,7 @@ EXPORT FN KeEnqueueTimer (
 
     ipl := KepAcquireTimerTree ( prb )
 
-    KepAcquireObjectElevated ( &timer^.Header )
+    KepAcquireObjectElevated ( &timer^.Header.Header )
 
     IF timer^.EnqueuedTo THEN
         // It was already inserted in a timer tree.
@@ -234,7 +234,7 @@ EXPORT FN KeDequeueTimer (
 
     // Acquire the timer's object lock.
 
-    KepAcquireObjectElevated ( &timer^.Header )
+    KepAcquireObjectElevated ( &timer^.Header.Header )
 
     // Remove it from the timer tree structure.
 
@@ -261,12 +261,12 @@ EXPORT FN KeResetTimer (
     IN timer : ^KeTimer,
 ) : UWORD
 
-    ipl := KepAcquireObject ( &timer^.Header )
+    ipl := KepAcquireObject ( &timer^.Header.Header )
 
     old := timer^.Header.SignalCount
     timer^.Header.SignalCount = 0
 
-    KepReleaseObject ( &timer^.Header, ipl )
+    KepReleaseObject ( &timer^.Header.Header, ipl )
 
     RETURN old
 END
@@ -332,7 +332,7 @@ FN (KeDpcF) KepTimerExpiration (
 
         // Acquire the object lock of the timer.
 
-        KepAcquireObjectElevated ( &timer^.Header )
+        KepAcquireObjectElevated ( &timer^.Header.Header )
 
         // Remove from the structure.
 
@@ -352,7 +352,7 @@ FN (KeDpcF) KepTimerExpiration (
         // Signal the timer if there are waiters.
 
         IF timer^.Header.WaiterCount THEN
-            KepSatisfyObject (
+            KepSatisfyQueuedObject (
                 &timer^.Header, // object
                 0, // priorityboost
                 TRUE, // all
@@ -373,7 +373,7 @@ FN (KeDpcF) KepTimerExpiration (
 
         // Release the timer's object lock.
 
-        KepReleaseObjectElevated ( &timer^.Header ) 
+        KepReleaseObjectElevated ( &timer^.Header.Header ) 
 
         // Execute the DPC function. This MUST be done outside of any spinlocks,
         // just like any other DPC function.

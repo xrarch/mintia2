@@ -12,7 +12,7 @@ EXPORT FN KeInitializeSemaphore (
 
     // Initialize a semaphore.
 
-    KepInitializeDispatchObject (
+    KepInitializeQueuedDispatchObject (
         &semaphore^.Header, // hdr
         name, // name
         &KepSynchEventType, // type
@@ -29,25 +29,27 @@ EXPORT FN KeReleaseSemaphore (
 
     // Signal the semaphore object and return its previous state.
 
-    ipl := KepAcquireObject ( &semaphore^.Header )
+    ipl := KepAcquireObject ( &semaphore^.Header.Header )
 
     oldcount := semaphore^.Header.SignalCount
 
     IF oldcount + count < count THEN
         // oldcount+count overflows
 
-        KepReleaseObject ( &semaphore^.Header, ipl )
+        KepReleaseObject ( &semaphore^.Header.Header, ipl )
 
         RETURN oldcount
     END
 
-    IF semaphore^.Header.SignalCount OR NOT semaphore^.Header.WaiterCount THEN
+    IF semaphore^.Header.SignalCount OR
+        NOT semaphore^.Header.WaiterCount THEN
+
         // Signal count is nonzero or there are no waiters.
         // Just add the count and return.
 
         semaphore^.Header.SignalCount = oldcount + count
 
-        KepReleaseObject ( &semaphore^.Header, ipl )
+        KepReleaseObject ( &semaphore^.Header.Header, ipl )
 
         RETURN oldcount
     END
@@ -55,7 +57,7 @@ EXPORT FN KeReleaseSemaphore (
     // Satisfy waits.
 
     WHILE count DO
-        IF NOT KepSatisfyObject (
+        IF NOT KepSatisfyQueuedObject (
             &semaphore^.Header, // object
             priorityboost, // priorityboost
             FALSE, // all
@@ -80,7 +82,7 @@ EXPORT FN KeReleaseSemaphore (
 
     semaphore^.Header.SignalCount = oldcount + count
 
-    KepReleaseObject ( &semaphore^.Header, ipl )
+    KepReleaseObject ( &semaphore^.Header.Header, ipl )
 
     RETURN 0
 END

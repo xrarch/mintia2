@@ -55,7 +55,7 @@ FN KepWakeBalancedQueue (
     // A thread associated with this queue has disassociated from it, or is
     // going to sleep. See if we should wake up another thread.
 
-    KepAcquireObjectElevated ( &queue^.Header )
+    KepAcquireObjectElevated ( &queue^.Header.Header )
 
     oldcount := KeIncrementUlongMp (
         &queue^.ActiveThreadCount, // ptr
@@ -77,7 +77,7 @@ FN KepWakeBalancedQueue (
         // item. If someone else steals it, they'll adjust their timeout and go
         // back to sleep.
 
-        KepSatisfyObject (
+        KepSatisfyQueuedObject (
             &queue^.Header, // object
             0, // priorityboost
             FALSE, // all
@@ -85,7 +85,7 @@ FN KepWakeBalancedQueue (
         )
     END
 
-    KepReleaseObjectElevated ( &queue^.Header )
+    KepReleaseObjectElevated ( &queue^.Header.Header )
 END
 
 FN KepDisassociateFromBalancedQueue (
@@ -129,7 +129,7 @@ FN (KepShouldSatisfyF) KepSatisfyBalancedQueue (
 
     queue := CAST object TO ^KeBalancedQueue
 
-    RETURN object^.SignalCount AND
+    RETURN queue^.Header.SignalCount AND
         queue^.ActiveThreadCount <= queue^.MaximumThreadCount
 END
 
@@ -141,11 +141,13 @@ FN (KepConsumeF) KepConsumeBalancedQueue (
     // When a balanced queue satisfied the thread's wait, that consumes a signal
     // count and a queue item.
 
-    object^.SignalCount -= 1
+    queue := CAST object TO ^KeBalancedQueue
+
+    queue^.Header.SignalCount -= 1
 
     // Grab the item.
 
-    item := (CAST object TO ^KeBalancedQueue)^.ItemListHead.Next
+    item := queue^.ItemListHead.Next
 
     // Stash it in the thread object.
 
@@ -165,16 +167,24 @@ FN (KepEnqueueF) KepEnqueueBalancedQueue (
     // Insert thread at head so that worker threads are scheduled in a LIFO
     // order, which promotes cache locality.
 
+    queue := CAST object TO ^KeBalancedQueue
+
     RtlInsertAtHeadList (
-        &object^.WaitListHead, // head
+        &queue^.Header.WaitListHead, // head
         &waitblock^.Entry, // entry
     )
+
+    KeAssert ( queue^.Header.WaiterCount != 0xFFFFFFFF )
+
+    queue^.Header.WaiterCount += 1
 END
 
+#SECTION "text"
 KepBalancedQueueType : KepDispatchObjectType = {
     [ShouldSatisfy] = &KepSatisfyBalancedQueue,
     [Consume] = &KepConsumeBalancedQueue,
     [Enqueue] = &KepEnqueueBalancedQueue,
+    [Dequeue] = &KepDequeueWait,
 }
 
 EXPORT FN KeInitializeBalancedQueue (
@@ -187,7 +197,7 @@ EXPORT FN KeInitializeBalancedQueue (
     // These have a dispatch header, but it should *never* be waited on
     // directly, only KeRemoveFromBalancedQueue should be used.
 
-    KepInitializeDispatchObject (
+    KepInitializeQueuedDispatchObject (
         &queue^.Header, // header
         name, // name
         &KepBalancedQueueType, // type
@@ -222,7 +232,7 @@ EXPORT FN KeInsertIntoBalancedQueue (
 
     // Acquire the object spinlock.
 
-    ipl := KepAcquireObject ( &queue^.Header )
+    ipl := KepAcquireObject ( &queue^.Header.Header )
 
     IF queue^.Header.WaiterCount AND
         queue^.ActiveThreadCount < queue^.MaximumThreadCount THEN
@@ -233,7 +243,7 @@ EXPORT FN KeInsertIntoBalancedQueue (
         // item. If someone else steals it, they'll adjust their timeout and go
         // back to sleep.
 
-        KepSatisfyObject (
+        KepSatisfyQueuedObject (
             &queue^.Header, // object
             priorityboost, // priorityboost
             FALSE, // all
@@ -258,7 +268,7 @@ EXPORT FN KeInsertIntoBalancedQueue (
 
     queue^.Header.SignalCount += 1
 
-    KepReleaseObject ( &queue^.Header, ipl )
+    KepReleaseObject ( &queue^.Header.Header, ipl )
 END
 
 EXPORT FN KeRemoveFromBalancedQueue (
@@ -320,7 +330,7 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
         // Make a quick check for an entry before trying to wait.
 
-        KepAcquireObjectElevated ( &queue^.Header )
+        KepAcquireObjectElevated ( &queue^.Header.Header )
 
         IF NOT RtlEmptyList ( &queue^.ItemListHead ) AND
             queue^.ActiveThreadCount <= queue^.MaximumThreadCount THEN
@@ -335,12 +345,12 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
             queue^.Header.SignalCount -= 1
 
-            KepReleaseObject ( &queue^.Header, ipl )
+            KepReleaseObject ( &queue^.Header.Header, ipl )
 
             RETURN OS_STATUS_SUCCESS
         END
 
-        KepReleaseObjectElevated ( &queue^.Header )
+        KepReleaseObjectElevated ( &queue^.Header.Header )
     END
 
     KepLowerIpl ( ipl )
@@ -349,7 +359,7 @@ EXPORT FN KeRemoveFromBalancedQueue (
         waitmode, // waitmode
         alertable, // alertable
         timeout, // timeout
-        &queue^.Header, // object
+        queue, // object
         NULLPTR, // continuation
     )
 

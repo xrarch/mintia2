@@ -19,14 +19,10 @@
     IF (waitblock)^.Flags & KEP_WB_DEQUEUED == 0 THEN
         // Remove the wait block.
 
-        RtlRemoveEntryList ( &(waitblock)^.Entry )
-
-        // Decrement waiter count, since this wait block wasn't
-        // satisfied yet.
-
-        KeAssert ( object^.WaiterCount != 0 )
-
-        object^.WaiterCount -= 1
+        object^.Type^.Dequeue (
+            object, // object
+            waitblock, // waitblock
+        )
     END
 
     // Release the object lock.
@@ -429,8 +425,8 @@ END
 
 #END
 
-FN KepSatisfyObject (
-    IN object : ^KepDispatchHeader,
+FN KepSatisfyQueuedObject (
+    IN object : ^KepQueuedDispatchHeader,
     IN priorityboost : UWORD,
     IN all : UWORD,
     IN status : OsStatus,
@@ -527,7 +523,7 @@ EXPORT FN KeWaitForObjects (
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
     IN objectcount : UWORD,
-    IN objecttable : ^^KepDispatchHeader,
+    IN objecttable : ^^VOID,
     IN waitblocktable : ^KepWaitBlock,
     IN continuation : ^KeContinuation,
 ) : OsStatus
@@ -776,10 +772,6 @@ EXPORT FN KeWaitForObjects (
             waitblock, // waitblock
         )
 
-        KeAssert ( object^.WaiterCount != 0xFFFFFFFF )
-
-        object^.WaiterCount += 1
-
         KepReleaseObjectElevated ( object )
 
         waitblock += SIZEOF KepWaitBlock
@@ -909,7 +901,7 @@ EXPORT FN KeWaitForSingleObject (
     IN waitmode : UWORD,
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
-    IN object : ^KepDispatchHeader,
+    IN object : ^VOID,
     IN continuation : ^KeContinuation,
 ) : OsStatus
 
@@ -917,7 +909,7 @@ EXPORT FN KeWaitForSingleObject (
     // interval in milliseconds can be supplied. If it is NULLPTR, the timeout
     // is infinite.
 
-    objecttable : ^KepDispatchHeader[1]
+    objecttable : ^VOID[1]
     objecttable[0] = object
 
     RETURN KeWaitForObjects (
