@@ -53,12 +53,21 @@ EXTERN FN KeuDisconnectInterrupt (
     IN interrupt : ^KeuInterrupt,
 ) : UWORD
 
+UNION KepWaitBlockLinks
+    List : RtlListEntry,
+    Heap : RtlHeapEntry,
+END
+
 STRUCT KepWaitBlock
-    Entry : RtlListEntry,
+    Links : KepWaitBlockLinks,
     Thread : ^KeuThread,
     Object : ^KepDispatchHeader,
     Argument : ^VOID,
-    WakeStatus : ULONG,
+    Context : ULONG,
+    Index : UBYTE,
+    Spare1 : UBYTE,
+    Spare2 : UBYTE,
+    Spare3 : UBYTE,
 END
 
 #IF BLD_LOCKDEP

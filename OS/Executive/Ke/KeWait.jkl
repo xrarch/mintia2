@@ -440,7 +440,7 @@ FN KepSatisfyQueuedObject (
     satisfied := FALSE
 
     WHILE listentry != listhead DO
-        waitblock := CONTAINEROF listentry TO KepWaitBlock.Entry
+        waitblock := CONTAINEROF listentry TO KepWaitBlock.Links.List
         listentry = listentry^.Next
 
         thread := waitblock^.Thread
@@ -450,7 +450,7 @@ FN KepSatisfyQueuedObject (
 
         waitblock^.Thread = NULLPTR
 
-        RtlRemoveEntryList ( &waitblock^.Entry )
+        RtlRemoveEntryList ( &waitblock^.Links.List )
 
         // Decrement our waiter count.
 
@@ -459,7 +459,18 @@ FN KepSatisfyQueuedObject (
         wakestatus := status
 
         IF NOT wakestatus THEN
-            wakestatus = waitblock^.WakeStatus
+            // Caller didn't ask for any particular status, so return the index
+            // of the object that was being waited upon, within the thread's
+            // original wait table.
+
+            wakestatus = waitblock^.Index
+
+            IF object == &thread^.Timeout THEN
+                // The object is the thread's integral timeout timer, so it
+                // should receive a status of OS_STATUS_WAIT_TIMEOUT.
+
+                wakestatus = OS_STATUS_WAIT_TIMEOUT
+            END
         END
 
         IF NOT KepTryCompleteWait (
@@ -577,7 +588,7 @@ EXPORT FN KeWaitForObjects (
 
     WHILE i < objectcount DO
         waitblock^.Thread = thread
-        waitblock^.WakeStatus = i
+        waitblock^.Index = i
 
         IF objecttable THEN
             waitblock^.Object = objecttable[i].Object
@@ -814,7 +825,7 @@ EXPORT FN KeWaitForObjects (
 
         RtlInsertAtTailList (
             &thread^.Timeout.Header.WaitListHead, // head
-            &waitblock^.Entry, // entry
+            &waitblock^.Links.List, // entry
         )
 
         thread^.Timeout.Header.WaiterCount = 1
