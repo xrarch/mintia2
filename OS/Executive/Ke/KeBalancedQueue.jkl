@@ -121,6 +121,7 @@ END
 FN (KepShouldSatisfyF) KepSatisfyBalancedQueue (
     IN thread : ^KeuThread,
     IN object : ^KepDispatchHeader,
+    IN argument : ^VOID,
 ) : UWORD
 
     // Immediately satisfy a wait on a balanced queue when it is signaled (which
@@ -136,6 +137,7 @@ END
 FN (KepAbortSatisfyF) KepAbortSatisfyBalancedQueue (
     IN thread : ^KeuThread,
     IN object : ^KepDispatchHeader,
+    IN argument : ^VOID,
 )
 
     // Satisfaction was aborted after we initially permitted it. Balanced queue
@@ -147,6 +149,7 @@ END
 FN (KepConsumeF) KepConsumeBalancedQueue (
     IN thread : ^KeuThread,
     IN object : ^KepDispatchHeader,
+    IN argument : ^VOID,
 )
 
     // When a balanced queue satisfied the thread's wait, that consumes a signal
@@ -160,9 +163,9 @@ FN (KepConsumeF) KepConsumeBalancedQueue (
 
     item := queue^.ItemListHead.Next
 
-    // Stash it in the thread object.
+    // Return the item.
 
-    thread^.QueueItem = item
+    NOTHING (CAST argument TO ^^RtlListEntry)^ = item
 
     // Remove it from the list.
 
@@ -294,8 +297,8 @@ EXPORT FN KeRemoveFromBalancedQueue (
     // Remove an item from the balanced queue. If there are too many threads, or
     // there are no items to remove, we block. 
 
-    // Not allowed at >= KEP_IPL_APC because the QueueItem field of the thread
-    // struct could get corrupted if this happens in an APC.
+    // Not allowed in an APC because the associated balanced queue can conflict
+    // between APC context and normal context.
 
     KeAssert ( KepCurrentIpl () < KEP_IPL_APC )
 
@@ -367,18 +370,21 @@ EXPORT FN KeRemoveFromBalancedQueue (
 
     KepLowerIpl ( ipl )
 
+    queueitem : ^RtlListEntry[1]
+
     status := KeWaitForSingleObject (
         waitmode, // waitmode
         alertable, // alertable
         timeout, // timeout
         queue, // object
+        &queueitem[0], // argument
         NULLPTR, // continuation
     )
 
     IF status == 0 THEN
         // Got an item.
 
-        item = thread^.QueueItem
+        item = queueitem[0]
 
         status = OS_STATUS_SUCCESS
     END

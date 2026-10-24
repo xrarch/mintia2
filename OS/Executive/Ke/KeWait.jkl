@@ -7,8 +7,6 @@
 #INCLUDE "<ll>/System/OsStatus.hjk"
 #INCLUDE "<ll>/System/OsSignal.hjk"
 
-#DEFINE KEP_WB_DEQUEUED 2
-
 #MACRO KepDequeueWaitBlock ( object, waitblock ) [
     object = (waitblock)^.Object
 
@@ -16,7 +14,7 @@
 
     KepAcquireObjectElevated ( object )
 
-    IF (waitblock)^.Flags & KEP_WB_DEQUEUED == 0 THEN
+    IF (waitblock)^.Thread != NULLPTR THEN
         // Remove the wait block.
 
         object^.Type^.Dequeue (
@@ -197,7 +195,7 @@ FN KepMasterContinuation ()
     hastimeout := thread^.WaitHasTimeout
     waitblocktable = thread^.WaitBlockTable
     alertable := thread^.Alertable
-    objecttable : ^^KepDispatchHeader = NULLPTR
+    objecttable : ^KeWaitEntry = NULLPTR
 
     IF objectcount <= KE_THREAD_WAIT_BLOCKS THEN
         // The integral thread wait block table was used.
@@ -206,12 +204,13 @@ FN KepMasterContinuation ()
         // to save the objects they point to now.
 
         IF objectcount != 0 THEN
-            savedobjects : ^KepDispatchHeader[KE_THREAD_WAIT_BLOCKS]
+            savedobjects : KeWaitEntry[KE_THREAD_WAIT_BLOCKS]
 
             i := 0
 
             WHILE i < objectcount DO
-                savedobjects[i] = waitblocktable[i].Object
+                savedobjects[i].Object = waitblocktable[i].Object
+                savedobjects[i].Argument = waitblocktable[i].Argument
 
                 i += 1
             END
@@ -446,9 +445,10 @@ FN KepSatisfyQueuedObject (
 
         thread := waitblock^.Thread
 
-        // Set the wait block dequeued and remove it from our queue.
+        // Indicate that the wait block was dequeued (by clearing the thread
+        // pointer) and remove it from our queue.
 
-        waitblock^.Flags |= KEP_WB_DEQUEUED
+        waitblock^.Thread = NULLPTR
 
         RtlRemoveEntryList ( &waitblock^.Entry )
 
@@ -514,16 +514,12 @@ FN KepCaptureCurrentTicksFunc (
     KepCaptureCurrentTicks ( time )
 END
 
-#MACRO KepQueueObject ( object ) [
-    (CONTAINEROF (object) TO KeBalancedQueue.Header)
-]
-
 EXPORT FN KeWaitForObjects (
     IN waitmode : UWORD,
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
     IN objectcount : UWORD,
-    IN objecttable : ^^VOID,
+    IN objecttable : ^KeWaitEntry,
     IN waitblocktable : ^KepWaitBlock,
     IN continuation : ^KeContinuation,
 ) : OsStatus
@@ -582,19 +578,19 @@ EXPORT FN KeWaitForObjects (
     WHILE i < objectcount DO
         waitblock^.Thread = thread
         waitblock^.WakeStatus = i
-        waitblock^.Flags = 0
 
         IF objecttable THEN
-            waitblock^.Object = objecttable[i]
+            waitblock^.Object = objecttable[i].Object
+            waitblock^.Argument = objecttable[i].Argument
         END
 
         i += 1
         waitblock += SIZEOF KepWaitBlock
     END
 
-    // Clear timeout wait block flags field.
+    // Set timeout wait block thread field.
 
-    thread^.TimeoutWaitBlock.Flags = 0
+    thread^.TimeoutWaitBlock.Thread = thread
 
     // Set the wait values in the thread.
 
@@ -699,7 +695,7 @@ EXPORT FN KeWaitForObjects (
     i = 0
 
     WHILE i < objectcount DO
-        object = waitblocktable[i].Object
+        object = waitblock^.Object
 
         KepAcquireObjectElevated ( object )
 
@@ -708,6 +704,7 @@ EXPORT FN KeWaitForObjects (
         IF object^.Type^.ShouldSatisfy (
             thread, // thread
             object, // object
+            waitblock^.Argument, // argument
         ) THEN
 
             // Already signaled. Our wait has been satisfied before it began.
@@ -734,6 +731,7 @@ EXPORT FN KeWaitForObjects (
                 object^.Type^.AbortSatisfy (
                     thread, // thread
                     object, // object
+                    waitblock^.Argument, // argument
                 )
 
                 KepReleaseObjectElevated ( object )
@@ -747,6 +745,7 @@ EXPORT FN KeWaitForObjects (
             object^.Type^.Consume (
                 thread, // thread
                 object, // object
+                waitblock^.Argument, // argument
             )
 
             KepReleaseObjectElevated ( object )
@@ -911,6 +910,7 @@ EXPORT FN KeWaitForSingleObject (
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
     IN object : ^VOID,
+    IN argument : ^VOID,
     IN continuation : ^KeContinuation,
 ) : OsStatus
 
@@ -918,15 +918,16 @@ EXPORT FN KeWaitForSingleObject (
     // interval in milliseconds can be supplied. If it is NULLPTR, the timeout
     // is infinite.
 
-    objecttable : ^VOID[1]
-    objecttable[0] = object
+    wait : KeWaitEntry
+    wait.Object = object
+    wait.Argument = argument
 
     RETURN KeWaitForObjects (
         waitmode, // waitmode
         alertable, // alertable
         timeout, // timeout
         1, // objectcount
-        &objecttable[0], // objecttable
+        &wait, // objecttable
         NULLPTR, // waitblocktable
         continuation, // continuation
     )

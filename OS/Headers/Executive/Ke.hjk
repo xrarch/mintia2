@@ -564,12 +564,17 @@ END
 
 #DEFINE KE_MAX_USER_ALERTABLE [KE_CANCEL_ON_KAPC]
 
+STRUCT KeWaitEntry
+    Object : ^VOID,
+    Argument : ^VOID,
+END
+
 EXTERN FN KeWaitForObjects (
     IN waitmode : UWORD,
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
     IN objectcount : UWORD,
-    IN objecttable : ^^VOID,
+    IN objecttable : ^KeWaitEntry,
     IN waitblocktable : ^KepWaitBlock,
     IN continuation : ^KeContinuation,
 ) : OsStatus
@@ -591,6 +596,7 @@ EXTERN FN KeWaitForSingleObject (
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
     IN object : ^VOID,
+    IN argument : ^VOID,
     IN continuation : ^KeContinuation,
 ) : OsStatus
 
