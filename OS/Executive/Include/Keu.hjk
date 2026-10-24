@@ -259,7 +259,9 @@ KE_CACHE_LINE_END
     WaitMode : UBYTE,
     WaitIpl : UBYTE,
     WaitHasTimeout : UBYTE,
+    ObjectRequeueFlags : UBYTE,
     InteractiveBits : UBYTE,
+    VmPrivilegeBits : UBYTE,
     CurrentQueue : UBYTE,
     SuspendCount : UBYTE,
     Terminated : UBYTE,
@@ -569,3 +571,15 @@ EXTERN FN KeuReaperBarrier (
 #MACRO KeuTurnstileDeletionBarrier ( turnstile ) []
 
 #END
+
+STRUCT KeuQuantityTier
+    HeapRoot : ^RtlHeapEntry[2],
+    Threshold : UWORD,
+END
+
+STRUCT KeuQuantityQueue
+    Header : KepDispatchHeader,
+    Resource : ^UWORD,
+    Tiers : ^KeuQuantityTier,
+    TierOffset : ULONG,
+END

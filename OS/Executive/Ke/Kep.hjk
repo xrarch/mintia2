@@ -1144,15 +1144,26 @@ FNPTR KepConsumeF (
     IN argument : ^VOID,
 )
 
+#DEFINE KEP_REQUEUE_WHEN_CLASS_RAISED 1
+#DEFINE KEP_REQUEUE_WHEN_CLASS_LOWERED 2
+#DEFINE KEP_REQUEUE_WHEN_VMP_RAISED 4
+#DEFINE KEP_REQUEUE_WHEN_VMP_LOWERED 8
+
 FNPTR KepEnqueueF (
     IN thread : ^KeuThread,
     IN object : ^KepDispatchHeader,
     IN waitblock : ^KepWaitBlock,
-)
+) : UWORD
 
 FNPTR KepDequeueF (
     IN object : ^KepDispatchHeader,
     IN waitblock : ^KepWaitBlock,
+)
+
+FNPTR KepRequeueF (
+    IN object : ^KepDispatchHeader,
+    IN waitblock : ^KepWaitBlock,
+    IN flags : UWORD,
 )
 
 STRUCT KepDispatchObjectType
@@ -1161,6 +1172,7 @@ STRUCT KepDispatchObjectType
     Consume : KepConsumeF,
     Enqueue : KepEnqueueF,
     Dequeue : KepDequeueF,
+    Requeue : KepRequeueF,
 END
 
 EXTERN KepSynchEventType : KepDispatchObjectType

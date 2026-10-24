@@ -46,7 +46,7 @@ FN (KepEnqueueF) KepEnqueueWaitFifo (
     IN thread : ^KeuThread,
     IN object : ^KepDispatchHeader,
     IN waitblock : ^KepWaitBlock,
-)
+) : UWORD
 
     // Insert thread at tail so that oldest waiter gets awoken first.
 
@@ -60,6 +60,8 @@ FN (KepEnqueueF) KepEnqueueWaitFifo (
     KeAssert ( queuedobject^.WaiterCount != 0xFFFFFFFF )
 
     queuedobject^.WaiterCount += 1
+
+    RETURN 0
 END
 
 FN (KepDequeueF) KepDequeueWait (

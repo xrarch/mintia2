@@ -610,6 +610,7 @@ EXPORT FN KeWaitForObjects (
     thread^.WaitIpl = ipl
     thread^.WaitHasTimeout = FALSE
     thread^.WaitStatus = OS_STATUS_WAIT_PLACEHOLDER
+    thread^.ObjectRequeueFlags = 0
 
     // Store the wait block table in the thread.
 
@@ -785,7 +786,7 @@ EXPORT FN KeWaitForObjects (
 
         // Enqueue our wait block to the object.
 
-        object^.Type^.Enqueue (
+        thread^.ObjectRequeueFlags |= object^.Type^.Enqueue (
             thread, // thread
             object, // object
             waitblock, // waitblock

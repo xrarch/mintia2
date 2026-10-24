@@ -2120,6 +2120,7 @@ FN KepRaisePriorityFloorThread (
     IN thread : ^KeuThread,
     IN interactive : UWORD,
     IN priority : UWORD,
+    IN vmprivilege : UWORD,
 ) : UWORD
 
     // Boost the thread to the given interactivity and priority. This is used
@@ -2127,6 +2128,16 @@ FN KepRaisePriorityFloorThread (
     // package. The thread lock is held.
 
     boosted := FALSE
+
+    flags := 0
+
+    IF vmprivilege AND
+        NOT KepIsVmPrivilegedForFloor ( thread ) THEN
+
+        KepSetVmPrivilegedForFloor ( thread )
+
+        flags |= KEP_REQUEUE_WHEN_VMP_RAISED
+    END
 
 #IF BLD_MP
     // We need to grab the ready queue lock.
@@ -2150,8 +2161,14 @@ FN KepRaisePriorityFloorThread (
 
         thread^.PriorityFloor = priority
 
-        IF thread^.Priority < thread^.PriorityFloor THEN
+        IF thread^.Priority < priority THEN
             // Raise the priority.
+
+            IF thread^.Priority < OS_PRIORITY_LOW_REALTIME AND
+                priority >= OS_PRIORITY_LOW_REALTIME THEN
+
+                flags |= KEP_REQUEUE_WHEN_CLASS_RAISED
+            END
 
             KepSetPriorityThread (
                 prb, // prb
@@ -2163,7 +2180,9 @@ FN KepRaisePriorityFloorThread (
         boosted = TRUE
     END
 
-    IF interactive AND NOT KepIsInteractiveForFloor ( thread ) THEN
+    IF interactive AND
+        NOT KepIsInteractiveForFloor ( thread ) THEN
+
         // Raise the interactivity floor.
 
         KepSetInteractiveForFloor ( thread )
@@ -2171,6 +2190,8 @@ FN KepRaisePriorityFloorThread (
         IF NOT KepIsInteractiveForOtherThanFloor ( thread ) THEN
             // It wasn't interactive and we just raised the floor, so
             // it's probably in the wrong queue now.
+
+            flags |= KEP_REQUEUE_WHEN_CLASS_RAISED
 
             IF thread^.Status == KE_THREAD_READY THEN
                 KepReinsertThread (
@@ -2196,6 +2217,18 @@ FN KepRaisePriorityFloorThread (
     END
 
     KepReleaseReadyQueueElevated ( prb )
+
+    IF thread^.Status == KE_THREAD_WAITING AND
+        flags & thread^.ObjectRequeueFlags THEN
+
+        // The thread is waiting on an object that asked to be informed when
+        // its priority is raised in the way we just did, so inform it.
+
+        KepRequeueWaits (
+            thread, // thread
+            flags, // flags
+        )
+    END
 
     RETURN boosted
 END

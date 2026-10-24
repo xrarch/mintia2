@@ -176,7 +176,7 @@ FN (KepEnqueueF) KepEnqueueBalancedQueue (
     IN thread : ^KeuThread,
     IN object : ^KepDispatchHeader,
     IN waitblock : ^KepWaitBlock,
-)
+) : UWORD
 
     // Insert thread at head so that worker threads are scheduled in a LIFO
     // order, which promotes cache locality.
@@ -191,6 +191,8 @@ FN (KepEnqueueF) KepEnqueueBalancedQueue (
     KeAssert ( queue^.Header.WaiterCount != 0xFFFFFFFF )
 
     queue^.Header.WaiterCount += 1
+
+    RETURN 0
 END
 
 #SECTION "text"

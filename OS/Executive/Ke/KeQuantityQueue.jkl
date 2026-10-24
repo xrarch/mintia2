@@ -1,0 +1,294 @@
+//
+// Implements support for KeQuantityQueue dispatcher objects.
+//
+
+#INCLUDE "Kep.hjk"
+
+#MACRO KepThreadTierId ( queue, thread ) [
+    ((CAST ((thread) + (queue)^.TierOffset) TO ^UBYTE)^)
+]
+
+FN (KepShouldSatisfyF) KepSatisfyQuantityQueue (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+    IN argument : ^VOID,
+) : UWORD
+
+    // Immediately satisfy a wait on a quantity queue if the thread's current
+    // tier allows it to take the amount. This is done under both the queue's
+    // object lock and the thread's lock, so if the tier is only updated under
+    // the thread's lock then this is guaranteed to commit the wait for the
+    // correct tier.
+
+    amount := CAST argument TO UWORD
+    queue := CAST object TO ^KeuQuantityQueue
+
+    tier := &queue^.Tiers[KepThreadTierId ( queue, thread )]
+
+    // Try to just CAS the atomic counter.
+
+    resource := queue^.Resource
+    value := resource^
+    new : UWORD
+
+    WHILE TRUE DO
+        IF value < amount OR
+            (value - amount) < tier^.Threshold THEN
+
+            // There isn't enough to satisfy the request, or it would cause the
+            // quantity to drop below the threshold, so go block.
+
+            RETURN FALSE
+        END
+
+        new = KeCompareSwapPtr (
+            resource, // ptr
+            value - amount, // newvalue
+            value, // expectedvalue
+        )
+
+        IF new == value THEN
+            // Claimed it, so return now.
+
+            RETURN TRUE
+        END
+
+        value = new
+    END
+END
+
+FN (KepAbortSatisfyF) KepAbortSatisfyQuantityQueue (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+    IN argument : ^VOID,
+)
+
+    // Satisfaction was aborted after we initially permitted it.
+    // Have to return the amount we took from the resource earlier.
+
+    // Unlike other times where we increment the counter, we don't need to see
+    // if anyone should be awoken, since we've had the queue's lock held since
+    // we took this amount, so nobody can possibly have blocked on it who
+    // shouldn't be.
+
+    amount := CAST argument TO UWORD
+    queue := CAST object TO ^KeuQuantityQueue
+
+    KeIncrementPtr (
+        queue^.Resource, // ptr
+        amount, // inc
+    )
+END
+
+FN (KepConsumeF) KepConsumeQuantityQueue (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+    IN argument : ^VOID,
+)
+
+    // Don't have to do anything here since our ShouldSatisfy function already
+    // yoinked the amount.
+
+    NOTHING
+END
+
+FN (RtlLessThanF) KepCompareQuantityQueueRequests (
+    IN a : ^RtlHeapEntry,
+    IN b : ^RtlHeapEntry,
+) : UWORD
+
+    // Compare two requests.
+
+    waitblock1 := CONTAINEROF a TO KepWaitBlock.Links.Heap
+    waitblock2 := CONTAINEROF b TO KepWaitBlock.Links.Heap
+
+    // First compute the key as the beginning tick of the request plus the
+    // size of the request. This makes smaller requests satisfied sooner, but
+    // eventually age of the request will cause it to be satisfied.
+
+    key1 : UWORD = waitblock1^.Context + waitblock1^.Argument
+    key2 : UWORD = waitblock2^.Context + waitblock2^.Argument
+
+    // Now return which one is smaller.
+
+    RETURN key1 < key2
+END
+
+FN (KepEnqueueF) KepEnqueueQuantityQueue (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+    IN waitblock : ^KepWaitBlock,
+) : UWORD
+
+    // The thread's wait on the quantity queue has been committed, so we need
+    // to enqueue the wait block.
+
+    amount := CAST waitblock^.Argument TO UWORD
+    queue := CAST object TO ^KeuQuantityQueue
+
+    tier := &queue^.Tiers[KepThreadTierId ( queue, thread )]
+
+    // Part of the key for the wait block is the tick that the request was
+    // made at, so save that now.
+
+    waitblock^.Context = KepLowTick ()
+
+    // Compute whether the thread should go into the timeshared min heap or the
+    // interactive/realtime min heap.
+
+    heapindex := NOT (thread^.Priority >= OS_PRIORITY_LOW_REALTIME |
+        thread^.InteractiveBits)
+
+    waitblock^.Spare1 = heapindex
+    waitblock^.Spare2 = KepThreadTierId ( queue, thread )
+
+    // Now insert in the heap.
+
+    RtlInsertIntoHeap (
+        &KepCompareQuantityQueueRequests, // comparisonfunc
+        &tier^.HeapRoot[heapindex], // rootptr
+        &waitblock^.Links.Heap, // entry
+    )
+
+    RETURN (KEP_REQUEUE_WHEN_CLASS_RAISED |
+        KEP_REQUEUE_WHEN_CLASS_LOWERED |
+        KEP_REQUEUE_WHEN_VMP_RAISED |
+        KEP_REQUEUE_WHEN_VMP_LOWERED)
+END
+
+FN (KepDequeueF) KepDequeueQuantityQueue (
+    IN object : ^KepDispatchHeader,
+    IN waitblock : ^KepWaitBlock,
+)
+
+    // Dequeue a wait on the quantity queue.
+
+    queue := CAST object TO ^KeuQuantityQueue
+
+    tier := &queue^.Tiers[waitblock^.Spare2]
+    heapindex := waitblock^.Spare1
+
+    RtlRemoveFromHeap (
+        &KepCompareQuantityQueueRequests, // comparisonfunc
+        &tier^.HeapRoot[heapindex], // rootptr
+        &waitblock^.Links.Heap, // entry
+    )
+END
+
+FN (KepRequeueF) KepRequeueQuantityQueue (
+    IN object : ^KepDispatchHeader,
+    IN waitblock : ^KepWaitBlock,
+    IN flags : UWORD,
+)
+
+    // The waiting thread's priority changed so we were called to see if we
+    // should move the wait block or satisfy the wait.
+
+
+END
+
+#SECTION "text"
+KepQuantityQueueType : KepDispatchObjectType = {
+    [ShouldSatisfy] = &KepSatisfyQuantityQueue,
+    [AbortSatisfy] = &KepAbortSatisfyQuantityQueue,
+    [Consume] = &KepConsumeQuantityQueue,
+    [Enqueue] = &KepEnqueueQuantityQueue,
+    [Dequeue] = &KepDequeueQuantityQueue,
+    [Requeue] = &KepRequeueQuantityQueue,
+}
+
+FN KeuInitializeQuantityQueue (
+    IN quantity : ^KeuQuantityQueue,
+    IN name : ^UBYTE,
+    IN resource : ^UWORD,
+    IN tiers : ^KeuQuantityTier,
+    IN tiercount : UWORD,
+    IN tieroffset : UWORD,
+)
+
+    // Initialize a quantity queue.
+    //
+    // The Threshold field of each tier should have been initialized by the
+    // caller.
+    //
+    // tieroffset is an offset from the base of a KeuThread structure at which
+    // a UBYTE tier ID can be found.
+
+    KepInitializeDispatchObject (
+        &quantity^.Header, // hdr
+        name, // name
+        &KepQuantityQueueType, // type
+    )
+
+    quantity^.Resource = resource
+    quantity^.Tiers = tiers
+    quantity^.TierOffset = tieroffset
+
+    i := 0
+
+    WHILE i < tiercount DO
+        // Initialize two min-heaps per tier. The first min-heap is for
+        // real-time / interactive threads and the second is for timeshared
+        // threads, to make sure the former gets first dibs always.
+
+        tiers[i].HeapRoot[0] = NULLPTR
+        tiers[i].HeapRoot[1] = NULLPTR
+
+        i += 1
+    END
+END
+
+FN KeuDecrementQuantityQueue (
+    IN queue : ^KeuQuantityQueue,
+    IN amount : UWORD,
+    IN waitmode : UWORD,
+    IN alertable : UWORD,
+    IN timeout : ^RtlUquad,
+) : OsStatus
+
+    // Decrement the quantity by amount. If this would cause the quantity to
+    // drop below the tier's threshold, then block the thread until enough is
+    // available.
+
+    tier := &queue^.Tiers[KepThreadTierId ( queue, KeCurrentThread () )]
+
+    // Try to just CAS the atomic counter.
+
+    resource := queue^.Resource
+    value := resource^
+    new : UWORD
+
+    WHILE TRUE DO
+        IF value < amount OR
+            (value - amount) < tier^.Threshold THEN
+
+            // There isn't enough to satisfy the request, or it would cause the
+            // resource to drop below the threshold, so go block.
+
+            BREAK
+        END
+
+        new = KeCompareSwapPtr (
+            resource, // ptr
+            value - amount, // newvalue
+            value, // expectedvalue
+        )
+
+        IF new == value THEN
+            // Claimed it, so return now.
+
+            RETURN OS_STATUS_SUCCESS
+        END
+
+        value = new
+    END
+
+    RETURN KeWaitForSingleObject (
+        waitmode, // waitmode
+        alertable, // alertable
+        timeout, // timeout
+        queue, // object
+        CAST amount TO ^VOID, // argument
+        NULLPTR, // continuation
+    )
+END
