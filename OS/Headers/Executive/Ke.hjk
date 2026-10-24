@@ -301,14 +301,14 @@ FNPTR KeInterruptF (
 )
 
 STRUCT KepDispatchHeader
+    WaitListHead : RtlListEntry,
+    Name : ^UBYTE,
+    Type : ^KepDispatchObjectType,
 #IF BLD_MP
     Spinlock : KepSpinlock,
 #END
-    WaitListHead : RtlListEntry,
     SignalCount : ULONG,
     WaiterCount : ULONG,
-    Name : ^UBYTE,
-    Type : UBYTE,
 END
 
 STRUCT KeTimer

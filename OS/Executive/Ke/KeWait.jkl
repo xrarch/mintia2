@@ -707,14 +707,12 @@ EXPORT FN KeWaitForObjects (
 
         KepAcquireObjectElevated ( object )
 
-        // Capture the current signal count.
+        // Check if the object should immediately satisfy the thread's wait.
 
-        signal := object^.SignalCount
-
-        IF signal AND
-            (object^.Type != KEP_DISPATCH_BALANCED_QUEUE OR
-            KepQueueObject ( object )^.ActiveThreadCount <=
-            KepQueueObject ( object )^.MaximumThreadCount) THEN
+        IF object^.Type^.ShouldSatisfy (
+            thread, // thread
+            object, // object
+        ) THEN
 
             // Already signaled. Our wait has been satisfied before it began.
             // Try to atomically claim the wait completion on behalf of this
@@ -738,25 +736,13 @@ EXPORT FN KeWaitForObjects (
                 GOTO Wait
             END
 
-            IF object^.Type != KEP_DISPATCH_EVENT_NOTIF THEN
-                object^.SignalCount = signal - 1
+            // This object satisfied the thread's wait, so call the
+            // type-specific consume function.
 
-                // If this is a balanced queue it must contain an item.
-
-                IF object^.Type == KEP_DISPATCH_BALANCED_QUEUE THEN
-                    // Grab the item.
-
-                    item := KepQueueObject ( object )^.ItemListHead.Next
-
-                    // Stash it in the thread object.
-
-                    thread^.QueueItem = item
-
-                    // Remove it from the list.
-
-                    RtlRemoveEntryList ( item )
-                END
-            END
+            object^.Type^.Consume (
+                thread, // thread
+                object, // object
+            )
 
             KepReleaseObjectElevated ( object )
 
@@ -784,21 +770,11 @@ EXPORT FN KeWaitForObjects (
 
         // Enqueue our wait block to the object.
 
-        IF object^.Type == KEP_DISPATCH_BALANCED_QUEUE THEN
-            // Insert at head so that worker threads are scheduled in a LIFO
-            // order, which promotes cache locality.
-
-            RtlInsertAtHeadList (
-                &object^.WaitListHead, // head
-                &waitblock^.Entry, // entry
-            )
-
-        ELSE
-            RtlInsertAtTailList (
-                &object^.WaitListHead, // head
-                &waitblock^.Entry, // entry
-            )
-        END
+        object^.Type^.Enqueue (
+            thread, // thread
+            object, // object
+            waitblock, // waitblock
+        )
 
         KeAssert ( object^.WaiterCount != 0xFFFFFFFF )
 

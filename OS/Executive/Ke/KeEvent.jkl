@@ -4,6 +4,65 @@
 
 #INCLUDE "Kep.hjk"
 
+FN (KepShouldSatisfyF) KepSatisfyWhenSignaled (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+) : UWORD
+
+    // Immediately satisfy a wait on this object when it is signaled.
+
+    RETURN object^.SignalCount
+END
+
+FN (KepConsumeF) KepConsumeSignalCount (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+)
+
+    // When this object satisfied the thread's wait, that consumes a signal
+    // count.
+
+    object^.SignalCount -= 1
+END
+
+FN (KepConsumeF) KepConsumeNoOp (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+)
+
+    // When this object satisfied the thread's wait, that does nothing.
+
+    NOTHING
+END
+
+FN (KepEnqueueF) KepEnqueueWaitFifo (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+    IN waitblock : ^KepWaitBlock,
+)
+
+    // Insert thread at tail so that oldest waiter gets awoken first.
+
+    RtlInsertAtTailList (
+        &object^.WaitListHead, // head
+        &waitblock^.Entry, // entry
+    )
+END
+
+// Also shared with semaphores.
+PUBLIC KepSynchEventType : KepDispatchObjectType = {
+    [ShouldSatisfy] = &KepSatisfyWhenSignaled,
+    [Consume] = &KepConsumeSignalCount,
+    [Enqueue] = &KepEnqueueWaitFifo,
+}
+
+// Also shared with timers.
+PUBLIC KepNotifEventType : KepDispatchObjectType = {
+    [ShouldSatisfy] = &KepSatisfyWhenSignaled,
+    [Consume] = &KepConsumeNoOp,
+    [Enqueue] = &KepEnqueueWaitFifo,
+}
+
 EXPORT FN KeInitializeEvent (
     IN event : ^KeEvent,
     IN name : ^UBYTE,
@@ -11,10 +70,10 @@ EXPORT FN KeInitializeEvent (
     IN signalstate : UWORD,
 )
 
-    type := KEP_DISPATCH_EVENT_SYNCH
+    type := &KepSynchEventType
 
     IF notification THEN
-        type = KEP_DISPATCH_EVENT_NOTIF
+        type = &KepNotifEventType
     END
 
     KepInitializeDispatchObject (
@@ -62,7 +121,7 @@ EXPORT FN KeSignalEvent (
     IF event^.Header.WaiterCount THEN
         // Satisfy waits on the object.
 
-        IF event^.Header.Type == KEP_DISPATCH_EVENT_NOTIF THEN
+        IF event^.Header.Type == &KepNotifEventType THEN
             // Satisfy ALL waits.
 
             KepSatisfyObject (

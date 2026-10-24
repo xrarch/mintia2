@@ -362,10 +362,6 @@ KE_CACHE_LINE_END
 #END
 END
 
-#DEFINE KEP_DISPATCH_EVENT_NOTIF 1
-#DEFINE KEP_DISPATCH_EVENT_SYNCH 2
-#DEFINE KEP_DISPATCH_BALANCED_QUEUE 3
-
 #DEFINE KEP_IDLE_QUEUE 1
 #DEFINE KEP_TIMESHARED_QUEUE 2
 #DEFINE KEP_REAL_TIME_QUEUE 3
@@ -1125,6 +1121,32 @@ EXTERN KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
 #END
     NOTHING (hdr)^.Type = (type)
 ]
+
+FNPTR KepShouldSatisfyF (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+) : UWORD
+
+FNPTR KepConsumeF (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+)
+
+FNPTR KepEnqueueF (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+    IN waitblock : ^KepWaitBlock,
+)
+
+STRUCT KepDispatchObjectType
+    ShouldSatisfy : KepShouldSatisfyF,
+    Consume : KepConsumeF,
+    Enqueue : KepEnqueueF,
+END
+
+EXTERN KepSynchEventType : KepDispatchObjectType
+
+EXTERN KepNotifEventType : KepDispatchObjectType
 
 EXTERN KepIndexFirstBitClear : UBYTE[256]
 EXTERN KepIndexFirstBitSet : UBYTE[256]

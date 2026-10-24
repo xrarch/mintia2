@@ -118,6 +118,65 @@ FN KepDisassociateFromBalancedQueue (
     KepReleaseThreadListElevated ( kepnode )
 END
 
+FN (KepShouldSatisfyF) KepSatisfyBalancedQueue (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+) : UWORD
+
+    // Immediately satisfy a wait on a balanced queue when it is signaled (which
+    // means there is at least one item in it) and the active count is less or
+    // equal to the maximum count.
+
+    queue := CAST object TO ^KeBalancedQueue
+
+    RETURN object^.SignalCount AND
+        queue^.ActiveThreadCount <= queue^.MaximumThreadCount
+END
+
+FN (KepConsumeF) KepConsumeBalancedQueue (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+)
+
+    // When a balanced queue satisfied the thread's wait, that consumes a signal
+    // count and a queue item.
+
+    object^.SignalCount -= 1
+
+    // Grab the item.
+
+    item := (CAST object TO ^KeBalancedQueue)^.ItemListHead.Next
+
+    // Stash it in the thread object.
+
+    thread^.QueueItem = item
+
+    // Remove it from the list.
+
+    RtlRemoveEntryList ( item )
+END
+
+FN (KepEnqueueF) KepEnqueueBalancedQueue (
+    IN thread : ^KeuThread,
+    IN object : ^KepDispatchHeader,
+    IN waitblock : ^KepWaitBlock,
+)
+
+    // Insert thread at head so that worker threads are scheduled in a LIFO
+    // order, which promotes cache locality.
+
+    RtlInsertAtHeadList (
+        &object^.WaitListHead, // head
+        &waitblock^.Entry, // entry
+    )
+END
+
+KepBalancedQueueType : KepDispatchObjectType = {
+    [ShouldSatisfy] = &KepSatisfyBalancedQueue,
+    [Consume] = &KepConsumeBalancedQueue,
+    [Enqueue] = &KepEnqueueBalancedQueue,
+}
+
 EXPORT FN KeInitializeBalancedQueue (
     IN queue : ^KeBalancedQueue,
     IN name : ^UBYTE,
@@ -131,7 +190,7 @@ EXPORT FN KeInitializeBalancedQueue (
     KepInitializeDispatchObject (
         &queue^.Header, // header
         name, // name
-        KEP_DISPATCH_BALANCED_QUEUE, // type
+        &KepBalancedQueueType, // type
     )
 
     queue^.Header.SignalCount = 0
