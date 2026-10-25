@@ -299,12 +299,12 @@ EXPORT FN KeRemoveFromBalancedQueue (
     // Remove an item from the balanced queue. If there are too many threads, or
     // there are no items to remove, we block. 
 
+    thread := KeCurrentThread ()
+
     // Not allowed in an APC because the associated balanced queue can conflict
     // between APC context and normal context.
 
-    KeAssert ( KepCurrentIpl () < KEP_IPL_APC )
-
-    thread := KeCurrentThread ()
+    KeAssert ( NOT thread^.ExecutingKapc )
 
     ipl := KepRaiseIpl ( KEP_IPL_DPC )
 
