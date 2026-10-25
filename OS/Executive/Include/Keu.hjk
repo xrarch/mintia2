@@ -262,6 +262,7 @@ KE_CACHE_LINE_END
     ObjectRequeueFlags : UBYTE,
     InteractiveBits : UBYTE,
     VmPrivilegeBits : UBYTE,
+    PageTierIndex : UBYTE,
     CurrentQueue : UBYTE,
     SuspendCount : UBYTE,
     Terminated : UBYTE,
@@ -362,14 +363,17 @@ END
 
 #MACRO KeuSetVmPrivilege ( thread ) [
     NOTHING (thread)^.VmPrivilegeBits |= KEU_VM_PRIVILEGE
+    NOTHING (thread)^.PageTierIndex = 0
 ]
 
 #MACRO KeuSetVmPrivilegeForFloor ( thread ) [
     NOTHING (thread)^.VmPrivilegeBits |= KEU_VM_PRIVILEGE_PI_FLOOR
+    NOTHING (thread)^.PageTierIndex = 0
 ]
 
 #MACRO KeuClearVmPrivilegeForFloor ( thread ) [
     NOTHING (thread)^.VmPrivilegeBits &= ~KEU_VM_PRIVILEGE_PI_FLOOR
+    NOTHING (thread)^.PageTierIndex = NOT (thread)^.VmPrivilegeBits
 ]
 
 EXTERN FN KeuIgnoreEvents ()
