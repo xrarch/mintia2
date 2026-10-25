@@ -8,6 +8,155 @@
     ((CAST ((thread) + (queue)^.TierOffset) TO ^UBYTE)^)
 ]
 
+FN (RtlLessThanF) KepCompareQuantityQueueRequests (
+    IN a : ^RtlHeapEntry,
+    IN b : ^RtlHeapEntry,
+) : UWORD
+
+    // Compare two requests.
+
+    waitblock1 := CONTAINEROF a TO KepWaitBlock.Links.Heap
+    waitblock2 := CONTAINEROF b TO KepWaitBlock.Links.Heap
+
+    // First compute the key as the beginning tick of the request plus the
+    // size of the request. This makes smaller requests satisfied sooner, but
+    // eventually age of the request will cause it to be satisfied.
+
+    key1 : UWORD = waitblock1^.Context + waitblock1^.Argument
+    key2 : UWORD = waitblock2^.Context + waitblock2^.Argument
+
+    // Now return which one is smaller.
+
+    RETURN key1 < key2
+END
+
+FN KepTrySatisfyQuantityQueue (
+    IN queue : ^KeuQuantityQueue,
+    IN lockedthread : ^KeuThread,
+)
+
+    // Try to satisfy waits on the quantity queue. Lower tiers are satisfied
+    // first. Object lock is held.
+
+    max := queue^.TierCount
+    tier := &queue^.Tiers[0]
+
+    resource := queue^.Resource
+    value := resource^
+    new : UWORD
+
+    WHILE max DO
+        threshold := tier^.Threshold
+
+        i := 0
+
+        WHILE i < 2 DO
+            WHILE tier^.HeapRoot[i] != NULLPTR DO
+                waitblock :=
+                    CONTAINEROF tier^.HeapRoot[i] TO KepWaitBlock.Links.Heap
+
+                thread := waitblock^.Thread
+
+                amount := CAST waitblock^.Argument TO UWORD
+
+@Retry
+
+                IF value < amount OR
+                    (value - amount) < threshold THEN
+
+                    // There isn't enough to satisfy the request, or it
+                    // would cause the quantity to drop below the threshold.
+
+                    BREAK
+                END
+
+                new = KeCompareSwapPtr (
+                    resource, // ptr
+                    value - amount, // newvalue
+                    value, // expectedvalue
+                )
+
+                IF new != value THEN
+                    // CAS failed, retry.
+
+                    value = new
+
+                    GOTO Retry
+                END
+
+                // Managed to satisfy this wait block.
+
+                waitblock^.Thread = NULLPTR
+
+                RtlRemoveFromHeap (
+                    &KepCompareQuantityQueueRequests, // comparisonfunc
+                    &tier^.HeapRoot[i], // rootptr
+                    &waitblock^.Links.Heap, // entry
+                )
+
+                queue^.WaiterCount -= 1
+
+                IF NOT KepTryCompleteWait (
+                    thread, // thread
+                    waitblock^.Index, // wakestatus
+                ) THEN
+
+                    // Somebody else woke the thread and is responsible for
+                    // unwaiting. Return the resource since the thread isn't
+                    // going to get a successful status, so it won't be under
+                    // the impression that it got it.
+
+                    KeIncrementPtr (
+                        resource, // ptr
+                        amount, // inc
+                    )
+
+                ELSE
+                    // We are responsible for unwaiting the thread.
+
+#IF BLD_MP
+                    IF thread == lockedthread THEN
+                        KepUnwaitThread (
+                            thread, // thread
+                            0, // status
+                            0, // priorityboost
+                        )
+
+                    ELSE
+                        KepDeferredUnwaitThread (
+                            thread, // thread
+                            0, // priorityboost
+                        )
+                    END
+#ELSE
+                    KepUnwaitThread (
+                        thread, // thread
+                        0, // status
+                        0, // priorityboost
+                    )
+#END
+
+                    value -= amount
+                END
+            END
+
+            i += 1
+        END
+
+        IF tier^.HeapRoot[0] != NULLPTR OR
+            tier^.HeapRoot[1] != NULLPTR THEN
+
+            // There are still threads waiting on this tier, so no further
+            // tiers should receive any resources.
+
+            BREAK
+        END
+
+        tier += SIZEOF KeuQuantityTier
+        max -= 1
+    END
+END
+
 FN (KepShouldSatisfyF) KepSatisfyQuantityQueue (
     IN thread : ^KeuThread,
     IN object : ^KepDispatchHeader,
@@ -92,28 +241,6 @@ FN (KepConsumeF) KepConsumeQuantityQueue (
     NOTHING
 END
 
-FN (RtlLessThanF) KepCompareQuantityQueueRequests (
-    IN a : ^RtlHeapEntry,
-    IN b : ^RtlHeapEntry,
-) : UWORD
-
-    // Compare two requests.
-
-    waitblock1 := CONTAINEROF a TO KepWaitBlock.Links.Heap
-    waitblock2 := CONTAINEROF b TO KepWaitBlock.Links.Heap
-
-    // First compute the key as the beginning tick of the request plus the
-    // size of the request. This makes smaller requests satisfied sooner, but
-    // eventually age of the request will cause it to be satisfied.
-
-    key1 : UWORD = waitblock1^.Context + waitblock1^.Argument
-    key2 : UWORD = waitblock2^.Context + waitblock2^.Argument
-
-    // Now return which one is smaller.
-
-    RETURN key1 < key2
-END
-
 FN (KepEnqueueF) KepEnqueueQuantityQueue (
     IN thread : ^KeuThread,
     IN object : ^KepDispatchHeader,
@@ -150,6 +277,8 @@ FN (KepEnqueueF) KepEnqueueQuantityQueue (
         &waitblock^.Links.Heap, // entry
     )
 
+    queue^.WaiterCount += 1
+
     RETURN (KEP_REQUEUE_WHEN_CLASS_RAISED |
         KEP_REQUEUE_WHEN_CLASS_LOWERED |
         KEP_REQUEUE_WHEN_VMP_RAISED |
@@ -173,18 +302,73 @@ FN (KepDequeueF) KepDequeueQuantityQueue (
         &tier^.HeapRoot[heapindex], // rootptr
         &waitblock^.Links.Heap, // entry
     )
+
+    queue^.WaiterCount -= 1
 END
 
 FN (KepRequeueF) KepRequeueQuantityQueue (
+    IN thread : ^KeuThread,
     IN object : ^KepDispatchHeader,
     IN waitblock : ^KepWaitBlock,
     IN flags : UWORD,
 )
 
     // The waiting thread's priority changed so we were called to see if we
-    // should move the wait block or satisfy the wait.
+    // should move the wait block or satisfy the wait. The thread lock and
+    // object lock are held.
 
+    queue := CAST object TO ^KeuQuantityQueue
 
+    tierid := KepThreadTierId ( queue, thread )
+
+    heapindex := NOT (thread^.Priority >= OS_PRIORITY_LOW_REALTIME |
+        thread^.InteractiveBits)
+
+    currentheapindex := waitblock^.Spare1
+    currenttierid := waitblock^.Spare2
+
+    IF currentheapindex != heapindex OR
+        currenttierid != tierid THEN
+
+        // The wait block really is in the wrong heap or tier so fully
+        // requeue it.
+
+        tier := &queue^.Tiers[currenttierid]
+
+        // First remove from the old heap.
+
+        RtlRemoveFromHeap (
+            &KepCompareQuantityQueueRequests, // comparisonfunc
+            &tier^.HeapRoot[currentheapindex], // rootptr
+            &waitblock^.Links.Heap, // entry
+        )
+
+        // Save new heap index and tier.
+
+        waitblock^.Spare1 = heapindex
+        waitblock^.Spare2 = tierid
+
+        // Now insert in the new heap.
+
+        tier = &queue^.Tiers[tierid]
+
+        RtlInsertIntoHeap (
+            &KepCompareQuantityQueueRequests, // comparisonfunc
+            &tier^.HeapRoot[heapindex], // rootptr
+            &waitblock^.Links.Heap, // entry
+        )
+
+        IF tierid < currenttierid THEN
+            // The thread is now in a lower tier which means it has a more
+            // permissible threshold that may allow it to take the resources it
+            // wants.
+
+            KepTrySatisfyQuantityQueue (
+                queue, // queue
+                thread, // lockedthread
+            )
+        END
+    END
 END
 
 #SECTION "text"
@@ -198,7 +382,7 @@ KepQuantityQueueType : KepDispatchObjectType = {
 }
 
 FN KeuInitializeQuantityQueue (
-    IN quantity : ^KeuQuantityQueue,
+    IN queue : ^KeuQuantityQueue,
     IN name : ^UBYTE,
     IN resource : ^UWORD,
     IN tiers : ^KeuQuantityTier,
@@ -209,20 +393,22 @@ FN KeuInitializeQuantityQueue (
     // Initialize a quantity queue.
     //
     // The Threshold field of each tier should have been initialized by the
-    // caller.
+    // caller. Tiers should be sorted in increasing order of threshold.
     //
     // tieroffset is an offset from the base of a KeuThread structure at which
     // a UBYTE tier ID can be found.
 
     KepInitializeDispatchObject (
-        &quantity^.Header, // hdr
+        &queue^.Header, // hdr
         name, // name
         &KepQuantityQueueType, // type
     )
 
-    quantity^.Resource = resource
-    quantity^.Tiers = tiers
-    quantity^.TierOffset = tieroffset
+    queue^.Resource = resource
+    queue^.Tiers = tiers
+    queue^.TierOffset = tieroffset
+    queue^.TierCount = tiercount
+    queue^.WaiterCount = 0
 
     i := 0
 
@@ -244,6 +430,7 @@ FN KeuDecrementQuantityQueue (
     IN waitmode : UWORD,
     IN alertable : UWORD,
     IN timeout : ^RtlUquad,
+    IN wait : UWORD,
 ) : OsStatus
 
     // Decrement the quantity by amount. If this would cause the quantity to
@@ -268,6 +455,13 @@ FN KeuDecrementQuantityQueue (
             BREAK
         END
 
+        IF amount == 0 THEN
+            // Caller is just checking to see if the resource is above its
+            // threshold. It is, so return rather than doing a useless CAS.
+
+            RETURN OS_STATUS_SUCCESS
+        END
+
         new = KeCompareSwapPtr (
             resource, // ptr
             value - amount, // newvalue
@@ -283,6 +477,10 @@ FN KeuDecrementQuantityQueue (
         value = new
     END
 
+    IF NOT wait THEN
+        RETURN OS_STATUS_UNSATISFIED
+    END
+
     RETURN KeWaitForSingleObject (
         waitmode, // waitmode
         alertable, // alertable
@@ -291,4 +489,29 @@ FN KeuDecrementQuantityQueue (
         CAST amount TO ^VOID, // argument
         NULLPTR, // continuation
     )
+END
+
+FN KeuIncrementQuantityQueue (
+    IN queue : ^KeuQuantityQueue,
+    IN amount : UWORD,
+)
+
+    // Release the amount to the quantity queue and then wake up anybody who
+    // can be awoken.
+
+    KeIncrementPtr (
+        queue^.Resource, // ptr
+        amount, // inc
+    )
+
+    IF queue^.WaiterCount THEN
+        ipl := KepAcquireObject ( &queue^.Header )
+
+        KepTrySatisfyQuantityQueue (
+            queue, // queue
+            NULLPTR, // lockedthread
+        )
+
+        KepReleaseObject ( &queue^.Header, ipl )
+    END
 END
