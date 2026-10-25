@@ -2132,11 +2132,13 @@ FN KepRaisePriorityFloorThread (
     flags := 0
 
     IF vmprivilege AND
-        NOT KepIsVmPrivilegedForFloor ( thread ) THEN
+        NOT KeuHasVmPrivilegeForFloor ( thread ) THEN
 
-        KepSetVmPrivilegedForFloor ( thread )
+        KeuSetVmPrivilegeForFloor ( thread )
 
         flags |= KEP_REQUEUE_WHEN_VMP_RAISED
+
+        boosted = TRUE
     END
 
 #IF BLD_MP
@@ -2237,6 +2239,7 @@ FN KepLowerPriorityFloorThread (
     IN thread : ^KeuThread,
     IN interactive : UWORD,
     IN priority : UWORD,
+    IN vmprivilege : UWORD,
 )
 
     // Lower the priority floor of a thread.
@@ -2245,6 +2248,14 @@ FN KepLowerPriorityFloorThread (
     prb := KEP_CURRENT_PRB
 
     KeAssert ( prb^.CurrentThread == thread )
+
+    IF KeuHasVmPrivilegeForFloor ( thread ) AND
+        NOT vmprivilege THEN
+
+        // No longer VM privileged.
+
+        KeuClearVmPrivilegeForFloor ( thread )
+    END
 
     KepAcquireReadyQueueElevated ( prb )
 
@@ -2266,7 +2277,9 @@ FN KepLowerPriorityFloorThread (
 
     // Apply the new interactivity floor.
 
-    IF KepIsInteractiveForFloor ( thread ) AND NOT interactive THEN
+    IF KepIsInteractiveForFloor ( thread ) AND
+        NOT interactive THEN
+
         // No longer interactive.
 
         KepClearInteractiveForFloor ( thread )

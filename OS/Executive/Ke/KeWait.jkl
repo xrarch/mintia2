@@ -944,3 +944,46 @@ EXPORT FN KeWaitForSingleObject (
         continuation, // continuation
     )
 END
+
+FN KepRequeueWaits (
+    IN thread : ^KeuThread,
+    IN flags : UWORD,
+)
+
+    // Call the requeue function for all the objects the thread is waiting on,
+    // since its priority changed and some of them may want to do something.
+
+    // Thread lock is held. Requeue functions are allowed to wake up the thread.
+
+    KeAssert ( thread^.Status == KE_THREAD_WAITING )
+
+    waitblock := thread^.WaitBlockTable
+    count := thread^.WaitCount
+
+    WHILE count DO
+        object := waitblock^.Object
+
+        requeue := object^.Type^.Requeue
+
+        IF requeue THEN
+            KepAcquireObjectElevated ( object )
+
+            IF waitblock^.Thread != NULLPTR THEN
+                // There's a requeue function and the waitblock wasn't already
+                // awoken from the object side (indicated by setting the Thread
+                // field to a null pointer), so call it.
+
+                requeue (
+                    object, // object
+                    waitblock, // waitblock
+                    flags, // flags
+                )
+            END
+
+            KepReleaseObjectElevated ( object )
+        END
+
+        count -= 1
+        waitblock += SIZEOF KepWaitBlock
+    END
+END

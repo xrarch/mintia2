@@ -127,6 +127,27 @@ FN (RtlLessThanF) KepCompareThreads (
     thread1 := CONTAINEROF a TO KeuThread.TurnstileEntry
     thread2 := CONTAINEROF b TO KeuThread.TurnstileEntry
 
+    IF thread1^.BestowedVmPrivilege THEN
+        IF NOT thread2^.BestowedVmPrivilege THEN
+            // VM privileged threads inherit priority ahead of all non VM
+            // privileged threads. The only VM privileged threads are ones that
+            // are high real time priorities, so any loss of priority
+            // information caused by this is not a correctness concern since
+            // the thread will get raised there anyway.
+
+            // It's possible to inherit VM privilege and priority independently
+            // if the assumption that this is fine turns out to fail, but this
+            // would require expanding some structures (turnstile might need a
+            // second heap root for VM privileged waiters, and thread might need
+            // a second set of heap links).
+
+            RETURN TRUE
+        END
+
+    ELSEIF thread2^.BestowedVmPrivilege THEN
+        RETURN FALSE
+    END
+
     t1pri := thread1^.BestowedPriority
     t2pri := thread2^.BestowedPriority
 
@@ -193,6 +214,9 @@ FN KepBoostPriority (
     interactive := thread^.InteractiveBits
     thread^.BestowedInteractivity = interactive
 
+    vmprivilege := thread^.VmPrivilegeBits
+    thread^.BestowedVmPrivilege = vmprivilege
+
     thread^.BlockedOnTurnstile = turnstile
 
     // Insert the thread into the turnstile's max heap.
@@ -225,6 +249,7 @@ FN KepBoostPriority (
                 owner, // thread
                 interactive, // interactive
                 priority, // priority
+                vmprivilege, // vmprivilege
             )
         END
 
@@ -261,6 +286,7 @@ FN KepBoostPriority (
 
             owner^.BestowedPriority = owner^.Priority
             owner^.BestowedInteractivity = owner^.InteractiveBits
+            owner^.BestowedVmPrivilege = owner^.VmPrivilegeBits
 
             // Re-insert.
 
@@ -710,6 +736,7 @@ FN KepComputeFloor (
     listentry := head^.Next
     floor := 0
     interactivityfloor := 0
+    vmprivilegefloor := 0
 
     WHILE listentry != head DO
         turnstile := CONTAINEROF listentry TO KepTurnstile.PiEntry
@@ -723,13 +750,19 @@ FN KepComputeFloor (
 
             boosterpri := booster^.BestowedPriority
             boosterint := booster^.BestowedInteractivity
-            boosterrt := boosterint OR boosterpri >= OS_PRIORITY_LOW_REALTIME
+            boosterrt := boosterint | (boosterpri >= OS_PRIORITY_LOW_REALTIME)
 
-            IF (interactivityfloor OR floor >= OS_PRIORITY_LOW_REALTIME) THEN
+            vmprivilegefloor |= booster^.BestowedVmPrivilege
+
+            IF interactivityfloor OR
+                floor >= OS_PRIORITY_LOW_REALTIME THEN
+
                 // I'm real time, so I should only care about other real time
                 // threads.
 
-                IF boosterrt AND boosterpri > floor THEN
+                IF boosterrt AND
+                    boosterpri > floor THEN
+
                     floor = boosterpri
                 END
 
@@ -738,8 +771,8 @@ FN KepComputeFloor (
                 // priority floor from the real time thread that boosts me.
 
                 floor = boosterpri
-                interactivityfloor = boosterrt
-            
+                interactivityfloor = boosterint
+
             ELSEIF boosterpri > floor THEN
                 floor = boosterpri
             END
@@ -756,6 +789,7 @@ FN KepComputeFloor (
         thread, // thread
         interactivityfloor, // interactive
         floor, // priority
+        vmprivilegefloor, // vmprivilege
     )
 
     KepReleaseThread ( thread, ipl )

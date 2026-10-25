@@ -621,7 +621,7 @@ FN MmpAllocatePage (
     // Allocate a page from the given node. If none available, return
     // NULLPTR.
 
-    IF PsCurrentThread()^.VmPrivileged THEN
+    IF PsCurrentThread()^.Tcb.VmPrivilegeBits THEN
         flags |= MM_ALLOCATE_LOW
     END
 
@@ -912,7 +912,7 @@ FN MmpWaitForPages (
     backoff : RtlUquad
     backoffms := MMP_INITIAL_BACKOFF_MS
 
-    IF PsCurrentThread()^.VmPrivileged THEN
+    IF PsCurrentThread()^.Tcb.VmPrivilegeBits THEN
         low = TRUE
     END
 
@@ -1072,7 +1072,7 @@ FN MmuChargeCommit (
     // It would be unwise to page this routine as it can be called during
     // nonpaged pool allocation.
 
-    IF PsCurrentThread()^.VmPrivileged THEN
+    IF PsCurrentThread()^.Tcb.VmPrivilegeBits THEN
         flags |= MM_ALLOCATE_FORCE_COMMIT
     END
 

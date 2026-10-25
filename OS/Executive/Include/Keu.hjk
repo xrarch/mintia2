@@ -280,6 +280,7 @@ KE_CACHE_LINE_END
 
     BestowedPriority : UBYTE,
     BestowedInteractivity : UBYTE,
+    BestowedVmPrivilege : UBYTE,
     ExecutingKapc : UBYTE,
     HasContinuation : UBYTE,
 
@@ -351,6 +352,25 @@ KE_CACHE_LINE_END
     HeldLocks : KepHeldLocks
 #END
 END
+
+#DEFINE KEU_VM_PRIVILEGE 1
+#DEFINE KEU_VM_PRIVILEGE_PI_FLOOR 2
+
+#MACRO KeuHasVmPrivilegeForFloor ( thread ) [
+    ((thread)^.VmPrivilegeBits & KEU_VM_PRIVILEGE_PI_FLOOR)
+]
+
+#MACRO KeuSetVmPrivilege ( thread ) [
+    NOTHING (thread)^.VmPrivilegeBits |= KEU_VM_PRIVILEGE
+]
+
+#MACRO KeuSetVmPrivilegeForFloor ( thread ) [
+    NOTHING (thread)^.VmPrivilegeBits |= KEU_VM_PRIVILEGE_PI_FLOOR
+]
+
+#MACRO KeuClearVmPrivilegeForFloor ( thread ) [
+    NOTHING (thread)^.VmPrivilegeBits &= ~KEU_VM_PRIVILEGE_PI_FLOOR
+]
 
 EXTERN FN KeuIgnoreEvents ()
 

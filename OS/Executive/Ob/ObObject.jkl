@@ -769,7 +769,7 @@ EXPORT FN ObUnreferenceObject (
         thread := PsCurrentThread ()
 
         IF NOT KeAreApcsDeliverable () OR
-            thread^.VmPrivileged THEN
+            thread^.Tcb.VmPrivilegeBits THEN
 
             // APCs are not deliverable so we're gonna defer this deletion to
             // worker thread context. This is to avoid illegally trying to

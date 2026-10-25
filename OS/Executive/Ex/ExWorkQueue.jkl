@@ -235,7 +235,9 @@ FN ExpInitializeWorkQueuesForNode (
                 TRUE, // setcurrentpriority
             )
 
-            thread^.VmPrivileged = ExpWorkVmPrivileged[j]
+            IF ExpWorkVmPrivileged[j] THEN
+                KeuSetVmPrivilege ( &thread^.Tcb )
+            END
 
             // Remove the reference we got by virtue of creating the thread.
 
