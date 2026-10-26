@@ -216,6 +216,14 @@ FN (KepShouldSatisfyF) KepSatisfyQuantityQueue (
 
     tier := &queue^.Tiers[KepThreadTierId ( queue, thread )]
 
+    // First increment the waiter count, have to do this first or else someone
+    // who increments the quantity might miss us even though we end up
+    // committing a wait.
+
+    queue^.WaiterCount += 1
+
+    KeWriteMemoryBarrier ()
+
     // Try to just CAS the atomic counter.
 
     resource := queue^.Resource
@@ -269,6 +277,8 @@ FN (KepAbortSatisfyF) KepAbortSatisfyQuantityQueue (
         queue^.Resource, // ptr
         amount, // inc
     )
+
+    queue^.WaiterCount -= 1
 END
 
 FN (KepConsumeF) KepConsumeQuantityQueue (
@@ -320,8 +330,6 @@ FN (KepEnqueueF) KepEnqueueQuantityQueue (
         &tier^.HeapRoot[heapindex], // rootptr
         &waitblock^.Links.Heap, // entry
     )
-
-    queue^.WaiterCount += 1
 
     RETURN (KEP_REQUEUE_WHEN_CLASS_RAISED |
         KEP_REQUEUE_WHEN_CLASS_LOWERED |
