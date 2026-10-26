@@ -295,7 +295,9 @@ FN (KepEnqueueF) KepEnqueueQuantityQueue (
     amount := CAST waitblock^.Argument TO UWORD
     queue := CAST object TO ^KeuQuantityQueue
 
-    tier := &queue^.Tiers[KepThreadTierId ( queue, thread )]
+    tierid := KepThreadTierId ( queue, thread )
+
+    tier := &queue^.Tiers[tierid]
 
     // Part of the key for the wait block is the tick that the request was
     // made at, so save that now.
@@ -309,7 +311,7 @@ FN (KepEnqueueF) KepEnqueueQuantityQueue (
         thread^.InteractiveBits)
 
     waitblock^.Spare1 = heapindex
-    waitblock^.Spare2 = KepThreadTierId ( queue, thread )
+    waitblock^.Spare2 = tierid
 
     // Now insert in the heap.
 
