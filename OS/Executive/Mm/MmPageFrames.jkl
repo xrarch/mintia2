@@ -232,7 +232,16 @@ FN MmuSetPageReservation (
 
     thread := PsCurrentThread ()
     reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
+
     count := reserve^.Count
+
+    // Reset the debt to zero to prevent it from growing unboundedly. This
+    // should work to reset it at the beginning of a new allocation operation
+    // because failure causes that incur debt should cause a full unwind of
+    // the stack without calling this function again, so the debt will remain
+    // intact for usage by MmFulfillPageReservation.
+
+    reserve^.Debt = 0
 
 @Retry
 
@@ -316,11 +325,14 @@ FN MmuSetPageReservation (
 
     IF flags & MM_ALLOCATE_WAIT == 0 THEN
         // We weren't able to wait, so add this as a debt and induce upper
-        // layers to try again.
+        // layers to try again. We only add the difference because a later
+        // MmReleasePageReserve will convert the current reserve into debt
+        // on top of this (the net effect being that the entire page count
+        // required to make progress in an allocation operation will be
+        // represented in the debt by the time the uppermost level does a
+        // MmFulfillPageReservation).
 
-        IF minimum > reserve^.Debt THEN
-            reserve^.Debt = minimum
-        END
+        reserve^.Debt += diff
 
         RETURN OS_STATUS_TRY_AGAIN
     END
@@ -394,6 +406,12 @@ EXPORT FN MmReleasePageReserve ()
         mmnode, // mmnode
         count, // pages
     )
+
+    // This is potentially happening because of debt incurred by an inner layer
+    // and is going to cause a retry. Therefore we are going to need the entire
+    // reserve we had, plus extra. Convert the reserve to debt.
+
+    reserve^.Debt += count
 END
 
 EXPORT FN MmFulfillPageReservation ()
