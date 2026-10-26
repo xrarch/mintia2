@@ -40,8 +40,11 @@ FN MmpClaimAvailablePages (
 
     threshold := MMP_BLOCK_FOR_PAGES_THRESHOLD
 
-    IF PsCurrentThread ()^.Tcb.VmPrivilegeBits THEN
-        // VM privileged threads get to tap the reserved pool.
+    IF PsCurrentThread ()^.Tcb.VmPrivilegeBits AND
+        flags & MM_ALLOCATE_NORMAL == 0 THEN
+
+        // VM privileged threads get to tap the reserved pool, unless they
+        // specifically asked not to.
 
         threshold = 0
     END
