@@ -48,10 +48,21 @@ FN KepTrySatisfyQuantityQueue (
     WHILE max DO
         threshold := tier^.Threshold
 
+        // Iterate over the two heap roots of the tier. The first one is the
+        // one that real-time / interactive threads go on, and they'll receive
+        // hunks of quantity first, as they reach the root of the heap, to
+        // promote responsiveness. However, if a request reaches the root and
+        // is too big to be satisfied, then we will still advance to the next
+        // and try to satisfy requests from lower priority threads. This avoids
+        // starvation and is okay because only the tiers are supposed to be
+        // airtight boundaries, not scheduling classes within tiers.
+
         i := 0
 
         WHILE i < 2 DO
             WHILE tier^.HeapRoot[i] != NULLPTR DO
+                // The heap still has wait blocks on it, so grab one.
+
                 waitblock :=
                     CONTAINEROF tier^.HeapRoot[i] TO KepWaitBlock.Links.Heap
 
@@ -61,14 +72,18 @@ FN KepTrySatisfyQuantityQueue (
 
 @Retry
 
+                // Check if there is enough to satisfy the request, or if it
+                // would cause the quantity to drop below the threshold.
+
                 IF value < amount OR
                     (value - amount) < threshold THEN
 
-                    // There isn't enough to satisfy the request, or it
-                    // would cause the quantity to drop below the threshold.
+                    // Not enough, break out of satisfying waiters on this heap.
 
                     BREAK
                 END
+
+                // Try to atomically claim the resource.
 
                 new = KeCompareSwapPtr (
                     resource, // ptr
@@ -77,16 +92,15 @@ FN KepTrySatisfyQuantityQueue (
                 )
 
                 IF new != value THEN
-                    // CAS failed, retry.
+                    // CAS failed because value became stale, retry.
 
                     value = new
 
                     GOTO Retry
                 END
 
-                // Managed to satisfy this wait block.
-
-                waitblock^.Thread = NULLPTR
+                // Managed to satisfy this wait block, so remove it from the
+                // heap.
 
                 RtlRemoveFromHeap (
                     &KepCompareQuantityQueueRequests, // comparisonfunc
@@ -94,7 +108,20 @@ FN KepTrySatisfyQuantityQueue (
                     &waitblock^.Links.Heap, // entry
                 )
 
+                // Set the Thread pointer to NULLPTR since that's the recognized
+                // way to indicate to the generic wait logic that a dispatcher
+                // object has unlinked a wait block from its structures.
+
+                waitblock^.Thread = NULLPTR
+
+                // Decrement our waiter count since we use that as a hint in
+                // KeuIncrementQuantityQueue.
+
                 queue^.WaiterCount -= 1
+
+                // Try to atomically claim responsibility for completing the
+                // wait (other contenders include other objects the thread is
+                // waiting on, KAPC delivery, and signals).
 
                 IF NOT KepTryCompleteWait (
                     thread, // thread
@@ -116,6 +143,12 @@ FN KepTrySatisfyQuantityQueue (
 
 #IF BLD_MP
                     IF thread == lockedthread THEN
+                        // The caller already has this thread locked, so
+                        // we should directly call the unwait function that
+                        // assumes the thread lock is held. This happens when
+                        // a thread's tier is increased by priority inheritance
+                        // and we were called to see if it can now be satisfied.
+
                         KepUnwaitThread (
                             thread, // thread
                             0, // status
@@ -136,6 +169,9 @@ FN KepTrySatisfyQuantityQueue (
                     )
 #END
 
+                    // The remaining value of the resource should be decremented
+                    // by the amount we just handed out.
+
                     value -= amount
                 END
             END
@@ -143,14 +179,20 @@ FN KepTrySatisfyQuantityQueue (
             i += 1
         END
 
+        // If there are any threads still waiting on this tier, then don't
+        // advance to the next one, since satisfaction should be strictly
+        // ordered by tier (this one should ALWAYS be satisfied before any
+        // further ones).
+
         IF tier^.HeapRoot[0] != NULLPTR OR
             tier^.HeapRoot[1] != NULLPTR THEN
 
-            // There are still threads waiting on this tier, so no further
-            // tiers should receive any resources.
+            // There are so break out.
 
             BREAK
         END
+
+        // Satisfy threads in the next tier.
 
         tier += SIZEOF KeuQuantityTier
         max -= 1
@@ -294,14 +336,21 @@ FN (KepDequeueF) KepDequeueQuantityQueue (
 
     queue := CAST object TO ^KeuQuantityQueue
 
+    // We stashed the heap index and tier in the waitblock to avoid having to
+    // recompute it.
+
     tier := &queue^.Tiers[waitblock^.Spare2]
     heapindex := waitblock^.Spare1
+
+    // Remove the waitblock from the heap.
 
     RtlRemoveFromHeap (
         &KepCompareQuantityQueueRequests, // comparisonfunc
         &tier^.HeapRoot[heapindex], // rootptr
         &waitblock^.Links.Heap, // entry
     )
+
+    // Decrement waiter count since we use that as a hint.
 
     queue^.WaiterCount -= 1
 END
@@ -319,13 +368,20 @@ FN (KepRequeueF) KepRequeueQuantityQueue (
 
     queue := CAST object TO ^KeuQuantityQueue
 
+    // Compute which tier and heap the thread should go in now.
+
     tierid := KepThreadTierId ( queue, thread )
 
     heapindex := NOT (thread^.Priority >= OS_PRIORITY_LOW_REALTIME |
         thread^.InteractiveBits)
 
+    // Grab the heap and tier it is currently in, since we stashed those in the
+    // waitblock.
+
     currentheapindex := waitblock^.Spare1
     currenttierid := waitblock^.Spare2
+
+    // Check if it actually changed and needs to be requeued.
 
     IF currentheapindex != heapindex OR
         currenttierid != tierid THEN
@@ -505,6 +561,15 @@ FN KeuIncrementQuantityQueue (
     )
 
     IF queue^.WaiterCount THEN
+        // There are waiters, so they might need to be awoken.
+
+        // XXX WaiterCount could prove to not be a sufficient hint to avoid
+        //     major contention on this lock during low memory circumstances
+        //     so maintaining an out-of-line "minimum amount" for each heap
+        //     root that we could scan locklessly here, to tell with more
+        //     certainty that there's really someone to satisfy, might be a
+        //     good idea if that turns out to be a big problem.
+
         ipl := KepAcquireObject ( &queue^.Header )
 
         KepTrySatisfyQuantityQueue (
