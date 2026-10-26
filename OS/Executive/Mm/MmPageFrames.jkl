@@ -236,6 +236,22 @@ FN MmuSetPageReservation (
     thread := PsCurrentThread ()
     reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
 
+    saveflags := flags
+
+    IF maximum != minimum THEN
+        // Try the maximum with no waiting and with normal threshold.
+
+        // The reason we're overriding any VM-privileged threshold here for the
+        // first pass, is to try to cause VM-privileged threads to use the
+        // minimum amount of the reserved pool of pages; if the first pass fails
+        // then we remove this limitation at the same time we peel back the
+        // attempt to the minimum, and that time it'll get the minimum out of
+        // the reserved pool.
+
+        flags &= ~MM_ALLOCATE_WAIT
+        flags |= MM_ALLOCATE_NORMAL
+    END
+
     count := reserve^.Count
 
     // Reset the debt to zero to prevent it from growing unboundedly. This
@@ -319,6 +335,7 @@ FN MmuSetPageReservation (
     IF maximum != minimum THEN
         // Lower to the minimum and retry.
 
+        flags = saveflags
         maximum = minimum
 
         GOTO Retry
@@ -432,7 +449,7 @@ EXPORT FN MmFulfillPageReservation ()
     reserve^.Debt = 0
 
     MmuSetPageReservation (
-        0, // minimum
+        debt, // minimum
         debt, // maximum
         MM_ALLOCATE_WAIT, // flags
         OUT: junk, // actual
