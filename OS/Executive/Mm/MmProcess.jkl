@@ -73,13 +73,12 @@ FN MmuInitializeThread (
 
     thread^.ReservedPages[FALSE].Count = 0
     thread^.ReservedPages[FALSE].Debt = 0
-#IF BLD_CHK
-    thread^.ReservedPages[FALSE].Node = NULLPTR
-#END
 
     thread^.ReservedPages[TRUE].Count = 0
     thread^.ReservedPages[TRUE].Debt = 0
-#IF BLD_CHK
+
+#IF BLD_NUMA
+    thread^.ReservedPages[FALSE].Node = NULLPTR
     thread^.ReservedPages[TRUE].Node = NULLPTR
 #END
 

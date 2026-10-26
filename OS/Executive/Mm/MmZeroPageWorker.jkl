@@ -56,7 +56,7 @@ FN (KeContinuationF) MmuZeroPageWorker (
         // Zero at most 64 pages during each 100ms interval.
         // We will zero a maximum of 640 pages per second which is about 2.5MB.
 
-        count : WORD = MMP_ZERO_MAXIMUM
+        count := MMP_ZERO_MAXIMUM
 
         WHILE count > 0 DO
             // Atomically claim the page frames we want to zero.
@@ -74,11 +74,11 @@ FN (KeContinuationF) MmuZeroPageWorker (
                     GOTO Wait
                 END
 
-                new := CAST KeCompareSwapPtr (
+                new := KeCompareSwapPtr (
                     &mmnode^.AvailablePageCount, // ptr
                     avail - MMP_ZERO_BATCH, // newvalue
                     avail, // expectedvalue
-                ) TO WORD
+                )
 
                 IF new == avail THEN
                     BREAK

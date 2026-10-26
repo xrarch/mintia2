@@ -7,6 +7,202 @@
 
 #INCLUDE "Mmp.hjk"
 
+FN MmpMakeMorePages (
+    IN mmnode : ^MmpNode,
+)
+
+    // Try to make free pages, asynchronously.
+
+    IF mmnode^.LowMemoryEvent.Header.SignalCount == 0 THEN
+        KeSignalEvent (
+            &mmnode^.LowMemoryEvent, // event
+            0, // priorityboost
+        )
+    END
+END
+
+#IF BLD_NUMA
+
+FN MmpClaimAvailablePages (
+    IN mmnode : ^MmpNode,
+    IN pages : UWORD,
+    IN flags : UWORD,
+    IN timeout : ^RtlUquad,
+    OUT actualnode : ^MmpNode,
+) : OsStatus
+
+    // Claim available pages from the closest node that has them to claim. If
+    // none has them, then default to the original node. Returns the node that
+    // it was taken from.
+
+    actualnode = mmnode
+    nodelist := mmnode^.KeNode^.DistanceList
+
+    threshold := MMP_BLOCK_FOR_PAGES_THRESHOLD
+
+    IF PsCurrentThread ()^.Tcb.VmPrivilegeBits THEN
+        // VM privileged threads get to tap the reserved pool.
+
+        threshold = 0
+    END
+
+    avail := mmnode^.AvailablePageCount
+
+    IF avail > mmnode^.LowPageCount AND
+        (avail - pages) <= mmnode^.LowPageCount THEN
+
+        // It was the home node and this request will make it low on pages, so
+        // start the asynchronous page-making processes.
+
+        // We do this now rather than when we're more sure we're taking it from
+        // the home node because we only know that for sure after the CAS
+        // succeeds, and by that time, a window has opened where people are
+        // blocking for free pages but nobody has started the page-making
+        // processes, which could lead to deadlock.
+
+        MmpMakeMorePages ( mmnode )
+    END
+
+    WHILE TRUE DO
+        WHILE avail < pages OR
+            (avail - pages) <= threshold DO
+
+            // Dang!!!!! Not enough pages on this node. Try skipping to one
+            // that has pages and is on the same pagefile pool.
+
+@NextNode
+
+            IF NOT nodelist[0] OR
+                flags & MM_ALLOCATE_NO_BORROW THEN
+
+                // No more nodes left to check, or the caller is demanding that
+                // we don't borrow from other nodes. Try blockingly from the
+                // home node.
+
+                IF flags & MM_ALLOCATE_WAIT == 0 THEN
+                    // Nevermind, this won't help since we're not allowed to
+                    // wait anyway.
+
+                    RETURN OS_STATUS_NO_MEMORY
+                END
+
+                actualnode = mmnode
+
+                RETURN KeuDecrementQuantityQueue (
+                    &mmnode^.AvailablePageQuantityQueue, // queue
+                    pages, // amount
+                    KE_KERNEL_MODE, // waitmode
+                    KE_UNALERTABLE, // alertable
+                    timeout, // timeout
+                    TRUE, // wait
+                )
+            END
+
+            actualnode = nodelist[0]^.Mmp
+            nodelist += SIZEOF ^KeuNode
+
+            IF actualnode^.PagefileState != mmnode^.PagefileState THEN
+                // This new node is not on the same pagefile pool as our home
+                // node. This also means they don't share commit, so it's
+                // illegal to borrow between them since that violates the
+                // guarantees commit is meant to provide the system.
+
+                // Try the next node instead.
+
+                GOTO NextNode
+            END
+
+            // Grab the available page count of the new node.
+
+            avail = actualnode^.AvailablePageCount
+
+            // Don't borrow if a remote node is already below its low page
+            // count. That would be rude and likely counterproductive.
+
+            threshold = actualnode^.LowPageCount
+        END
+
+        // The currently selected actualnode appears to have enough pages to
+        // satisfy our request, so try to yoink.
+
+        new := KeCompareSwapPtr (
+            &actualnode^.AvailablePageCount, // ptr
+            avail - pages, // newvalue
+            avail, // expectedvalue
+        )
+
+        IF new == avail THEN
+            // Got it!
+
+            IF actualnode != mmnode THEN
+                // We're borrowing the page frames, so record that with a
+                // saturating 16-bit counter. This does not need atomics since
+                // its a hint, so a lost count isn't a big deal.
+
+                oldvalue : UWORD = mmnode^.BorrowCounts[actualnode^.Id]
+
+                oldvalue += pages
+
+                IF oldvalue > 0xFFFF THEN
+                    oldvalue = 0xFFFF
+                END
+
+                mmnode^.BorrowCounts[actualnode^.Id] = oldvalue
+            END
+
+            RETURN OS_STATUS_SUCCESS
+        END
+
+        // Our copy of the available page count became stale, so update it and
+        // try again.
+
+        avail = new
+    END
+END
+
+#ELSE
+
+FN MmpClaimAvailablePages (
+    IN mmnode : ^MmpNode,
+    IN pages : UWORD,
+    IN flags : UWORD,
+    IN timeout : ^RtlUquad,
+    OUT actualnode : ^MmpNode,
+) : OsStatus
+
+    // Non-NUMA build so just claim directly from home node.
+
+    actualnode = mmnode
+
+    avail := mmnode^.AvailablePageCount
+
+    IF avail > mmnode^.LowPageCount AND
+        (avail - pages) <= mmnode^.LowPageCount THEN
+
+        // It was the home node and this request will make it low on pages, so
+        // start the asynchronous page-making processes.
+
+        // We do this now rather than when we're more sure we're taking it from
+        // the home node because we only know that for sure after the CAS
+        // succeeds, and by that time, a window has opened where people are
+        // blocking for free pages but nobody has started the page-making
+        // processes, which could lead to deadlock.
+
+        MmpMakeMorePages ( mmnode )
+    END
+
+    RETURN KeuDecrementQuantityQueue (
+        &mmnode^.AvailablePageQuantityQueue, // queue
+        pages, // amount
+        KE_KERNEL_MODE, // waitmode
+        KE_UNALERTABLE, // alertable
+        timeout, // timeout
+        flags & MM_ALLOCATE_WAIT, // wait
+    )
+END
+
+#END
+
 FN MmuSetPageReservation (
     IN minimum : UWORD,
     IN maximum : UWORD,
@@ -64,9 +260,12 @@ FN MmuSetPageReservation (
 
     mmnode := MmCurrentAffinityNode ()
 
-    // Reserve can only be for one node.
-
-    KeAssert ( reserve^.Count == 0 OR mmnode == reserve^.Node )
+#IF BLD_NUMA
+    IF reserve^.Node THEN
+        mmnode = reserve^.Node
+        flags |= MM_ALLOCATE_NO_BORROW
+    END
+#END
 
     // Compute how many more pages are needed to bring the reserve up to what's
     // needed.
@@ -90,13 +289,12 @@ FN MmuSetPageReservation (
     timeout : RtlUquad
     RtlSetUquadToUlong ( &timeout, 500 )
 
-    status = KeuDecrementQuantityQueue (
-        &mmnode^.AvailablePageQuantityQueue, // queue
-        diff, // amount
-        KE_KERNEL_MODE, // waitmode
-        FALSE, // alertable
+    status = MmpClaimAvailablePages (
+        mmnode, // mmnode
+        maximum, // pages
+        flags, // flags
         &timeout, // timeout
-        flags & MM_ALLOCATE_WAIT, // wait
+        OUT: actualnode, // actualnode
     )
 
     IF OsError ( status ) THEN
@@ -108,8 +306,8 @@ FN MmuSetPageReservation (
         GOTO Error
     END
 
-#IF BLD_CHK
-    reserve^.Node = mmnode
+#IF BLD_NUMA
+    reserve^.Node = actualnode
 #END
 
     reserve^.Count = maximum
@@ -154,7 +352,7 @@ FN MmuSetPageReservation (
         // physical pages are ever freed. Instead of sitting here forever,
         // we should retry so we can grab one of those freed pool blocks.
         // This should be very rare.
-    
+
         status = OS_STATUS_TRY_AGAIN
     END
 
@@ -169,8 +367,11 @@ FN MmuReleasePageReserve ()
 
     reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
 
-#IF BLD_CHK
+#IF BLD_NUMA
+    mmnode := reserve^.Node
     reserve^.Node = NULLPTR
+
+    KeAssert ( mmnode != NULLPTR )
 #END
 
     count := reserve^.Count
@@ -187,7 +388,9 @@ FN MmuReleasePageReserve ()
 
     // Increment the available page count.
 
+#IF ( NOT BLD_NUMA )
     mmnode := MmCurrentAffinityNode ()
+#END
 
     KeuIncrementQuantityQueue (
         &mmnode^.AvailablePageQuantityQueue, // queue
@@ -377,52 +580,6 @@ FN MmpAllocatePageFromStandbyList (
     END
 
     RETURN pfe
-END
-
-FN MmpMakeMorePages (
-    IN mmnode : ^MmpNode,
-)
-
-    // Try to make free pages, asynchronously.
-
-    IF mmnode^.LowMemoryEvent.Header.SignalCount == 0 THEN
-        // Signal my own low memory event.
-
-        KeSignalEvent (
-            &mmnode^.LowMemoryEvent, // event
-            0, // priorityboost
-        )
-    END
-
-#IF BLD_NUMA
-    // Scan neighboring nodes to see if any of them borrowed a substantial
-    // number of page frames from me. If so, signal them too.
-
-    nodelist := mmnode^.KeNode^.DistanceList
-
-    WHILE nodelist[0] DO
-        othernode := nodelist[0]^.Mmp
-
-        IF othernode^.BorrowCounts[mmnode^.Id] >= MMP_SIGNIFICANT_BORROWS THEN
-            // Set its borrow count from us to zero to avoid uselessly doing
-            // this again and again. Intentionally don't use an atomic here.
-
-            othernode^.BorrowCounts[mmnode^.Id] = 0
-
-            IF othernode^.LowMemoryEvent.Header.SignalCount == 0 THEN
-                // Signal its low memory event to get our page frames back.
-
-                KeSignalEvent (
-                    &othernode^.LowMemoryEvent, // event
-                    0, // priorityboost
-                )
-            END
-        END
-
-        nodelist += SIZEOF ^KeuNode
-    END
-#END
-
 END
 
 FN MmpReferencePage (
@@ -731,7 +888,7 @@ FN MmpAllocatePage (
             BREAK
         END
 
-        avail = CAST new TO WORD
+        avail = new
     END
 
     color &= MMP_COLOR_COUNT - 1

@@ -7,6 +7,7 @@
 #INCLUDE "<ll>/System/OsProcess.hjk"
 
 #DEFINE MMP_BALANCE_MANAGER_INTERVAL_MS 1000
+#DEFINE MMP_BALANCE_MANAGER_WAIT_FOR_WORK_MS 500
 
 #DEFINE MMP_POOL_ADJUSTMENT_SHORT_INTERVAL_MS 1000
 #DEFINE MMP_POOL_ADJUSTMENT_INTERVAL_MS 5000
@@ -174,9 +175,11 @@ FN (KeContinuationF) MmuBalanceManager (
             )
         END
 
+@ImACatWhoLovesToSnooze
+
         status = KeWaitForObjects (
             KE_KERNEL_MODE, // waitmode
-            FALSE, // alertable
+            KE_UNALERTABLE, // alertable
             NULLPTR, // timeout
             2, // objectcount
             &waittable[0], // objecttable
@@ -216,17 +219,121 @@ FN (KeContinuationF) MmuBalanceManager (
                 MmpGarbageCollectVpnDb ( mmnode )
             END
 
-        ELSEIF status == 1 THEN
-            // The low memory event was set.
-            // Try to free up page frames in a hurry.
-
-            MmpAdjustAllCachesSafely (
-                mmnode, // mmnode
-                TRUE, // empty
-            )
-
-            // Trim working sets.
-
+            CONTINUE
         END
+
+        // The low memory event was set.
+
+        // Try to free up page frames in a hurry. We can't go back to sleep
+        // until we observe the available page count above the low page
+        // threshold or system deadlock could result, since we are only
+        // signaled when it drops below that (for performance reasons).
+        // We ideally want to get up to the sufficient page count but we're
+        // allowed to go back to sleep before we get there.
+
+        // Do the lowest effort stuff first and get increasingly desperate.
+
+@TryAgain
+
+        // First dump all the object caches.
+
+        MmpAdjustAllCachesSafely (
+            mmnode, // mmnode
+            TRUE, // empty
+        )
+
+        IF mmnode^.AvailablePageCount > mmnode^.SufficientPageCount THEN
+            // Dumping caches was enough on its own.
+
+            GOTO ImACatWhoLovesToSnooze
+        END
+
+        MmpGarbageCollectVpnDb ( mmnode )
+
+        IF mmnode^.AvailablePageCount > mmnode^.SufficientPageCount THEN
+            // Garbage collecting VPNDB was enough on its own.
+
+            GOTO ImACatWhoLovesToSnooze
+        END
+
+        // Trim working sets.
+
+        // MmpTrimWorkingSets ( mmnode )
+
+        IF mmnode^.AvailablePageCount > mmnode^.SufficientPageCount THEN
+            // Trimming working sets was enough on its own.
+
+            GOTO ImACatWhoLovesToSnooze
+        END
+
+        // The synchronous stuff didn't work so we're out of hope and need
+        // to set off a bunch of asynchronous work to see if that'll help.
+
+        // Kick off the modified page writer.
+
+        // MmpFlushModifiedPageList ( mmnode )
+
+#IF BLD_NUMA
+        // While the modified page writer works, scan neighboring nodes to see
+        // if any of them borrowed a substantial number of page frames from me.
+        // If so, signal them too.
+
+        nodelist := mmnode^.KeNode^.DistanceList
+
+        WHILE nodelist[0] DO
+            othernode := nodelist[0]^.Mmp
+
+            IF othernode^.BorrowCounts[mmnode^.Id] >=
+                MMP_SIGNIFICANT_BORROWS THEN
+
+                // Set its borrow count from us to zero to avoid uselessly
+                // doing this again and again. Intentionally don't use an
+                // atomic here.
+
+                othernode^.BorrowCounts[mmnode^.Id] = 0
+
+                IF othernode^.LowMemoryEvent.Header.SignalCount == 0 THEN
+                    // Signal its low memory event to get our page frames
+                    // back.
+
+                    KeSignalEvent (
+                        &othernode^.LowMemoryEvent, // event
+                        0, // priorityboost
+                    )
+                END
+            END
+
+            nodelist += SIZEOF ^KeuNode
+        END
+#END
+
+        // Sleep for awhile to see if the asynchronous work helps.
+
+        waitinterval : RtlUquad
+
+        RtlSetUquadToUlong (
+            &waitinterval, // uquad
+            MMP_BALANCE_MANAGER_WAIT_FOR_WORK_MS, // ms
+        )
+
+        KeSleep (
+            &waitinterval, // interval
+            KE_KERNEL_MODE, // waitmode
+            KE_UNALERTABLE, // alertable
+            NULLPTR, // continuation
+        )
+
+        IF mmnode^.AvailablePageCount <= mmnode^.LowPageCount THEN
+            // We did not make it out of the low page count, so we have to try
+            // again.
+
+            GOTO TryAgain
+        END
+
+        // We may or may not have made it up to the sufficient page count,
+        // but we at least made it up to the low page count, which is good
+        // enough to go back to sleep. We can hope that the async work will
+        // get us the rest of the way but for now we don't want to spam all of
+        // this again.
     END
 END
