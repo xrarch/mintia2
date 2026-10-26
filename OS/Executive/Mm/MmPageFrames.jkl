@@ -108,6 +108,10 @@ FN MmuSetPageReservation (
         GOTO Error
     END
 
+#IF BLD_CHK
+    reserve^.Node = mmnode
+#END
+
     reserve^.Count = maximum
     actual = maximum
 
@@ -152,6 +156,10 @@ FN MmuReleasePageReserve ()
     thread := PsCurrentThread ()
 
     reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
+
+#IF BLD_CHK
+    reserve^.Node = NULLPTR
+#END
 
     count := reserve^.Count
 
