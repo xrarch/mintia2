@@ -94,6 +94,9 @@ FN MmpInitializeNodeStage1 (
 
     KeInitializeLock ( &mmnode^.KernelStackPteListLock, "KernelStackPteList" )
 
+    mmnode^.AvailablePageTiers[0].Threshold = MMP_BLOCK_FOR_PAGES_THRESHOLD
+    mmnode^.AvailablePageTiers[1].Threshold = 0
+
     KeuInitializeQuantityQueue (
         &mmnode^.AvailablePageQuantityQueue, // queue
         "AvailablePageCount", // name

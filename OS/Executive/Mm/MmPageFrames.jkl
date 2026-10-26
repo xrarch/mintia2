@@ -143,6 +143,18 @@ FN MmuSetPageReservation (
     // stack).
 
     IF status == OS_STATUS_WAIT_TIMEOUT THEN
+        // No pages were freed for several seconds. Return to the upper
+        // level codepath so that it can retry. If we're lucky, we might be
+        // able to pick up a newly freed pool block, or something else that
+        // obviates the need to grab a page frame at all.
+        //
+        // This actually mitigates a possible class of deadlocks where, for
+        // example, the entirety of physical memory may be filled with pool
+        // pages, and pool blocks are being allocated and freed, but no
+        // physical pages are ever freed. Instead of sitting here forever,
+        // we should retry so we can grab one of those freed pool blocks.
+        // This should be very rare.
+    
         status = OS_STATUS_TRY_AGAIN
     END
 
