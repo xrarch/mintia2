@@ -820,8 +820,10 @@ FN ExAllocateFromArena (
             status = arena^.ImportCallbacks.Import (
                 arena^.ImportArena, // importarena
                 flags, // flags
-                importsize, // size
+                size, // minimum
+                importsize, // maximum
                 OUT address, // address
+                OUT importsize, // actual
             )
 
             ipl = KeAcquireLockExclusiveRaise ( &arena^.Lock )
@@ -1067,16 +1069,32 @@ END
 FN (ExArenaImportF) ExDefaultArenaImport (
     IN importarena : ^ExpArena,
     IN flags : UWORD,
-    IN size : UWORD,
+    IN minimum : UWORD,
+    IN maximum : UWORD,
     OUT address : ^VOID,
+    OUT actual : UWORD,
 ) : OsStatus
 
-    RETURN ExAllocateFromArena (
+@Retry
+
+    status := ExAllocateFromArena (
         importarena, // arena
         flags, // flags
-        size, // size
+        maximum, // size
         OUT address, // address
     )
+
+    IF OsError ( status ) AND
+        minimum != maximum THEN
+
+        maximum = minimum
+
+        GOTO Retry
+    END
+
+    actual = maximum
+
+    RETURN status
 END
 
 FN (ExArenaFreeF) ExDefaultArenaFree (
@@ -1238,6 +1256,7 @@ FN ExCreateArena (
         status = ExCreateMagazineCache (
             kenode, // kenode
             "QuantumCache", // name
+            flags, // flags
             pageable, // pageable
             &ExpFreeQuantumCache, // freefunc
             &arena^.QuantumCaches[i], // context

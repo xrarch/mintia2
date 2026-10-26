@@ -97,6 +97,7 @@ END
 EXPORT FN ExCreateMagazineCache (
     IN kenode : ^KeuNode,
     IN name : ^UBYTE,
+    IN flags : UWORD,
     IN pageable : UWORD,
     IN freefunc : ExMagazineCacheFreeF,
     IN context : ^VOID,
@@ -109,7 +110,7 @@ EXPORT FN ExCreateMagazineCache (
 
     status := MmAllocateFromObjectCache (
         expnode^.MagazineCacheCache, // objectcache
-        MM_ALLOCATE_WAIT, // flags
+        flags, // flags
         'MagC', // tag
         OUT magazinecache, // object
     )

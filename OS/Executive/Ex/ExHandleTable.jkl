@@ -184,6 +184,9 @@ FN ExuCreateHandle (
 
     // Allocate a handle from the handle table.
 
+    reserved := FALSE
+    status := OS_STATUS_SUCCESS
+
 @Retry
 
     handle = handletable^.FreeListHead
@@ -205,7 +208,7 @@ FN ExuCreateHandle (
             handletable^.FreeListHead = free^.Next >> EXP_NEXT_HANDLE_SHIFT
         END
 
-        RETURN OS_STATUS_SUCCESS
+        GOTO Exit
     END
 
     // Grow the handle table.
@@ -215,14 +218,14 @@ FN ExuCreateHandle (
 
     // First charge quota for the new table.
 
-    status := MmuChargePoolQuota (
+    status = MmuChargePoolQuota (
         handletable^.QuotaBlock, // quotablock
         newsize, // charge
         TRUE, // pageable
     )
 
     IF OsError ( status ) THEN
-        RETURN status
+        GOTO Exit
     END
 
     // Now allocate it.
@@ -254,13 +257,15 @@ FN ExuCreateHandle (
             // allocation first, and upon failure, we wait for free pages
             // without locks and then retry everything.
 
-            IF status != OS_STATUS_NO_MEMORY THEN
-                RETURN status
+            IF status != OS_STATUS_TRY_AGAIN THEN
+                GOTO Exit
             END
 
             KeReleaseLock ( lock )
 
-            MmWaitForPoolMemory ()
+            MmFulfillPageReservation ()
+
+            reserved = TRUE
 
             KeAcquireLockExclusive ( lock )
 
@@ -269,7 +274,7 @@ FN ExuCreateHandle (
 
         // No lock trick we're just out of memory.
 
-        RETURN status
+        GOTO Exit
     END
 
     IF table THEN
@@ -340,5 +345,11 @@ FN ExuCreateHandle (
         free^.Next = (nexthandle << EXP_NEXT_HANDLE_SHIFT) | EXP_FREE_HANDLE
     END
 
-    RETURN OS_STATUS_SUCCESS
+@Exit
+
+    IF reserved THEN
+        MmReleasePageReserve ()
+    END
+    
+    RETURN status
 END

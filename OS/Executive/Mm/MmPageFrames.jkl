@@ -218,8 +218,8 @@ FN MmuSetPageReservation (
     // level of an allocation stack, and a lack thereof means it is at a deeper
     // layer. If a failure occurs here and it's at a lower layer, then a Debt
     // is accrued, and an OS_STATUS_TRY_AGAIN is returned to eventually induce
-    // the uppermost layer to call this waitably, at which point it will try
-    // to reserve the entire debt at once.
+    // the uppermost layer to call MmuFulfillPageReservation, at which point it
+    // will try to reserve the entire debt at once.
 
     // This has the effect that if a wait is needed for pages in order
     // to satisfy a reservation, it is consolidated to the upper layer. This is
@@ -231,24 +231,12 @@ FN MmuSetPageReservation (
     KeAssert ( maximum >= minimum )
 
     thread := PsCurrentThread ()
-
     reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
+    count := reserve^.Count
 
 @Retry
 
-    IF flags & MM_ALLOCATE_WAIT AND
-        reserve^.Debt THEN
-
-        // This is the uppermost layer, so try to pay off the entire debt.
-
-        IF reserve^.Debt > maximum THEN
-            maximum = reserve^.Debt
-        END
-
-        reserve^.Debt = 0
-    END
-
-    IF reserve^.Count >= maximum THEN
+    IF count >= maximum THEN
         // Already enough.
 
         actual = maximum
@@ -267,10 +255,9 @@ FN MmuSetPageReservation (
     END
 #END
 
-    // Compute how many more pages are needed to bring the reserve up to what's
-    // needed.
+    // Compute the amount needed to get it up there.
 
-    diff := maximum - reserve^.Count
+    diff := maximum - count
 
     // Page reserve is commit-charged.
 
@@ -287,11 +274,11 @@ FN MmuSetPageReservation (
     // Reserve actual available page count.
 
     timeout : RtlUquad
-    RtlSetUquadToUlong ( &timeout, 500 )
+    RtlSetUquadToUlong ( &timeout, 1000 )
 
     status = MmpClaimAvailablePages (
         mmnode, // mmnode
-        maximum, // pages
+        diff, // pages
         flags, // flags
         &timeout, // timeout
         OUT: actualnode, // actualnode
@@ -331,7 +318,9 @@ FN MmuSetPageReservation (
         // We weren't able to wait, so add this as a debt and induce upper
         // layers to try again.
 
-        reserve^.Debt += minimum
+        IF minimum > reserve^.Debt THEN
+            reserve^.Debt = minimum
+        END
 
         RETURN OS_STATUS_TRY_AGAIN
     END
@@ -359,7 +348,7 @@ FN MmuSetPageReservation (
     RETURN status
 END
 
-FN MmuReleasePageReserve ()
+EXPORT FN MmReleasePageReserve ()
 
     // Release the remaining page reservation for the thread, if any.
 
@@ -370,13 +359,11 @@ FN MmuReleasePageReserve ()
 #IF BLD_NUMA
     mmnode := reserve^.Node
     reserve^.Node = NULLPTR
-
-    KeAssert ( mmnode != NULLPTR )
 #END
 
     count := reserve^.Count
 
-    IF count THEN
+    IF count == 0 THEN
         // Nothing to release.
 
         LEAVE
@@ -392,6 +379,10 @@ FN MmuReleasePageReserve ()
     mmnode := MmCurrentAffinityNode ()
 #END
 
+#IF BLD_NUMA
+    KeAssert ( mmnode != NULLPTR )
+#END
+
     KeuIncrementQuantityQueue (
         &mmnode^.AvailablePageQuantityQueue, // queue
         count, // amount
@@ -402,6 +393,28 @@ FN MmuReleasePageReserve ()
     MmuUnchargeCommit (
         mmnode, // mmnode
         count, // pages
+    )
+END
+
+EXPORT FN MmFulfillPageReservation ()
+
+    // Intended to be called by a top level of the allocation stack that
+    // received OS_STATUS_TRY_AGAIN from a lower level and needs to fulfill
+    // a debt. The caller is responsible for releasing any excess page
+    // reservation.
+
+    thread := PsCurrentThread ()
+
+    reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
+
+    debt := reserve^.Debt
+    reserve^.Debt = 0
+
+    MmuSetPageReservation (
+        0, // minimum
+        debt, // maximum
+        MM_ALLOCATE_WAIT, // flags
+        OUT: junk, // actual
     )
 END
 
@@ -781,9 +794,9 @@ FN MmpUnreferencePage (
 
         KeReleaseLockLower ( &colorlist^.Lock, ipl )
 
-        MmpIncrementAvailablePages (
-            mmnode, // mmnode
-            1, // inc
+        KeuIncrementQuantityQueue (
+            &mmnode^.AvailablePageQuantityQueue, // queue
+            1, // amount
         )
 
         LEAVE
@@ -798,102 +811,19 @@ FN MmpUnreferencePage (
     KeReleaseLockLower ( &colorlist^.Lock, ipl )
 END
 
-FN MmpAllocatePage (
+FN MmpAllocatePageReserved (
     IN mmnode : ^MmpNode,
     IN flags : UWORD,
     IN color : UWORD,
 ) : ^MmpPfe
 
-    // Allocate a page from the given node. If none available, return
-    // NULLPTR.
-
-    IF PsCurrentThread()^.Tcb.VmPrivilegeBits THEN
-        flags |= MM_ALLOCATE_LOW
-    END
-
-#IF BLD_NUMA
-    nodelist : ^^KeuNode = NULLPTR
-    originalnode := mmnode
-
-    KeAssert ( originalnode^.KeNode^.ProcessorCount != 0 )
-#END
-
-@Retry
-
-    avail := mmnode^.AvailablePageCount
-    new : UWORD
-
-    IF avail <= mmnode^.LowPageCount
-#IF BLD_NUMA
-        AND mmnode == originalnode
-#END
-        THEN
-
-        // Too few pages. Try to make more, asynchronously.
-
-        MmpMakeMorePages ( mmnode )
-    END
-
-    WHILE TRUE DO
-        IF avail <= 0 OR
-            (flags & MM_ALLOCATE_LOW == 0 AND
-            avail <= MMP_BLOCK_FOR_PAGES_THRESHOLD) THEN
-
-            // Not enough pages.
-
-            // Note that the available page count can briefly become negative
-            // due to a race between standby page reclamation, and page lookup
-            // within an object. Any non-positive available page count means
-            // functionally that no pages are available.
-
-#IF BLD_NUMA
-            IF flags & MM_ALLOCATE_NO_BORROW == 0 THEN
-                // Look at the next most distant node from this one.
-
-                IF NOT nodelist THEN
-                    nodelist = mmnode^.KeNode^.DistanceList
-                END
-
-                WHILE nodelist[0] DO
-                    IF nodelist[0]^.Mmp^.PagefileState ==
-                        mmnode^.PagefileState THEN
-
-                        // This node has the same pagefile pool and commit
-                        // tracking so we can borrow from it.
-
-                        mmnode = nodelist[0]^.Mmp
-
-                        nodelist += SIZEOF ^KeuNode
-
-                        GOTO Retry
-                    END
-
-                    nodelist += SIZEOF ^KeuNode
-                END
-            END
-#END
-
-            RETURN NULLPTR
-        END
-
-        // Atomically claim a single page frame by a CAS loop.
-
-        new = KeCompareSwapPtr (
-            &mmnode^.AvailablePageCount, // ptr
-            avail - 1, // newvalue
-            avail, // expectedvalue
-        )
-
-        IF new == avail THEN
-            BREAK
-        END
-
-        avail = new
-    END
+    // Allocate a page from the given node.
+    // The caller has reserved an available page count from this node and there
+    // is a guarantee that there is a page somewhere.
 
     color &= MMP_COLOR_COUNT - 1
 
-    pfe : ^MmpPfe = NULLPTR
+    pfe : ^MmpPfe
 
     mustzero := FALSE
 
@@ -943,48 +873,22 @@ FN MmpAllocatePage (
         )
     END
 
-    IF NOT pfe THEN
-        // There is a race condition where after we claim an available page off
-        // the count, a standby page can be taken off the list by a page lookup
-        // within an object, which can make all of the lists empty even after
-        // we successfully allocated a count. The available page count can also
-        // become negative due to this.
+    // Should not be possible to fail to get a page since we have a guarantee
+    // that there is a page on some list.
 
-        MmpIncrementAvailablePages (
-            mmnode, // mmnode
-            1, // inc
-        )
-
-        GOTO Retry
-    END
+    KeAssert ( pfe != NULLPTR )
 
 #IF BLD_CHK
     pfe^.Packed = MmpPackType ( pfe^.Packed, MMP_IN_USE_PFE_TYPE )
 #END
 
     IF mustzero THEN
-        KeAssert ( pfe != NULLPTR )
-
         MmZeroPage (
             MmpPfeToPfn ( pfe ), // pfn
             0, // offset
             RTL_PAGE_SIZE, // length
         )
     END
-
-#IF BLD_NUMA
-    IF originalnode != mmnode THEN
-        // We're borrowing the page frame, so record that with a saturating
-        // 16-bit counter. This does not need atomics since its a hint, so a
-        // lost count isn't a big deal.
-
-        oldvalue := originalnode^.BorrowCounts[mmnode^.Id]
-
-        IF oldvalue != 0xFFFF THEN
-            originalnode^.BorrowCounts[mmnode^.Id] = oldvalue + 1
-        END
-    END
-#END
 
     RETURN pfe
 END
@@ -1011,9 +915,9 @@ FN MmpFreePage (
         TRUE, // head
     )
 
-    MmpIncrementAvailablePages (
-        mmnode, // mmnode
-        1, // inc
+    KeuIncrementQuantityQueue (
+        &mmnode^.AvailablePageQuantityQueue, // queue
+        1, // amount
     )
 
     IF count > mmnode^.ZeroingThreshold AND
@@ -1028,222 +932,72 @@ FN MmpFreePage (
     END
 END
 
-FN MmpIncrementAvailablePages (
-    IN mmnode : ^MmpNode,
-    IN increment : UWORD,
-) : WORD
+FN MmpAllocatePageFromReserve (
+    IN flags : UWORD,
+    IN color : UWORD,
+) : ^MmpPfe
 
-    // Increment the number of available pages and return the old count.
-    // If needed, signal page-available events to wake waiters.
+    // Allocate a page from the thread's page reserve.
+    // Returns NULLPTR if the thread ran out of page reserve.
 
-    old := CAST KeIncrementPtr (
-        &mmnode^.AvailablePageCount, // ulong
-        increment, // inc
-    ) TO WORD
+    thread := PsCurrentThread ()
+    reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
+    count := reserve^.Count
 
-    IF old >= MMP_BLOCK_FOR_PAGES_THRESHOLD AND
-        mmnode^.PageAvailableEvent.Header.SignalCount == 0 THEN
-
-        // Signal the available page event.
-
-        KeSignalEvent (
-            &mmnode^.PageAvailableEvent, // event
-            0, // priorityboost
-        )
+    IF count == 0 THEN
+        RETURN NULLPTR
     END
 
-    IF old >= 0 AND
-        mmnode^.LowPageAvailableEvent.Header.SignalCount == 0 THEN
+    reserve^.Count = count - 1
 
-        // Signal the low page available event.
+#IF BLD_NUMA
+    mmnode := reserve^.Node
 
-        KeSignalEvent (
-            &mmnode^.LowPageAvailableEvent, // event
-            0, // priorityboost
-        )
+    IF count == 1 THEN
+        // Count is now zero so clear the node to allow the next reserve to
+        // reserve any.
+
+        reserve^.Node = NULLPTR
     END
-
-    RETURN old
-END
-
-#DEFINE MMP_MIN_LOOPS_FOR_BACKOFF 2
-#DEFINE MMP_INITIAL_BACKOFF_MS 5
-#DEFINE MMP_MAX_BACKOFF_MS 1000
-
-FN MmpWaitForPages (
-    IN mmnode : ^MmpNode,
-    IN low : UWORD,
-)
-
-    // Wait for available pages to exist from the given node.
-    // This function provides no guarantees - caller will have to repeatedly
-    // call it until MmpAllocatePage yields a page.
-    //
-    // Note that each time this function returns, the caller should retry its
-    // entire allocation path. For example, if the caller is a cache layer, then
-    // it should try to look for a cached block to have appeared to take instead
-    // of calling this function again. This avoids a class of resource
-    // granularity deadlocks (described below).
-    //
-    // Randomized exponential back-off is performed to mitigate thundering herd.
-    // Some bits of the current thread pointer are used as a seed for xorshift.
-
-    loops := 0
-    threshold : UWORD
-    event : ^KeEvent
-
-    timeout : RtlUquad
-    RtlSetUquadToUlong ( &timeout, 5000 )
-
-    backoff : RtlUquad
-    backoffms := MMP_INITIAL_BACKOFF_MS
-
-    IF PsCurrentThread()^.Tcb.VmPrivilegeBits THEN
-        low = TRUE
-    END
-
-    IF low THEN
-        threshold = 0
-        event = &mmnode^.LowPageAvailableEvent
-
-    ELSE
-        threshold = MMP_BLOCK_FOR_PAGES_THRESHOLD
-        event = &mmnode^.PageAvailableEvent
-    END
-
-    WHILE TRUE DO
-        // Wait on the event until we catch the available page count at a
-        // sufficient level.
-
-        IF mmnode^.AvailablePageCount > threshold THEN
-            LEAVE
-        END
-
-        KeResetEvent ( event )
-
-        IF mmnode^.AvailablePageCount > threshold THEN
-            // Inbetween checking the threshold and resetting the event, the
-            // available page count became sufficient again, so we should
-            // signal the event and return otherwise we may deadlock ourselves
-            // or other threads.
-
-            KeSignalEvent (
-                event, // event
-                0, // priorityboost
-            )
-
-            LEAVE
-        END
-
-        IF loops >= MMP_MIN_LOOPS_FOR_BACKOFF THEN
-            // Perform exponential backoff.
-
-            seed : UWORD
-
-            IF loops == MMP_MIN_LOOPS_FOR_BACKOFF THEN
-                // Initialize the xorshift seed which is the low bits of the
-                // current thread pointer shifted right by the natural
-                // alignment and XORed with the VPN and the current uptime.
-                // This tries to improve uniqueness of the seed between each
-                // thread and over time.
-
-                thrd := KeCurrentThread ()
-                seed = (thrd >> RTL_ALIGN_SHIFT) $ (thrd >> RTL_PAGE_SHIFT)
-            END
-
-            // XOR with bits of the uptime every iteration.
-
-#IF ( == BLD_BITS 32 )
-            seed $= KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Low
 #ELSE
-            seed $= KeCurrentVolatileNode ()^.SharedUserPage^.Uptime.Quad
+    mmnode := MmCurrentAffinityNode ()
 #END
 
-            // Jitter the backoff interval by the low 4 bits of the seed.
-
-            backoffms += seed & 15
-
-            IF backoffms >= MMP_MAX_BACKOFF_MS THEN
-                // This thread has been waiting a long time for pages and may
-                // be starved by newcoming threads. Reset the backoff interval
-                // to a small random value in order to compete with them.
-
-                backoffms = 1 + (seed & 31)
-                loops = 0
-            END
-
-            RtlSetUquadToUlong (
-                &backoff, // uquad
-                backoffms, // ulong
-            )
-
-            KeSleep (
-                &backoff, // interval
-                KE_KERNEL_MODE, // waitmode
-                FALSE, // alertable
-                NULLPTR, // continuation
-            )
-
-            // Multiply the backoff interval by two.
-
-            backoffms *= 2
-
-            seed $= seed << 13
-            seed $= seed >> 17
-            seed $= seed << 5
-        END
-
-        status := KeWaitForSingleObject (
-            KE_KERNEL_MODE, // waitmode
-            KE_UNALERTABLE, // alertable
-            &timeout, // timeout
-            event, // object
-            NULLPTR, // argument
-            NULLPTR, // continuation
-        )
-
-        IF status == OS_STATUS_WAIT_TIMEOUT THEN
-            // No pages were freed for several seconds. Return to the upper
-            // level codepath so that it can retry. If we're lucky, we might be
-            // able to pick up a newly freed pool block, or something else that
-            // obviates the need to grab a page frame at all.
-            //
-            // This actually mitigates a possible class of deadlocks where, for
-            // example, the entirety of physical memory may be filled with pool
-            // pages, and pool blocks are being allocated and freed, but no
-            // physical pages are ever freed. Instead of sitting here forever,
-            // we should retry so we can grab one of those freed pool blocks.
-            // This should be very rare.
-
-            LEAVE
-        END
-
-        loops += 1
-    END
+    RETURN MmpAllocatePageReserved (
+        mmnode, // mmnode
+        flags, // flags
+        color, // color
+    )
 END
 
-FN MmpAllocatePageWait (
+FN MmpAllocatePageUnreserved (
     IN mmnode : ^MmpNode,
     IN flags : UWORD,
     IN color : UWORD,
 ) : ^MmpPfe
 
-    // Allocate a page with the given parameters. Allowed to wait.
+    // Allocate a page that has not yet been reserved.
+    // Returns NULLPTR if reserving the page fails.
 
-    WHILE TRUE DO
-        pfe := MmpAllocatePage (
-            mmnode, // mmnode
-            flags, // flags
-            color, // color
-        )
+    status := MmpClaimAvailablePages (
+        mmnode, // mmnode
+        1, // pages
+        flags, // flags
+        NULLPTR, // timeout
+        OUT mmnode, // actualnode
+    )
 
-        IF pfe THEN
-            RETURN pfe
-        END
+    IF OsError ( status ) THEN
+        // Failed to claim an available page.
 
-        MmpWaitForPages (
-            mmnode, // mmnode
-            flags & MM_ALLOCATE_LOW, // low
-        )
+        RETURN NULLPTR
     END
+
+    // Got a count, so allocate the page.
+
+    RETURN MmpAllocatePageReserved (
+        mmnode, // mmnode
+        flags, // flags
+        color, // color
+    )
 END

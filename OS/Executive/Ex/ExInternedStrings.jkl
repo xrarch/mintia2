@@ -103,9 +103,13 @@ EXPORT FN ExFindName (
     kenode := KeCurrentAffinityNode ()
     expnode := kenode^.Exp
 
+    node : ^ExpName
+
     // Get the hash bucket.
 
     bucket := &expnode^.NameBuckets[hash & (EXP_NAME_BUCKETS - 1)]
+
+    reserved := FALSE
 
 @Retry
 
@@ -125,24 +129,24 @@ EXPORT FN ExFindName (
             BREAK
         END
 
-        checknode := CONTAINEROF avlnode TO ExpName.Entry
+        node = CONTAINEROF avlnode TO ExpName.Entry
 
         res := CAST RtlCompareRtlString (
             str, // str1
-            &checknode^.String, // str2
+            &node^.String, // str2
         ) TO WORD
 
         IF res == 0 THEN
             // Found it! Unlock the bucket and return the node.
 
             KeIncrementUlong (
-                &checknode^.References, // ptr
+                &node^.References, // ptr
                 1, // inc
             )
 
             KeReleaseLock ( &bucket^.Lock )
 
-            RETURN CAST checknode TO ^ExName
+            GOTO Exit
         END
 
         IF res < 0 THEN
@@ -158,17 +162,21 @@ EXPORT FN ExFindName (
         SIZEOF ExpName + len + 1, // bytes
         'Name', // tag
         0, // flags
-        OUT node : ^ExpName, // ptr
+        OUT node, // ptr
     )
 
     IF OsError ( status ) THEN
         KeReleaseLock ( &bucket^.Lock )
 
-        IF status != OS_STATUS_NO_MEMORY THEN
-            RETURN NULLPTR
+        IF status != OS_STATUS_TRY_AGAIN THEN
+            node = NULLPTR
+
+            GOTO Exit
         END
 
-        MmWaitForPoolMemory ()
+        MmFulfillPageReservation ()
+
+        reserved = TRUE
 
         GOTO Retry
     END
@@ -199,6 +207,12 @@ EXPORT FN ExFindName (
     // Unlock bucket and return node.
 
     KeReleaseLock ( &bucket^.Lock )
+
+@Exit
+
+    IF reserved THEN
+        MmReleasePageReserve ()
+    END
 
     RETURN CAST node TO ^ExName
 END

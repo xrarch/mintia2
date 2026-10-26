@@ -220,9 +220,11 @@ FN KepInitializePrb (
         function = &KepIdleLoop
     END
 
+    prb^.IdleThreadPtr = PsuAllocateIdleThread ( kenode )
+
     KeuInitializeThread (
         &kenode^.IdleProcess^.Pcb, // process
-        &prb^.IdleThread, // thread
+        prb^.IdleThreadPtr, // thread
         kenode, // kenode
         "IdleThread", // name
         prb^.IdleStackBase + BL_IDLE_STACK_SIZE, // kstack
@@ -233,11 +235,11 @@ FN KepInitializePrb (
         NULLPTR, // parameter2
     )
 
-    prb^.IdleThread.Priority = OS_PRIORITY_IDLE
-    prb^.IdleThread.BasePriority = OS_PRIORITY_IDLE
+    prb^.IdleThreadPtr^.Priority = OS_PRIORITY_IDLE
+    prb^.IdleThreadPtr^.BasePriority = OS_PRIORITY_IDLE
 
 #IF BLD_MP
-    prb^.IdleThread.CurrentPrb = prb
+    prb^.IdleThreadPtr^.CurrentPrb = prb
     KeuGlobalProcessorArray[consecid] = prb
 #END
 

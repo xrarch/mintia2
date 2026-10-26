@@ -111,6 +111,15 @@ EXPORT FN MmAllocateFromObjectCache (
     )
 
     IF OsError ( status ) THEN
+        IF status == OS_STATUS_TRY_AGAIN AND
+            flags & MM_ALLOCATE_WAIT THEN
+
+            // We're the top level and the mapped page arena said to try again,
+            // so try again.
+
+            GOTO Retry
+        END
+
         RETURN status
     END
 
@@ -445,6 +454,7 @@ EXPORT FN MmCreateObjectCache (
         status = ExCreateMagazineCache (
             kenode, // kenode
             name, // name
+            flags, // flags
             pageable, // pageable
             &MmpFreeToObjectCache, // freefunc
             objectcache, // context

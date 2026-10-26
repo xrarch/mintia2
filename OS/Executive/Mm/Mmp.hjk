@@ -111,11 +111,6 @@ STRUCT MmpAvailablePageList
     Count : UWORD,
 END
 
-EXTERN FN MmpIncrementAvailablePages (
-    IN mmnode : ^MmpNode,
-    IN increment : UWORD,
-) : WORD
-
 EXTERN MmpSystemSize : UWORD
 
 #MACRO MmpFindPfnDatabase () [
@@ -180,26 +175,34 @@ EXTERN FN MmpReleaseDynamicPages (
     IN flush : UWORD,
 )
 
-EXTERN FN MmpAllocatePage (
+EXTERN FN MmpAllocatePageFromReserve (
+    IN flags : UWORD,
+    IN color : UWORD,
+) : ^MmpPfe
+
+EXTERN FN MmpAllocatePageUnreserved (
     IN mmnode : ^MmpNode,
     IN flags : UWORD,
     IN color : UWORD,
 ) : ^MmpPfe
+
+EXTERN FN MmpAllocatePageReserved (
+    IN mmnode : ^MmpNode,
+    IN flags : UWORD,
+    IN color : UWORD,
+) : ^MmpPfe
+
+EXTERN FN MmpClaimAvailablePages (
+    IN mmnode : ^MmpNode,
+    IN pages : UWORD,
+    IN flags : UWORD,
+    IN timeout : ^RtlUquad,
+    OUT actualnode : ^MmpNode,
+) : OsStatus
 
 EXTERN FN MmpFreePage (
     IN pfe : ^MmpPfe,
 )
-
-EXTERN FN MmpWaitForPages (
-    IN mmnode : ^MmpNode,
-    IN low : UWORD,
-)
-
-EXTERN FN MmpAllocatePageWait (
-    IN mmnode : ^MmpNode,
-    IN flags : UWORD,
-    IN color : UWORD,
-) : ^MmpPfe
 
 EXTERN FN MmpAllocatePageFromList (
     IN list : ^MmpAvailablePageList,

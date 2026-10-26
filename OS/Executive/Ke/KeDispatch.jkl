@@ -132,14 +132,14 @@ FN KepJumpIntoIdleThread (
 
     // Set parameters for new thread.
 
-    prb^.CurrentThread = &prb^.IdleThread
-    prb^.KernelStackTop = prb^.IdleThread.KernelStackTop
+    prb^.CurrentThread = prb^.IdleThreadPtr
+    prb^.KernelStackTop = prb^.IdleThreadPtr^.KernelStackTop
 
-    KepSetCurrentThreadForProcessor ( &prb^.IdleThread )
+    KepSetCurrentThreadForProcessor ( prb^.IdleThreadPtr )
 
     // Switch into our idle thread.
 
-    KepJumpIntoThread ( &prb^.IdleThread )
+    KepJumpIntoThread ( prb^.IdleThreadPtr )
 END
 
 FN KepUpdateInteractivity (
@@ -1543,7 +1543,7 @@ FN KepPreemptThread (
     current^.Switching = TRUE
 #END
 
-    IF current != &prb^.IdleThread THEN
+    IF current != prb^.IdleThreadPtr THEN
         // Ready the current thread.
 
         KepAcquireReadyQueueElevated ( prb )
@@ -1671,7 +1671,7 @@ FN KepSetPriorityThread (
     // This operation cannot be initiated by a user anyway since there's no
     // way to get a handle to an idle thread.
 
-    KeAssert ( thread != &prb^.IdleThread )
+    KeAssert ( thread != prb^.IdleThreadPtr )
 
     thread^.Priority = priority
 
@@ -1958,7 +1958,7 @@ FN KepQuantumEnd (
 
     current := prb^.CurrentThread
 
-    IF current == &prb^.IdleThread THEN
+    IF current == prb^.IdleThreadPtr THEN
         // Idle thread takes no quantum ends. This can happen if there was a
         // thread swap inbetween the quantum end request and service.
 
@@ -2109,7 +2109,7 @@ FN KepYield (
 
         KepSwitchThread (
             current, // current
-            &prb^.IdleThread, // thread
+            prb^.IdleThreadPtr, // thread
             continuation, // continuation
             FALSE, // handoff
         )
@@ -2589,7 +2589,7 @@ FN KepPinThread (
     current := myprb^.CurrentThread
 
     KeAssert ( KepCurrentIpl () == KEP_IPL_DPC )
-    KeAssert ( current != &myprb^.IdleThread )
+    KeAssert ( current != myprb^.IdleThreadPtr )
 
     KepAcquireThreadElevated ( current )
 
@@ -2647,7 +2647,7 @@ FN KepUnpinThread ()
     current := myprb^.CurrentThread
 
     KeAssert ( KepCurrentIpl () == KEP_IPL_DPC )
-    KeAssert ( current != &myprb^.IdleThread )
+    KeAssert ( current != myprb^.IdleThreadPtr )
 
     // No lock is needed because Pinned is only read while the thread is on a
     // ready queue. Since it's running *right now*, it can't be on a ready

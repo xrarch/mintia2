@@ -254,6 +254,22 @@ FN PsuInitializeIdleProcess (
     kenode^.SystemCred = &idleproc^.Paged^.Cred
 END
 
+FN PsuAllocateIdleThread (
+    IN kenode : ^KeuNode,
+) : ^KeuThread
+
+    // Allocate an idle thread from the node space.
+
+    thread : ^KeuThread = KeuAllocateNodeSpace (
+        kenode, // kenode
+        SIZEOF PsuThread, // bytes
+    )
+
+    KeAssert ( thread != NULLPTR )
+
+    RETURN thread
+END
+
 FN PsuInitializeStage1 ()
 
     // Stage 1 initialization for Ps.

@@ -46,21 +46,23 @@ FN MmuChargeCommit (
         END
 
         IF flags & MM_ALLOCATE_FORCE_COMMIT == 0 THEN
-            IF remaining - pages < -pfs^.CommitLimitGrowthLeft THEN
-                // Don't even bother trying, there's no way to extend the
-                // pagefiles to accommodate this because the theoretical commit
-                // limit represents what we could theoretically increase the
-                // commit limit to if we were to extend all of the pagefiles to
-                // their maximum size.
-
-                RETURN OS_STATUS_COMMIT_EXCEEDED
-            END
-
             IF remaining - pages < pfs^.EmergencyCommitMinimum THEN
                 // This charge would bring the remaining commit below the
                 // emergency minimum, so try to add it to the pagefile
                 // expansion wish list first. Don't bother if we can't wait for
                 // this to complete though.
+
+                IF remaining - pages < 0 AND
+                    -(remaining - pages) > pfs^.CommitLimitGrowthLeft THEN
+
+                    // Don't even bother trying, there's no way to extend the
+                    // pagefiles to accommodate this because the theoretical
+                    // commit limit represents what we could theoretically
+                    // increase the commit limit to if we were to extend all of
+                    // the pagefiles to their maximum size.
+
+                    RETURN OS_STATUS_COMMIT_EXCEEDED
+                END
 
                 status = OS_STATUS_COMMIT_EXCEEDED
 

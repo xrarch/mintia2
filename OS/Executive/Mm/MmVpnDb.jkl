@@ -85,45 +85,28 @@ FN MmpReferenceVpnDbPage (
 
     // Charge commit for the new VPNDB page.
 
-    status := MmuChargeCommit (
-        mmnode, // mmnode
-        1, // pages
+    status := MmuSetPageReservation (
+        1, // minimum
+        1, // maximum
         flags, // flags
+        OUT: junk, // actual
     )
 
     IF OsError ( status ) THEN
+        // Failed to reserve.
+
         RETURN status
     END
 
-@RetryCharged
-
-    pfe := MmpAllocatePage (
-        mmnode, // mmnode
+    pfe := MmpAllocatePageFromReserve (
         flags, // flags
         MmpVirtualAddressColor ( vpe ), // color
     )
 
-    IF NOT pfe THEN
-        // Failed to immediately allocate a page frame.
+    // Should be infallible since we didn't do anything that could take from
+    // the reserve inbetween reserving and allocating.
 
-        IF flags & MM_ALLOCATE_WAIT THEN
-            // Caller asked us to wait for a page if needed.
-
-            MmpWaitForPages (
-                mmnode, // mmnode
-                flags & MM_ALLOCATE_LOW, // low
-            )
-
-            GOTO RetryCharged
-        END
-
-        MmuUnchargeCommit (
-            mmnode, // mmnode
-            1, // pages
-        )
-
-        RETURN OS_STATUS_NO_MEMORY
-    END
+    KeAssert ( pfe != NULLPTR )
 
 @RetryAcquire
 

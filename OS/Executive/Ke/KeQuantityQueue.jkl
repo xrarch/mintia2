@@ -446,6 +446,7 @@ FN KeuInitializeQuantityQueue (
     IN tiers : ^KeuQuantityTier,
     IN tiercount : UWORD,
     IN tieroffset : UWORD,
+    IN errorstatus : OsStatus,
 )
 
     // Initialize a quantity queue.
@@ -467,6 +468,7 @@ FN KeuInitializeQuantityQueue (
     queue^.TierOffset = tieroffset
     queue^.TierCount = tiercount
     queue^.WaiterCount = 0
+    queue^.ErrorStatus = errorstatus
 
     i := 0
 
@@ -536,7 +538,7 @@ FN KeuDecrementQuantityQueue (
     END
 
     IF NOT wait THEN
-        RETURN OS_STATUS_UNSATISFIED
+        RETURN queue^.ErrorStatus
     END
 
     RETURN KeWaitForSingleObject (

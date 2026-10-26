@@ -7,33 +7,37 @@
 FN (ExArenaImportF) MmpImportNonpageable (
     IN importarena : ^ExpArena,
     IN flags : UWORD,
-    IN size : UWORD,
+    IN minimum : UWORD,
+    IN maximum : UWORD,
     OUT address : ^VOID,
+    OUT actual : UWORD,
 ) : OsStatus
 
     // Import into the nonpaged arena.
 
     mmnode := KeNumaNodeFromSpacePointer ( importarena )^.Mmp
 
-    pages := size >> RTL_PAGE_SHIFT
+    // Set the page reservation to enough to allocate the pages we want
+    // below.
 
-    // First charge commit for these pages.
-
-    status := MmuChargeCommit (
-        mmnode, // mmnode
-        pages, // pages
+    status := MmuSetPageReservation (
+        minimum >> RTL_PAGE_SHIFT, // minimum
+        maximum >> RTL_PAGE_SHIFT, // maximum
         flags, // flags
+        OUT actual, // actual
     )
 
     IF OsError ( status ) THEN
+        // Failed to reserve.
+
         RETURN status
     END
 
-    // Now allocate the virtual addresses from the dynamic space arena.
+    // First allocate the virtual addresses from the dynamic space arena.
 
     status = MmpAllocateDynamicPages (
         mmnode, // mmnode
-        pages, // pages
+        actual, // pages
         flags, // flags
         OUT address, // ptr
     )
@@ -47,7 +51,7 @@ FN (ExArenaImportF) MmpImportNonpageable (
     status = MmpCreateVpes (
         mmnode, // mmnode
         address, // address
-        size >> RTL_PAGE_SHIFT, // pages
+        actual, // pages
         flags, // flags
     )
 
@@ -55,61 +59,38 @@ FN (ExArenaImportF) MmpImportNonpageable (
         GOTO Error2
     END
 
+    // That stuff might have eaten from our reserve in unlucky cases so check
+    // for that case.
+
+    IF MmuQueryPageReserve () < actual THEN
+        // It did. Try to bring it back up.
+
+        status = MmuSetPageReservation (
+            actual, // minimum
+            actual, // maximum
+            flags, // flags
+            OUT: junk, // actual
+        )
+
+        IF OsError ( status ) THEN
+            GOTO Error3
+        END
+    END
+
     i := 0
     pte := MmpPteAddress ( address )
     colorptr := address
 
-    WHILE i < pages DO
-        // Allocate a page frame to place here.
+    WHILE i < actual DO
+        // Allocate a page frame to place here. This is infallible since we
+        // reserved them above.
 
-@Retry
-
-        pfe := MmpAllocatePage (
-            mmnode, // mmnode
+        pfe := MmpAllocatePageFromReserve (
             flags, // flags
             MmpVirtualAddressColor ( colorptr ), // color
         )
 
-        IF NOT pfe THEN
-            IF flags & MM_ALLOCATE_WAIT THEN
-                // Caller said we should wait here for more pages.
-
-                MmpWaitForPages (
-                    mmnode, // mmnode
-                    flags & MM_ALLOCATE_LOW, // low
-                )
-
-                GOTO Retry
-            END
-
-            // Free everything we just did.
-
-#IF BLD_CHK
-            colorptr = address
-#END
-
-            WHILE i DO
-                i -= 1
-
-                ptecontents := pte[i]
-
-                KeAssert ( MmpIsPteValid ( ptecontents ) )
-
-                pte[i] = MMP_INVALID_KERNEL_PTE
-
-                MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
-
-#IF BLD_CHK
-                KeuFlushMyTbAddress ( colorptr )
-
-                colorptr += RTL_PAGE_SIZE
-#END
-            END
-
-            status = OS_STATUS_NO_MEMORY
-
-            GOTO Error3
-        END
+        KeAssert ( pfe != NULLPTR )
 
         // Map the page frame.
         // Note that no TB entry exists for this page in any CPU if we've been
@@ -121,6 +102,8 @@ FN (ExArenaImportF) MmpImportNonpageable (
         colorptr += RTL_PAGE_SIZE
     END
 
+    actual <<= RTL_PAGE_SHIFT
+
     RETURN OS_STATUS_SUCCESS
 
 @Error3
@@ -128,7 +111,7 @@ FN (ExArenaImportF) MmpImportNonpageable (
     MmpUnreferenceVpes (
         mmnode, // mmnode
         address, // address
-        pages, // pages
+        actual, // pages
     )
 
 @Error2
@@ -136,16 +119,13 @@ FN (ExArenaImportF) MmpImportNonpageable (
     MmpReleaseDynamicPages (
         mmnode, // mmnode
         address, // ptr
-        pages, // pages
+        actual, // pages
         FALSE, // flush
     )
 
 @Error1
 
-    MmuUnchargeCommit (
-        mmnode, // mmnode
-        pages, // pages
-    )
+    MmReleasePageReserve ()
 
     RETURN status
 END

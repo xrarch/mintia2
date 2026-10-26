@@ -91,6 +91,8 @@ FN MmAllocatePoolEx (
 
         bytes = (bytes + RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
 
+@Retry
+
         status = MmAllocateMappedPages (
             kenode, // kenode
             flags, // flags
@@ -100,6 +102,15 @@ FN MmAllocatePoolEx (
         )
 
         IF OsError ( status ) THEN
+            IF status == OS_STATUS_TRY_AGAIN AND
+                flags & MM_ALLOCATE_WAIT THEN
+
+                // We're the top level and the mapped page arena said to try
+                // again, so do it.
+
+                GOTO Retry
+            END
+
             RETURN status
         END
 
@@ -191,30 +202,6 @@ FN MmFreePool (
         mmnode^.PoolCaches[pageable][index], // objectcache
         ptr, // ptr
         tag, // tag
-    )
-END
-
-FN MmWaitForPoolMemory ()
-
-    // Exported function to wait for free memory on the local node.
-    // Sometimes one wishes to allocate pool while holding a lock that is also
-    // held on a free codepath. This isn't acceptable if that lock is ever taken
-    // by a memory-making thread. As a substitute, this sort of idiom becomes
-    // useful:
-    //
-    // WHILE TRUE DO
-    //     IF MmAllocatePool ( wait=FALSE ) != NULLPTR THEN
-    //         BREAK
-    //     END
-    //
-    //     KeReleaseLock ( &MyImportantLock )
-    //     MmWaitForPoolMemory ()
-    //     KeAcquireLockExclusive ( &MyImportantLock )
-    // END
-
-    MmpWaitForPages (
-        MmCurrentAffinityNode(), // mmnode
-        PsCurrentThread()^.Tcb.VmPrivilegeBits, // low
     )
 END
 
