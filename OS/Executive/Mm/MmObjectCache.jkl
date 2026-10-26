@@ -170,6 +170,11 @@ EXPORT FN MmAllocateFromObjectCache (
     IF thread^.VmPrivilegeBits AND
         mmnode^.AvailablePageCount <= MMP_BLOCK_FOR_PAGES_THRESHOLD THEN
 
+        // We did not observe the available page count above the reserved
+        // threshold, so we still have to make it VM-privileged. (If we had,
+        // that would mean that whatever pages we have don't count as part of
+        // that pool, and we wouldn't need to do this).
+
         listhead = &objectcache^.PartialSlabListHead[TRUE]
         vmprivileged = TRUE
     END
