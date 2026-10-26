@@ -68,11 +68,12 @@ EXPORT FN MmAllocateFromObjectCache (
     // slab list head.
 
     listhead := &objectcache^.PartialSlabListHead[FALSE]
-    privileged := FALSE
 
     saveflags := flags
 
-    IF KeCurrentThread ()^.VmPrivilegeBits THEN
+    thread := KeCurrentThread ()
+
+    IF thread^.VmPrivilegeBits THEN
         // The thread is VM-privileged, so it should do two passes. The first
         // is a non-blocking attempt to pick up an object from an unprivileged
         // slab or to create a new unprivileged slab using normal pages. The
@@ -121,8 +122,6 @@ EXPORT FN MmAllocateFromObjectCache (
 
     KeReleaseLockLower ( &objectcache^.Lock, ipl )
 
-    mmnode := objectcache^.Node^.Mmp
-
     status := MmAllocateMappedPages (
         objectcache^.Node, // kenode
         flags, // flags
@@ -133,13 +132,12 @@ EXPORT FN MmAllocateFromObjectCache (
 
     IF OsError ( status ) THEN
         IF flags & MM_ALLOCATE_NORMAL AND
-            NOT privileged THEN
+            listhead == &objectcache^.PartialSlabListHead[FALSE] THEN
 
             // This is a VM-privileged thread that failed to pick up an
             // unprivileged slab. So switch to privileged and try again.
 
             flags = saveflags
-            privileged = TRUE
             listhead = &objectcache^.PartialSlabListHead[TRUE]
 
             GOTO RetryPrivileged
@@ -159,9 +157,35 @@ EXPORT FN MmAllocateFromObjectCache (
         RETURN status
     END
 
+    // It's possible that our VM-privileged state changed while we waited for
+    // pages and that we actually have reserved pages despite initially
+    // thinking we didn't, so we need to check again. This might also allow
+    // us to back down from making the slab VM-privileged if it turns out the
+    // memory situation has improved since we made that choice.
+
+    vmprivileged := FALSE
+    listhead = &objectcache^.PartialSlabListHead[FALSE]
+    mmnode := objectcache^.Node^.Mmp
+
+    IF thread^.VmPrivilegeBits AND
+        mmnode^.AvailablePageCount <= MMP_BLOCK_FOR_PAGES_THRESHOLD THEN
+
+        listhead = &objectcache^.PartialSlabListHead[TRUE]
+        vmprivileged = TRUE
+    END
+
+    // Take the lock and add the slab.
+
     ipl = KeAcquireLockExclusiveRaise ( &objectcache^.Lock )
 
-    IF NOT RtlEmptyList ( listhead ) THEN
+    // It's possible someone else doing the same thing added a partial slab to
+    // either the normal slab list head or the VM-privileged list head. Check
+    // both (this redundantly checks the normal slab list head twice if that's
+    // the one selected, but it's slower to add a branch to avoid this).
+
+    IF NOT RtlEmptyList ( &objectcache^.PartialSlabListHead[FALSE] ) OR
+        NOT RtlEmptyList ( listhead ) THEN
+
         // Someone else added a partial slab while we were trying to get one.
         // Free ours and retry everything.
 
@@ -203,7 +227,7 @@ EXPORT FN MmAllocateFromObjectCache (
     WHILE i < max DO
         othervpe^.U.ObjectCache.SlabControl = vpe
         othervpe^.U.ObjectCache.PoolCacheIndex = objectcache^.PoolCacheIndex
-        othervpe^.U.ObjectCache.Privileged = privileged
+        othervpe^.U.ObjectCache.VmPrivileged = vmprivileged
 
         othervpe += MMP_VPE_SIZE
         i += 1
@@ -269,10 +293,10 @@ FN (ExMagazineCacheFreeF) MmpFreeToObjectCache (
 
             KeAssert ( vpe^.U.ObjectCache.FreeListHead == NULLPTR )
 
-            privileged := vpe^.U.ObjectCache.Privileged
+            vmprivileged := vpe^.U.ObjectCache.VmPrivileged
 
             RtlInsertAtHeadList (
-                &objectcache^.PartialSlabListHead[privileged], // listhead
+                &objectcache^.PartialSlabListHead[vmprivileged], // listhead
                 &vpe^.U.ObjectCache.SlabListEntry, // listentry
             )
         END
@@ -331,7 +355,7 @@ EXPORT FN MmFreeToObjectCache (
         //     looking at the VPE? It's kind of a bummer to have to do that even
         //     in the magazine cached case.
 
-        IF NOT vpe^.U.ObjectCache.Privileged THEN
+        IF NOT vpe^.U.ObjectCache.VmPrivileged THEN
             ExFreeToMagazineCache (
                 objectcache^.MagazineCache, // magazinecache
                 object, // ptr
