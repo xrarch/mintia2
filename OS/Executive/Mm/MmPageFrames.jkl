@@ -7,6 +7,181 @@
 
 #INCLUDE "Mmp.hjk"
 
+FN MmuSetPageReservation (
+    IN minimum : UWORD,
+    IN maximum : UWORD,
+    IN flags : UWORD,
+    OUT actual : UWORD,
+) : OsStatus
+
+    // Set the current thread's page reservation to at least the minimum
+    // requested, ideally up to the maximum. Return the actual amount reserved.
+
+    // This is intended to be used by various levels of an allocation stack.
+    // It's designed to assume that MM_ALLOCATE_WAIT means it's at the top
+    // level of an allocation stack, and a lack thereof means it is at a deeper
+    // layer. If a failure occurs here and it's at a lower layer, then a Debt
+    // is accrued, and an OS_STATUS_TRY_AGAIN is returned to eventually induce
+    // the uppermost layer to call this waitably, at which point it will try
+    // to reserve the entire debt at once.
+
+    // This has the effect that if a wait is needed for pages in order
+    // to satisfy a reservation, it is consolidated to the upper layer. This is
+    // needed for locking reasons, but also good for page wait scheduling,
+    // since waits will be for a quantity of pages that actually reflects what
+    // the thread immediately needs to make its way through the allocation
+    // stack.
+
+    KeAssert ( maximum >= minimum )
+
+    thread := PsCurrentThread ()
+
+    reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
+
+@Retry
+
+    IF flags & MM_ALLOCATE_WAIT AND
+        reserve^.Debt THEN
+
+        // This is the uppermost layer, so try to pay off the entire debt.
+
+        IF reserve^.Debt > maximum THEN
+            maximum = reserve^.Debt
+        END
+
+        reserve^.Debt = 0
+    END
+
+    IF reserve^.Count >= maximum THEN
+        // Already enough.
+
+        actual = maximum
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    // Not enough reservation, try to get it up to the maximum.
+
+    mmnode := MmCurrentAffinityNode ()
+
+    // Reserve can only be for one node.
+
+    KeAssert ( reserve^.Count == 0 OR mmnode == reserve^.Node )
+
+    // Compute how many more pages are needed to bring the reserve up to what's
+    // needed.
+
+    diff := maximum - reserve^.Count
+
+    // Page reserve is commit-charged.
+
+    status := MmuChargeCommit (
+        mmnode, // mmnode
+        diff, // pages
+        flags, // flags
+    )
+
+    IF OsError ( status ) THEN
+        GOTO Error
+    END
+
+    // Reserve actual available page count.
+
+    timeout : RtlUquad
+    RtlSetUquadToUlong ( &timeout, 500 )
+
+    status = KeuDecrementQuantityQueue (
+        &mmnode^.AvailablePageQuantityQueue, // queue
+        diff, // amount
+        KE_KERNEL_MODE, // waitmode
+        FALSE, // alertable
+        &timeout, // timeout
+        flags & MM_ALLOCATE_WAIT, // wait
+    )
+
+    IF OsError ( status ) THEN
+        MmuUnchargeCommit (
+            mmnode, // mmnode
+            diff, // pages
+        )
+
+        GOTO Error
+    END
+
+    reserve^.Count = maximum
+    actual = maximum
+
+    RETURN OS_STATUS_SUCCESS
+
+@Error
+
+    IF maximum != minimum THEN
+        // Lower to the minimum and retry.
+
+        maximum = minimum
+
+        GOTO Retry
+    END
+
+    // Failed to get the minimum.
+
+    IF flags & MM_ALLOCATE_WAIT == 0 THEN
+        // We weren't able to wait, so add this as a debt and induce upper
+        // layers to try again.
+
+        reserve^.Debt += minimum
+
+        RETURN OS_STATUS_TRY_AGAIN
+    END
+
+    // We were able to wait and failed anyway, so return a true error status
+    // unless it was a timeout (which should also cause a retry of the full
+    // stack).
+
+    IF status == OS_STATUS_WAIT_TIMEOUT THEN
+        status = OS_STATUS_TRY_AGAIN
+    END
+
+    RETURN status
+END
+
+FN MmuReleasePageReserve ()
+
+    // Release the remaining page reservation for the thread, if any.
+
+    thread := PsCurrentThread ()
+
+    reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
+
+    count := reserve^.Count
+
+    IF count THEN
+        // Nothing to release.
+
+        LEAVE
+    END
+
+    // Set the reserve empty.
+
+    reserve^.Count = 0
+
+    // Increment the available page count.
+
+    mmnode := MmCurrentAffinityNode ()
+
+    KeuIncrementQuantityQueue (
+        &mmnode^.AvailablePageQuantityQueue, // queue
+        count, // amount
+    )
+
+    // Uncharge the commit.
+
+    MmuUnchargeCommit (
+        mmnode, // mmnode
+        count, // pages
+    )
+END
+
 FN MmpInsertPageIntoList (
     IN list : ^MmpAvailablePageList,
     IN pfe : ^MmpPfe,

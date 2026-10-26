@@ -93,6 +93,15 @@ FN MmpInitializeNodeStage1 (
     mmnode^.SizeLevel = MM_UNINITIALIZED_SYSTEM
 
     KeInitializeLock ( &mmnode^.KernelStackPteListLock, "KernelStackPteList" )
+
+    KeuInitializeQuantityQueue (
+        &mmnode^.AvailablePageQuantityQueue, // queue
+        "AvailablePageCount", // name
+        &mmnode^.AvailablePageCountTEMP, // resource
+        &mmnode^.AvailablePageTiers[0], // tiers
+        2, // tiercount
+        OFFSETOF KeuThread.PageTierIndex, // tieroffset
+    )
 END
 
 #SECTION "INITtext"

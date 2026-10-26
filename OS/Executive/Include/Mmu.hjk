@@ -212,3 +212,34 @@ EXTERN FN MmuCompleteMdl (
 EXTERN FN MmuNodeToKeNode (
     IN mmnode : ^MmpNode,
 ) : ^KeuNode
+
+STRUCT MmuThreadReservedPageInfo
+#IF BLD_CHK
+    Node : ^MmpNode,
+#END
+    Count : ULONG,
+    Debt : ULONG,
+END
+
+EXTERN FN MmuSetPageReservation (
+    IN minimum : UWORD,
+    IN maximum : UWORD,
+    IN flags : UWORD,
+    OUT actual : UWORD,
+) : OsStatus
+
+EXTERN FN MmuReleasePageReserve ()
+
+#MACRO MmuFulfillPageReservation ( flags ) [
+    // Intended to be called by a top level of the allocation stack that
+    // received OS_STATUS_TRY_AGAIN from a lower level but doesn't itself want
+    // to reserve anything. This process involves setting arguments of the
+    // MmuSetPageReservation function to unintuitive values, so it's a macro.
+
+    MmuSetPageReservation (
+        0, // minimum
+        0, // maximum
+        flags, // flags
+        OUT: junk, // actual
+    )
+]

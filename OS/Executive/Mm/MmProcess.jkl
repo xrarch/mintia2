@@ -68,6 +68,21 @@ FN MmuInitializeThread (
 ) : OsStatus
 
     // Initialize the thread's virtual memory state.
+
+    // Set the reserved page information for normal and KAPC context to 0.
+
+    thread^.ReservedPages[FALSE].Count = 0
+    thread^.ReservedPages[FALSE].Debt = 0
+#IF BLD_CHK
+    thread^.ReservedPages[FALSE].Node = NULLPTR
+#END
+
+    thread^.ReservedPages[TRUE].Count = 0
+    thread^.ReservedPages[TRUE].Debt = 0
+#IF BLD_CHK
+    thread^.ReservedPages[TRUE].Node = NULLPTR
+#END
+
     // If it's a usermode thread, this involves creating a TEB and user stack.
     // XXX Or don't, review discussions on runtime responsibility for this
 
