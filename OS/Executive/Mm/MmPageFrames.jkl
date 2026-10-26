@@ -388,11 +388,6 @@ EXPORT FN MmReleasePageReserve ()
 
     reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
 
-#IF BLD_NUMA
-    mmnode := reserve^.Node
-    reserve^.Node = NULLPTR
-#END
-
     count := reserve^.Count
 
     IF count == 0 THEN
@@ -412,6 +407,9 @@ EXPORT FN MmReleasePageReserve ()
 #END
 
 #IF BLD_NUMA
+    mmnode := reserve^.Node
+    reserve^.Node = NULLPTR
+
     KeAssert ( mmnode != NULLPTR )
 #END
 
@@ -637,72 +635,19 @@ FN MmpReferencePage (
     IN pfe : ^MmpPfe,
 )
 
-    // Increment the reference count on the page. This must either be a page
-    // with a refcount that is already non-zero, or a page that is on the
-    // modified list.
+    // Increment the reference count on the page. This must be a page
+    // with a refcount that is already non-zero. Pages on the standby and
+    // modified list are only taken off them by reclamation (standby only),
+    // modified page writing (modified only), or object lookup (either).
 
     KeAssert ( MmpGetPackedType ( pfe^.Packed ) == MMP_IN_USE_PFE_TYPE )
 
-    refcount := pfe^.References
+    KeAssert ( pfe^.References != 0 )
 
-    WHILE TRUE DO
-        IF refcount == 0 THEN
-            // If the reference count is zero, then the page is on a list and
-            // needs special handling.
-
-            BREAK
-        END
-
-        new := KeCompareSwapUlong (
-            &pfe^.References, // ptr
-            refcount + 1, // newvalue
-            refcount, // expectedvalue
-        )
-
-        IF new == refcount THEN
-            LEAVE
-        END
-
-        refcount = new
-    END
-
-    // Reference count was zero, so we need to remove the page from a list.
-    //
-    // Only modified pages can be encountered in this state by this routine.
-    // Free pages are only taken off that list by MmpAllocatePage, and standby
-    // pages are only taken off that list by object lookups and
-    // MmpAllocatePageFromStandbyList, due to special synchronization
-    // requirements. It IS valid however to call this routine on a standby page
-    // whose refcount you already know for a fact to be greater than zero, and
-    // in fact it is the preferred method for doing so.
-
-    // TODO: Remove the below, it isn't actually needed and is just included as
-    //       an example of the locking protocol until page lookups within
-    //       objects are implemented.
-
-    packed := pfe^.Packed
-
-    KeAssert ( MmpGetPackedFlag ( packed, MMP_MODIFIED_PFE_FLAG ) )
-
-    mmnode := KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
-
-    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.ModifiedListLock )
-
-    refcount = KeIncrementUlong (
+    KeIncrementUlong (
         &pfe^.References, // ptr
         1, // inc
     )
-
-    IF refcount == 0 THEN
-        // Reference count was zero, so the page was on the modified page list,
-        // which needs to be removed from.
-
-        RtlRemoveEntryList ( &pfe^.Entry )
-
-        mmnode^.ModifiedPageCount -= 1
-    END
-
-    KeReleaseLockLower ( &mmnode^.ModifiedListLock, ipl )
 END
 
 FN MmpUnreferencePage (
@@ -993,7 +938,7 @@ FN MmpAllocatePageFromReserve (
 
     IF count == 1 THEN
         // Count is now zero so clear the node to allow the next reserve to
-        // reserve any.
+        // reserve from any node.
 
         reserve^.Node = NULLPTR
     END
