@@ -56,8 +56,7 @@ FN MmpInitializePool (
 
             MmpSetObjectCacheIndex (
                 mmnode^.PoolCaches[i][j], // objectcache
-                i, // index1
-                j, // index2
+                (j << 1) | i, // index
             )
 
             j += 1
@@ -118,8 +117,7 @@ FN MmAllocatePoolEx (
 
         // Indicate page-aligned.
 
-        vpe^.U.ObjectCache.PoolCacheIndex1 = NOT NOT pageable
-        vpe^.U.ObjectCache.PoolCacheIndex2 = 0xFF
+        vpe^.U.ObjectCache.PoolCacheIndex = (0x7F << 1) | (NOT NOT pageable)
 
         // Stash length in slab control pointer.
 
@@ -175,10 +173,10 @@ FN MmFreePool (
 
     vpe := MmpAddressToVpe ( mmnode, ptr )
 
-    pageable := vpe^.U.ObjectCache.PoolCacheIndex1
-    index := vpe^.U.ObjectCache.PoolCacheIndex2
+    pageable := vpe^.U.ObjectCache.PoolCacheIndex & 0x1
+    index := vpe^.U.ObjectCache.PoolCacheIndex >> 1
 
-    IF index == 0xFF THEN
+    IF index == 0x7F THEN
         // Page aligned.
 
         IF vpe^.U.ObjectCache.Tag != tag THEN

@@ -32,12 +32,11 @@ KE_CACHE_LINE_END
     ObjectsPerSlab : UINT,
     SlabPages : UBYTE,
     Pageable : UBYTE,
-    PoolCacheIndex1 : UBYTE,
-    PoolCacheIndex2 : UBYTE,
+    PoolCacheIndex : UBYTE,
 
 KE_CACHE_LINE_END
 
-    PartialSlabListHead : RtlListEntry,
+    PartialSlabListHead : RtlListEntry[2],
 END
 
 EXPORT FN MmAllocateFromObjectCache (
@@ -49,9 +48,9 @@ EXPORT FN MmAllocateFromObjectCache (
 
     // Allocate an object.
 
-    objectsize := objectcache^.ObjectSize
-
 @Retry
+
+    objectsize := objectcache^.ObjectSize
 
     IF objectcache^.MagazineCache THEN
         IF ExAllocateFromMagazineCache (
@@ -63,9 +62,11 @@ EXPORT FN MmAllocateFromObjectCache (
         END
     END
 
+    listhead := &objectcache^.PartialSlabListHead[0]
+    privileged := FALSE
+
     ipl := KeAcquireLockExclusiveRaise ( &objectcache^.Lock )
 
-    listhead := &objectcache^.PartialSlabListHead
     listentry := listhead^.Next
     vpe : ^MmpVpe
 
@@ -125,7 +126,7 @@ EXPORT FN MmAllocateFromObjectCache (
 
     ipl = KeAcquireLockExclusiveRaise ( &objectcache^.Lock )
 
-    IF NOT RtlEmptyList ( &objectcache^.PartialSlabListHead ) THEN
+    IF NOT RtlEmptyList ( listhead ) THEN
         // Someone else added a partial slab while we were trying to get one.
         // Free ours and retry everything.
 
@@ -149,11 +150,11 @@ EXPORT FN MmAllocateFromObjectCache (
     vpe^.U.ObjectCache.InUseObjects = 1
     vpe^.U.ObjectCache.FreeListHead = NULLPTR
     vpe^.U.ObjectCache.Tag = 0xABABABAB
-    vpe^.U.ObjectCache.PoolCacheIndex1 = objectcache^.PoolCacheIndex1
-    vpe^.U.ObjectCache.PoolCacheIndex2 = objectcache^.PoolCacheIndex2
+    vpe^.U.ObjectCache.PoolCacheIndex = objectcache^.PoolCacheIndex
+    vpe^.U.ObjectCache.Privileged = privileged
 
     RtlInsertAtTailList (
-        &objectcache^.PartialSlabListHead, // listhead
+        listhead, // listhead
         &vpe^.U.ObjectCache.SlabListEntry, // listentry
     )
 
@@ -166,8 +167,7 @@ EXPORT FN MmAllocateFromObjectCache (
 
     WHILE i < max DO
         othervpe^.U.ObjectCache.SlabControl = vpe
-        othervpe^.U.ObjectCache.PoolCacheIndex1 = objectcache^.PoolCacheIndex1
-        othervpe^.U.ObjectCache.PoolCacheIndex2 = objectcache^.PoolCacheIndex2
+        othervpe^.U.ObjectCache.PoolCacheIndex = objectcache^.PoolCacheIndex
 
         othervpe += MMP_VPE_SIZE
         i += 1
@@ -191,7 +191,7 @@ EXPORT FN MmAllocateFromObjectCache (
 
 @Success
 
-    (CAST (object + objectsize - SIZEOF ULONG) TO ^ULONG)^ = tag
+    NOTHING (CAST (object + objectsize - SIZEOF ULONG) TO ^ULONG)^ = tag
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -233,8 +233,10 @@ FN (ExMagazineCacheFreeF) MmpFreeToObjectCache (
 
             KeAssert ( vpe^.U.ObjectCache.FreeListHead == NULLPTR )
 
+            privileged := vpe^.U.ObjectCache.Privileged
+
             RtlInsertAtHeadList (
-                &objectcache^.PartialSlabListHead, // listhead
+                &objectcache^.PartialSlabListHead[privileged], // listhead
                 &vpe^.U.ObjectCache.SlabListEntry, // listentry
             )
         END
@@ -435,7 +437,8 @@ EXPORT FN MmCreateObjectCache (
     objectcache^.MagazineCache = NULLPTR
     objectcache^.ObjectSize = objectsize
 
-    RtlInitializeList ( &objectcache^.PartialSlabListHead )
+    RtlInitializeList ( &objectcache^.PartialSlabListHead[FALSE] )
+    RtlInitializeList ( &objectcache^.PartialSlabListHead[TRUE] )
 
     objectcache^.SlabPages = MmpCalculateGoodSlabSize ( objectsize )
 
@@ -483,7 +486,8 @@ EXPORT FN MmDeleteObjectCache (
         ExDeleteMagazineCache ( objectcache^.MagazineCache )
     END
 
-    KeAssert ( RtlEmptyList ( &objectcache^.PartialSlabListHead ) )
+    KeAssert ( RtlEmptyList ( &objectcache^.PartialSlabListHead[FALSE] ) )
+    KeAssert ( RtlEmptyList ( &objectcache^.PartialSlabListHead[TRUE] ) )
 
     MmpFreeObjectCache ( objectcache )
 END
@@ -527,13 +531,11 @@ END
 #SECTION "INITtext"
 FN MmpSetObjectCacheIndex (
     IN objectcache : ^MmpObjectCache,
-    IN index1 : UWORD,
-    IN index2 : UWORD,
+    IN index : UWORD,
 )
 
     // Set the indices that the object cache will store in its slab VPEs.
     // This is used by MmPool.
 
-    objectcache^.PoolCacheIndex1 = index1
-    objectcache^.PoolCacheIndex2 = index2
+    objectcache^.PoolCacheIndex = index
 END
