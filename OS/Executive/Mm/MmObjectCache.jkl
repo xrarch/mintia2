@@ -42,7 +42,9 @@ END
 #MACRO MmpInitializeSlabObject ( object, objectsize, tag ) [
     // Set the tag which is used to verify the wrong object type isn't being
     // freed later. We put it at the very end of the object in space we reserved
-    // in the objectsize when we created the object cache.
+    // in the objectsize when we created the object cache. Also helps detect
+    // heap smashing from running off the end of an object which is more of a
+    // hazard in slab caches.
 
     NOTHING (CAST ((object) + (objectsize) - SIZEOF ULONG) TO ^ULONG)^ = (tag)
 ]

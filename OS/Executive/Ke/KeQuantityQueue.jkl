@@ -53,9 +53,9 @@ FN KepTrySatisfyQuantityQueue (
         // hunks of quantity first, as they reach the root of the heap, to
         // promote responsiveness. However, if a request reaches the root and
         // is too big to be satisfied, then we will still advance to the next
-        // and try to satisfy requests from lower priority threads. This avoids
-        // starvation and is okay because only the tiers are supposed to be
-        // airtight boundaries, not scheduling classes within tiers.
+        // heap and try to satisfy requests from lower priority threads. This
+        // avoids starvation and is okay because tiers are supposed to be
+        // airtight boundaries but we make no guarantees for scheduling classes.
 
         i := 0
 
@@ -108,14 +108,14 @@ FN KepTrySatisfyQuantityQueue (
                     &waitblock^.Links.Heap, // entry
                 )
 
-                // Set the Thread pointer to NULLPTR since that's the recognized
-                // way to indicate to the generic wait logic that a dispatcher
-                // object has unlinked a wait block from its structures.
+                // Set the Thread pointer to NULLPTR since that's the usual
+                // way to indicate to the KeWaitYaddaYadda logic that a
+                // dispatcher object has unlinked a wait block from its
+                // structures.
 
                 waitblock^.Thread = NULLPTR
 
-                // Decrement our waiter count since we use that as a hint in
-                // KeuIncrementQuantityQueue.
+                // Decrement our waiter count since we use that as a hint.
 
                 queue^.WaiterCount -= 1
 
@@ -130,8 +130,7 @@ FN KepTrySatisfyQuantityQueue (
 
                     // Somebody else woke the thread and is responsible for
                     // unwaiting. Return the resource since the thread isn't
-                    // going to get a successful status, so it won't be under
-                    // the impression that it got it.
+                    // going to get a successful status from its wait.
 
                     KeIncrementPtr (
                         resource, // ptr
@@ -206,19 +205,19 @@ FN (KepShouldSatisfyF) KepSatisfyQuantityQueue (
 ) : UWORD
 
     // Immediately satisfy a wait on a quantity queue if the thread's current
-    // tier allows it to take the amount. This is done under both the queue's
-    // object lock and the thread's lock, so if the tier is only updated under
-    // the thread's lock then this is guaranteed to commit the wait for the
-    // correct tier.
+    // tier ID allows it to take the amount. This is done under both the queue's
+    // object lock and the thread's lock, so if the tier ID is only updated
+    // under one of those locks then this is guaranteed to commit the wait for
+    // the correct tier.
 
     amount := CAST argument TO UWORD
     queue := CAST object TO ^KeuQuantityQueue
 
     tier := &queue^.Tiers[KepThreadTierId ( queue, thread )]
 
-    // First increment the waiter count, have to do this first or else someone
-    // who increments the quantity might miss us even though we end up
-    // committing a wait.
+    // First increment the waiter count, have to do this before checking the
+    // available resource or else someone who increments it might miss waking us
+    // even though we end up committing a wait.
 
     queue^.WaiterCount += 1
 
@@ -310,7 +309,7 @@ FN (KepEnqueueF) KepEnqueueQuantityQueue (
     tier := &queue^.Tiers[tierid]
 
     // Part of the key for the wait block is the tick that the request was
-    // made at, so save that now.
+    // made at, to try to avoid starvation of older requests of many pages.
 
     waitblock^.Context = KepLowTick ()
 
