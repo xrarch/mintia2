@@ -71,6 +71,15 @@ FN MmpInitializeNodeStage1 (
         FALSE, // signalstate
     )
 
+#IF BLD_NUMA
+    KeInitializeEvent (
+        &mmnode^.RemoteReclaimEvent, // event
+        "RemoteReclaim", // name
+        FALSE, // notification
+        FALSE, // signalstate
+    )
+#END
+
     // Initialize the list heads.
 
     RtlInitializeList ( &mmnode^.ModifiedListHead )

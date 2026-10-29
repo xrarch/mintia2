@@ -157,9 +157,16 @@ FN (KeContinuationF) MmuBalanceManager (
         "ExuBalanceManagerTimer", // name
     )
 
-    waittable : KeWaitEntry[2]
+    waittable : KeWaitEntry[3]
     waittable[0].Object = &timer
     waittable[1].Object = &mmnode^.LowMemoryEvent
+
+    objectcount := 2
+
+#IF BLD_NUMA
+    waittable[2].Object = &mmnode^.RemoteReclaimEvent
+    objectcount = 3
+#END
 
     status : OsStatus = 0
 
@@ -181,7 +188,7 @@ FN (KeContinuationF) MmuBalanceManager (
             KE_KERNEL_MODE, // waitmode
             KE_UNALERTABLE, // alertable
             NULLPTR, // timeout
-            2, // objectcount
+            objectcount, // objectcount
             &waittable[0], // objecttable
             NULLPTR, // waitblocktable
             NULLPTR, // continuation
@@ -211,7 +218,7 @@ FN (KeContinuationF) MmuBalanceManager (
                 )
             END
 
-            IF (ms - mssincevpndbcollect) >= MMP_VPN_DB_SCAN_INTERVAL_MS THEN
+            IF ms - mssincevpndbcollect >= MMP_VPN_DB_SCAN_INTERVAL_MS THEN
                 // Garbage collect the VPN DB.
 
                 mssincevpndbcollect = ms
@@ -231,6 +238,19 @@ FN (KeContinuationF) MmuBalanceManager (
         // We ideally want to get up to the sufficient page count but we're
         // allowed to go back to sleep before we get there.
 
+        tries := 0
+        threshold := mmnode^.SufficientPageCount
+
+#IF BLD_NUMA
+        IF status == 2 THEN
+            // We were asked by a remote node to free up lots of pages for it
+            // so set the threshold to basically infinity so we don't early
+            // exit before doing all the stuff.
+
+            threshold = RTL_MACHINE_WORD_MAX
+        END
+#END
+
         // Do the lowest effort stuff first and get increasingly desperate.
 
 @TryAgain
@@ -242,17 +262,13 @@ FN (KeContinuationF) MmuBalanceManager (
             TRUE, // empty
         )
 
-        IF mmnode^.AvailablePageCount > mmnode^.SufficientPageCount THEN
-            // Dumping caches was enough on its own.
-
+        IF mmnode^.AvailablePageCount > threshold THEN
             GOTO ImACatWhoLovesToSnooze
         END
 
         MmpGarbageCollectVpnDb ( mmnode )
 
-        IF mmnode^.AvailablePageCount > mmnode^.SufficientPageCount THEN
-            // Garbage collecting VPNDB was enough on its own.
-
+        IF mmnode^.AvailablePageCount > threshold THEN
             GOTO ImACatWhoLovesToSnooze
         END
 
@@ -260,9 +276,7 @@ FN (KeContinuationF) MmuBalanceManager (
 
         // MmpTrimWorkingSets ( mmnode )
 
-        IF mmnode^.AvailablePageCount > mmnode^.SufficientPageCount THEN
-            // Trimming working sets was enough on its own.
-
+        IF mmnode^.AvailablePageCount > threshold THEN
             GOTO ImACatWhoLovesToSnooze
         END
 
@@ -274,36 +288,39 @@ FN (KeContinuationF) MmuBalanceManager (
         // MmpFlushModifiedPageList ( mmnode )
 
 #IF BLD_NUMA
-        // While the modified page writer works, scan neighboring nodes to see
-        // if any of them borrowed a substantial number of page frames from me.
-        // If so, signal them too.
+        IF tries >= 4 AND
+            status == 1 THEN
 
-        nodelist := mmnode^.KeNode^.DistanceList
+            // We've been trying to get memory for a long time but nothing has
+            // worked.
 
-        WHILE nodelist[0] DO
-            othernode := nodelist[0]^.Mmp
+            // While the modified page writer works, scan neighboring nodes to
+            // see if any of them borrowed a substantial number of page frames
+            // from me. If so, signal them too.
 
-            IF othernode^.BorrowCounts[mmnode^.Id] >=
-                MMP_SIGNIFICANT_BORROWS THEN
+            nodelist := mmnode^.KeNode^.DistanceList
 
-                // Set its borrow count from us to zero to avoid uselessly
-                // doing this again and again. Intentionally don't use an
-                // atomic here.
+            WHILE nodelist[0] DO
+                othernode := nodelist[0]^.Mmp
 
-                othernode^.BorrowCounts[mmnode^.Id] = 0
+                IF othernode^.BorrowCounts[mmnode^.Id] >=
+                    MMP_SIGNIFICANT_BORROWS THEN
 
-                IF othernode^.LowMemoryEvent.Header.SignalCount == 0 THEN
-                    // Signal its low memory event to get our page frames
-                    // back.
+                    IF othernode^.RemoteReclaimEvent.
+                        Header.SignalCount == 0 THEN
 
-                    KeSignalEvent (
-                        &othernode^.LowMemoryEvent, // event
-                        0, // priorityboost
-                    )
+                        // Signal its remote reclaim event to get our page
+                        // frames back.
+
+                        KeSignalEvent (
+                            &othernode^.RemoteReclaimEvent, // event
+                            0, // priorityboost
+                        )
+                    END
                 END
-            END
 
-            nodelist += SIZEOF ^KeuNode
+                nodelist += SIZEOF ^KeuNode
+            END
         END
 #END
 
@@ -326,6 +343,8 @@ FN (KeContinuationF) MmuBalanceManager (
         IF mmnode^.AvailablePageCount <= mmnode^.LowPageCount THEN
             // We did not make it out of the low page count, so we have to try
             // again.
+
+            tries += 1
 
             GOTO TryAgain
         END
