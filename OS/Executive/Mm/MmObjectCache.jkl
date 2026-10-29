@@ -39,6 +39,10 @@ KE_CACHE_LINE_END
     PartialSlabListHead : RtlListEntry[2],
 END
 
+#MACRO MmpInitializeSlabObject ( object, objectsize, tag ) [
+    NOTHING (CAST ((object) + (objectsize) - SIZEOF ULONG) TO ^ULONG)^ = (tag)
+]
+
 EXPORT FN MmAllocateFromObjectCache (
     IN objectcache : ^MmpObjectCache,
     IN flags : UWORD,
@@ -61,7 +65,9 @@ EXPORT FN MmAllocateFromObjectCache (
         // There's a magazine cache and we managed to pull an object off it, so
         // go report success.
 
-        GOTO Success
+        MmpInitializeSlabObject ( object, objectsize, tag )
+
+        RETURN OS_STATUS_SUCCESS
     END
 
     // Need to consult the slabs. First we're going to look at the unprivileged
@@ -115,7 +121,9 @@ EXPORT FN MmAllocateFromObjectCache (
 
         KeReleaseLockLower ( &objectcache^.Lock, ipl )
 
-        GOTO Success
+        MmpInitializeSlabObject ( object, objectsize, tag )
+
+        RETURN OS_STATUS_SUCCESS
     END
 
     // Need to allocate a new slab since there are no partial ones.
@@ -172,8 +180,8 @@ EXPORT FN MmAllocateFromObjectCache (
 
         // We did not observe the available page count above the reserved
         // threshold, so we still have to make it VM-privileged. (If we had,
-        // that would mean that whatever pages we have don't count as part of
-        // that pool, and we wouldn't need to do this).
+        // that would mean the page count we claimed doesn't count as reserved,
+        // and we wouldn't need to do this).
 
         listhead = &objectcache^.PartialSlabListHead[TRUE]
         vmprivileged = TRUE
@@ -238,7 +246,8 @@ EXPORT FN MmAllocateFromObjectCache (
         i += 1
     END
 
-    // Put all the objects on the slab's free list.
+    // Put all the objects except the first one on the slab's free list.
+    // We will return the first one.
 
     max = objectcache^.ObjectsPerSlab
     i = 1
@@ -254,9 +263,7 @@ EXPORT FN MmAllocateFromObjectCache (
 
     KeReleaseLockLower ( &objectcache^.Lock, ipl )
 
-@Success
-
-    NOTHING (CAST (object + objectsize - SIZEOF ULONG) TO ^ULONG)^ = tag
+    MmpInitializeSlabObject ( object, objectsize, tag )
 
     RETURN OS_STATUS_SUCCESS
 END
