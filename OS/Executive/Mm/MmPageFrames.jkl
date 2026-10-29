@@ -206,7 +206,7 @@ END
 
 #END
 
-FN MmuSetPageReservation (
+FN MmuAddPageReservation (
     IN minimum : UWORD,
     IN maximum : UWORD,
     IN flags : UWORD,
@@ -237,6 +237,7 @@ FN MmuSetPageReservation (
     reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
 
     saveflags := flags
+    actual = maximum
 
     IF maximum != minimum THEN
         // Try the maximum with no waiting and with normal threshold.
@@ -252,8 +253,6 @@ FN MmuSetPageReservation (
         flags |= MM_ALLOCATE_NORMAL
     END
 
-    count := reserve^.Count
-
     // Reset the debt to zero to prevent it from growing unboundedly. This
     // should work to reset it at the beginning of a new allocation operation
     // because failure causes that incur debt should cause a full unwind of
@@ -261,18 +260,6 @@ FN MmuSetPageReservation (
     // intact for usage by MmFulfillPageReservation.
 
     reserve^.Debt = 0
-
-@Retry
-
-    IF count >= maximum THEN
-        // Already enough.
-
-        actual = maximum
-
-        RETURN OS_STATUS_SUCCESS
-    END
-
-    // Not enough reservation, try to get it up to the maximum.
 
     mmnode := MmCurrentAffinityNode ()
 
@@ -283,15 +270,14 @@ FN MmuSetPageReservation (
     END
 #END
 
-    // Compute the amount needed to get it up there.
+@Retry
 
-    diff := maximum - count
-
-    // Page reserve is commit-charged.
+    // Page reserve is commit-charged since any wait that occurs while charging
+    // commit also should be accumulated to a top level.
 
     status := MmuChargeCommit (
         mmnode, // mmnode
-        diff, // pages
+        actual, // pages
         flags, // flags
     )
 
@@ -306,7 +292,7 @@ FN MmuSetPageReservation (
 
     status = MmpClaimAvailablePages (
         mmnode, // mmnode
-        diff, // pages
+        actual, // pages
         flags, // flags
         &timeout, // timeout
         OUT: actualnode, // actualnode
@@ -315,7 +301,7 @@ FN MmuSetPageReservation (
     IF OsError ( status ) THEN
         MmuUnchargeCommit (
             mmnode, // mmnode
-            diff, // pages
+            actual, // pages
         )
 
         GOTO Error
@@ -325,56 +311,64 @@ FN MmuSetPageReservation (
     reserve^.Node = actualnode
 #END
 
-    reserve^.Count = maximum
-    actual = maximum
+    reserve^.Count += actual
 
     RETURN OS_STATUS_SUCCESS
 
 @Error
 
-    IF maximum != minimum THEN
+    IF actual != minimum THEN
         // Lower to the minimum and retry.
 
         flags = saveflags
-        maximum = minimum
+        actual = minimum
 
         GOTO Retry
     END
 
     // Failed to get the minimum.
 
-    IF flags & MM_ALLOCATE_WAIT == 0 THEN
+    count := reserve^.Count
+
+    IF flags & MM_ALLOCATE_WAIT == 0 OR
+        status == OS_STATUS_WAIT_TIMEOUT THEN
+
         // We weren't able to wait, so add this as a debt and induce upper
-        // layers to try again. We only add the difference because a later
-        // MmReleasePageReserve will convert the current reserve into debt
-        // on top of this (the net effect being that the entire page count
-        // required to make progress in an allocation operation will be
-        // represented in the debt by the time the uppermost level does a
-        // MmFulfillPageReservation).
+        // layers to try again. 
 
-        reserve^.Debt += diff
+        // We also do this in the event of a timeout to mitigate a class of
+        // deadlocks where, for example, the entirety of physical memory may be
+        // filled with pool pages, and pool blocks are being allocated and
+        // freed, but no physical pages are ever freed. Instead of sitting here
+        // forever, we should retry so we can grab one of those freed pool
+        // blocks. This should be very rare.
 
-        RETURN OS_STATUS_TRY_AGAIN
-    END
-
-    // We were able to wait and failed anyway, so return a true error status
-    // unless it was a timeout (which should also cause a retry of the full
-    // stack).
-
-    IF status == OS_STATUS_WAIT_TIMEOUT THEN
-        // No pages were freed for several seconds. Return to the upper
-        // level codepath so that it can retry. If we're lucky, we might be
-        // able to pick up a newly freed pool block, or something else that
-        // obviates the need to grab a page frame at all.
-        //
-        // This actually mitigates a possible class of deadlocks where, for
-        // example, the entirety of physical memory may be filled with pool
-        // pages, and pool blocks are being allocated and freed, but no
-        // physical pages are ever freed. Instead of sitting here forever,
-        // we should retry so we can grab one of those freed pool blocks.
-        // This should be very rare.
+        reserve^.Debt = count + minimum
 
         status = OS_STATUS_TRY_AGAIN
+    END
+
+    IF count THEN
+        // Release the remaining page reservation for the thread.
+        // If a retry will occur, we've converted this reservation to debt,
+        // so we'll get it all back at once during the consolidated wait at
+        // the top level.
+
+        reserve^.Count = 0
+
+        // Increment the available page count.
+
+        KeuIncrementQuantityQueue (
+            &mmnode^.AvailablePageQuantityQueue, // queue
+            count, // amount
+        )
+
+        // Uncharge the commit.
+
+        MmuUnchargeCommit (
+            mmnode, // mmnode
+            count, // pages
+        )
     END
 
     RETURN status
@@ -400,18 +394,18 @@ EXPORT FN MmReleasePageReserve ()
 
     reserve^.Count = 0
 
-    // Increment the available page count.
-
-#IF ( NOT BLD_NUMA )
-    mmnode := MmCurrentAffinityNode ()
-#END
+    // Get the node the pages were reserved from.
 
 #IF BLD_NUMA
     mmnode := reserve^.Node
     reserve^.Node = NULLPTR
 
     KeAssert ( mmnode != NULLPTR )
+#ELSE
+    mmnode := MmCurrentAffinityNode ()
 #END
+
+    // Increment the available page count.
 
     KeuIncrementQuantityQueue (
         &mmnode^.AvailablePageQuantityQueue, // queue
@@ -424,12 +418,6 @@ EXPORT FN MmReleasePageReserve ()
         mmnode, // mmnode
         count, // pages
     )
-
-    // This is potentially happening because of debt incurred by an inner layer
-    // and is going to cause a retry. Therefore we are going to need the entire
-    // reserve we had, plus extra. Convert the reserve to debt.
-
-    reserve^.Debt += count
 END
 
 EXPORT FN MmFulfillPageReservation ()
@@ -446,7 +434,7 @@ EXPORT FN MmFulfillPageReservation ()
     debt := reserve^.Debt
     reserve^.Debt = 0
 
-    MmuSetPageReservation (
+    MmuAddPageReservation (
         debt, // minimum
         debt, // maximum
         MM_ALLOCATE_WAIT, // flags
@@ -927,9 +915,7 @@ FN MmpAllocatePageFromReserve (
     reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
     count := reserve^.Count
 
-    IF count == 0 THEN
-        RETURN NULLPTR
-    END
+    KeAssert ( count != 0 )
 
     reserve^.Count = count - 1
 

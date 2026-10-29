@@ -20,7 +20,7 @@ FN (ExArenaImportF) MmpImportNonpageable (
     // Set the page reservation to enough to allocate the pages we want
     // below.
 
-    status := MmuSetPageReservation (
+    status := MmuAddPageReservation (
         minimum >> RTL_PAGE_SHIFT, // minimum
         maximum >> RTL_PAGE_SHIFT, // maximum
         flags, // flags
@@ -59,24 +59,6 @@ FN (ExArenaImportF) MmpImportNonpageable (
         GOTO Error2
     END
 
-    // That stuff might have eaten from our reserve in unlucky cases so check
-    // for that case.
-
-    IF MmuQueryPageReserve () < actual THEN
-        // It did. Try to bring it back up.
-
-        status = MmuSetPageReservation (
-            actual, // minimum
-            actual, // maximum
-            flags, // flags
-            OUT: junk, // actual
-        )
-
-        IF OsError ( status ) THEN
-            GOTO Error3
-        END
-    END
-
     i := 0
     pte := MmpPteAddress ( address )
     colorptr := address
@@ -89,8 +71,6 @@ FN (ExArenaImportF) MmpImportNonpageable (
             flags, // flags
             MmpVirtualAddressColor ( colorptr ), // color
         )
-
-        KeAssert ( pfe != NULLPTR )
 
         // Map the page frame.
         // Note that no TB entry exists for this page in any CPU if we've been

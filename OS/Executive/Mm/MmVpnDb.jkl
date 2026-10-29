@@ -85,7 +85,7 @@ FN MmpReferenceVpnDbPage (
 
     // Charge commit for the new VPNDB page.
 
-    status := MmuSetPageReservation (
+    status := MmuAddPageReservation (
         1, // minimum
         1, // maximum
         flags, // flags
@@ -102,11 +102,6 @@ FN MmpReferenceVpnDbPage (
         flags, // flags
         MmpVirtualAddressColor ( vpe ), // color
     )
-
-    // Should be infallible since we didn't do anything that could take from
-    // the reserve inbetween reserving and allocating.
-
-    KeAssert ( pfe != NULLPTR )
 
 @RetryAcquire
 
