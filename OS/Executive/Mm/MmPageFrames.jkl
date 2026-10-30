@@ -439,7 +439,8 @@ FN MmpInsertPageIntoList (
 ) : UWORD
 
     // Insert the page into the specified list, into the correct color bucket.
-    // List lock is held.
+
+    ipl := KeAcquireLockExclusiveRaise ( &list^.Lock )
 
     RtlInsertAtHeadList (
         &list^.ListHead, // head
@@ -456,6 +457,8 @@ FN MmpInsertPageIntoList (
 #END
 
     list^.Count += 1
+
+    KeReleaseLockLower ( &list^.Lock, ipl )
 END
 
 FN MmpAllocatePageFromList (
@@ -759,10 +762,7 @@ FN MmpAllocatePageReserved (
                 )
 
             ELSE
-                pfe = MmpAllocatePageFromStandbyList (
-                    mmnode, // mmnode
-                    color, // color
-                )
+                pfe = MmpAllocatePageFromStandbyList ( mmnode )
             END
 
             IF pfe THEN
@@ -787,10 +787,7 @@ FN MmpAllocatePageReserved (
         )
 
     ELSE
-        pfe = MmpAllocatePageFromStandbyList (
-            mmnode, // mmnode
-            color, // color
-        )
+        pfe = MmpAllocatePageFromStandbyList ( mmnode )
     END
 
     // There's a guarantee that theres a physical page for us to take somewhere
