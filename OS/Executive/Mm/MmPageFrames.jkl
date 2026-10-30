@@ -748,20 +748,10 @@ FN MmpUnreferencePage (
             1, // inc
         )
 
-        // The order of releasing the page lock and list lock is important
-        // because we dropped our refcount, so it is no longer safe to touch
-        // the page lock after we release the list lock.
-
-        KeReleaseLock ( &pfe^.Lock )
-
-        KeReleaseLockLower ( &colorlist^.Lock, ipl )
-
         KeuIncrementQuantityQueue (
             &mmnode^.AvailablePageQuantityQueue, // queue
             1, // amount
         )
-
-        LEAVE
     END
 
     // The order of releasing the page lock and list lock is important
@@ -787,7 +777,7 @@ FN MmpAllocatePageReserved (
 
     pfe : ^MmpPfe
 
-    mustzero := FALSE
+@Retry
 
     IF flags & MM_ALLOCATE_ZERO THEN
         IF mmnode^.ZeroList.Count THEN
@@ -797,10 +787,7 @@ FN MmpAllocatePageReserved (
             )
 
         ELSE
-            // Need to grab a free or standby page. Make sure to zero out the
-            // page outside the list lock.
-
-            mustzero = TRUE
+            // Need to grab a free or standby page and zero it out.
 
             IF mmnode^.FreeList.Count THEN
                 pfe = MmpAllocatePageFromList (
@@ -812,6 +799,14 @@ FN MmpAllocatePageReserved (
                 pfe = MmpAllocatePageFromStandbyList (
                     mmnode, // mmnode
                     color, // color
+                )
+            END
+
+            IF pfe THEN
+                MmZeroPage (
+                    MmpPfeToPfn ( pfe ), // pfn
+                    0, // offset
+                    RTL_PAGE_SIZE, // length
                 )
             END
         END
@@ -835,22 +830,17 @@ FN MmpAllocatePageReserved (
         )
     END
 
-    // Should not be possible to fail to get a page since we have a guarantee
-    // that there is a page on some list.
+    // There's a guarantee that theres a physical page for us to take somewhere
+    // but no guarantee which list it's on, so some races exist where we saw
+    // a non-zero list count but ended up without a page. These need a retry.
 
-    KeAssert ( pfe != NULLPTR )
+    IF NOT pfe THEN
+        GOTO Retry
+    END
 
 #IF BLD_CHK
     pfe^.Packed = MmpPackType ( pfe^.Packed, MMP_IN_USE_PFE_TYPE )
 #END
-
-    IF mustzero THEN
-        MmZeroPage (
-            MmpPfeToPfn ( pfe ), // pfn
-            0, // offset
-            RTL_PAGE_SIZE, // length
-        )
-    END
 
     RETURN pfe
 END
