@@ -253,14 +253,6 @@ FN MmuAddPageReservation (
         flags |= MM_ALLOCATE_NORMAL
     END
 
-    // Reset the debt to zero to prevent it from growing unboundedly. This
-    // should work to reset it at the beginning of a new allocation operation
-    // because failure causes that incur debt should cause a full unwind of
-    // the stack without calling this function again, so the debt will remain
-    // intact for usage by MmFulfillPageReservation.
-
-    reserve^.Debt = 0
-
     mmnode := MmCurrentAffinityNode ()
 
 #IF BLD_NUMA
@@ -270,14 +262,25 @@ FN MmuAddPageReservation (
     END
 #END
 
+    reserve^.Debt = 0
+    credit := reserve^.Credit
+
 @Retry
+
+    IF credit >= actual THEN
+        // Take from credit.
+
+        reserve^.Credit = credit - actual
+
+        RETURN OS_STATUS_SUCCESS
+    END
 
     // Page reserve is commit-charged since any wait that occurs while charging
     // commit also should be accumulated to a top level.
 
     status := MmuChargeCommit (
         mmnode, // mmnode
-        actual, // pages
+        actual - credit, // pages
         flags, // flags
     )
 
@@ -292,7 +295,7 @@ FN MmuAddPageReservation (
 
     status = MmpClaimAvailablePages (
         mmnode, // mmnode
-        actual, // pages
+        actual - credit, // pages
         flags, // flags
         &timeout, // timeout
         OUT: actualnode, // actualnode
@@ -301,7 +304,7 @@ FN MmuAddPageReservation (
     IF OsError ( status ) THEN
         MmuUnchargeCommit (
             mmnode, // mmnode
-            actual, // pages
+            actual - credit, // pages
         )
 
         GOTO Error
@@ -312,6 +315,7 @@ FN MmuAddPageReservation (
 #END
 
     reserve^.Count += actual
+    reserve^.Credit = 0
 
     RETURN OS_STATUS_SUCCESS
 
@@ -328,8 +332,6 @@ FN MmuAddPageReservation (
 
     // Failed to get the minimum.
 
-    count := reserve^.Count
-
     IF flags & MM_ALLOCATE_WAIT == 0 OR
         status == OS_STATUS_WAIT_TIMEOUT THEN
 
@@ -343,32 +345,9 @@ FN MmuAddPageReservation (
         // forever, we should retry so we can grab one of those freed pool
         // blocks. This should be very rare.
 
-        reserve^.Debt = count + minimum
+        reserve^.Debt = minimum
 
         status = OS_STATUS_TRY_AGAIN
-    END
-
-    IF count THEN
-        // Release the remaining page reservation for the thread.
-        // If a retry will occur, we've converted this reservation to debt,
-        // so we'll get it all back at once during the consolidated wait at
-        // the top level.
-
-        reserve^.Count = 0
-
-        // Increment the available page count.
-
-        KeuIncrementQuantityQueue (
-            &mmnode^.AvailablePageQuantityQueue, // queue
-            count, // amount
-        )
-
-        // Uncharge the commit.
-
-        MmuUnchargeCommit (
-            mmnode, // mmnode
-            count, // pages
-        )
     END
 
     RETURN status
@@ -382,7 +361,7 @@ EXPORT FN MmReleasePageReserve ()
 
     reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
 
-    count := reserve^.Count
+    count := reserve^.Count + reserve^.Credit
 
     IF count == 0 THEN
         // Nothing to release.
@@ -393,6 +372,7 @@ EXPORT FN MmReleasePageReserve ()
     // Set the reserve empty.
 
     reserve^.Count = 0
+    reserve^.Credit = 0
 
     // Get the node the pages were reserved from.
 
@@ -418,6 +398,10 @@ EXPORT FN MmReleasePageReserve ()
         mmnode, // mmnode
         count, // pages
     )
+
+    // Convert to debt.
+
+    reserve^.Debt += count
 END
 
 EXPORT FN MmFulfillPageReservation ()
@@ -431,8 +415,10 @@ EXPORT FN MmFulfillPageReservation ()
 
     reserve := &thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
 
+    KeAssert ( reserve^.Credit == 0 )
+    KeAssert ( reserve^.Count == 0 )
+
     debt := reserve^.Debt
-    reserve^.Debt = 0
 
     MmuAddPageReservation (
         debt, // minimum
@@ -440,6 +426,11 @@ EXPORT FN MmFulfillPageReservation ()
         MM_ALLOCATE_WAIT, // flags
         OUT: junk, // actual
     )
+
+    // Move the reservation to credit.
+
+    reserve^.Credit = reserve^.Count
+    reserve^.Count = 0
 END
 
 FN MmpInsertPageIntoList (
