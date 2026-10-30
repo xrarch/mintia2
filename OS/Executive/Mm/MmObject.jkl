@@ -15,8 +15,8 @@ FN MmpClearTrackingTableEntry (
 
     // Reset the tracking table entry for this page.
 
-    entry := pfe^.TrackingTableEntry
-    entry^ = pfe^.Backing
+    entry := pfe^.U.Used.TrackingTableEntry
+    entry^ = pfe^.U.Used.Backing
 
     // If this wasn't a page of paged pool or the paged executive, the
     // tracking table entry resides in page tracking pool, and we can
@@ -57,7 +57,7 @@ FN MmpClearTrackingTableEntry (
         )
     END
 
-    IF pfe^.Backing == 0 THEN
+    IF pfe^.U.Used.Backing == 0 THEN
         // This must have been a file page or something else.
         // It's backing is recorded as zero rather than a pagefile location.
         // Because the tracking PTE has been zeroed, the refcount on the

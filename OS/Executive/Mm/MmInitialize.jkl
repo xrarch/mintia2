@@ -221,7 +221,6 @@ FN MmpReclaimMemoryFromNode (
             MmpWiredPages -= pages
             MmpFreedPages += pages
 
-            mmnode^.FreeList.Count += pages
             mmnode^.AvailablePageCount += pages
             mmnode^.FluidPageCount += pages
 
@@ -231,9 +230,9 @@ FN MmpReclaimMemoryFromNode (
             WHILE pages DO
                 MmpInitializeFreePfe ( pfe, nodeid )
 
-                RtlInsertAtTailList (
-                    &mmnode^.FreeList.Colors[MmpPfnColor(pfn)].Head, // head
-                    &pfe^.Entry, // entry
+                MmpInsertPageIntoList (
+                    &mmnode^.FreeList, // list
+                    pfe, // pfe
                 )
 
                 pfe += MMP_PFE_SIZE
@@ -458,7 +457,6 @@ FN MmuInitializeStage1 ()
 
                 mmnode^.FluidPageCount += pages
                 mmnode^.AvailablePageCount += pages
-                mmnode^.FreeList.Count += pages
 
                 pfn := desc^.StartPfn
                 pfe := MmpPfnToPfe ( pfn )
@@ -466,9 +464,9 @@ FN MmuInitializeStage1 ()
                 WHILE pages DO
                     MmpInitializeFreePfe ( pfe, i )
 
-                    RtlInsertAtTailList (
-                        &mmnode^.FreeList.Colors[MmpPfnColor(pfn)].Head, // head
-                        &pfe^.Entry, // entry
+                    MmpInsertPageIntoList (
+                        &mmnode^.FreeList, // list
+                        pfe, // pfe
                     )
 
                     pfe += MMP_PFE_SIZE

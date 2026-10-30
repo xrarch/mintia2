@@ -89,11 +89,24 @@
     (((packed) & ~MMP_PACKED_NODE_MASK) | ((nodeid) << MMP_PACKED_NODE_SHIFT))
 ]
 
-STRUCT MmpPfe
+STRUCT MmpPfeUsed
     TrackingTableEntry : ^MmpPte,
     Object : ^MmuObject,
     OffsetInObject : RtlUquad,
     Backing : MmpPte,
+END
+
+STRUCT MmpPfeFree
+    ColorEntry : RtlListEntry,
+END
+
+UNION MmpPfeUsedOrFree
+    Used : MmpPfeUsed,
+    Free : MmpPfeFree,
+END
+
+STRUCT MmpPfe
+    U : MmpPfeUsedOrFree,
     Entry : RtlListEntry,
     Lock : KeLock,
 
@@ -101,14 +114,15 @@ STRUCT MmpPfe
     Packed : ULONG,
 END
 
-STRUCT MmpAvailablePageListColor
+STRUCT MmpFreePageList
     Lock : KE_CACHE_LINE KeLock,
-    Head : RtlListEntry,
-END
-
-STRUCT MmpAvailablePageList
-    Colors : MmpAvailablePageListColor[MMP_COLOR_COUNT],
     Count : UWORD,
+    ListHead : RtlListEntry,
+
+#IF ( != MMP_COLOR_COUNT 1 )
+    ColorListHeads : RtlListEntry[MMP_COLOR_COUNT],
+#END
+
 END
 
 EXTERN MmpSystemSize : UWORD
@@ -205,14 +219,13 @@ EXTERN FN MmpFreePage (
 )
 
 EXTERN FN MmpAllocatePageFromList (
-    IN list : ^MmpAvailablePageList,
+    IN list : ^MmpFreePageList,
     IN color : UWORD,
 ) : ^MmpPfe
 
 EXTERN FN MmpInsertPageIntoList (
-    IN list : ^MmpAvailablePageList,
+    IN list : ^MmpFreePageList,
     IN pfe : ^MmpPfe,
-    IN head : UWORD,
 ) : UWORD
 
 #MACRO MmpAcquireObjectExclusive ( object ) [
@@ -310,9 +323,14 @@ KE_CACHE_LINE_END
 
 KE_CACHE_LINE_END
 
-    FreeList : MmpAvailablePageList,
-    ZeroList : MmpAvailablePageList,
-    StandbyList : MmpAvailablePageList,
+    FreeList : MmpFreePageList,
+    ZeroList : MmpFreePageList,
+
+KE_CACHE_LINE_END
+
+    StandbyListLock : KeLock,
+    StandbyListCount : UWORD,
+    StandbyListHead : RtlListEntry,
 
 KE_CACHE_LINE_END
 

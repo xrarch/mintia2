@@ -5,22 +5,28 @@
 #INCLUDE "Mmp.hjk"
 
 #SECTION "INITtext"
-FN MmpInitializeAvailablePageList (
-    IN list : ^MmpAvailablePageList,
+FN MmpInitializeFreePageList (
+    IN list : ^MmpFreePageList,
 )
 
-    // Initialize a list of available pages.
+    // Initialize a list of free pages.
 
     list^.Count = 0
 
+    RtlInitializeList ( &list^.ListHead )
+
+    KeInitializeLock ( &list^.Lock, "PageList" )
+
+#IF ( != MMP_COLOR_COUNT 1 )
     i := 0
 
     WHILE i < MMP_COLOR_COUNT DO
-        RtlInitializeList ( &list^.Colors[i].Head )
-        KeInitializeLock ( &list^.Colors[i].Lock, "Color" )
+        RtlInitializeList ( &list^.ColorListHeads[i] )
 
         i += 1
     END
+#END
+
 END
 
 #SECTION "INITtext"
@@ -29,10 +35,6 @@ FN MmpInitializeNodeStage1 (
 )
 
     // Perform stage 1 (physical) initialization for a memory node.
-
-    // Initialize the locks.
-
-    KeInitializeLock ( &mmnode^.ModifiedListLock, "ModifiedList" )
 
     // Initialize the events.
 
@@ -83,11 +85,15 @@ FN MmpInitializeNodeStage1 (
     // Initialize the list heads.
 
     RtlInitializeList ( &mmnode^.ModifiedListHead )
+    KeInitializeLock ( &mmnode^.ModifiedListLock, "ModifiedList" )
     mmnode^.ModifiedPageCount = 0
 
-    MmpInitializeAvailablePageList ( &mmnode^.FreeList )
-    MmpInitializeAvailablePageList ( &mmnode^.ZeroList )
-    MmpInitializeAvailablePageList ( &mmnode^.StandbyList )
+    MmpInitializeFreePageList ( &mmnode^.FreeList )
+    MmpInitializeFreePageList ( &mmnode^.ZeroList )
+
+    RtlInitializeList ( &mmnode^.StandbyListHead )
+    KeInitializeLock ( &mmnode^.StandbyListLock, "StandbyList" )
+    mmnode^.StandbyListCount = 0
 
     mmnode^.AvailablePageCount = 0
     mmnode^.FluidPageCount = 0

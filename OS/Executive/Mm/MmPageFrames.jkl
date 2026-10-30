@@ -434,156 +434,122 @@ EXPORT FN MmFulfillPageReservation ()
 END
 
 FN MmpInsertPageIntoList (
-    IN list : ^MmpAvailablePageList,
+    IN list : ^MmpFreePageList,
     IN pfe : ^MmpPfe,
-    IN head : UWORD,
 ) : UWORD
 
     // Insert the page into the specified list, into the correct color bucket.
-    // Return the count of page frames on the list before this one was added.
+    // List lock is held.
 
-    pfn := MmpPfeToPfn ( pfe )
-    colorlist := &list^.Colors[MmpPfnColor ( pfn )]
-
-    ipl := KeAcquireLockExclusiveRaise ( &colorlist^.Lock )
-
-    IF head THEN
-        RtlInsertAtHeadList (
-            &colorlist^.Head, // head
-            &pfe^.Entry, // entry
-        )
-
-    ELSE
-        RtlInsertAtTailList (
-            &colorlist^.Head, // head
-            &pfe^.Entry, // entry
-        )
-    END
-
-    oldcount := KeIncrementPtr (
-        &list^.Count, // ptr
-        1, // inc
+    RtlInsertAtHeadList (
+        &list^.ListHead, // head
+        &pfe^.Entry, // entry
     )
 
-    KeReleaseLockLower ( &colorlist^.Lock, ipl )
+#IF ( != MMP_COLOR_COUNT 1 )
+    colorlist := &list^.ColorListHeads[MmpPfnColor ( MmpPfeToPfn ( pfe ) )]
 
-    RETURN oldcount
+    RtlInsertAtHeadList (
+        colorlist, // head
+        &pfe^.U.Free.ColorEntry, // entry
+    )
+#END
+
+    list^.Count += 1
 END
 
 FN MmpAllocatePageFromList (
-    IN list : ^MmpAvailablePageList,
+    IN list : ^MmpFreePageList,
     IN color : UWORD,
 ) : ^MmpPfe
 
     // Allocate a page, preferably with the given color, from the list.
 
-    i := 0
+    pfe : ^MmpPfe
 
-    WHILE i < MMP_COLOR_COUNT DO
-        colorlist := &list^.Colors[color]
+    ipl := KeAcquireLockExclusiveRaise ( &list^.Lock )
 
-        IF NOT RtlEmptyList ( &colorlist^.Head ) THEN
-            ipl := KeAcquireLockExclusiveRaise ( &colorlist^.Lock )
+    count := list^.Count
 
-            entry := colorlist^.Head.Next
+    IF count == 0 THEN
+        KeReleaseLockLower ( &list^.Lock, ipl )
 
-            IF entry != &colorlist^.Head THEN
-                // Found one. Pop it from the head.
-
-                RtlRemoveEntryList ( entry )
-
-                KeIncrementPtr (
-                    &list^.Count, // ptr
-                    -1, // inc
-                )
-
-                KeReleaseLockLower ( &colorlist^.Lock, ipl )
-
-                RETURN CONTAINEROF entry TO MmpPfe.Entry
-            END
-
-            KeReleaseLockLower ( &colorlist^.Lock, ipl )
-        END
-
-        color = (color + 1) & (MMP_COLOR_COUNT - 1)
-        i += 1
+        RETURN NULLPTR
     END
 
-    RETURN NULLPTR
+    list^.Count = count - 1
+
+#IF ( == MMP_COLOR_COUNT 1 )
+    pfe = CONTAINEROF list^.ListHead.Next TO MmpPfe.Entry
+
+#ELSE
+    colorlist := &list^.ColorListHeads[color]
+
+    IF NOT RtlEmptyList ( colorlist ) THEN
+        // Color list has a page.
+
+        pfe = CONTAINEROF colorlist^.Next TO MmpPfe.U.Free.ColorEntry
+
+    ELSE
+        // Color list is empty so take a page from the strict LIFO list.
+
+        pfe = CONTAINEROF list^.ListHead.Next TO MmpPfe.Entry
+    END
+
+    RtlRemoveEntryList ( &pfe^.U.Free.ColorEntry )
+#END
+
+    RtlRemoveEntryList ( &pfe^.Entry )
+
+    KeReleaseLockLower ( &list^.Lock, ipl )
+
+    RETURN pfe
 END
 
 FN MmpAllocatePageFromStandbyList (
     IN mmnode : ^MmpNode,
-    IN color : UWORD,
 ) : ^MmpPfe
 
     // Allocate a page from the given standby list.
 
-    list := &mmnode^.StandbyList
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.StandbyListLock )
 
-    pfe : ^MmpPfe
-    colorlist : ^MmpAvailablePageListColor
-    ipl : UWORD
-    object : ^MmuObject
+    count := mmnode^.StandbyListCount
 
-    i := 0
+    IF count == 0 THEN
+        KeReleaseLockLower ( &mmnode^.StandbyListLock, ipl )
 
-    WHILE TRUE DO
-        colorlist = &list^.Colors[color]
-
-        IF NOT RtlEmptyList ( &colorlist^.Head ) THEN
-            ipl = KeAcquireLockExclusiveRaise ( &colorlist^.Lock )
-
-            entry := colorlist^.Head.Next
-
-            IF entry != &colorlist^.Head THEN
-                pfe = CONTAINEROF entry TO MmpPfe.Entry
-
-                // Found a page on this list. Capture its object and
-                // disassociate it by clearing the object pointer. If a page
-                // lookup within the object finds this page before we lock the
-                // object below and fully clear the tracking PTE, it will find
-                // that the object pointer has been cleared and will know that
-                // we're executing this path and will clear the tracking PTE
-                // itself. It will also increment a refcount on the object so
-                // that we don't hold a stale pointer to it.
-
-                object = pfe^.Object
-                pfe^.Object = NULLPTR
-
-                RtlRemoveEntryList ( &pfe^.Entry )
-
-                KeIncrementPtr (
-                    &list^.Count, // ptr
-                    -1, // inc
-                )
-
-                KeReleaseLock ( &colorlist^.Lock )
-
-                BREAK
-            END
-
-            KeReleaseLockLower ( &colorlist^.Lock, ipl )
-        END
-
-        color = (color + 1) & (MMP_COLOR_COUNT - 1)
-        i += 1
-
-        IF i >= MMP_COLOR_COUNT THEN
-            RETURN NULLPTR
-        END
+        RETURN NULLPTR
     END
+
+    mmnode^.StandbyListCount = count - 1
+
+    pfe := CONTAINEROF mmnode^.StandbyListHead.Next TO MmpPfe.Entry
+
+    // Found a page on this list. Capture its object and
+    // disassociate it by clearing the object pointer. If a page
+    // lookup within the object finds this page before we lock the
+    // object below and fully clear the tracking PTE, it will find
+    // that the object pointer has been cleared and will know that
+    // we're executing this path and will clear the tracking PTE
+    // itself. It will also increment a refcount on the object so
+    // that we don't hold a stale pointer to it.
+
+    object := pfe^.U.Used.Object
+    pfe^.U.Used.Object = NULLPTR
+
+    KeReleaseLock ( &mmnode^.StandbyListLock )
 
     unrefobject := FALSE
 
     // No need to call this as APC-safe since we're already blocking out APCs
-    // since we didn't lower IPL when we released the colorlist lock.
+    // since we didn't lower IPL when we released the list lock.
 
     KeAcquireLockExclusive ( &object^.StructureLock )
 
     KeAssert ( MmpGetPackedType ( pfe^.Packed ) == MMP_IN_USE_PFE_TYPE )
 
-    IF pfe^.TrackingTableEntry == NULLPTR THEN
+    IF pfe^.U.Used.TrackingTableEntry == NULLPTR THEN
         // A concurrent page lookup cleared the tracking table entry after
         // noticing that we were in the middle of stealing this page. It added a
         // reference to the object to stop our pointer to it from becoming
@@ -727,10 +693,7 @@ FN MmpUnreferencePage (
 
     // The page was neither deleted nor modified, so put it on the standby list.
 
-    color := MmpPfnColor ( MmpPfeToPfn ( pfe ) )
-    colorlist := &mmnode^.StandbyList.Colors[color]
-
-    KeAcquireLockExclusive ( &colorlist^.Lock )
+    KeAcquireLockExclusive ( &mmnode^.StandbyListLock )
 
     refcount = KeIncrementUlong (
         &pfe^.References, // ulong
@@ -738,15 +701,15 @@ FN MmpUnreferencePage (
     )
 
     IF refcount == 1 THEN
+        // Put at the tail of the standby list instead of the head so that
+        // pseudo-LRU happens.
+
         RtlInsertAtTailList (
-            &colorlist^.Head, // listhead
-            &pfe^.Entry, // listentry
+            &mmnode^.StandbyListHead, // head
+            &pfe^.Entry, // entry
         )
 
-        KeIncrementPtr (
-            &mmnode^.StandbyList.Count, // ptr
-            1, // inc
-        )
+        mmnode^.StandbyListCount += 1
 
         KeuIncrementQuantityQueue (
             &mmnode^.AvailablePageQuantityQueue, // queue
@@ -760,7 +723,7 @@ FN MmpUnreferencePage (
 
     KeReleaseLock ( &pfe^.Lock )
 
-    KeReleaseLockLower ( &colorlist^.Lock, ipl )
+    KeReleaseLockLower ( &mmnode^.StandbyListLock, ipl )
 END
 
 FN MmpAllocatePageReserved (
@@ -864,7 +827,6 @@ FN MmpFreePage (
     count := MmpInsertPageIntoList (
         &mmnode^.FreeList, // list
         pfe, // pfe
-        TRUE, // head
     )
 
     KeuIncrementQuantityQueue (
