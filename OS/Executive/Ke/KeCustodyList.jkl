@@ -56,7 +56,7 @@ FN KeuProcessCustodyList (
 @Loop
 
     // Atomically pop the entire object list.
-    //
+
     // Set the list head to a busy bit that stops people from calling the
     // activation routine while we're in this loop. There's nothing functionally
     // illegal about doing that, it's just inefficient since we're already here;
@@ -75,14 +75,10 @@ FN KeuProcessCustodyList (
     END
 
     WHILE object DO
+        // Grab next object link before doing the callback since it leaves our
+        // custody after we call the callback.
+
         nextobject := (CAST object TO ^^VOID)^
-
-        IF nextobject == 1 THEN
-            // Someone grabbed our busy bit and put it as their next link.
-            // This is harmless, just treat it as no next object.
-
-            nextobject = NULLPTR
-        END
 
         // Do the callback.
 
@@ -91,6 +87,13 @@ FN KeuProcessCustodyList (
             object, // object
             context, // context
         )
+
+        IF nextobject == 1 THEN
+            // Someone grabbed our busy bit and put it as their next link.
+            // This is harmless, just treat it as no next object.
+
+            BREAK
+        END
 
         object = nextobject
     END
