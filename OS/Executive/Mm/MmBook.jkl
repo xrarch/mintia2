@@ -289,13 +289,15 @@ FN MmpAllocatePageFromStandbyList (
         // Conversely, someone examining the TTE while holding the PFE lock can
         // see that the PFE has become stale by noting that the TTE changed
         // in the time it took them to acquire the PFE lock. They should then
-        // drop the PFE lock and do a retry loop re-examine the TTE.
+        // drop the PFE lock and do a retry loop and re-examine the TTE.
 
         GOTO Exit
     END
 
     // Didn't race, so go ahead and record the page's backing information in
-    // the tracking table entry before reclaiming it.
+    // the tracking table entry before reclaiming it. This tells us how to find
+    // it in, for example, a pagefile, now that its contents have been fully
+    // removed from memory. This field is set by the modified page writer.
 
     tte^ = pfe^.U.Used.Backing
 
@@ -347,7 +349,7 @@ FN MmpAllocatePageFromStandbyList (
             // which is the province of filesystem drivers to look up.
 
             // Since we don't need to store backing store information for this
-            // page, we should decrement the live entry count on the containing
+            // page, we should decrement the live entry count of the containing
             // tracking table, in the hope of freeing it.
 
             IF MmpDecrementLiveEntryCount ( tte ) != 1 THEN
@@ -369,28 +371,25 @@ FN MmpAllocatePageFromStandbyList (
                 GOTO Exit
             END
 
-            // Copy the PFE's page number within the book so that we can use
-            // that to figure out where the table is that needs to be removed.
-
-            pagenumber : RtlUquad
-
-            RtlMoveUquad (
-                &pagenumber, // dest
-                &pfe^.U.Used.BookPageNumber, // src
-            )
-
             KeReleaseLockLower ( &pfe^.Lock, ipl )
 
-            // Now we can safely delete the tracking table.
+            // Now we can safely delete the tracking table. We use the book
+            // page number of the PFE we just allocated in order to find the
+            // tracking table that needs deleting, since any pointer to it is
+            // now unsafe after dropping locks.
+
+            // This PFE is in our custody fully now so we don't need to worry
+            // about the book page number changing and can pass it directly in.
+
             // It's possible that while locks are dropped, someone will create
-            // another entry in it, and then we shouldn't delete it. It's also
-            // possible that someone else deletes it. These cases will be
-            // detected under the book lock and will cause this to be a harmless
+            // another entry in this table, and then we shouldn't delete it.
+            // It's also possible that someone else deletes it. These cases will
+            // be detected under the book structure lock and will be a harmless
             // no-op.
 
             MmpCheckAndDeleteTrackingTable (
                 book, // book
-                &pagenumber, // pagenumber
+                &pfe^.U.Used.BookPageNumber, // pagenumber
             )
 
             // Release the reference we took out on the book. Make sure to defer
