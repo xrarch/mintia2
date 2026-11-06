@@ -270,8 +270,8 @@ FN MmpAllocatePageFromStandbyList (
     // alive and trying to take a reference to it, clear the tracking table
     // entry pointer.
 
-    tte := pfe^.U.Used.TrackingTableEntry
-    pfe^.U.Used.TrackingTableEntry = NULLPTR
+    tte := pfe^.U.Used.TrackingTableEntryPtr
+    pfe^.U.Used.TrackingTableEntryPtr = NULLPTR
 
     KeReleaseLock ( &mmnode^.StandbyListLock )
 
@@ -281,7 +281,7 @@ FN MmpAllocatePageFromStandbyList (
 
     KeAssert ( MmpGetPackedType ( pfe^.Packed ) == MMP_IN_USE_PFE_TYPE )
 
-    IF pfe^.U.Used.TrackingTableEntry == MMP_TTE_RACED_SENTINEL THEN
+    IF pfe^.U.Used.TrackingTableEntryPtr == MMP_TTE_RACED_SENTINEL THEN
         // We raced with a concurrent page lookup who saw the null TTE pointer
         // that we left across dropped locks. It already reset the page's
         // tracking table entry for us and there is nothing for us to do.
