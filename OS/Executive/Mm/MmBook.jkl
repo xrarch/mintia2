@@ -59,10 +59,17 @@
 #DEFINE MMP_TTE_RACED_SENTINEL [-1]
 
 STRUCT MmpBook
-    // The book lock is superior to the standby list lock and PFE lock.
-    // It guards against concurrent flushes and other high level operations.
+    // The operation lock guards against concurrent flushes and other high
+    // level operations.
 
-    Lock : KeLock,
+    OperationLock : KeLock,
+
+KE_CACHE_LINE_END
+
+    // The structure lock guards against modification to the tracking table
+    // structure.
+
+    StructureLock : KeLock,
 
 KE_CACHE_LINE_END
 
@@ -188,7 +195,26 @@ FN MmpCheckAndDeleteTrackingTable (
     // Check if the tracking table that is used to translate the given page
     // number should be deleted, and delete it if so.
 
-    ipl := KeAcquireLockExclusiveRaise ( &book^.Lock )
+    // XXX A reasonable fear here is that another thread holding the structure
+    //     lock takes a page fault on a tracking table that had been paged out,
+    //     and then a caller of this function who really does not want to block
+    //     for pages, blocks indirectly for pages by waiting for that thread to
+    //     release the structure lock. This can't happen, because each walk from
+    //     one tracking table level to the next checks to make sure the PTE is
+    //     valid first. If it isn't, then the live entry count of the tracking
+    //     table is biased by 1 to ensure its lifetime, and then the structure
+    //     lock is dropped. The page can then be faulted in. This process
+    //     repeats until the lookup code observes a valid PTE, which it can pin
+    //     in the system working set until the end of the operation by
+    //     incrementing the reference count on the PFE of the tracking table.
+    //     As for why we can be sure we will not take any page faults, it's
+    //     because any tracking table with valid entries (such as any ancestor
+    //     of the one we're looking for) is pinned in the system working set and
+    //     can't be paged out. If we run into an invalid PTE, then we can simply
+    //     terminate this operation, because that means that the leaf table we
+    //     are here to delete is gone anyway.
+
+    ipl := KeAcquireLockExclusiveRaise ( &book^.StructureLock )
 
     // First look up the tracking table that corresponds to the page number.
     // If there is none, there's nothing for us to do.
@@ -204,7 +230,7 @@ FN MmpCheckAndDeleteTrackingTable (
 
     KeCrash ( "TODO MmpCheckAndDeleteTrackingTable\n" )
 
-    KeReleaseLockLower ( &book^.Lock, ipl )
+    KeReleaseLockLower ( &book^.StructureLock, ipl )
 END
 
 FN MmpAllocatePageFromStandbyList (
