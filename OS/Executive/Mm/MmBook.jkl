@@ -1,0 +1,387 @@
+//
+// Implements books, which are containers for virtual pages that are looked up
+// by page number. A page in a book is virtual and may be present in memory
+// (cached in a physical page frame), or may be elsewhere. It may not exist at
+// all yet. The method for how to materialize a page (for example backing store
+// or demand-zero) depends on the author of the book, such as file page cache
+// or anonymous shared memory.
+//
+// These are often referred to as "VM objects" or "sections" in other systems
+// and are given another name here to avoid a multiple-way naming collision with
+// other system features also termed objects.
+//
+// The structure used for tracking a book's pages is called a tracking table or
+// TT. A TT is a multi level table with an increasing number of levels for
+// greater indices (similar to a traditional UFS inode block map). A tracking
+// table level's lifetime is maintained by an entry count stored in the VPNDB
+// entry for its containing page. When a tracking table contains no tracking
+// table entries that point to physical pages (that is, all tracked pages have
+// been cleaned to backing store and reclaimed via the standby list), it becomes
+// itself pageable to disk. This works by allocating tracking tables as pageable
+// memory and using a biased reference count on their page frame to avoid
+// removal from the system working set until these entries are all gone (the
+// working set trimming code is written to be aware of this special case).
+//
+// The reason they must be wired in physical memory until all tracked physical
+// pages are gone is to avoid standby list reclamation taking a page fault while
+// trying to record the page's backing store in its TTE, which would cause
+// deadlock.
+//
+
+#INCLUDE "Mmp.hjk"
+
+// On a 32-bit system with 4KB pages (xr17032, fox32) this can handle page
+// numbers up to 1,100,586,419,232-1, or ~4.5 PB.
+
+// On a 64-bit system with 4KB pages (amd64) this can handle page numbers up to
+// 68,853,957,152-1 or ~282 TB.
+
+// On a 64-bit system with 16KB pages (aphelion, aarch64) this can handle page
+// numbers up to 17,600,780,175,392-1, or ~288.4 PB.
+
+#DEFINE MMP_TT_ENTRIES [(RTL_PAGE_SIZE / SIZEOF MmpPte)]
+
+#DEFINE MMP_EMBEDDED_PAGES 64
+
+#DEFINE MMP_L1_PAGES [(MMP_EMBEDDED_PAGES + MMP_TT_ENTRIES)]
+
+#DEFINE MMP_L2_PAGES [(MMP_L1_PAGES + (MMP_TT_ENTRIES * MMP_TT_ENTRIES))]
+
+#DEFINE MMP_L3_PAGES [(
+    MMP_L2_PAGES + (MMP_TT_ENTRIES * MMP_TT_ENTRIES * MMP_TT_ENTRIES)
+)]
+
+#DEFINE MMP_L4_PAGES [(
+    MMP_L3_PAGES + (MMP_TT_ENTRIES * MMP_TT_ENTRIES *
+        MMP_TT_ENTRIES * MMP_TT_ENTRIES)
+)]
+
+#DEFINE MMP_TTE_RACED_SENTINEL [-1]
+
+STRUCT MmpBook
+    // The book lock is superior to the standby list lock and PFE lock.
+    // It guards against concurrent flushes and other high level operations.
+
+    Lock : KeLock,
+
+KE_CACHE_LINE_END
+
+    SizeInBytes : RtlUquad,
+
+    EmbeddedArray : MmpPte[MMP_EMBEDDED_PAGES],
+    OneLevelArray : ^MmpPte,
+    TwoLevelArray : ^^MmpPte,
+    ThreeLevelArray : ^^^MmpPte,
+    FourLevelArray : ^^^^MmpPte,
+
+KE_CACHE_LINE_END
+
+    References : ULONG,
+END
+
+FN MmpConditionallyReferenceBook (
+    IN book : ^MmpBook,
+) : UWORD
+
+    // Attempt to reference the book. Only succeeds if the reference count is
+    // not already 0. Returns TRUE if referenced, FALSE otherwise. Note that
+    // a FALSE return means somebody else is in the process of deleting the
+    // book.
+
+    // This is only safe if a lock is being held that the caller knows is
+    // blocking out the final release of the book's memory.
+
+    oldcount := book^.References
+
+    WHILE TRUE DO
+        IF oldcount == 0 THEN
+            // Count is already zero, so it may be undergoing deletion. Not safe
+            // to reference this book.
+
+            RETURN FALSE
+        END
+
+        new := KeCompareSwapUlong (
+            &book^.References, // ptr
+            oldcount + 1, // newvalue
+            oldcount, // expectedvalue
+        )
+
+        IF new == oldcount THEN
+            // Got it. The previous count was nonzero so we know the book is
+            // safe.
+
+            RETURN TRUE
+        END
+
+        oldcount = new
+    END
+END
+
+FN MmpReferenceBook (
+    IN book : ^MmpBook,
+)
+
+    // Reeference the given book.
+
+    KeIncrementUlong (
+        &book^.References, // ptr
+        1, // inc
+    )
+END
+
+FN MmpUnreferenceBook (
+    IN book : ^MmpBook,
+    IN defer : UWORD,
+)
+
+    // Unreference the given book.
+
+    // If the refcount reaches zero, it must be freed.
+    // If it should be freed and defer is TRUE, then enqueue it to a reaper
+    // thread.
+
+    oldcount := KeIncrementUlong (
+        &book^.References, // ptr
+        0xFFFFFFFF, // inc
+    )
+
+    IF oldcount == 1 THEN
+        // We're responsible for freeing the book.
+
+        IF defer THEN
+            // Enqueue the book to a reaper thread custody list.
+
+            KeCrash ( "TODO MmpUnreferenceBook\n" )
+
+            LEAVE
+        END
+
+        // Free the book ourselves.
+
+        KeCrash ( "TODO MmpUnreferenceBook\n" )
+    END
+END
+
+FN MmpDecrementLiveEntryCount (
+    IN tte : ^MmpPte,
+) : UWORD
+
+    // Decrement the live entry count of the containing tracking table for this
+    // TTE. Return the old count.
+
+    mmnode := KeNumaNodeFromSpacePointer ( tte )^.Mmp
+
+    vpe := MmpAddressToVpe ( mmnode, tte )
+
+    RETURN KeIncrementUlong (
+        &vpe^.U.TrackingTable.LiveEntryCount, // ptr
+        0xFFFFFFFF, // inc
+    )
+END
+
+FN MmpCheckAndDeleteTrackingTable (
+    IN book : ^MmpBook,
+    IN pagenumber : ^RtlUquad,
+)
+
+    // Check if the tracking table that is used to translate the given page
+    // number should be deleted, and delete it if so.
+
+    ipl := KeAcquireLockExclusiveRaise ( &book^.Lock )
+
+    // First look up the tracking table that corresponds to the page number.
+    // If there is none, there's nothing for us to do.
+
+    // ...
+
+    // Now check under the book lock to see if the live entry count of the
+    // tracking table is still 0. If so, delete it. Then walk to the parent to
+    // decrement its live entry count and clear the entry that pointed to this
+    // tracking table. If its entry count becomes zero as well, then repeat.
+
+    // ...
+
+    KeCrash ( "TODO MmpCheckAndDeleteTrackingTable\n" )
+
+    KeReleaseLockLower ( &book^.Lock, ipl )
+END
+
+FN MmpAllocatePageFromStandbyList (
+    IN mmnode : ^MmpNode,
+) : ^MmpPfe
+
+    // Allocate a page from the given node's standby list.
+
+    // This is in MmBook instead of MmPageFrames because all standby pages are
+    // in a book and have to be removed here with a careful locking scheme,
+    // and therefore we need knowledge of the internals of book implementation.
+
+    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.StandbyListLock )
+
+    count := mmnode^.StandbyListCount
+
+    IF count == 0 THEN
+        KeReleaseLockLower ( &mmnode^.StandbyListLock, ipl )
+
+        // Nothing on the standby list.
+
+        RETURN NULLPTR
+    END
+
+    // There's at least one page on the standby list, so grab it.
+
+    mmnode^.StandbyListCount = count - 1
+
+    pfe := CONTAINEROF mmnode^.StandbyListHead.Next TO MmpPfe.Entry
+
+    KeAssert ( pfe^.References == 0 )
+
+    RtlRemoveEntryList ( &pfe^.Entry )
+
+    // For lock ordering reasons we have to drop the standby list lock. In
+    // order to stop a page lookup or something else from thinking the page is
+    // alive and trying to take a reference to it, clear the tracking table
+    // entry pointer.
+
+    tte := pfe^.U.Used.TrackingTableEntry
+    pfe^.U.Used.TrackingTableEntry = NULLPTR
+
+    KeReleaseLock ( &mmnode^.StandbyListLock )
+
+    // Take the page lock.
+
+    KeAcquireLockExclusive ( &pfe^.Lock )
+
+    KeAssert ( MmpGetPackedType ( pfe^.Packed ) == MMP_IN_USE_PFE_TYPE )
+
+    IF pfe^.U.Used.TrackingTableEntry == MMP_TTE_RACED_SENTINEL THEN
+        // We raced with a concurrent page lookup who saw the null TTE pointer
+        // that we left across dropped locks. It already reset the page's
+        // tracking table entry for us and there is nothing for us to do.
+
+        // Conversely, someone examining the TTE while holding the PFE lock can
+        // see that the PFE has become stale by noting that the TTE changed
+        // in the time it took them to acquire the PFE lock. They should then
+        // drop the PFE lock and do a retry loop re-examine the TTE.
+
+        GOTO Exit
+    END
+
+    // Didn't race, so go ahead and record the page's backing information in
+    // the tracking table entry before reclaiming it.
+
+    tte^ = pfe^.U.Used.Backing
+
+    // Check if the page is associated with a book. If not, then its tracking
+    // table entry is a system PTE, which we don't want to touch further.
+
+    book := pfe^.U.Used.Book
+
+    IF book AND
+        (tte < &book^.EmbeddedArray[0] OR
+        tte > &book^.EmbeddedArray[MMP_EMBEDDED_PAGES - 1]) THEN
+
+        // This page is associated with a book and is not tracked in the book's
+        // embedded array, so some management of the tracking tables is
+        // required now that we have invalidated a TTE.
+
+        // We can decrement the reference count on a page of TTEs, potentially
+        // allowing it to be trimmed from the system working set and paged out.
+
+        ttpfe := MmpPfnToPfe (
+            MmpPfnFromPte (
+                (MmpPteAddress ( tte ))^
+            )
+        )
+
+        // Tracking tables should consist of in-use anonymous pages.
+
+        KeAssert ( MmpGetPackedType ( ttpfe^.Packed ) ==
+            MMP_IN_USE_PFE_TYPE )
+
+        // This page of tracking table should have at least 2
+        // references: one for being pinned (due to having this tracking
+        // entry resident), and another for being in the system working
+        // set.
+
+        KeAssert ( ttpfe^.References >= 2 )
+
+        KeIncrementUlong (
+            &ttpfe^.References, // ptr
+            0xFFFFFFFF, // inc
+        )
+
+        IF pfe^.U.Used.Backing == 0 THEN
+            // This page's backing location is recorded as zero, which means it
+            // has no backing that is owned by the memory manager. That is, we
+            // weren't the ones who gave it a backing store, nor do we know
+            // where to find that. This usually means this is a file page,
+            // which is the province of filesystem drivers to look up.
+
+            // Since we don't need to store backing store information for this
+            // page, we should decrement the live entry count on the containing
+            // tracking table, in the hope of freeing it.
+
+            IF MmpDecrementLiveEntryCount ( tte ) != 1 THEN
+                // Didn't drop the count to zero, so exit.
+
+                GOTO Exit
+            END
+
+            // Did drop the count to zero, so we want to get rid of this table.
+            // Can't do this under the PFE lock, so we have to drop it. But
+            // that will cause the book's lifetime to become uncertain. So first
+            // try to increment the book's reference count.
+
+            IF NOT MmpConditionallyReferenceBook ( book ) THEN
+                // Someone is actively deleting the book already and is going
+                // to free this tracking table anyway, so we don't have to do
+                // anything. Just exit.
+
+                GOTO Exit
+            END
+
+            // Copy the PFE's page number within the book so that we can use
+            // that to figure out where the table is that needs to be removed.
+
+            pagenumber : RtlUquad
+
+            RtlMoveUquad (
+                &pagenumber, // dest
+                &pfe^.U.Used.BookPageNumber, // src
+            )
+
+            KeReleaseLockLower ( &pfe^.Lock, ipl )
+
+            // Now we can safely delete the tracking table.
+            // It's possible that while locks are dropped, someone will create
+            // another entry in it, and then we shouldn't delete it. It's also
+            // possible that someone else deletes it. These cases will be
+            // detected under the book lock and will cause this to be a harmless
+            // no-op.
+
+            MmpCheckAndDeleteTrackingTable (
+                book, // book
+                &pagenumber, // pagenumber
+            )
+
+            // Release the reference we took out on the book. Make sure to defer
+            // any deletion of the book that this causes since that isn't safe
+            // to do right now.
+
+            MmpUnreferenceBook (
+                book, // book
+                TRUE, // defer
+            )
+
+            RETURN pfe
+        END
+    END
+
+@Exit
+
+    KeReleaseLockLower ( &pfe^.Lock, ipl )
+
+    RETURN pfe
+END

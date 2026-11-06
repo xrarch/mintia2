@@ -91,8 +91,8 @@
 
 STRUCT MmpPfeUsed
     TrackingTableEntry : ^MmpPte,
-    Object : ^MmuObject,
-    OffsetInObject : RtlUquad,
+    Book : ^MmpBook,
+    BookPageNumber : RtlUquad,
     Backing : MmpPte,
 END
 
@@ -228,16 +228,20 @@ EXTERN FN MmpInsertPageIntoList (
     IN pfe : ^MmpPfe,
 ) : UWORD
 
-#MACRO MmpAcquireObjectExclusive ( object ) [
-    KeAcquireLockExclusiveRaise ( &(object)^.Pushlock )
+#MACRO MmpAcquireBookExclusiveRaise ( book ) [
+    KeAcquireLockExclusiveRaise ( &(book)^.Lock )
 ]
 
-#MACRO MmpAcquireObjectShared ( object ) [
-    KeAcquireLockSharedRaise ( &(object)^.Pushlock )
+#MACRO MmpReleaseBookLower ( book, ipl ) [
+    KeReleaseLockLower ( &(book)^.Lock, ipl )
 ]
 
-#MACRO MmpReleaseObject ( object, ipl ) [
-    KeReleaseLockLower ( &(object)^.Pushlock, ipl )
+#MACRO MmpAcquireBookExclusive ( book ) [
+    KeAcquireLockExclusive ( &(book)^.Lock )
+]
+
+#MACRO MmpReleaseBook ( book ) [
+    KeReleaseLock ( &(book)^.Lock )
 ]
 
 STRUCT MmpQuotaLimit
@@ -414,15 +418,9 @@ KE_CACHE_LINE_END
 
 END
 
-EXTERN FN MmpClearTrackingTableEntry (
-    IN object : ^MmuObject,
-    IN pfe : ^MmpPfe,
-)
-
-EXTERN FN MmpUnreferenceObject (
-    IN object : ^MmuObject,
-    IN defer : UWORD,
-)
+EXTERN FN MmpAllocatePageFromStandbyList (
+    IN mmnode : ^MmpNode,
+) : ^MmpPfe
 
 EXTERN FN MmpGarbageCollectVpnDb (
     IN mmnode : ^MmpNode,
@@ -457,8 +455,14 @@ STRUCT MmpVpeObjectConsumer
     VmPrivileged : UBYTE,
 END
 
+STRUCT MmpVpeTrackingTableConsumer
+    Parent : ^MmpVpe,
+    LiveEntryCount : ULONG,
+END
+
 UNION MmpVpeConsumerData
     ObjectCache : MmpVpeObjectConsumer,
+    TrackingTable : MmpVpeTrackingTableConsumer,
 END
 
 STRUCT MmpVpe
