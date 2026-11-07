@@ -741,12 +741,14 @@ FN BxCreateVirtualSpace (
 
     pde := &BxPageDirectory[base >> 22]
 
-    WHILE pagetables DO
+    i := 0
+
+    WHILE i < pagetables DO
         pde[0] = (pfn << 12) | MMP_PTE_V | MMP_PTE_W
 
         pfn += 1
         pde += 4
-        pagetables -= 1
+        i += 1
     END
 
     // Zero them out through the recursive mapping.
@@ -756,7 +758,7 @@ FN BxCreateVirtualSpace (
     RtlFillMemoryWithUlong (
         ptebase, // ptr
         pagetables << RTL_PAGE_SHIFT, // sz
-        0x00000000, // ulong
+        MMP_INVALID_KERNEL_PTE, // ulong
     )
 
     RETURN realpages

@@ -10,6 +10,10 @@
 
 #INCLUDE "Mmp.hjk"
 
+#MACRO MmpVpnDbHash ( vpn ) [
+    ((((vpn) >> 15) $ ((vpn) >> 10) $ ((vpn) >> 5) $ (vpn)) & 31)
+]
+
 #SECTION "INITtext"
 FN MmpInitializeVpnDb (
     IN kenode : ^KeuNode,
@@ -19,11 +23,21 @@ FN MmpInitializeVpnDb (
 
     mmnode := kenode^.Mmp
 
-    KeInitializeLock ( &mmnode^.VpnDbLock, "VpnDb" )
-
     mmnode^.VpnDbBase = kenode + KE_VPN_DB_OFFSET
     mmnode^.VpnDbCounters = kenode^.VpnDbCounters
-    mmnode^.VpnDbFilter = kenode^.VpnDbFilter
+
+    i := 0
+
+    WHILE i < MMP_VPN_DB_RECLAIM_BUCKETS DO
+        KeInitializeLock (
+            &mmnode^.VpnDbReclaimBuckets[i].Lock, // lock
+            "VpnDbReclaimBucket", // name
+        )
+
+        RtlInitializeList ( &mmnode^.VpnDbReclaimBuckets[i].ListHead )
+
+        i += 1
+    END
 END
 
 FN MmpReferenceVpnDbPage (
@@ -43,10 +57,14 @@ FN MmpReferenceVpnDbPage (
 @Retry
 
     WHILE TRUE DO
-        IF refcount == 0 THEN
+        IF refcount <= 1 THEN
             // A reference count of 0 means there is no physical page backing
-            // this VPNDB page. We need to break out and create one under a
-            // lock.
+            // this VPNDB page.
+            //
+            // A reference count of 1 means it is reclaimable and we need to
+            // remove it from the reclaimable list first.
+            // 
+            // In either case, break out and do it under the bucket lock.
 
             BREAK
         END
@@ -59,30 +77,55 @@ FN MmpReferenceVpnDbPage (
             refcount, // expectedvalue
         )
 
-        IF new != refcount THEN
+        IF new == refcount THEN
+            RETURN OS_STATUS_SUCCESS
+        END
+
+        // Something changed, so retry.
+
+        refcount = new
+    END
+
+    ipl : UWORD
+    pfe : ^MmpPfe
+    bucket := &mmnode^.VpnDbReclaimBuckets[MmpVpnDbHash ( vpndbpage )]
+    pteaddr := MmpPteAddress ( vpe )
+
+    IF refcount == 1 THEN
+        // Try to remove the page from the reclaimable list.
+
+        ipl = KeAcquireLockExclusiveRaise ( &bucket^.Lock )
+
+        IF counter^ != 1 THEN
             // Something changed, so retry.
 
-            refcount = new
+            KeReleaseLockLower ( &bucket^.Lock, ipl )
 
-            CONTINUE
+            GOTO Retry
         END
 
-        IF refcount == 1 THEN
-            // Old refcount was 1, and now its 2, so we are responsible for
-            // decrementing the count in the filter. Note that this can
-            // race but this is self-correcting as the racing threads leave,
-            // and not a functional hazard as the filter is only used as
-            // a hint by the garbage collection process.
+        // Find the PFE.
 
-            KeIncrementUlong (
-                &mmnode^.VpnDbFilter[vpndbpage / MMP_VPNDB_PER_FILTER], // ptr
-                0xFFFFFFFF, // inc
-            )
-        END
+        ptecontents := pteaddr^
+
+        KeAssert ( MmpIsPteValid ( ptecontents ) )
+
+        pfe = MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) )
+
+        // Remove it from the reclaimable list.
+
+        RtlRemoveEntryList ( &pfe^.Entry )
+
+        // Increment the counter to 2 to reflect one VPE.
+
+        counter^ = 2
+
+        KeReleaseLockLower ( &bucket^.Lock, ipl )
 
         RETURN OS_STATUS_SUCCESS
     END
 
+    // The refcount was 0, so we need to create a new VPNDB page.
     // Charge commit for the new VPNDB page.
 
     status := MmuAddPageReservation (
@@ -98,19 +141,19 @@ FN MmpReferenceVpnDbPage (
         RETURN status
     END
 
-    pfe := MmpAllocatePageFromReserve (
+    pfe = MmpAllocatePageFromReserve (
         flags, // flags
         MmpVirtualAddressColor ( vpe ), // color
     )
 
 @RetryAcquire
 
-    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.VpnDbLock )
+    ipl = KeAcquireLockExclusiveRaise ( &bucket^.Lock )
 
     IF counter^ != 0 THEN
         // The value of the counter changed, so retry.
 
-        KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+        KeReleaseLockLower ( &bucket^.Lock, ipl )
 
         MmpFreePage ( pfe )
 
@@ -122,19 +165,21 @@ FN MmpReferenceVpnDbPage (
         GOTO Retry
     END
 
-    pteaddr := MmpPteAddress ( vpe )
-
 #IF BLD_MP
     IF pteaddr^ == MMP_PENDING_FLUSH_PTE THEN
         // The PTE is still pending flush, so flush it now.
 
-        KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+        KeReleaseLockLower ( &bucket^.Lock, ipl )
 
         KeuFlushShootdowns ( MmpNodeToKeProcess ( mmnode ) )
 
         GOTO RetryAcquire
     END
 #END
+
+    KeAssert ( pteaddr^ == MMP_INVALID_KERNEL_PTE )
+
+    pfe^.U.VpnDb.VirtualAddress = vpe & RTL_PAGE_NUMBER_MASK
 
     pteaddr^ = MmpBuildPoolPte ( MmpPfeToPfn ( pfe ) )
 
@@ -148,7 +193,7 @@ FN MmpReferenceVpnDbPage (
 
     counter^ = 1 + count
 
-    KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+    KeReleaseLockLower ( &bucket^.Lock, ipl )
 
     RETURN OS_STATUS_SUCCESS
 END
@@ -169,37 +214,80 @@ FN MmpReferenceVpe (
     KeAssert ( oldcount >= 2 )
 END
 
-FN MmpUnreferenceVpe (
-    IN vpe : ^MmpVpe,
+FN MmpUnreferenceVpnDbPage (
+    IN mmnode : ^MmpNode,
+    IN vpndbpage : UWORD,
+    IN count : UWORD,
 )
 
-    // Decrement the refcount of a VPE whose containing page is known to exist.
+    // Unreference a VPN DB page.
 
-    // If this drops the refcount of the containing VPNDB page to 1, then it is
-    // eligible for garbage collection on the next scan.
+    counter := &mmnode^.VpnDbCounters[vpndbpage]
 
-    mmnode := KeNumaNodeFromSpacePointer ( vpe )^.Mmp
-    vpn := (vpe - mmnode^.VpnDbBase) >> RTL_PAGE_SHIFT
+    refcount := counter^
+
+    WHILE TRUE DO
+        // This operation should leave at least 1 reference, since there's a
+        // physical page.
+
+        KeAssert ( refcount != 0 )
+        KeAssert ( count <= refcount - 1 )
+
+        IF refcount - count == 1 THEN
+            // We're about to drop the reference count to 1, so we will need to
+            // put the page on the reclaimable bucket.
+
+            BREAK
+        END
+
+        // Try to atomically decrement the refcount.
+
+        new := KeCompareSwapUlong (
+            counter, // ptr
+            refcount - count, // newvalue
+            refcount, // expectedvalue
+        )
+
+        IF new == refcount THEN
+            LEAVE
+        END
+
+        // Something changed, so retry.
+
+        refcount = new
+    END
+
+    bucket := &mmnode^.VpnDbReclaimBuckets[MmpVpnDbHash ( vpndbpage )]
+
+    vpe := CAST mmnode^.VpnDbBase + (vpndbpage << RTL_PAGE_SHIFT) TO ^MmpVpe
+    pteaddr := MmpPteAddress ( vpe )
+
+    ipl := KeAcquireLockExclusiveRaise ( &bucket^.Lock )
+
+    // Decrement under the lock.
 
     oldcount := KeIncrementUlong (
-        &mmnode^.VpnDbCounters[vpn],
-        0xFFFFFFFF, // inc
+        counter, // ptr
+        -count, // inc
     )
 
-    KeAssert ( oldcount >= 2 )
+    IF oldcount == refcount THEN
+        // Nobody incremented the reference count in the time it took us to take
+        // the lock, so we should put the page on the reclaim list.
 
-    IF oldcount == 2 THEN
-        // Old refcount was 2, and now its 1, so we are responsible for
-        // incrementing the count in the filter. Note that this can
-        // race but this is self-correcting as the racing threads leave, and
-        // not a functional hazard as the filter is only used as a hint by
-        // the garbage collection process.
+        ptecontents := pteaddr^
 
-        KeIncrementUlong (
-            &mmnode^.VpnDbFilter[vpn / MMP_VPNDB_PER_FILTER], // ptr
-            1, // inc
+        KeAssert ( MmpIsPteValid ( ptecontents ) )
+
+        pfe := MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) )
+
+        RtlInsertAtTailList (
+            &bucket^.ListHead, // listhead
+            &pfe^.Entry, // listentry
         )
     END
+
+    KeReleaseLockLower ( &bucket^.Lock, ipl )
 END
 
 FN MmpUnreferenceVpes (
@@ -227,29 +315,34 @@ FN MmpUnreferenceVpes (
             max = pages
         END
 
-        oldcount := KeIncrementUlong (
-            &mmnode^.VpnDbCounters[vpndbpage],
-            -max, // inc
+        MmpUnreferenceVpnDbPage (
+            mmnode, // mmnode
+            vpndbpage, // vpndbpage
+            max, // count
         )
-
-        KeAssert ( oldcount >= max + 1 )
-
-        IF oldcount == max + 1 THEN
-            // Old refcount was 2, and now its 1, so we are responsible for
-            // incrementing the count in the filter. Note that this can
-            // race but this is self-correcting as the racing threads leave, and
-            // not a functional hazard as the filter is only used as a hint by
-            // the garbage collection process.
-
-            KeIncrementUlong (
-                &mmnode^.VpnDbFilter[vpndbpage / MMP_VPNDB_PER_FILTER], // ptr
-                1, // inc
-            )
-        END
 
         vpn += max
         pages -= max
     END
+END
+
+FN MmpUnreferenceVpe (
+    IN vpe : ^MmpVpe,
+)
+
+    // Decrement the refcount of a VPE whose containing page is known to exist.
+
+    // If this drops the refcount of the containing VPNDB page to 1, then it is
+    // eligible for garbage collection on the next scan.
+
+    mmnode := KeNumaNodeFromSpacePointer ( vpe )^.Mmp
+    vpn := MmpVpeToDynamicSpaceVpn ( mmnode, vpe )
+
+    MmpUnreferenceVpnDbPage (
+        mmnode, // mmnode
+        (vpn * MMP_VPE_SIZE) >> RTL_PAGE_SHIFT, // vpndbpage
+        1, // count
+    )
 END
 
 FN MmpCreateVpes (
@@ -361,78 +454,56 @@ FN MmpGarbageCollectVpnDb (
 )
 
     // Garbage collect unused pages in the VPN DB. This is done lazily rather
-    // than reclaiming the pages eagerly in order to minimize TB shootdowns
-    // and avoid excessive contention on the VpnDbLock.
+    // than reclaiming the pages eagerly in order to minimize TB shootdowns.
 
-    // This process involves scanning and is optimized by scanning a
-    // filter as the first level. The filter consists of an array of
-    // 32-bit counts of VPN DB pages that lie within a particular range, which
-    // are reclaimable (refcount==1).
+    // This process involves scanning each of 32 reclamation buckets and freeing
+    // any VPN DB pages found on each of them.
 
     counters := mmnode^.VpnDbCounters
-    filter := mmnode^.VpnDbFilter
 
     base := mmnode^.VpnDbBase
 
     ptes := MmpPteAddress ( base )
 
-    i := 0
     pages := ((mmnode^.KeNode^.DynamicSpaceSize * MMP_VPE_SIZE) +
         RTL_PAGE_SIZE - 1) >> RTL_PAGE_SHIFT
 
-    WHILE i < pages DO
-        IF filter[i / MMP_VPNDB_PER_FILTER] == 0 THEN
-            // No reclaimable pages in this range.
+    i := 0
 
-            i += MMP_VPNDB_PER_FILTER
+    WHILE i < MMP_VPN_DB_RECLAIM_BUCKETS DO
+        bucket := &mmnode^.VpnDbReclaimBuckets[i]
+        listhead := &bucket^.ListHead
 
-            CONTINUE
-        END
-
-        // There may be at least one reclaimable page in this range.
-
-        max := i + MMP_VPNDB_PER_FILTER
-
-        IF max > pages THEN
-            max = pages
-        END
-
-        WHILE i < max DO
-            IF counters[i] != 1 THEN
-                // Not reclaimable.
-
-                i += 1
-
-                CONTINUE
-            END
+        WHILE NOT RtlEmptyList ( listhead ) DO
+            // This bucket appears to have reclaimable pages on it, so lock it
+            // and reclaim one.
 
 @Retry
 
-            // This page of VPN DB is reclaimable.
-            // Try to atomically change the refcount to 0 to represent that we
-            // have reclaimed the underlying physical page.
+            ipl := KeAcquireLockExclusiveRaise ( &bucket^.Lock )
 
-            ipl := KeAcquireLockExclusiveRaise ( &mmnode^.VpnDbLock )
+            IF RtlEmptyList ( listhead ) THEN
+                // Nevermind.
 
-            value := KeCompareSwapUlong (
-                &counters[i], // ptr
-                0, // newvalue
-                1, // expectedvalue
-            )
-
-            IF value != 1 THEN
-                // Something changed, so just ignore this page.
-
-                KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
-
-                i += 1
-
-                CONTINUE
+                GOTO NextBucket
             END
+
+            pfe := CONTAINEROF listhead^.Next TO MmpPfe.Entry
+
+            vaddr := pfe^.U.VpnDb.VirtualAddress
+            page := (vaddr - base) >> RTL_PAGE_SHIFT
+
+            // This page of VPN DB is reclaimable, so its counter should be
+            // 1. This means that it still has a physical page mapped to it
+            // but has no outstanding entries inside of it.
+
+            KeAssert ( counters[page] == 1 )
+
+            counters[page] = 0
 
             // Decremented the count to zero, so now we can reclaim.
 
-            ptecontents := ptes[i]
+            ptecontents := ptes[page]
 
             KeAssert ( MmpIsPteValid ( ptecontents ) )
 
@@ -440,29 +511,27 @@ FN MmpGarbageCollectVpnDb (
             // Set the PTE to indicate the flushing of this VPN from the TB
             // is currently in a deferred batch.
 
-            ptes[i] = MMP_PENDING_FLUSH_PTE
+            ptes[page] = MMP_PENDING_FLUSH_PTE
 
             IF NOT KeuBatchShootdown (
                 MmpNodeToKeProcess ( mmnode ), // process
                 NULLPTR, // context
-                base + (i << RTL_PAGE_SHIFT), // ptr
+                vaddr, // ptr
                 1, // pages
                 &MmpFlushVpnDb, // callback
                 FALSE, // canflush
             ) THEN
 
-                // Oops, nevermind. We ran out of batched shootdown slots and
-                // don't want to flush them while holding the VpnDbLock, so we
-                // have to undo what we just did and then flush manually
-                // while outside of it.
+                // Oops, nevermind. We ran out of batched shootdown slots
+                // and don't want to flush them while holding the bucket
+                // lock, so we have to undo what we just did and then flush
+                // manually while outside of it.
 
-                ptes[i] = ptecontents
+                ptes[page] = ptecontents
 
-                KeWriteMemoryBarrier ()
+                counters[page] = 1
 
-                counters[i] = 1
-
-                KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+                KeReleaseLockLower ( &bucket^.Lock, ipl )
 
                 KeuFlushShootdowns ( MmpNodeToKeProcess ( mmnode ) )
 
@@ -471,26 +540,20 @@ FN MmpGarbageCollectVpnDb (
 #ELSE
             // Clear the PTE and flush the virtual page.
 
-            ptes[i] = MMP_INVALID_KERNEL_PTE
+            ptes[page] = MMP_INVALID_KERNEL_PTE
 
-            KeuFlushMyTbAddress ( base + (i << RTL_PAGE_SHIFT) )
+            KeuFlushMyTbAddress ( vaddr )
 #END
 
-            KeReleaseLockLower ( &mmnode^.VpnDbLock, ipl )
+            // Remove the PFE from the reclaimable list.
 
-            // Decrement the number of VPN DB pages in this range that have a
-            // refcount of 1, since we just changed one to 0.
+            RtlRemoveEntryList ( &pfe^.Entry )
 
-            KeIncrementUlong (
-                &filter[i / MMP_VPNDB_PER_FILTER], // ptr
-                0xFFFFFFFF, // inc
-            )
+@NextBucket
 
-            // Free the page frame.
-
-            MmpFreePage ( MmpPfnToPfe ( MmpPfnFromPte ( ptecontents ) ) )
-
-            i += 1
+            KeReleaseLockLower ( &bucket^.Lock, ipl )
         END
+
+        i += 1
     END
 END

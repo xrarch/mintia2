@@ -100,9 +100,14 @@ STRUCT MmpPfeFree
     ColorEntry : RtlListEntry,
 END
 
+STRUCT MmpPfeVpnDb
+    VirtualAddress : ^VOID,
+END
+
 UNION MmpPfeUsedOrFree
     Used : MmpPfeUsed,
     Free : MmpPfeFree,
+    VpnDb : MmpPfeVpnDb,
 END
 
 STRUCT MmpPfe
@@ -290,15 +295,18 @@ END
 // 32, 64, 96, 160, 256, 384, 576, 864, 1312, 1984, 2976
 #DEFINE MMP_NUMBER_POOL_BUCKETS 11
 
+#DEFINE MMP_VPN_DB_RECLAIM_BUCKETS 32
+
+STRUCT MmpVpnDbReclaimBucket
+    ListHead : RtlListEntry,
+    Lock : KE_CACHE_LINE KeLock,
+END
+
 STRUCT MmpNode
-    VpnDbLock : KeLock,
-
-KE_CACHE_LINE_END
-
     VpnDbBase : ^VOID,
     VpnDbCounters : ^ULONG,
-    VpnDbFilter : ^ULONG,
     VpnDbPages : UWORD,
+    VpnDbReclaimBuckets : MmpVpnDbReclaimBucket[MMP_VPN_DB_RECLAIM_BUCKETS],
 
 KE_CACHE_LINE_END
 
@@ -337,7 +345,11 @@ KE_CACHE_LINE_END
 
 KE_CACHE_LINE_END
 
+#IF BLD_NUMA
+
     BorrowCounts : ^UINT,
+
+#END
 
     DynamicSpaceBase : ^VOID,
     PagefileState : ^MmpPagefileState,
@@ -380,8 +392,6 @@ KE_CACHE_LINE_END
 KE_CACHE_LINE_END
 
     LowMemoryEvent : KE_CACHE_LINE KeEvent,
-    PageAvailableEvent : KE_CACHE_LINE KeEvent,
-    LowPageAvailableEvent : KE_CACHE_LINE KeEvent,
     ModifiedPageEvent : KE_CACHE_LINE KeEvent,
     ZeroPageEvent : KE_CACHE_LINE KeEvent,
 

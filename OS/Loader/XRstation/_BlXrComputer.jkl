@@ -715,7 +715,7 @@ FN BxInitializeMemory (
         RtlFillMemoryWithUlong (
             pgdir + (RTL_PAGE_SIZE / 2), // ptr
             RTL_PAGE_SIZE / 2, // size
-            0x00000010, // ulong
+            MMP_INVALID_KERNEL_PTE, // ulong
         )
 
         // Identity map the first 4MB of RAM so that we don't instantly puke
@@ -883,7 +883,7 @@ FN BxMapPage (
             RtlFillMemoryWithUlong (
                 pagetable, // dest
                 RTL_PAGE_SIZE, // sz
-                0x00000010, // ulong
+                MMP_INVALID_KERNEL_PTE, // ulong
             )
 
             newpde |= MMP_PTE_G
@@ -1049,12 +1049,14 @@ FN BxCreateVirtualSpace (
 
     pde := &BxBootPageDirectory[base >> 22]
 
-    WHILE pagetables DO
+    i := 0
+
+    WHILE i < pagetables DO
         pde[0] = (pfn << 5) | MMP_PTE_V | MMP_PTE_W | MMP_PTE_K | MMP_PTE_G
 
         pfn += 1
         pde += 4
-        pagetables -= 1
+        i += 1
     END
 
     // Zero them out through the recursive mapping.
@@ -1064,7 +1066,7 @@ FN BxCreateVirtualSpace (
     RtlFillMemoryWithUlong (
         ptebase, // ptr
         pagetables << RTL_PAGE_SHIFT, // sz
-        0x00000010, // ulong
+        MMP_INVALID_KERNEL_PTE, // ulong
     )
 
     RETURN realpages
