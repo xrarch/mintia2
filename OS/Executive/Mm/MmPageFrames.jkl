@@ -536,6 +536,8 @@ FN MmpUnreferencePage (
 
     KeAssert ( MmpGetPackedType ( pfe^.Packed ) == MMP_IN_USE_PFE_TYPE )
 
+@Retry
+
     refcount := pfe^.References
 
     KeAssert ( refcount != 0 )
@@ -581,33 +583,42 @@ FN MmpUnreferencePage (
 
     mmnode := KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
 
+    listlock := &mmnode^.StandbyListLock
+    listhead := &mmnode^.StandbyListHead
+
+    IF MmpGetPackedFlag ( packed, MMP_MODIFIED_PFE_FLAG ) THEN
+        listlock = &mmnode^.ModifiedListLock
+        listhead = &mmnode^.ModifiedListHead
+    END
+
+    KeAcquireLockExclusive ( listlock )
+
+    // Decrement under the lock.
+
+    oldcount := KeIncrementUlong (
+        &pfe^.References, // ptr
+        0xFFFFFFFF, // inc
+    )
+
+    IF oldcount != 1 THEN
+        // Someone else incremented the reference count, it's not our
+        // responsibility to put it on the list now.
+
+        KeAssert ( oldcount > 1 )
+
+        GOTO Exit
+    END
+
+    RtlInsertAtTailList (
+        listhead, // listhead
+        &pfe^.Entry, // entry
+    )
+
     IF MmpGetPackedFlag ( packed, MMP_MODIFIED_PFE_FLAG ) THEN
         // The page was modified, so it must be placed on the modified page
         // list for its home node.
 
-        KeAcquireLockExclusive ( &mmnode^.ModifiedListLock )
-
-        refcount = KeIncrementUlong (
-            &pfe^.References, // ulong
-            0xFFFFFFFF, // inc
-        )
-
-        IF refcount == 1 THEN
-            RtlInsertAtTailList (
-                &mmnode^.ModifiedListHead, // listhead
-                &pfe^.Entry, // entry
-            )
-
-            mmnode^.ModifiedPageCount += 1
-        END
-
-        // The order of releasing the page lock and list lock is important
-        // because we dropped our refcount, so it is no longer safe to touch
-        // the page lock after we release the list lock.
-
-        KeReleaseLock ( &pfe^.Lock )
-
-        KeReleaseLockLower ( &mmnode^.ModifiedListLock, ipl )
+        mmnode^.ModifiedPageCount += 1
 
         IF mmnode^.ModifiedPageCount >= mmnode^.ModifiedPageMaximum AND
             mmnode^.ModifiedPageEvent.Header.SignalCount == 0 THEN
@@ -620,27 +631,10 @@ FN MmpUnreferencePage (
                 0, // priorityboost
             )
         END
-
-        LEAVE
-    END
-
-    // The page was neither deleted nor modified, so put it on the standby list.
-
-    KeAcquireLockExclusive ( &mmnode^.StandbyListLock )
-
-    refcount = KeIncrementUlong (
-        &pfe^.References, // ulong
-        0xFFFFFFFF, // inc
-    )
-
-    IF refcount == 1 THEN
-        // Put at the tail of the standby list instead of the head so that
-        // pseudo-LRU happens.
-
-        RtlInsertAtTailList (
-            &mmnode^.StandbyListHead, // head
-            &pfe^.Entry, // entry
-        )
+    
+    ELSE
+        // The page was neither deleted nor modified, so put it on the standby
+        // list.
 
         mmnode^.StandbyListCount += 1
 
@@ -650,13 +644,15 @@ FN MmpUnreferencePage (
         )
     END
 
+@Exit
+
     // The order of releasing the page lock and list lock is important
     // because we dropped our refcount, so it is no longer safe to touch
     // the page lock after we release the list lock.
 
     KeReleaseLock ( &pfe^.Lock )
 
-    KeReleaseLockLower ( &mmnode^.StandbyListLock, ipl )
+    KeReleaseLockLower ( listlock, ipl )
 END
 
 FN MmpAllocatePageReserved (
