@@ -21,16 +21,6 @@ EXPORT KeuGlobalProcessorArray : ^KepPrb[KEP_MAXIMUM_PROCESSORS]
 
 KepInitializeCount : ULONG
 
-KepAnnounceSpinlock : KepSpinlock = KEP_INITIAL_SPINLOCK
-
-#MACRO KepAcquireAnnounce () [
-    KepAcquireSpinlockRaise ( &KepAnnounceSpinlock )
-]
-
-#MACRO KepReleaseAnnounce ( oldipl ) [
-    KepReleaseSpinlockLower ( &KepAnnounceSpinlock, oldipl )
-]
-
 #SECTION "text"
 PUBLIC KepAllProcessorsMask : KE_CACHE_LINE (ULONG[16]) = {
     0xFFFFFFFF, 0xFFFFFFFF,
@@ -42,16 +32,6 @@ PUBLIC KepAllProcessorsMask : KE_CACHE_LINE (ULONG[16]) = {
     0xFFFFFFFF, 0xFFFFFFFF,
     0xFFFFFFFF, 0xFFFFFFFF,
 }
-
-#ELSE
-
-#MACRO KepAcquireAnnounce () [
-    KepRaiseIpl ( KEP_IPL_DPC )
-]
-
-#MACRO KepReleaseAnnounce ( oldipl ) [
-    KepLowerIpl ( oldipl )
-]
 
 #END
 
@@ -68,11 +48,7 @@ FN (KeContinuationF) KepIdleLoop (
 
     prb := KEP_CURRENT_PRB_LOCAL
 
-    ipl := KepAcquireAnnounce ()
-
     RtlPrint ( "KepIdleLoop: Processor %u idling\n", prb^.GlobalId )
-
-    KepReleaseAnnounce ( ipl )
 
 #IF BLD_MP
     // Atomically decrement the initialization count to indicate to the boot
