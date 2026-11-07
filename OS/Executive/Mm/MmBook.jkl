@@ -284,13 +284,14 @@ FN MmpAllocatePageFromStandbyList (
 
     IF pfe^.U.Used.TrackingTableEntryPtr == MMP_TTE_RACED_SENTINEL THEN
         // We raced with a concurrent page lookup who saw the null TTE pointer
-        // that we left across dropped locks. It already reset the page's
-        // tracking table entry for us and there is nothing for us to do.
+        // that we left across dropped locks. It already set the page's tracking
+        // table entry for us and there is nothing for us to do.
 
-        // Conversely, someone examining the TTE while holding the PFE lock can
-        // see that the PFE has become stale by noting that the TTE changed
-        // in the time it took them to acquire the PFE lock. They should then
-        // drop the PFE lock and do a retry loop and re-examine the TTE.
+        // Conversely, that other person (a looker upper or whatever) examining
+        // the TTE while holding the PFE lock can see that the PFE has become
+        // stale (claimed by us) by noting that the TTE changed in the time it
+        // took them to acquire the PFE lock. They should then drop the PFE lock
+        // and retry their examination of the TTE.
 
         GOTO Exit
     END
@@ -316,8 +317,9 @@ FN MmpAllocatePageFromStandbyList (
         // embedded array, so some management of the tracking tables is
         // required now that we have invalidated a TTE.
 
-        // We can decrement the reference count on a page of TTEs, potentially
-        // allowing it to be trimmed from the system working set and paged out.
+        // We can decrement the reference count on the page that contained the
+        // TTE, potentially allowing it to be trimmed from the system working
+        // set and paged out.
 
         ttpfe := MmpPfnToPfe (
             MmpPfnFromPte (
@@ -325,15 +327,11 @@ FN MmpAllocatePageFromStandbyList (
             )
         )
 
-        // Tracking tables should consist of in-use anonymous pages.
+        KeAssert ( MmpGetPackedType ( ttpfe^.Packed ) == MMP_IN_USE_PFE_TYPE )
 
-        KeAssert ( MmpGetPackedType ( ttpfe^.Packed ) ==
-            MMP_IN_USE_PFE_TYPE )
-
-        // This page of tracking table should have at least 2
-        // references: one for being pinned (due to having this tracking
-        // entry resident), and another for being in the system working
-        // set.
+        // This page of tracking table should have at least 2 references: one
+        // for being pinned (due to having this tracking entry resident), and
+        // another for being in the system working set.
 
         KeAssert ( ttpfe^.References >= 2 )
 
@@ -350,8 +348,10 @@ FN MmpAllocatePageFromStandbyList (
             // which is the province of filesystem drivers to look up.
 
             // Since we don't need to store backing store information for this
-            // page, we should decrement the live entry count of the containing
-            // tracking table, in the hope of freeing it.
+            // page (it has functionally returned to an uninitialized state, as
+            // far as we are concerned), we should decrement the live entry
+            // count of the containing tracking table, in the hope of freeing
+            // it.
 
             IF MmpDecrementLiveEntryCount ( tte ) != 1 THEN
                 // Didn't drop the count to zero, so exit.
