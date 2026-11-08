@@ -166,47 +166,6 @@ FN (ExArenaFreeF) MmpFreeNonpageable (
     )
 END
 
-FN (ExArenaLookupTagF) MmpLookupMappedArenaTag (
-    IN arena : ^ExpArena,
-    IN address : ^VOID,
-    IN remove : UWORD,
-) : ^ExpArenaTag
-
-    // Look up the slab arena tag.
-    // Do nothing on removal since we unreference the VPE upon freeing the
-    // underlying imported span.
-
-    mmnode := KeNumaNodeFromSpacePointer ( arena )^.Mmp
-
-    vpe := MmpAddressToVpe ( mmnode, address )
-
-    tag := vpe^.MappedArenaTag
-
-    IF remove THEN
-        vpe^.MappedArenaTag = NULLPTR
-    END
-
-    RETURN tag
-END
-
-FN (ExArenaInsertTagF) MmpInsertMappedArenaTag (
-    IN arena : ^ExpArena,
-    IN address : ^VOID,
-    IN flags : UWORD,
-    IN tag : ^ExpArenaTag,
-) : OsStatus
-
-    // Insert the slab arena tag.
-
-    mmnode := KeNumaNodeFromSpacePointer ( arena )^.Mmp
-
-    vpe := MmpAddressToVpe ( mmnode, address )
-
-    vpe^.MappedArenaTag = tag
-
-    RETURN OS_STATUS_SUCCESS
-END
-
 FN MmpInitializeMappedPages (
     IN kenode : ^KeuNode,
 )
@@ -217,10 +176,6 @@ FN MmpInitializeMappedPages (
 
     // Create the two slab arenas, one for each type of pageability.
 
-    tagcallbacks : ExArenaTagCallbacks
-    tagcallbacks.LookupTag = &MmpLookupMappedArenaTag
-    tagcallbacks.InsertTag = &MmpInsertMappedArenaTag
-
     importcallbacks : ExArenaImportCallbacks
     importcallbacks.Import = &MmpImportNonpageable
     importcallbacks.Free = &MmpFreeNonpageable
@@ -230,7 +185,6 @@ FN MmpInitializeMappedPages (
         "NonpagedMappedArena", // name
         kenode, // kenode
         0, // flags
-        &tagcallbacks, // tagcallbacks
         &importcallbacks, // importcallbacks
         0, // quantumcachemax
         FALSE, // pageable
@@ -255,7 +209,6 @@ FN MmpInitializeMappedPages (
         "PagedMappedArena", // name
         kenode, // kenode
         0, // flags
-        &tagcallbacks, // tagcallbacks
         &importcallbacks, // importcallbacks
         0, // quantumcachemax
         TRUE, // pageable

@@ -209,24 +209,6 @@ EXTERN FN (ExEnumerateDictionaryF) ExDeleteStringDictionaryEntry (
     IN context : ^VOID,
 )
 
-FNPTR ExArenaLookupTagF (
-    IN arena : ^ExpArena,
-    IN address : ^VOID,
-    IN remove : UWORD,
-) : ^ExpArenaTag
-
-FNPTR ExArenaInsertTagF (
-    IN arena : ^ExpArena,
-    IN address : ^VOID,
-    IN flags : UWORD,
-    IN tag : ^ExpArenaTag,
-) : OsStatus
-
-STRUCT ExArenaTagCallbacks
-    LookupTag : ExArenaLookupTagF,
-    InsertTag : ExArenaInsertTagF,
-END
-
 FNPTR ExArenaImportF (
     IN importarena : ^ExpArena,
     IN flags : UWORD,
@@ -257,7 +239,6 @@ EXTERN FN ExCreateArena (
     IN name : ^UBYTE,
     IN kenode : ^KeuNode,
     IN flags : UWORD,
-    IN tagcallbacks : ^ExArenaTagCallbacks,
     IN importcallbacks : ^ExArenaImportCallbacks,
     IN quantumcachemax : UWORD,
     IN pageable : UWORD,

@@ -4,59 +4,6 @@
 
 #INCLUDE "Mmp.hjk"
 
-FN (ExArenaLookupTagF) MmpLookupDynamicSpaceTag (
-    IN arena : ^ExpArena,
-    IN address : ^VOID,
-    IN remove : UWORD,
-) : ^ExpArenaTag
-
-    // Look up the dynamic space tag.
-
-    mmnode := KeNumaNodeFromSpacePointer ( arena )^.Mmp
-
-    vpe := MmpAddressToVpe ( mmnode, address )
-
-    tag := vpe^.DynamicSpaceArenaTag
-
-    IF remove THEN
-        // Also remove the tag (unreference its containing VPE).
-
-        vpe^.DynamicSpaceArenaTag = NULLPTR
-
-        MmpUnreferenceVpe ( vpe )
-    END
-
-    RETURN tag
-END
-
-FN (ExArenaInsertTagF) MmpInsertDynamicSpaceTag (
-    IN arena : ^ExpArena,
-    IN address : ^VOID,
-    IN flags : UWORD,
-    IN tag : ^ExpArenaTag,
-) : OsStatus
-
-    // Insert the dynamic space tag.
-
-    mmnode := KeNumaNodeFromSpacePointer ( arena )^.Mmp
-
-    status := MmpCreateVpe (
-        mmnode, // mmnode
-        address, // address
-        flags, // flags
-    )
-
-    IF OsError ( status ) THEN
-        RETURN status
-    END
-
-    vpe := MmpAddressToVpe ( mmnode, address )
-
-    vpe^.DynamicSpaceArenaTag = tag
-
-    RETURN OS_STATUS_SUCCESS
-END
-
 #IF BLD_MP
 
 FN (KeuAfterShootdownF) MmpDynamicSpaceCallback (
@@ -119,10 +66,6 @@ FN MmpInitializeSystemVa (
 
     mmnode := kenode^.Mmp
 
-    tagcallbacks : ExArenaTagCallbacks
-    tagcallbacks.LookupTag = &MmpLookupDynamicSpaceTag
-    tagcallbacks.InsertTag = &MmpInsertDynamicSpaceTag
-
 #IF BLD_MP
     clearfunc := &MmpClearDynamicSpace
 #ELSE
@@ -133,7 +76,6 @@ FN MmpInitializeSystemVa (
         "DynamicSpace", // name
         kenode, // kenode
         0, // flags
-        &tagcallbacks, // tagcallbacks
         NULLPTR, // importcallbacks
         0, // quantumcachemax
         FALSE, // pageable
