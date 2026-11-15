@@ -222,7 +222,7 @@ FN MmpInitializeMappedPages (
 END
 
 EXPORT FN MmAllocateMappedPages (
-    IN kenode : ^KeuNode,
+    IN mmnode : ^MmpNode,
     IN flags : UWORD,
     IN pages : UWORD,
     IN pageable : UWORD,
@@ -232,7 +232,7 @@ EXPORT FN MmAllocateMappedPages (
     // Allocate a number of pages from the slab arena.
 
     RETURN ExAllocateFromArena (
-        kenode^.Mmp^.MappedArenas[NOT NOT pageable], // arena
+        mmnode^.MappedArenas[NOT NOT pageable], // arena
         flags, // flags
         pages << RTL_PAGE_SHIFT, // size
         OUT ptr, // address
@@ -240,7 +240,7 @@ EXPORT FN MmAllocateMappedPages (
 END
 
 EXPORT FN MmFreeMappedPages (
-    IN kenode : ^KeuNode,
+    IN mmnode : ^MmpNode,
     IN ptr : ^VOID,
     IN pages : UWORD,
     IN pageable : UWORD,
@@ -249,7 +249,7 @@ EXPORT FN MmFreeMappedPages (
     // Free a number of pages to the slab arena.
 
     ExFreeToArena (
-        kenode^.Mmp^.MappedArenas[NOT NOT pageable], // arena
+        mmnode^.MappedArenas[NOT NOT pageable], // arena
         ptr, // address
         pages << RTL_PAGE_SHIFT, // size
     )
