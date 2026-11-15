@@ -231,26 +231,6 @@ FN ExDeleteArena (
     ExpFreeArena ( arena )
 END
 
-FN ExpAdjustQuantumCaches (
-    IN arena : ^ExpArena,
-    IN purge : UWORD,
-)
-
-    // Adjust the arena's quantum caches.
-
-    i := 1
-
-    WHILE i <= arena^.QuantumCacheMaximum DO
-        IF purge THEN
-            ExuPurgeMagazineCache ( arena^.QuantumCaches[i].Cache )
-        ELSE
-            ExuAdjustMagazineCache ( arena^.QuantumCaches[i].Cache )
-        END
-
-        i += 1
-    END
-END
-
 FN ExpPopulateTagReserve (
     IN arena : ^ExpArena,
     IN flags : UWORD,
@@ -827,14 +807,13 @@ FN ExAllocateFromArena (
 
         // Importing from the arena failed or there's none to import from.
 
-        IF arena^.QuantumCacheMaximum != 0 AND
-            retries <= 1 THEN
-
+        IF retries <= 1 THEN
             // Reap quantum caches and try again.
 
-            ExpAdjustQuantumCaches (
-                arena, // arena
-                retries == 1, // purge
+            ExuAdjustMagazineCaches (
+                arena^.Node, // kenode
+                FALSE, // paged
+                FALSE, // empty
             )
 
             retries += 1
