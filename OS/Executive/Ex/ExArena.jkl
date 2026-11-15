@@ -813,7 +813,7 @@ FN ExAllocateFromArena (
             ExuAdjustMagazineCaches (
                 arena^.Node, // kenode
                 FALSE, // paged
-                FALSE, // empty
+                retries == 1, // empty
             )
 
             retries += 1
@@ -1030,12 +1030,72 @@ FN ExpInsertArenaInLists (
 END
 
 #SECTION "PAGEtext"
+FN ExRaiseArenaQuantumCacheMaximum (
+    IN arena : ^ExpArena,
+    IN quantumcachemax : UWORD,
+    IN flags : UWORD,
+    IN pageable : UWORD,
+) : OsStatus
+
+    // Raise the maximum quantum caching for the arena.
+
+    KeAssert ( quantumcachemax >= arena^.QuantumCacheMaximum )
+
+    IF quantumcachemax == arena^.QuantumCacheMaximum THEN
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    quantumshift := arena^.QuantumShift
+
+    quantumcachemax >>= quantumshift
+
+    IF quantumcachemax >= EXP_MAX_QUANTUM_CACHES THEN
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
+    start := (arena^.QuantumCacheMaximum >> quantumshift) + 1
+    i := start
+
+    WHILE i <= quantumcachemax DO
+        arena^.QuantumCaches[i].Arena = arena
+        arena^.QuantumCaches[i].Size = i << quantumshift
+
+        status := ExCreateMagazineCache (
+            arena^.Node, // kenode
+            "QuantumCache", // name
+            flags, // flags
+            pageable, // pageable
+            &ExpFreeQuantumCache, // freefunc
+            &arena^.QuantumCaches[i], // context
+            OUT arena^.QuantumCaches[i].Cache, // poolcache
+        )
+
+        IF OsError ( status ) THEN
+            // Back out and return error status.
+
+            WHILE i != start DO
+                i -= 1
+
+                ExDeleteMagazineCache ( arena^.QuantumCaches[i].Cache )
+            END
+
+            RETURN status
+        END
+
+        i += 1
+    END
+
+    arena^.QuantumCacheMaximum = quantumcachemax << quantumshift
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
 FN ExCreateArena (
     IN name : ^UBYTE,
     IN kenode : ^KeuNode,
     IN flags : UWORD,
     IN importcallbacks : ^ExArenaImportCallbacks,
-    IN quantumcachemax : UWORD,
     IN pageable : UWORD,
     IN quantumshift : UWORD,
     IN importarena : ^ExpArena,
@@ -1044,12 +1104,6 @@ FN ExCreateArena (
 ) : OsStatus
 
     // Create an arena.
-
-    quantumcachemax >>= quantumshift
-
-    IF quantumcachemax >= EXP_MAX_QUANTUM_CACHES THEN
-        RETURN OS_STATUS_NO_MEMORY
-    END
 
     status : OsStatus
 
@@ -1119,7 +1173,7 @@ FN ExCreateArena (
         )
     END
 
-    arena^.QuantumCacheMaximum = quantumcachemax << quantumshift
+    arena^.QuantumCacheMaximum = 0
 
     RtlInitializeAvl ( &arena^.FreeTree )
 
@@ -1131,39 +1185,6 @@ FN ExCreateArena (
     arena^.TagReserveCount = 0
 
     arena^.Clear = clearfunc
-
-    i := 1
-
-    WHILE i <= quantumcachemax DO
-        arena^.QuantumCaches[i].Arena = arena
-        arena^.QuantumCaches[i].Size = i << quantumshift
-
-        status = ExCreateMagazineCache (
-            kenode, // kenode
-            "QuantumCache", // name
-            flags, // flags
-            pageable, // pageable
-            &ExpFreeQuantumCache, // freefunc
-            &arena^.QuantumCaches[i], // context
-            OUT arena^.QuantumCaches[i].Cache, // poolcache
-        )
-
-        IF OsError ( status ) THEN
-            // Back out and return error status.
-
-            WHILE i != 1 DO
-                i -= 1
-
-                ExDeleteMagazineCache ( arena^.QuantumCaches[i].Cache )
-            END
-
-            ExpFreeArena ( arena )
-
-            RETURN status
-        END
-
-        i += 1
-    END
 
     // Insert into the node's arena list.
 

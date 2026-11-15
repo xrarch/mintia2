@@ -77,7 +77,6 @@ FN MmpInitializeSystemVa (
         kenode, // kenode
         0, // flags
         NULLPTR, // importcallbacks
-        0, // quantumcachemax
         FALSE, // pageable
         RTL_PAGE_SHIFT, // quantumshift
         NULLPTR, // importarena
@@ -145,6 +144,27 @@ FN MmpAllocateDynamicPages (
     END
 
     RETURN status
+END
+
+#SECTION "INITtext"
+FN MmpCacheSystemVa (
+    IN kenode : ^KeuNode,
+)
+
+    // Initialize quantum caches for the dynamic space arena.
+
+    status := ExRaiseArenaQuantumCacheMaximum (
+        kenode^.Mmp^.DynamicSpaceArena, // arena
+        (KEU_STACK_PAGES + 1) * RTL_PAGE_SIZE, // quantumcachemax
+        0, // flags
+        FALSE, // pageable
+    )
+
+    IF OsError ( status ) THEN
+#ENTERSECTION "INITtext"
+        RtlPrint ( "MmpCacheSystemVa: failed to create quantum caches\n" )
+#LEAVESECTION
+    END
 END
 
 FN MmpReleaseDynamicPages (
