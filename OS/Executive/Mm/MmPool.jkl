@@ -26,6 +26,18 @@ MmpObjectSizes : KE_CACHE_LINE UINT[] = {
     MmUsableSpaceOfBlock ( 2208, RTL_ALIGN_BYTES ),
 }
 
+#MACRO MmpMakePoolContext ( pageable, index ) [
+    (((pageable) << 6) | (index))
+]
+
+#MACRO MmpPoolContextPageable ( poolcontext ) [
+    (((poolcontext) >> 6) & 1)
+]
+
+#MACRO MmpPoolContextIndex ( poolcontext ) [
+    ((poolcontext) & 0x3F)
+]
+
 #SECTION "INITtext"
 FN MmpInitializePool (
     IN kenode : ^KeuNode,
@@ -54,9 +66,9 @@ FN MmpInitializePool (
 
             KeAssert ( NOT OsError ( status ) )
 
-            MmpSetObjectCacheIndex (
+            MmpSetObjectCacheContext (
                 mmnode^.PoolCaches[i][j], // objectcache
-                (j << 1) | i, // index
+                MmpMakePoolContext ( i, j ), // context
             )
 
             j += 1
@@ -80,6 +92,10 @@ FN MmAllocatePoolEx (
     IF NOT kenode THEN
         kenode = KeCurrentAffinityNode ()
     END
+
+    // Make sure pageable is 0 or 1.
+
+    pageable = NOT NOT pageable
 
     status : OsStatus
 
@@ -117,13 +133,10 @@ FN MmAllocatePoolEx (
 
         // Indicate page-aligned.
 
-        vpe^.U.ObjectCache.PoolCacheIndex = (0x7F << 1) | (NOT NOT pageable)
-
-        // Stash length in slab control pointer.
-
-        vpe^.U.ObjectCache.SlabControl = CAST bytes TO ^VOID
-
-        vpe^.U.ObjectCache.Tag = tag
+        vpe^.U.PageAlignedPool.SlabControl = 0xFFFFFFFF
+        vpe^.U.PageAlignedPool.Pages = bytes
+        vpe^.U.PageAlignedPool.Tag = tag
+        vpe^.U.PageAlignedPool.Pageable = pageable
 
         RETURN status
     END
@@ -154,7 +167,7 @@ FN MmAllocatePoolEx (
     END
 
     RETURN MmAllocateFromObjectCache (
-        mmnode^.PoolCaches[NOT NOT pageable][index], // objectcache
+        mmnode^.PoolCaches[pageable][index], // objectcache
         flags, // flags
         tag, // tag
         OUT ptr, // ptr
@@ -173,28 +186,32 @@ FN MmFreePool (
 
     vpe := MmpAddressToVpe ( mmnode, ptr )
 
-    pageable := vpe^.U.ObjectCache.PoolCacheIndex & 0x1
-    index := vpe^.U.ObjectCache.PoolCacheIndex >> 1
+    slabctrl := vpe^.U.ObjectCache.SlabControl
 
-    IF index == 0x7F THEN
+    IF slabctrl == 0xFFFFFFFF THEN
         // Page aligned.
 
-        IF vpe^.U.ObjectCache.Tag != tag THEN
+        IF vpe^.U.PageAlignedPool.Tag != tag THEN
             KeCrash ( "MmFreePool: incorrect tag (expected %x, saw %x)\n",
-                tag, vpe^.U.ObjectCache.Tag )
+                tag, vpe^.U.PageAlignedPool.Tag )
         END
 
         MmFreeMappedPages (
             kenode, // kenode
             ptr, // ptr
-            CAST vpe^.U.ObjectCache.SlabControl TO UWORD, // pages
-            pageable, // pageable
+            vpe^.U.PageAlignedPool.Pages, // pages
+            vpe^.U.PageAlignedPool.Pageable, // pageable
         )
 
         LEAVE
     END
 
     // Smaller.
+
+    poolcontext := MmpSlabPoolContext ( slabctrl )
+
+    pageable := MmpPoolContextPageable ( poolcontext )
+    index := MmpPoolContextIndex ( poolcontext )
 
     MmFreeToObjectCache (
         mmnode^.PoolCaches[pageable][index], // objectcache

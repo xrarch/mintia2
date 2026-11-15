@@ -27,12 +27,13 @@ STRUCT MmpObjectCache
 KE_CACHE_LINE_END
 
     Node : ^KeuNode,
+    MmNode : ^MmpNode,
     MagazineCache : ^ExpMagazineCache,
     ObjectSize : ULONG,
     ObjectsPerSlab : UINT,
     SlabPages : UBYTE,
     Pageable : UBYTE,
-    PoolCacheIndex : UBYTE,
+    PoolCacheContext : UBYTE,
 
 KE_CACHE_LINE_END
 
@@ -109,17 +110,22 @@ EXPORT FN MmAllocateFromObjectCache (
 
         vpe = CONTAINEROF listentry TO MmpVpe.U.ObjectCache.SlabListEntry
 
-        object = vpe^.U.ObjectCache.FreeListHead
+        KeAssert ( vpe^.U.ObjectCache.FreeListHead != 0xFFFF )
 
-        KeAssert ( object != NULLPTR )
+        mmnode := objectcache^.MmNode
+
+        object = MmpVpeToAddress (
+            mmnode, // mmnode
+            vpe, // vpe
+        ) + (vpe^.U.ObjectCache.FreeListHead << 2)
 
         vpe^.U.ObjectCache.InUseObjects += 1
 
-        next := (CAST object TO ^^VOID)^
+        next := (CAST object TO ^UINT)^
 
         vpe^.U.ObjectCache.FreeListHead = next
 
-        IF NOT next THEN
+        IF next == 0xFFFF THEN
             // Remove this slab from the partial list, since it is fully used.
 
             RtlRemoveEntryList ( &vpe^.U.ObjectCache.SlabListEntry )
@@ -179,7 +185,7 @@ EXPORT FN MmAllocateFromObjectCache (
 
     vmprivileged := FALSE
     listhead = &objectcache^.PartialSlabListHead[FALSE]
-    mmnode := objectcache^.Node^.Mmp
+    mmnode := objectcache^.MmNode
 
     IF thread^.VmPrivilegeBits AND
         mmnode^.AvailablePageCount <= MMP_BLOCK_FOR_PAGES_THRESHOLD THEN
@@ -227,9 +233,14 @@ EXPORT FN MmAllocateFromObjectCache (
     // Initialize the VPE to describe the slab.
     // Note that the SlabArena's import function already created the VPEs.
 
+    vpe^.U.ObjectCache.SlabControl = MmpMakeSlabControl (
+        MmpAddressToDynamicSpaceVpn ( mmnode, object ), // index
+        objectcache^.PoolCacheContext, // context
+        vmprivileged, // vmprivileged
+    )
+
     vpe^.U.ObjectCache.InUseObjects = 1
-    vpe^.U.ObjectCache.FreeListHead = NULLPTR
-    vpe^.U.ObjectCache.Tag = 0xABABABAB
+    vpe^.U.ObjectCache.FreeListHead = 0xFFFF
 
     RtlInsertAtTailList (
         listhead, // listhead
@@ -244,9 +255,7 @@ EXPORT FN MmAllocateFromObjectCache (
     i := 0
 
     WHILE i < max DO
-        othervpe^.U.ObjectCache.SlabControl = vpe
-        othervpe^.U.ObjectCache.PoolCacheIndex = objectcache^.PoolCacheIndex
-        othervpe^.U.ObjectCache.VmPrivileged = vmprivileged
+        othervpe^.U.ObjectCache.SlabControl = vpe^.U.ObjectCache.SlabControl
 
         othervpe += MMP_VPE_SIZE
         i += 1
@@ -257,11 +266,11 @@ EXPORT FN MmAllocateFromObjectCache (
 
     max = objectcache^.ObjectsPerSlab
     i = 1
-    ptr : ^^VOID = object + objectsize
+    ptr : ^UINT = object + objectsize
 
     WHILE i < max DO
         ptr^ = vpe^.U.ObjectCache.FreeListHead
-        vpe^.U.ObjectCache.FreeListHead = ptr
+        vpe^.U.ObjectCache.FreeListHead = CAST (ptr - object) >> 2 TO UINT
 
         ptr += objectsize
         i += 1
@@ -283,14 +292,17 @@ FN (ExMagazineCacheFreeF) MmpFreeToObjectCache (
 
     objectcache := CAST context TO ^MmpObjectCache
 
-    mmnode := objectcache^.Node^.Mmp
+    mmnode := objectcache^.MmNode
 
     vpe := MmpAddressToVpe ( mmnode, ptr )
 
     // Find the control VPE for the slab in case this is in the middle of a
     // multi-page slab.
 
-    vpe = vpe^.U.ObjectCache.SlabControl
+    vpe = MmpDynamicSpaceVpnToVpe (
+        mmnode, // mmnode
+        MmpSlabIndex ( vpe^.U.ObjectCache.SlabControl ), // vpn
+    )
 
     ipl := KeAcquireLockExclusiveRaise ( &objectcache^.Lock )
 
@@ -309,9 +321,11 @@ FN (ExMagazineCacheFreeF) MmpFreeToObjectCache (
             // one object away from being completely in use again, so we want
             // to prioritize allocating from it to try to make that happen.
 
-            KeAssert ( vpe^.U.ObjectCache.FreeListHead == NULLPTR )
+            KeAssert ( vpe^.U.ObjectCache.FreeListHead == 0xFFFF )
 
-            vmprivileged := vpe^.U.ObjectCache.VmPrivileged
+            vmprivileged := MmpSlabVmPrivileged (
+                vpe^.U.ObjectCache.SlabControl, // slabctrl
+            )
 
             RtlInsertAtHeadList (
                 &objectcache^.PartialSlabListHead[vmprivileged], // listhead
@@ -319,8 +333,10 @@ FN (ExMagazineCacheFreeF) MmpFreeToObjectCache (
             )
         END
 
-        NOTHING (CAST ptr TO ^^VOID)^ = vpe^.U.ObjectCache.FreeListHead
-        vpe^.U.ObjectCache.FreeListHead = ptr
+        NOTHING (CAST ptr TO ^UINT)^ = vpe^.U.ObjectCache.FreeListHead
+
+        vpe^.U.ObjectCache.FreeListHead =
+            CAST (ptr - MmpVpeToAddress ( mmnode, vpe )) >> 2 TO UINT
 
         KeReleaseLockLower ( &objectcache^.Lock, ipl )
 
@@ -360,7 +376,7 @@ EXPORT FN MmFreeToObjectCache (
     IF objectcache^.MagazineCache THEN
         // There's a magazine cache so free the object to it.
 
-        mmnode := objectcache^.Node^.Mmp
+        mmnode := objectcache^.MmNode
 
         vpe := MmpAddressToVpe ( mmnode, object )
 
@@ -373,7 +389,7 @@ EXPORT FN MmFreeToObjectCache (
         //     looking at the VPE? It's kind of a bummer to have to do that even
         //     in the magazine cached case.
 
-        IF NOT vpe^.U.ObjectCache.VmPrivileged THEN
+        IF NOT MmpSlabVmPrivileged ( vpe^.U.ObjectCache.SlabControl ) THEN
             ExFreeToMagazineCache (
                 objectcache^.MagazineCache, // magazinecache
                 object, // ptr
@@ -396,7 +412,7 @@ FN MmpFreeObjectCache (
 
     // Free an object cache.
 
-    mmnode := objectcache^.Node^.Mmp
+    mmnode := objectcache^.MmNode
 
     IF objectcache >= &mmnode^.PreallocatedObjectCaches[0] AND
 objectcache < &mmnode^.PreallocatedObjectCaches[MMP_PREALLOCATED_CACHES] THEN
@@ -529,6 +545,7 @@ EXPORT FN MmCreateObjectCache (
     END
 
     objectcache^.Node = kenode
+    objectcache^.MmNode = kenode^.Mmp
     objectcache^.MagazineCache = NULLPTR
     objectcache^.ObjectSize = objectsize
 
@@ -624,13 +641,13 @@ FN MmpInitializeObjectCaches (
 END
 
 #SECTION "INITtext"
-FN MmpSetObjectCacheIndex (
+FN MmpSetObjectCacheContext (
     IN objectcache : ^MmpObjectCache,
-    IN index : UWORD,
+    IN context : UWORD,
 )
 
     // Set the indices that the object cache will store in its slab VPEs.
     // This is used by MmPool.
 
-    objectcache^.PoolCacheIndex = index
+    objectcache^.PoolCacheContext = context
 END

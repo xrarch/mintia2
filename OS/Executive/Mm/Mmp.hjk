@@ -434,19 +434,60 @@ EXTERN FN MmpGarbageCollectVpnDb (
     (CAST (vpe - (mmnode)^.VpnDbBase) / MMP_VPE_SIZE TO UWORD)
 ]
 
+#MACRO MmpDynamicSpaceVpnToVpe ( mmnode, vpn ) [
+    (CAST ((vpn) * MMP_VPE_SIZE) + (mmnode)^.VpnDbBase TO ^MmpVpe)
+]
+
 #MACRO MmpVpeToAddress ( mmnode, vpe ) [
     (CAST (MmpVpeToDynamicSpaceVpn ( mmnode, vpe ) << RTL_PAGE_SHIFT) +
         (mmnode)^.DynamicSpaceBase TO ^VOID)
 ]
 
+#MACRO MmpMakeSlabControl ( index, poolcontext, vmprivileged ) [
+    ((index) | ((poolcontext) << 24) | ((vmprivileged) << 31))
+]
+
+#MACRO MmpSlabIndex ( slabctrl ) [
+    ((slabctrl) & 0xFFFFFF)
+]
+
+#MACRO MmpSlabPoolContext ( slabctrl ) [
+    (((slabctrl) >> 24) & 0x7F)
+]
+
+#MACRO MmpSlabVmPrivileged ( slabctrl ) [
+    ((slabctrl) >> 31)
+]
+
+#DEFINE MMP_SLAB_NONE 0xFFFFFFFF
+
 STRUCT MmpVpeObjectConsumer
-    SlabControl : ^MmpVpe,
     SlabListEntry : RtlListEntry,
-    FreeListHead : ^^VOID,
-    Tag : ULONG,
+
+    // Low 24 bits of SlabControl contain the index of the VPE within VPN DB
+    // that represents the slab header. Next 7 bits contain an index used by
+    // MmPool to figure out which object cache it got a block from for an
+    // arbitrary-size allocation. Uppermost bit contains whether this slab is
+    // considered VM-privileged.
+
+    SlabControl : ULONG,
+
+    // FreeListHead is an offset of 4 byte units into the slab.
+
+    FreeListHead : UINT,
     InUseObjects : UINT,
-    PoolCacheIndex : UBYTE,
-    VmPrivileged : UBYTE,
+END
+
+STRUCT MmpVpePageAlignedPoolConsumer
+    Tag : UWORD,
+    Pages : UWORD,
+
+    // Must have a SlabControl two pointers from the start which is used by
+    // MmPool to tell a page-aligned pool VPE apart from a slab VPE.
+
+    SlabControl : ULONG,
+
+    Pageable : UBYTE,
 END
 
 STRUCT MmpVpeTrackingTableConsumer
@@ -457,6 +498,7 @@ END
 UNION MmpVpeConsumerData
     ObjectCache : MmpVpeObjectConsumer,
     TrackingTable : MmpVpeTrackingTableConsumer,
+    PageAlignedPool : MmpVpePageAlignedPoolConsumer,
 END
 
 STRUCT MmpVpe
@@ -490,7 +532,7 @@ EXTERN FN MmpUnreferenceVpes (
     IN pages : UWORD,
 ) : OsStatus
 
-EXTERN FN MmpSetObjectCacheIndex (
+EXTERN FN MmpSetObjectCacheContext (
     IN objectcache : ^MmpObjectCache,
-    IN index : UWORD,
+    IN context : UWORD,
 )
