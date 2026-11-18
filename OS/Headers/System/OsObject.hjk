@@ -65,3 +65,21 @@ ENUM OsObjectType : UWORD
 
     OS_MAX_TYPE,
 END
+
+// OS_SAFE_LENGTH is defined to be 256M less than the signed 32-bit maximum.
+// This is used as a hard "safe maximum" for various things in the system in
+// order to help avoid bugs around clumsy handling of buffer lengths being
+// exploitable (such as interned string management in ExInternedStrings and
+// temporary buffer management in MmCapture). This does not mean that consumers
+// of these things don't need to care about not being stupid with buffers.
+
+// The things that use this internally MAY depend on it to avoid bugs. For
+// example the interned string management relies on it to avoid problems from
+// the fact that the length field in RtlString is 64 bits on 64 bit platforms
+// but the inlined length field in ExNameReference is always only 32 bit. By
+// refusing to intern strings larger than this, lengths that extend into the
+// upper 32 bits of the RtlString length are not chopped off when stashed in
+// the ExNameReference. And there are others. Therefore it shouldn't be changed
+// (increased) lightly.
+
+#DEFINE OS_SAFE_LENGTH 0x70000000
