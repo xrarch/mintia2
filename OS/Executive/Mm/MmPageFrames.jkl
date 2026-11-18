@@ -563,23 +563,23 @@ FN MmpUnreferencePage (
         refcount = new
     END
 
-    packed := pfe^.Packed
-
-    IF MmpGetPackedFlag ( packed, MMP_DELETED_PFE_FLAG ) THEN
-        // The page was deleted, so it must be freed now that the last reference
-        // has gone away.
-
-        MmpFreePage ( pfe )
-
-        LEAVE
-    END
-
     // Acquire the page lock to block out concurrent modifications of the packed
     // flags that may affect which list it is supposed to go to now.
 
     ipl := KeAcquireLockExclusiveRaise ( &pfe^.Lock )
 
-    packed = pfe^.Packed
+    packed := pfe^.Packed
+
+    IF MmpGetPackedFlag ( packed, MMP_DELETED_PFE_FLAG ) THEN
+        // The page was marked deleted, so we have to drop the lock and free
+        // it.
+
+        KeReleaseLockLower ( &pfe^.Lock, ipl )
+
+        MmpFreePage ( pfe )
+
+        LEAVE
+    END
 
     mmnode := KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
 
