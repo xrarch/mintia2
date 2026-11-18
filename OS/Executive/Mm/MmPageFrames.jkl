@@ -563,35 +563,29 @@ FN MmpUnreferencePage (
         refcount = new
     END
 
-    // Acquire the page lock to block out concurrent modifications of the packed
-    // flags that may affect which list it is supposed to go to now.
-
-    ipl := KeAcquireLockExclusiveRaise ( &pfe^.Lock )
-
     packed := pfe^.Packed
 
     IF MmpGetPackedFlag ( packed, MMP_DELETED_PFE_FLAG ) THEN
         // The page was deleted, so it must be freed now that the last reference
         // has gone away.
 
-        KeReleaseLockLower ( &pfe^.Lock, ipl )
-
         MmpFreePage ( pfe )
 
         LEAVE
     END
 
+    // Acquire the page lock to block out concurrent modifications of the packed
+    // flags that may affect which list it is supposed to go to now.
+
+    ipl := KeAcquireLockExclusiveRaise ( &pfe^.Lock )
+
+    packed = pfe^.Packed
+
     mmnode := KeNumaNodeById ( MmpGetPackedNodeId ( packed ) )^.Mmp
 
-    listlock := &mmnode^.StandbyListLock
-    listhead := &mmnode^.StandbyListHead
+    pagelist := &mmnode^.InUsePageLists[MmpGetListId ( packed )]
 
-    IF MmpGetPackedFlag ( packed, MMP_MODIFIED_PFE_FLAG ) THEN
-        listlock = &mmnode^.ModifiedListLock
-        listhead = &mmnode^.ModifiedListHead
-    END
-
-    KeAcquireLockExclusive ( listlock )
+    KeAcquireLockExclusive ( &pagelist^.Lock )
 
     // Decrement under the lock.
 
@@ -600,51 +594,23 @@ FN MmpUnreferencePage (
         0xFFFFFFFF, // inc
     )
 
-    IF oldcount != 1 THEN
-        // Someone else incremented the reference count, it's not our
-        // responsibility to put it on the list now.
+    IF oldcount == 1 THEN
+        // We didn't race with anyone else putting incrementing the reference
+        // count since we took the page list lock and page lock, so it's still
+        // our responsibility to put the page on the list.
 
-        KeAssert ( oldcount > 1 )
+        RtlInsertAtTailList (
+            &pagelist^.ListHead, // listhead
+            &pfe^.Entry, // entry
+        )
 
-        GOTO Exit
-    END
+        pagelist^.Count += 1
 
-    RtlInsertAtTailList (
-        listhead, // listhead
-        &pfe^.Entry, // entry
-    )
-
-    IF MmpGetPackedFlag ( packed, MMP_MODIFIED_PFE_FLAG ) THEN
-        // The page was modified, so it must be placed on the modified page
-        // list for its home node.
-
-        mmnode^.ModifiedPageCount += 1
-
-        IF mmnode^.ModifiedPageCount >= mmnode^.ModifiedPageMaximum AND
-            mmnode^.ModifiedPageEvent.Header.SignalCount == 0 THEN
-
-            // The modified page list is longer than the limit, so signal the
-            // modified page writer.
-
-            KeSignalEvent (
-                &mmnode^.ModifiedPageEvent, // event
-                0, // priorityboost
-            )
-        END
-    
-    ELSE
-        // The page was neither deleted nor modified, so put it on the standby
-        // list.
-
-        mmnode^.StandbyListCount += 1
-
-        KeuIncrementQuantityQueue (
-            &mmnode^.AvailablePageQuantityQueue, // queue
-            1, // amount
+        pagelist^.InsertionRoutine (
+            mmnode, // mmnode
+            pfe, // pfe
         )
     END
-
-@Exit
 
     // The order of releasing the page lock and list lock is important
     // because we dropped our refcount, so it is no longer safe to touch
@@ -652,7 +618,7 @@ FN MmpUnreferencePage (
 
     KeReleaseLock ( &pfe^.Lock )
 
-    KeReleaseLockLower ( listlock, ipl )
+    KeReleaseLockLower ( &pagelist^.Lock, ipl )
 END
 
 FN MmpAllocatePageReserved (
@@ -834,5 +800,80 @@ FN MmpAllocatePageUnreserved (
         mmnode, // mmnode
         flags, // flags
         color, // color
+    )
+END
+
+FN (MmpInUsePageListInsertionF) MmpInsertPageInStandbyList (
+    IN mmnode : ^MmpNode,
+    IN pfe : ^MmpPfe,
+)
+
+    // The page has been inserted in the standby list.
+    // The list lock and PFE lock are held.
+
+    // We need to increment the available page count.
+
+    KeuIncrementQuantityQueue (
+        &mmnode^.AvailablePageQuantityQueue, // queue
+        1, // amount
+    )
+END
+
+FN (MmpInUsePageListInsertionF) MmpInsertPageInModifiedList (
+    IN mmnode : ^MmpNode,
+    IN pfe : ^MmpPfe,
+)
+
+    // The page has been inserted in the modified list.
+    // The list lock and PFE lock are held.
+
+    // We need to see if the modified page writer should be signaled.
+
+    IF mmnode^.InUsePageLists[MMP_MODIFIED_LIST_INDEX].Count >=
+        mmnode^.ModifiedPageMaximum AND
+        mmnode^.ModifiedPageEvent.Header.SignalCount == 0 THEN
+
+        // The modified page list is longer than the limit, so signal the
+        // modified page writer.
+
+        KeSignalEvent (
+            &mmnode^.ModifiedPageEvent, // event
+            0, // priorityboost
+        )
+    END
+END
+
+#SECTION "INITtext"
+FN MmpInitializeInUsePageList (
+    IN pagelist : ^MmpInUsePageList,
+    IN insertionroutine : MmpInUsePageListInsertionF,
+)
+
+    // Initialize an in-use page list.
+
+    RtlInitializeList ( &pagelist^.ListHead )
+
+    KeInitializeLock ( &pagelist^.Lock, "PageList" )
+
+    pagelist^.Count = 0
+    pagelist^.InsertionRoutine = insertionroutine
+END
+
+#SECTION "INITtext"
+FN MmpInitializeInUsePageLists (
+    IN mmnode : ^MmpNode,
+)
+
+    // Initialize the in-use page lists.
+    // This is here to avoid putting the callbacks in the Mmp header.
+
+    MmpInitializeInUsePageList (
+        &mmnode^.InUsePageLists[MMP_STANDBY_LIST_INDEX], // pagelist
+        &MmpInsertPageInStandbyList, // insertionroutine
+    )
+
+    MmpInitializeInUsePageList (
+        &mmnode^.InUsePageLists[MMP_MODIFIED_LIST_INDEX], // pagelist
+        &MmpInsertPageInModifiedList, // insertionroutine
     )
 END

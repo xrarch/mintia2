@@ -42,6 +42,7 @@
 //
 // 0-3: Type code
 // 4-7: Various flags
+// 8-10: In-use page list index
 // 20-31: NUMA node ID
 
 #DEFINE MMP_PACKED_TYPE_MASK 0xF
@@ -50,14 +51,23 @@
 #DEFINE MMP_PACKED_NODE_SHIFT 20
 #DEFINE MMP_PACKED_NODE_MASK 0xFFF00000
 
+#DEFINE MMP_PACKED_LIST_SHIFT 8
+#DEFINE MMP_PACKED_LIST_MASK 0x700
+
 #DEFINE MMP_UNINITIALIZED_PFE_TYPE 0
 #DEFINE MMP_FREE_PFE_TYPE 1
 #DEFINE MMP_IN_USE_PFE_TYPE 2
 
 #DEFINE MMP_PACKED_FLAG_FIRST_BIT 4
 
-#DEFINE MMP_MODIFIED_PFE_FLAG 1
-#DEFINE MMP_DELETED_PFE_FLAG 2
+ENUM MmpListIndex : UWORD
+    MMP_STANDBY_LIST_INDEX,
+    MMP_MODIFIED_LIST_INDEX,
+
+    MMP_MAX_LIST_INDEX,
+END
+
+#DEFINE MMP_DELETED_PFE_FLAG 1
 #DEFINE MMP_PAGED_EXEC_PFE_FLAG 4
 
 #MACRO MmpPackType ( packed, type ) [
@@ -89,6 +99,14 @@
     (((packed) & ~MMP_PACKED_NODE_MASK) | ((nodeid) << MMP_PACKED_NODE_SHIFT))
 ]
 
+#MACRO MmpPackListId ( packed, listid ) [
+    (((packed) & ~MMP_PACKED_LIST_MASK) | ((listid) << MMP_PACKED_LIST_SHIFT))
+]
+
+#MACRO MmpGetListId ( packed ) [
+    (((packed) & MMP_PACKED_LIST_MASK) >> MMP_PACKED_LIST_SHIFT)
+]
+
 STRUCT MmpPfeUsed
     TrackingTableEntryPtr : ^MmpPte,
     Book : ^MmpBook,
@@ -117,6 +135,18 @@ STRUCT MmpPfe
 
     References : ULONG,
     Packed : ULONG,
+END
+
+FNPTR MmpInUsePageListInsertionF (
+    IN mmnode : ^MmpNode,
+    IN pfe : ^MmpPfe,
+)
+
+STRUCT MmpInUsePageList
+    Lock : KE_CACHE_LINE KeLock,
+    Count : UWORD,
+    ListHead : RtlListEntry,
+    InsertionRoutine : MmpInUsePageListInsertionF,
 END
 
 STRUCT MmpFreePageList
@@ -314,23 +344,12 @@ STRUCT MmpNode
 
 KE_CACHE_LINE_END
 
-    ModifiedListLock : KeLock,
-
-KE_CACHE_LINE_END
-
-    ModifiedListHead : RtlListEntry,
-    ModifiedPageCount : UWORD,
-
-KE_CACHE_LINE_END
-
     FreeList : MmpFreePageList,
     ZeroList : MmpFreePageList,
 
 KE_CACHE_LINE_END
 
-    StandbyListLock : KeLock,
-    StandbyListCount : UWORD,
-    StandbyListHead : RtlListEntry,
+    InUsePageLists : MmpInUsePageList[MMP_MAX_LIST_INDEX],
 
 KE_CACHE_LINE_END
 
@@ -539,4 +558,8 @@ EXTERN FN MmpUnreferenceVpes (
 EXTERN FN MmpSetObjectCacheContext (
     IN objectcache : ^MmpObjectCache,
     IN context : UWORD,
+)
+
+EXTERN FN MmpInitializeInUsePageLists (
+    IN mmnode : ^MmpNode,
 )

@@ -244,12 +244,14 @@ FN MmpAllocatePageFromStandbyList (
     // in a book and have to be removed here with a careful locking scheme,
     // and therefore we need knowledge of the internals of book implementation.
 
-    ipl := KeAcquireLockExclusiveRaise ( &mmnode^.StandbyListLock )
+    standbylist := &mmnode^.InUsePageLists[MMP_STANDBY_LIST_INDEX]
 
-    count := mmnode^.StandbyListCount
+    ipl := KeAcquireLockExclusiveRaise ( &standbylist^.Lock )
+
+    count := standbylist^.Count
 
     IF count == 0 THEN
-        KeReleaseLockLower ( &mmnode^.StandbyListLock, ipl )
+        KeReleaseLockLower ( &standbylist^.Lock, ipl )
 
         // Nothing on the standby list.
 
@@ -258,9 +260,9 @@ FN MmpAllocatePageFromStandbyList (
 
     // There's at least one page on the standby list, so grab it.
 
-    mmnode^.StandbyListCount = count - 1
+    standbylist^.Count = count - 1
 
-    pfe := CONTAINEROF mmnode^.StandbyListHead.Next TO MmpPfe.Entry
+    pfe := CONTAINEROF standbylist^.ListHead.Next TO MmpPfe.Entry
 
     KeAssert ( pfe^.References == 0 )
 
@@ -274,7 +276,7 @@ FN MmpAllocatePageFromStandbyList (
     tte := pfe^.U.Used.TrackingTableEntryPtr
     pfe^.U.Used.TrackingTableEntryPtr = NULLPTR
 
-    KeReleaseLock ( &mmnode^.StandbyListLock )
+    KeReleaseLock ( &standbylist^.Lock )
 
     // Take the page lock.
 
