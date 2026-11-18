@@ -232,13 +232,26 @@ FN MmGetOverheadOfBytes (
         RETURN 0
     END
 
+    oldbytes := bytes
+
     IF bytes > MmpObjectSizes[MMP_NUMBER_POOL_BUCKETS - 1] THEN
         // Page-aligned charge.
 
-        RETURN (bytes + RTL_PAGE_OFFSET_MASK) & RTL_PAGE_NUMBER_MASK
+        bytes = (bytes + RTL_PAGE_OFFSET_MASK) & RTL_PAGE_NUMBER_MASK
+
+    ELSE
+        // Small block charge.
+
+        bytes = (bytes + RTL_ALIGN_BYTES + RTL_ALIGN_BYTES - 1) &
+            -RTL_ALIGN_BYTES
     END
 
-    // Small block charge.
+    IF bytes < oldbytes THEN
+        // An overflow has occurred which isn't good.
+        // Return the unsigned maximum.
 
-    RETURN (bytes + RTL_ALIGN_BYTES + RTL_ALIGN_BYTES - 1) & -RTL_ALIGN_BYTES
+        bytes = RTL_MACHINE_WORD_MAX
+    END
+
+    RETURN bytes
 END

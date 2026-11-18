@@ -98,6 +98,27 @@ EXPORT FN ExFindName (
 
     len := str^.Length
 
+    IF len == 0 THEN
+        // Refuse to intern a zero-length string.
+
+        // Not only is it tricky with how we encode the references, but
+        // it's usually a bad idea to permit zero-length strings, so system
+        // services that forget to do special handling for them will tend to
+        // find themselves in this codepath and short circuit out because of
+        // this error status; it's good to help avoid bugs causing
+        // vulnerabilities or corruption.
+
+        RETURN OS_STATUS_ZERO_LENGTH_STRING
+    END
+
+    IF len > RTL_LONG_MAX_S THEN
+        // Scary string length, larger than the signed max for 32 bit integer.
+        // To try to minimize the odds of weird overflow bugs by consumers of
+        // the interned string package, just reject this.
+
+        RETURN OS_STATUS_NO_MEMORY
+    END
+
     hash := ExpHash ( str^.Data )
 
     kenode := KeCurrentAffinityNode ()

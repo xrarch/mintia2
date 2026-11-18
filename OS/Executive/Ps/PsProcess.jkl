@@ -1626,17 +1626,15 @@ FN OsQueryProcesses (
     // fault on a memory mapped network file while holding the process list
     // lock).
 
-    IF maxcount == 0 THEN
+    IF maxcount == 0 OR
+        maxcount > (RTL_MACHINE_WORD_MAX / SIZEOF OsProcessQuery) THEN
+
+        // The buffer size overflows when multiplied, or is zero.
+
         RETURN OS_STATUS_INVALID_ARGUMENT
     END
 
     bufsize := maxcount * SIZEOF OsProcessQuery
-
-    IF bufsize / maxcount != SIZEOF OsProcessQuery THEN
-        // The buffer size overflowed.
-
-        RETURN OS_STATUS_INVALID_ARGUMENT
-    END
 
     status := MmAllocateAndChargeSysBuffer (
         bufsize, // bytes
