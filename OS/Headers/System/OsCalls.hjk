@@ -11,9 +11,15 @@
 //    //@...
 //
 // Where ... is replaced by a string of characters each representing a flag.
+// This is not just for fun, they are functionally necessary in order for the
+// system service dispatch code to know whether it is safe to use certain fast
+// paths or not, among other things.
+//
 // The flags are:
 //
-//    C  Can use a continuation.
+//    C  The implementation can wait with a continuation, so the system service
+//       dispatcher must save the callee-saved registers outside of the kernel
+//       stack since it may be discarded.
 //
 
 // NOTE: A system service may have no more than twelve arguments, and may
