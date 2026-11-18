@@ -128,9 +128,13 @@ FN IopLoadClassByName (
 
     KeReleaseLock ( &IopCatalogLock )
 
+    str : RtlString
+
+    ExUnpackNameReference ( &str, &module^.NameReference )
+
     status = ExLoadLibrary (
         &module^.Path^.String, // path
-        &module^.Name^.String, // name
+        &str, // name
         EX_LOAD_LIBRARY_KEEP_HEADERS, // flags
         OUT library, // library
         OUT: cached, // cached
@@ -280,9 +284,12 @@ FN IopLookupModule (
 
     // Intern the name of the module.
 
-    module^.Name = ExFindName ( name )
+    status = ExCreateNameReference (
+        &module^.NameReference, // reference
+        name, // str
+    )
 
-    IF NOT module^.Name THEN
+    IF OsError ( status ) THEN
         GOTO Exit2
     END
 
@@ -422,8 +429,8 @@ FN IopForgetModule (
 
     IF module^.Library THEN
         // The module is currently loaded, so initiate an unload (the big kind
-        // that cancels IO requests and stuff) and then retry the whole operation.
-        // If the unload fails, propagate the status to the caller.
+        // that cancels IO requests and stuff) and then retry the whole
+        // operation. If the unload fails, propagate the status to the caller.
 
         // ...
 
@@ -433,7 +440,11 @@ FN IopForgetModule (
     // Make sure the memory for the module's library is fully freed so that it
     // is really reloaded from disk next time.
 
-    ExForgetLibrary ( &module^.Name^.String )
+    str : RtlString
+
+    ExUnpackNameReference ( &str, &module^.NameReference )
+
+    ExForgetLibrary ( &str )
 
     // The module's classes should now be inert. Delete their structures.
 
@@ -709,8 +720,11 @@ FN IopInitializeCatalog ()
         status := IopInitializeLoadedModule ( module )
 
         IF OsError ( status ) THEN
-            KeCrash ( "Failed to initialize boot driver %s\n",
-                module^.Name^.String.Data )
+            str : RtlString
+
+            ExUnpackNameReference ( &str, &module^.NameReference )
+
+            KeCrash ( "Failed to initialize boot driver %s\n", str.Data )
         END
     END
 END

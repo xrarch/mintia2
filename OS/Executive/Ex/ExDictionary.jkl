@@ -7,7 +7,7 @@
 STRUCT ExpDictionaryEntry
     Entry : RtlAvlNode,
     OrderedEntry : RtlListEntry,
-    Key : ^ExName,
+    KeyReference : ExNameReference,
     Value : ^VOID,
 END
 
@@ -37,10 +37,20 @@ FN (RtlAvlLessThanF) ExpCompareDictionaryEntries (
 
     // Return whether A < B, lexicographically.
 
-    RETURN CAST RtlCompareRtlString (
-        &(CONTAINEROF a TO ExpDictionaryEntry.Entry)^.Key^.String, // str1
-        &(CONTAINEROF b TO ExpDictionaryEntry.Entry)^.Key^.String, // str2
-    ) TO WORD < 0
+    str1 : RtlString
+    str2 : RtlString
+
+    ExUnpackNameReference (
+        &str1, // dest
+        &(CONTAINEROF a TO ExpDictionaryEntry.Entry)^.KeyReference, // reference
+    )
+
+    ExUnpackNameReference (
+        &str2, // dest
+        &(CONTAINEROF b TO ExpDictionaryEntry.Entry)^.KeyReference, // reference
+    )
+
+    RETURN CAST RtlCompareRtlString ( &str1, &str2 ) TO WORD < 0
 END
 
 #SECTION "PAGEtext"
@@ -70,9 +80,16 @@ FN ExpLookupDictionaryEntry (
 
         checknode := CONTAINEROF avlnode TO ExpDictionaryEntry.Entry
 
+        str : RtlString
+
+        ExUnpackNameReference (
+            &str, // dest
+            &checknode^.KeyReference, // reference
+        )
+
         res := CAST RtlCompareRtlString (
             key, // str1
-            &checknode^.Key^.String, // str2
+            &str, // str2
         ) TO WORD
 
         IF res == 0 THEN
@@ -125,7 +142,7 @@ FN ExpRemoveEntryFromDictionary (
         &entry^.Entry, // node
     )
 
-    ExUnreferenceName ( entry^.Key )
+    ExDeleteNameReference ( &entry^.KeyReference )
 
     MmFreePool (
         entry, // entry
@@ -217,15 +234,13 @@ EXPORT FN ExInsertInDictionary (
         RETURN status
     END
 
-    entry^.Key = ExFindName ( key )
+    status = ExCreateNameReference (
+        &entry^.KeyReference, // reference
+        key, // str
+    )
 
-    IF NOT entry^.Key THEN
-        MmFreePool (
-            entry, // entry
-            'DcEn', // tag
-        )
-
-        RETURN OS_STATUS_NO_MEMORY
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     entry^.Value = value
@@ -259,10 +274,17 @@ EXPORT FN ExEnumerateDictionary (
         next := listentry^.Next
         entry := CONTAINEROF listentry TO ExpDictionaryEntry.OrderedEntry
 
+        str : RtlString
+
+        ExUnpackNameReference (
+            &str, // dest
+            &entry^.KeyReference, // reference
+        )
+
         IF func THEN
             func (
                 dict, // dict
-                &entry^.Key^.String, // key
+                &str, // key
                 entry^.Value, // value
                 context, // context
             )
@@ -272,7 +294,7 @@ EXPORT FN ExEnumerateDictionary (
             ExpRemoveEntryFromDictionary (
                 dict, // dict
                 entry, // entry
-                ExpHash ( entry^.Key^.String.Data ), // hash
+                ExpHash ( str.Data ), // hash
             )
         END
 
@@ -294,15 +316,18 @@ EXPORT FN ExInsertStringInDictionary (
     // The string's lifetime is determined by the caller so we need to make a
     // new string that we own.
 
-    internedvalue := ExFindName ( value )
+    status := ExCreateName (
+        value, // str
+        OUT: internedvalue, // name
+    )
 
-    IF NOT internedvalue THEN
-        RETURN OS_STATUS_NO_MEMORY
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     // Now insert in the dictionary.
 
-    status := ExInsertInDictionary (
+    status = ExInsertInDictionary (
         dict, // dict
         key, // key
         internedvalue, // value

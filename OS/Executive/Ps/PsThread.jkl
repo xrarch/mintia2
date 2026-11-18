@@ -145,7 +145,7 @@ FN (ObuTypeDeleteF) PspDeleteThreadObject (
 
     // Unreference the interned name.
 
-    ExUnreferenceName ( paged^.Name )
+    ExDeleteNameReference ( &paged^.NameReference )
 
     // Perform eager cleanup if it hasn't been done.
 
@@ -265,8 +265,6 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     kenode := KeNumaNodeFromSpacePointer ( thread )
 
-    status : OsStatus
-
     // Initialize the thread object.
 
     flags := ctx^.Flags
@@ -278,10 +276,13 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
     // Intern the name.
 
-    paged^.Name = ExFindName ( ctx^.Name )
+    status := ExCreateNameReference (
+        &paged^.NameReference, // reference
+        ctx^.Name, // str
+    )
 
-    IF NOT paged^.Name THEN
-        RETURN OS_STATUS_NO_MEMORY
+    IF OsError ( status ) THEN
+        RETURN status
     END
 
     // Charge for the kernel stack.
@@ -470,7 +471,7 @@ FN (ObuTypeInitializeF) PspInitializeThreadObject (
 
 @Error2
 
-    ExUnreferenceName ( paged^.Name )
+    ExDeleteNameReference ( &paged^.NameReference )
 
     RETURN status
 END

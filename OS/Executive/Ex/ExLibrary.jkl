@@ -182,18 +182,20 @@ EXPORT FN ExLoadLibrary (
         GOTO Exit
     END
 
-    library^.Name = NULLPTR
+    ExCreateNullNameReference ( &library^.NameReference )
+
     library^.References = 1
     library^.Flags = loadflags
 
     IF name THEN
         // Intern the symbolic name string.
 
-        library^.Name = ExFindName ( name )
+        status = ExCreateNameReference (
+            &library^.NameReference, // reference
+            name, // str
+        )
 
-        IF NOT library^.Name THEN
-            status = OS_STATUS_NO_MEMORY
-
+        IF OsError ( status ) THEN
             GOTO Exit1
         END
 
@@ -266,7 +268,7 @@ EXPORT FN ExLoadLibrary (
 @Exit2
 
     IF name THEN
-        ExUnreferenceName ( library^.Name )
+        ExDeleteNameReference ( &library^.NameReference )
     END
 
 @Exit1
@@ -304,7 +306,7 @@ FN ExpDeleteLibrary (
 
     // Free the library structure.
 
-    ExUnreferenceName ( library^.Name )
+    ExDeleteNameReference ( &library^.NameReference )
 
     MmFreePool (
         library, // ptr
@@ -366,9 +368,13 @@ FN ExuReapLibraries (
 
         KeAssert ( library^.References == 0 )
 
+        str : RtlString
+
+        ExUnpackNameReference ( &str, &library^.NameReference )
+
         ExRemoveFromDictionary (
             &ExpLibraryDictionary, // dict
-            &library^.Name^.String, // key
+            &str, // key
         )
 
         listentry = listentry^.Next
@@ -432,9 +438,13 @@ EXPORT FN ExForgetLibrary (
 
     // Now unpublish it.
 
+    str : RtlString
+
+    ExUnpackNameReference ( &str, &library^.NameReference )
+
     ExRemoveFromDictionary (
         &ExpLibraryDictionary, // dict
-        &library^.Name^.String, // key
+        &str, // key
     )
 
     // It's fully in our custody now so we can do the rest of the deletion work

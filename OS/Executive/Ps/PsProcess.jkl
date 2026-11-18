@@ -255,7 +255,7 @@ FN (ObuTypeDeleteF) PspDeleteProcessObject (
 
     // Unreference the name.
 
-    ExUnreferenceName ( paged^.Name )
+    ExDeleteNameReference ( &paged^.NameReference )
 
     // Unreference the quota block.
 
@@ -410,11 +410,12 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
     // Intern the name.
 
-    paged^.Name = ExFindName ( ctx^.Name )
+    status = ExCreateNameReference (
+        &paged^.NameReference, // reference
+        ctx^.Name, // str
+    )
 
-    IF NOT paged^.Name THEN
-        status = OS_STATUS_NO_MEMORY
-
+    IF OsError ( status ) THEN
         GOTO Error4
     END
 
@@ -522,7 +523,7 @@ FN (ObuTypeInitializeF) PspInitializeProcessObject (
 
 @Error5
 
-    ExUnreferenceName ( paged^.Name )
+    ExDeleteNameReference ( &paged^.NameReference )
 
 @Error4
 
@@ -1347,9 +1348,13 @@ FN PsuQueryProcessObject (
         query, // query
     )
 
+    str : RtlString
+
+    ExUnpackNameReference ( &str, &paged^.NameReference )
+
     RtlCopyString (
         &query^.Name[0], // dest
-        paged^.Name^.String.Data, // src
+        str.Data, // src
         OS_NAME_MAX + 1, // bufsize
     )
 

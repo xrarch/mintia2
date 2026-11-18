@@ -4,8 +4,104 @@
 
 #INCLUDE "Exp.hjk"
 
+#SECTION "PAGEtext"
+EXPORT FN ExuFastComputeNameLength (
+    IN buf : ^UBYTE,
+) : UWORD
+
+    // Compute the length of a 16-byte interned string buffer quickly, since
+    // we make room for more string bytes rather than stashing the length.
+
+    // We know that it is at least word aligned and the buffer is exactly
+    // 16 bytes, and that the entire buffer after the last byte is zeroed, so
+    // we can optimize this a bit.
+
+    // We also know that it is not zero length because zero length strings are
+    // never inlined.
+
+    // Little-endian is intentionally the only thing supported here since we
+    // don't plan to support any big-endian architectures.
+
+    longbuf := CAST buf TO ^ULONG
+
+    long := longbuf[0]
+
+    IF (long - 0x01010101) & ~long & 0x80808080 THEN
+        // First long has a null byte so find it.
+
+        IF long & 0x0000FF00 == 0 THEN
+            RETURN 1
+        END
+
+        IF long & 0x00FF0000 == 0 THEN
+            RETURN 2
+        END
+
+        RETURN 3
+    END
+
+    long = longbuf[1]
+
+    IF (long - 0x01010101) & ~long & 0x80808080 THEN
+        // Second long has a null byte so find it.
+
+        IF long == 0 THEN
+            RETURN 4
+        END
+
+        IF long & 0x0000FF00 == 0 THEN
+            RETURN 5
+        END
+
+        IF long & 0x00FF0000 == 0 THEN
+            RETURN 6
+        END
+
+        RETURN 7
+    END
+
+    long = longbuf[2]
+
+    IF (long - 0x01010101) & ~long & 0x80808080 THEN
+        // Third long has a null byte so find it.
+
+        IF long == 0 THEN
+            RETURN 8
+        END
+
+        IF long & 0x0000FF00 == 0 THEN
+            RETURN 9
+        END
+
+        IF long & 0x00FF0000 == 0 THEN
+            RETURN 10
+        END
+
+        RETURN 11
+    END
+
+    long = longbuf[3]
+
+    IF (long - 0x01010101) & ~long & 0x80808080 THEN
+        // Fourth long has a null byte so find it.
+
+        IF long == 0 THEN
+            RETURN 12
+        END
+
+        IF long & 0x0000FF00 == 0 THEN
+            RETURN 13
+        END
+
+        IF long & 0x00FF0000 == 0 THEN
+            RETURN 14
+        END
+
+        RETURN 15
+    END
+END
+
 STRUCT ExpName
-    // The RtlString must be at the start to align with ExName.
     String : RtlString,
 
     Entry : RtlAvlNode,
@@ -88,13 +184,56 @@ FN ExpHash (
 END
 
 #SECTION "PAGEtext"
-EXPORT FN ExFindName (
+EXPORT FN ExCreateNameReference (
+    IN reference : ^ExNameReference,
     IN str : ^RtlString,
-) : ^ExName
+) : OsStatus
+
+    // Create a reference to an interned string.
+
+    len := str^.Length
+
+    IF len != 0 AND
+        len <= EXU_INLINE_BUF_LENGTH - 1 THEN
+
+        // We can actually just inline the string in the reference.
+
+        RtlCopyBytes (
+            &reference^.U.Inlined.Buffer[0], // dest
+            str^.Data, // src
+            len, // size
+        )
+
+        RtlFillMemoryWithUlong (
+            &reference^.U.Inlined.Buffer[len], // dest
+            EXU_INLINE_BUF_LENGTH - len, // size
+            0, // ulong
+        )
+
+        RETURN OS_STATUS_SUCCESS
+    END
+
+    status := ExCreateName (
+        str, // str
+        OUT: name, // name
+    )
+
+    IF NOT OsError ( status ) THEN
+        reference^.U.Inlined.Buffer[0] = 0
+        reference^.U.Reference.Data = name^.String.Data
+        reference^.U.Reference.Length = name^.String.Length
+    END
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+EXPORT FN ExCreateName (
+    IN str : ^RtlString,
+    OUT name : ^ExName,
+) : OsStatus
 
     // Find a name in the string internment buckets.
-
-    // Hash the name.
 
     len := str^.Length
 
@@ -116,8 +255,10 @@ EXPORT FN ExFindName (
         // To try to minimize the odds of weird overflow bugs by consumers of
         // the interned string package, just reject this.
 
-        RETURN OS_STATUS_NO_MEMORY
+        RETURN OS_STATUS_STRING_TOO_LONG
     END
+
+    // Hash the name.
 
     hash := ExpHash ( str^.Data )
 
@@ -133,6 +274,8 @@ EXPORT FN ExFindName (
     reserved := FALSE
 
 @Retry
+
+    status := OS_STATUS_SUCCESS
 
     // Lock the bucket.
 
@@ -177,7 +320,7 @@ EXPORT FN ExFindName (
         END
     END
 
-    status := MmAllocatePoolEx (
+    status = MmAllocatePoolEx (
         kenode, // kenode
         TRUE, // pageable
         SIZEOF ExpName + len + 1, // bytes
@@ -190,8 +333,6 @@ EXPORT FN ExFindName (
         KeReleaseLock ( &bucket^.Lock )
 
         IF status != OS_STATUS_TRY_AGAIN THEN
-            node = NULLPTR
-
             GOTO Exit
         END
 
@@ -235,7 +376,23 @@ EXPORT FN ExFindName (
         MmReleasePageReserve ()
     END
 
-    RETURN CAST node TO ^ExName
+    name = CAST node TO ^ExName
+
+    RETURN status
+END
+
+#SECTION "PAGEtext"
+EXPORT FN ExuDeleteNameReference (
+    IN reference : ^ExNameReference,
+)
+
+    // We can get a pointer to the ExName structure by looking at the buffer
+    // pointer and subtracting SIZEOF ExpName from it, since we put the string
+    // bytes at the end of it.
+
+    name := CAST (reference^.U.Reference.Data - SIZEOF ExpName) TO ^ExName
+
+    ExUnreferenceName ( name )
 END
 
 #SECTION "PAGEtext"

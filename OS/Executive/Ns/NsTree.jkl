@@ -35,15 +35,17 @@ FN NspInitializeEntry (
 
     RtlInitializeList ( &entry^.VirtualChildListHead )
 
-    IF name THEN
-        entry^.Name = ExFindName ( name )
+    ExCreateNullNameReference ( &entry^.NameReference )
 
-        IF NOT entry^.Name THEN
+    IF name THEN
+        status := ExCreateNameReference (
+            &entry^.NameReference, // reference
+            name, // str
+        )
+
+        IF OsError ( status ) THEN
             RETURN FALSE
         END
-
-    ELSE
-        entry^.Name = NULLPTR
     END
 
     entry^.BouncePath = NULLPTR
@@ -73,12 +75,22 @@ FN (RtlAvlLessThanF) NspCompareEntries (
 
     // Return whether A < B, lexicographically.
 
-    str1 := &(CONTAINEROF a TO NsuEntry.LookupEntry)^.Name^.String
-    str2 := &(CONTAINEROF b TO NsuEntry.LookupEntry)^.Name^.String
+    str1 : RtlString
+    str2 : RtlString
+
+    ExUnpackNameReference (
+        &str1, // str
+        &(CONTAINEROF a TO NsuEntry.LookupEntry)^.NameReference, // reference
+    )
+
+    ExUnpackNameReference (
+        &str2, // str
+        &(CONTAINEROF b TO NsuEntry.LookupEntry)^.NameReference, // reference
+    )
 
     RETURN CAST RtlCompareRtlString (
-        str1, // str1
-        str2, // str2
+        &str1, // str1
+        &str2, // str2
     ) TO WORD < 0
 END
 
@@ -96,7 +108,7 @@ FN NspDeleteEntry (
 
     // First unreference the interned name.
 
-    ExUnreferenceName ( entry^.Name )
+    ExDeleteNameReference ( &entry^.NameReference )
 
     // Unreference the object.
 
@@ -485,9 +497,13 @@ FN NspLookupChild (
 
         child = CONTAINEROF avlnode TO NsuEntry.LookupEntry
 
+        str : RtlString
+
+        ExUnpackNameReference ( &str, &child^.NameReference )
+
         res := CAST RtlCompareRtlString (
             name, // str1
-            &child^.Name^.String, // str2
+            &str, // str2
         ) TO WORD
 
         IF res == 0 THEN

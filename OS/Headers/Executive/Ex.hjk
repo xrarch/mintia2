@@ -39,14 +39,77 @@ EXTERN FN ExCompleteAction (
     IN action : ^ExAction,
 )
 
+EXTERN FN ExuFastComputeNameLength (
+    IN buf : ^UBYTE,
+) : UWORD
+
+EXTERN FN ExuDeleteNameReference (
+    IN reference : ^ExNameReference,
+)
+
+#DEFINE EXU_INLINE_BUF_LENGTH 16
+
 STRUCT ExName
-    // The RtlString must be at the start to align with ExpName.
+    // Must be at the start to match the internal structure ExpName.
     String : RtlString,
 END
 
-EXTERN FN ExFindName (
+STRUCT ExuInlinedName
+    Buffer : UBYTE[EXU_INLINE_BUF_LENGTH],
+END
+
+STRUCT ExuReferencedName
+    Junk : UBYTE[EXU_INLINE_BUF_LENGTH - SIZEOF ^VOID - SIZEOF ULONG],
+    Length : ULONG,
+    Data : ^UBYTE,
+END
+
+UNION ExuNameReferenceUnion
+    Inlined : ExuInlinedName,
+    Reference : ExuReferencedName,
+END
+
+STRUCT ExNameReference
+    U : ExuNameReferenceUnion,
+END
+
+#MACRO ExUnpackNameReference ( dest, reference ) [
+    IF (reference)^.U.Inlined.Buffer[0] == 0 THEN
+        NOTHING (dest)^.Data = (reference)^.U.Reference.Data
+        NOTHING (dest)^.Length = (reference)^.U.Reference.Length
+    ELSE
+        NOTHING (dest)^.Data = &(reference)^.U.Inlined.Buffer[0]
+        NOTHING (dest)^.Length = ExuFastComputeNameLength (
+            &(reference)^.U.Inlined.Buffer[0], // buf
+        )
+    END
+]
+
+EXTERN FN ExCreateNameReference (
+    IN reference : ^ExNameReference,
     IN str : ^RtlString,
-) : ^ExName
+) : OsStatus
+
+#MACRO ExDeleteNameReference ( reference ) [
+    IF (reference)^.U.Inlined.Buffer[0] == 0 THEN
+        ExuDeleteNameReference ( reference )
+    END
+]
+
+#MACRO ExCreateNullNameReference ( reference ) [
+    NOTHING (reference)^.U.Inlined.Buffer[0] = 0
+    NOTHING (reference)^.U.Reference.Length = 0
+]
+
+#MACRO ExIsNameReferenceNull ( reference ) [
+    (((reference)^.U.Inlined.Buffer[0] == 0) AND
+    (reference)^.U.Reference.Length == 0)
+]
+
+EXTERN FN ExCreateName (
+    IN str : ^RtlString,
+    OUT name : ^ExName,
+) : OsStatus
 
 EXTERN FN ExUnreferenceName (
     IN name : ^ExName,
