@@ -7,20 +7,6 @@
 
 #INCLUDE "Mmp.hjk"
 
-FN MmpMakeMorePages (
-    IN mmnode : ^MmpNode,
-)
-
-    // Try to make free pages, asynchronously.
-
-    IF mmnode^.LowMemoryEvent.Header.SignalCount == 0 THEN
-        KeSignalEvent (
-            &mmnode^.LowMemoryEvent, // event
-            0, // priorityboost
-        )
-    END
-END
-
 #IF BLD_NUMA
 
 FN MmpClaimAvailablePages (
@@ -54,21 +40,6 @@ FN MmpClaimAvailablePages (
 
     avail := mmnode^.AvailablePageCount
 
-    IF avail > mmnode^.LowPageCount AND
-        (avail - pages) <= mmnode^.LowPageCount THEN
-
-        // It was the home node and this request will make it low on pages, so
-        // start the asynchronous page-making processes.
-
-        // We do this now rather than when we're more sure we're taking it from
-        // the home node because we only know that for sure after the CAS
-        // succeeds, and by that time, a window has opened where people are
-        // blocking for free pages but nobody has started the page-making
-        // processes, which could lead to deadlock.
-
-        MmpMakeMorePages ( mmnode )
-    END
-
     WHILE TRUE DO
         WHILE avail < pages OR
             (avail - pages) < threshold DO
@@ -84,6 +55,16 @@ FN MmpClaimAvailablePages (
                 // No more nodes left to check, or the caller is demanding that
                 // we don't borrow from other nodes. Try blockingly from the
                 // home node.
+
+                IF mmnode^.LowMemoryEvent.Header.SignalCount == 0 THEN
+                    // Since we're about to block we definitely want to get the
+                    // page-making processes going.
+
+                    KeSignalEvent (
+                        &mmnode^.LowMemoryEvent, // event
+                        0, // priorityboost
+                    )
+                END
 
                 IF flags & MM_ALLOCATE_WAIT == 0 THEN
                     // Nevermind, this won't help since we're not allowed to
@@ -154,6 +135,17 @@ FN MmpClaimAvailablePages (
                 END
 
                 mmnode^.BorrowCounts[actualnode^.Id] = oldvalue
+            
+            ELSEIF mmnode^.AvailablePageCount <= mmnode^.LowPageCount AND
+                mmnode^.LowMemoryEvent.Header.SignalCount == 0 THEN
+
+                // It was the home node and this request made it low on pages,
+                // so start the asynchronous page-making processes.
+
+                KeSignalEvent (
+                    &mmnode^.LowMemoryEvent, // event
+                    0, // priorityboost
+                )
             END
 
             RETURN OS_STATUS_SUCCESS
@@ -183,23 +175,6 @@ FN MmpClaimAvailablePages (
 
     actualnode = mmnode
 
-    avail := mmnode^.AvailablePageCount
-
-    IF avail > mmnode^.LowPageCount AND
-        (avail - pages) <= mmnode^.LowPageCount THEN
-
-        // It was the home node and this request will make it low on pages, so
-        // start the asynchronous page-making processes.
-
-        // We do this now rather than when we're more sure we're taking it from
-        // the home node because we only know that for sure after the CAS
-        // succeeds, and by that time, a window has opened where people are
-        // blocking for free pages but nobody has started the page-making
-        // processes, which could lead to deadlock.
-
-        MmpMakeMorePages ( mmnode )
-    END
-
     threshold := MMP_BLOCK_FOR_PAGES_THRESHOLD
 
     IF PsCurrentThread ()^.Tcb.VmPrivilegeBits AND
@@ -210,6 +185,8 @@ FN MmpClaimAvailablePages (
 
         threshold = 0
     END
+
+    avail := mmnode^.AvailablePageCount
 
     WHILE TRUE DO
         WHILE avail < pages OR
@@ -222,6 +199,16 @@ FN MmpClaimAvailablePages (
                 // wait anyway.
 
                 RETURN OS_STATUS_NO_MEMORY
+            END
+
+            IF mmnode^.LowMemoryEvent.Header.SignalCount == 0 THEN
+                // Since we're about to block we definitely want to get the
+                // page-making processes going.
+
+                KeSignalEvent (
+                    &mmnode^.LowMemoryEvent, // event
+                    0, // priorityboost
+                )
             END
 
             RETURN KeuDecrementQuantityQueue (
@@ -245,6 +232,18 @@ FN MmpClaimAvailablePages (
 
         IF new == avail THEN
             // Got it!
+
+            IF mmnode^.AvailablePageCount <= mmnode^.LowPageCount AND
+                mmnode^.LowMemoryEvent.Header.SignalCount == 0 THEN
+
+                // This request made it low on pages, so start the asynchronous
+                // page-making processes.
+
+                KeSignalEvent (
+                    &mmnode^.LowMemoryEvent, // event
+                    0, // priorityboost
+                )
+            END
 
             RETURN OS_STATUS_SUCCESS
         END
