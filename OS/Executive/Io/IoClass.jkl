@@ -22,7 +22,6 @@ FN IopInitializeClass (
 ) : OsStatus
 
     // Initialize a loaded instance of a class.
-    // Returns NULLPTR upon failure.
 
     status := MmAllocatePool (
         FALSE, // pageable
@@ -44,24 +43,39 @@ FN IopInitializeClass (
     class^.DispatchTable = mydispatch
     class^.DispatchTableSize = dispatchtablesize
 
-    // Initialize the dispatch table.
+    endptr : ^VOID
 
-    superdispatch := superclass^.DispatchTable
+    IF superclass THEN
+        // Initialize the dispatch table.
 
-    // First fill in the entries that inherit from the superclass.
+        superdispatch := superclass^.DispatchTable
 
-    endptr := superdispatch + superclass^.DispatchTableSize
+        // First fill in the entries that inherit from the superclass.
 
-    WHILE superdispatch < endptr DO
-        IF dispatchtable^ THEN
-            mydispatch^ = dispatchtable^
-        ELSE
-            mydispatch^ = superdispatch^
+        endptr = superdispatch + superclass^.DispatchTableSize
+
+        WHILE superdispatch < endptr DO
+            IF dispatchtable^ THEN
+                mydispatch^ = dispatchtable^
+            ELSE
+                mydispatch^ = superdispatch^
+            END
+
+            superdispatch += SIZEOF IoPacketBasedCallF
+            dispatchtable += SIZEOF IoPacketBasedCallF
+            mydispatch += SIZEOF IoPacketBasedCallF
         END
 
-        superdispatch += SIZEOF IoPacketBasedCallF
-        dispatchtable += SIZEOF IoPacketBasedCallF
-        mydispatch += SIZEOF IoPacketBasedCallF
+        // Increment the superclass's subclass count.
+
+        KeIncrementUlong (
+            &superclass^.SubclassCount, // ptr
+            1, // inc
+        )
+
+        // Increment the reference count of the superclass's module.
+
+        IopReferenceModule ( superclass^.Module )
     END
 
     // Now fill in the entries that are unique to the subclass.
@@ -78,17 +92,6 @@ FN IopInitializeClass (
         dispatchtable += SIZEOF IoPacketBasedCallF
         mydispatch += SIZEOF IoPacketBasedCallF
     END
-
-    // Increment the superclass's subclass count.
-
-    KeIncrementUlong (
-        &superclass^.SubclassCount, // ptr
-        1, // inc
-    )
-
-    // Increment the reference count of the superclass's module.
-
-    IopReferenceModule ( superclass^.Module )
 
     RETURN status
 END
