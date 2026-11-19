@@ -465,7 +465,7 @@ EXPORT FN MmReleasePageReserve ()
     reserve^.Debt += count
 END
 
-EXPORT FN MmFulfillPageReservation ()
+EXPORT FN MmFulfillPageReservation () : OsStatus
 
     // Intended to be called by a top level of the allocation stack that
     // received OS_STATUS_TRY_AGAIN from a lower level and needs to fulfill
@@ -481,17 +481,23 @@ EXPORT FN MmFulfillPageReservation ()
 
     debt := reserve^.Debt
 
-    MmuAddPageReservation (
+    status := MmuAddPageReservation (
         debt, // minimum
         debt, // maximum
         MM_ALLOCATE_WAIT, // flags
         OUT: junk, // actual
     )
 
+    IF status == OS_STATUS_TRY_AGAIN THEN
+        status = OS_STATUS_SUCCESS
+    END
+
     // Move the reservation to credit.
 
     reserve^.Credit = reserve^.Count
     reserve^.Count = 0
+
+    RETURN status
 END
 
 FN MmpInsertPageIntoList (
@@ -520,6 +526,8 @@ FN MmpInsertPageIntoList (
     list^.Count += 1
 
     KeReleaseLockLower ( &list^.Lock, ipl )
+
+    RETURN list^.Count
 END
 
 FN MmpAllocatePageFromList (

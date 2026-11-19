@@ -336,7 +336,11 @@ EXPORT FN ExCreateName (
             GOTO Exit
         END
 
-        MmFulfillPageReservation ()
+        status = MmFulfillPageReservation ()
+
+        IF OsError ( status ) THEN
+            GOTO Exit
+        END
 
         reserved = TRUE
 

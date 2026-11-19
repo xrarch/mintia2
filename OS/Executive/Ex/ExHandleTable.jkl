@@ -263,11 +263,15 @@ FN ExuCreateHandle (
 
             KeReleaseLock ( lock )
 
-            MmFulfillPageReservation ()
-
-            reserved = TRUE
+            status = MmFulfillPageReservation ()
 
             KeAcquireLockExclusive ( lock )
+
+            IF OsError ( status ) THEN
+                GOTO Exit
+            END
+
+            reserved = TRUE
 
             GOTO Retry
         END
