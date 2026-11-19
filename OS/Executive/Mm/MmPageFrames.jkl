@@ -29,7 +29,9 @@ FN MmpClaimAvailablePages (
 
     threshold := MMP_BLOCK_FOR_PAGES_THRESHOLD
 
-    IF PsCurrentThread ()^.Tcb.VmPrivilegeBits AND
+    thread := PsCurrentThread ()
+
+    IF thread^.Tcb.VmPrivilegeBits AND
         flags & MM_ALLOCATE_NORMAL == 0 THEN
 
         // VM privileged threads get to tap the reserved pool, unless they
@@ -75,7 +77,7 @@ FN MmpClaimAvailablePages (
 
                 actualnode = mmnode
 
-                RETURN KeuDecrementQuantityQueue (
+                status := KeuDecrementQuantityQueue (
                     &mmnode^.AvailablePageQuantityQueue, // queue
                     pages, // amount
                     KE_KERNEL_MODE, // waitmode
@@ -83,6 +85,15 @@ FN MmpClaimAvailablePages (
                     timeout, // timeout
                     TRUE, // wait
                 )
+
+                IF NOT OsError ( status ) THEN
+                    // Reset the page wait start tick since we might have waited.
+
+                    thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
+                        .PageWaitStartTick = KEU_QUANTITY_QUEUE_KEY_BIAS_TICK
+                END
+
+                RETURN status
             END
 
             actualnode = nodelist[0]^.Mmp
@@ -177,7 +188,9 @@ FN MmpClaimAvailablePages (
 
     threshold := MMP_BLOCK_FOR_PAGES_THRESHOLD
 
-    IF PsCurrentThread ()^.Tcb.VmPrivilegeBits AND
+    thread := PsCurrentThread ()
+
+    IF thread^.Tcb.VmPrivilegeBits AND
         flags & MM_ALLOCATE_NORMAL == 0 THEN
 
         // VM privileged threads get to tap the reserved pool, unless they
@@ -211,7 +224,7 @@ FN MmpClaimAvailablePages (
                 )
             END
 
-            RETURN KeuDecrementQuantityQueue (
+            status := KeuDecrementQuantityQueue (
                 &mmnode^.AvailablePageQuantityQueue, // queue
                 pages, // amount
                 KE_KERNEL_MODE, // waitmode
@@ -219,6 +232,15 @@ FN MmpClaimAvailablePages (
                 timeout, // timeout
                 TRUE, // wait
             )
+
+            IF NOT OsError ( status ) THEN
+                // Reset the page wait start tick since we might have waited.
+
+                thread^.ReservedPages[thread^.Tcb.ExecutingKapc]
+                    .PageWaitStartTick = KEU_QUANTITY_QUEUE_KEY_BIAS_TICK
+            END
+
+            RETURN status
         END
 
         // The currently selected actualnode appears to have enough pages to
@@ -367,15 +389,6 @@ FN MmuAddPageReservation (
 
     reserve^.Count += actual
     reserve^.Credit = 0
-
-    // Tell the available page quantity queue to reset the wait start tick next
-    // time. This is used for request aging, and we only reset it after
-    // successful requests that allowed waiting so that in the event of a retry,
-    // we don't lose the age.
-
-    IF saveflags & MM_ALLOCATE_WAIT THEN
-        reserve^.PageWaitStartTick = KEU_QUANTITY_QUEUE_KEY_BIAS_TICK
-    END
 
     RETURN OS_STATUS_SUCCESS
 
@@ -871,14 +884,6 @@ FN MmpAllocatePageUnreserved (
         // Failed to claim an available page.
 
         RETURN NULLPTR
-    END
-
-    IF flags & MM_ALLOCATE_WAIT THEN
-        // Reset the page wait start tick since we might have waited.
-
-        thread := PsCurrentThread ()
-
-        MmpResetPageWaitAge ( thread )
     END
 
     // Got a count, so allocate the page.
