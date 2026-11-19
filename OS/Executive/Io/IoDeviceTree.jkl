@@ -29,6 +29,21 @@ IopTreeLock : KeLock = KE_INITIAL_LOCK
     KeReleaseLock ( &(treenode)^.Lock )
 ]
 
+#MACRO IopLockTwoNodes ( node1, node2 ) [
+    IF (node1) < (node2) THEN
+        KeAcquireLockExclusive ( &(node1)^.Lock )
+        KeAcquireLockExclusive ( &(node2)^.Lock )
+    ELSE
+        KeAcquireLockExclusive ( &(node2)^.Lock )
+        KeAcquireLockExclusive ( &(node1)^.Lock )
+    END
+]
+
+#MACRO IopUnlockTwoNodes ( node1, node2 ) [
+    KeReleaseLock ( &(node1)^.Lock )
+    KeReleaseLock ( &(node2)^.Lock )
+]
+
 STRUCT IouPlane
     Name : ^UBYTE,
 
@@ -173,8 +188,18 @@ FN IouAttachNodes (
 
     status := OS_STATUS_SUCCESS
 
-    IopLockNode ( parent )
-    IopLockNode ( child )
+    IopLockTwoNodes ( parent, child )
+
+    IF parent^.Unplugged OR
+        child^.Unplugged THEN
+
+        // One of these two nodes has been marked unplugged, so we must not
+        // attach to it.
+
+        status = OS_STATUS_DEVICE_UNPLUGGED
+
+        GOTO Exit
+    END
 
     parentchildren := IopFindPlaneEntry (
         parent, // treenode
@@ -233,8 +258,7 @@ FN IouAttachNodes (
 
 @Exit
 
-    IopUnlockNode ( child )
-    IopUnlockNode ( parent )
+    IopUnlockTwoNodes ( parent, child )
 
     RETURN status
 END
@@ -248,8 +272,7 @@ FN IouDetachNodes (
 
     // Destroy a parent-child relationship in the specified plane.
 
-    IopLockNode ( parent )
-    IopLockNode ( child )
+    IopLockTwoNodes ( parent, child )
 
     parentchildren := IopFindPlaneEntry (
         parent, // treenode
@@ -279,8 +302,7 @@ FN IouDetachNodes (
 
     KeAssert ( removed != FALSE )
 
-    IopUnlockNode ( child )
-    IopUnlockNode ( parent )
+    IopUnlockTwoNodes ( parent, child )
 
     // Unreference the parent to reflect the loss of a child.
     // This may cause the parent to go away as well.
@@ -369,6 +391,9 @@ FN IouEnumerateRelations (
     // returns a successful status, however, it is guaranteed to provide a
     // *complete* picture of the relations at that moment. If it returns an
     // error status, the set remains empty.
+    //
+    // Marking the node unplugged using IouUnplugNode prevents any new relations
+    // from being established.
 
     status := OS_STATUS_SUCCESS
 
@@ -404,4 +429,22 @@ FN IouEnumerateRelations (
     END
 
     RETURN status
+END
+
+#SECTION "PAGEtext"
+FN IouUnplugNode (
+    IN treenode : ^IouTreeNode,
+)
+
+    // Mark the node unplugged, which will atomically stop any new attachments
+    // from being made. This makes usage of IouEnumerateRelations reliable for
+    // routing things like upward-flowing packets like the one that tells a
+    // device stack that a device has been yanked, which must flow from the
+    // bottom up because it originates from the lowest level nodes.
+
+    KeAcquireLockExclusive ( &treenode^.Lock )
+
+    treenode^.Unplugged = TRUE
+
+    KeReleaseLock ( &treenode^.Lock )
 END
