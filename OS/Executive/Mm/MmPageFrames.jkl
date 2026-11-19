@@ -35,6 +35,9 @@ FN MmpClaimAvailablePages (
     // none has them, then default to the original node. Returns the node that
     // it was taken from.
 
+    // If MM_ALLOCATE_NORMAL is supplied in flags, then MM_ALLOCATE_WAIT should
+    // not be in order to get reliable behavior.
+
     actualnode = mmnode
     nodelist := mmnode^.KeNode^.DistanceList
 
@@ -68,7 +71,7 @@ FN MmpClaimAvailablePages (
 
     WHILE TRUE DO
         WHILE avail < pages OR
-            (avail - pages) <= threshold DO
+            (avail - pages) < threshold DO
 
             // Dang!!!!! Not enough pages on this node. Try skipping to one
             // that has pages and is on the same pagefile pool.
@@ -175,6 +178,9 @@ FN MmpClaimAvailablePages (
 
     // Non-NUMA build so just claim directly from home node.
 
+    // If MM_ALLOCATE_NORMAL is supplied in flags, then MM_ALLOCATE_WAIT should
+    // not be in order to get reliable behavior.
+
     actualnode = mmnode
 
     avail := mmnode^.AvailablePageCount
@@ -194,14 +200,60 @@ FN MmpClaimAvailablePages (
         MmpMakeMorePages ( mmnode )
     END
 
-    RETURN KeuDecrementQuantityQueue (
-        &mmnode^.AvailablePageQuantityQueue, // queue
-        pages, // amount
-        KE_KERNEL_MODE, // waitmode
-        KE_UNALERTABLE, // alertable
-        timeout, // timeout
-        flags & MM_ALLOCATE_WAIT, // wait
-    )
+    threshold := MMP_BLOCK_FOR_PAGES_THRESHOLD
+
+    IF PsCurrentThread ()^.Tcb.VmPrivilegeBits AND
+        flags & MM_ALLOCATE_NORMAL == 0 THEN
+
+        // VM privileged threads get to tap the reserved pool, unless they
+        // specifically asked not to.
+
+        threshold = 0
+    END
+
+    WHILE TRUE DO
+        WHILE avail < pages OR
+            (avail - pages) < threshold DO
+
+            // Dang!!!!! Not enough pages. Have to wait.
+
+            IF flags & MM_ALLOCATE_WAIT == 0 THEN
+                // Nevermind, this won't help since we're not allowed to
+                // wait anyway.
+
+                RETURN OS_STATUS_NO_MEMORY
+            END
+
+            RETURN KeuDecrementQuantityQueue (
+                &mmnode^.AvailablePageQuantityQueue, // queue
+                pages, // amount
+                KE_KERNEL_MODE, // waitmode
+                KE_UNALERTABLE, // alertable
+                timeout, // timeout
+                TRUE, // wait
+            )
+        END
+
+        // The currently selected actualnode appears to have enough pages to
+        // satisfy our request, so try to yoink.
+
+        new := KeCompareSwapPtr (
+            &actualnode^.AvailablePageCount, // ptr
+            avail - pages, // newvalue
+            avail, // expectedvalue
+        )
+
+        IF new == avail THEN
+            // Got it!
+
+            RETURN OS_STATUS_SUCCESS
+        END
+
+        // Our copy of the available page count became stale, so update it and
+        // try again.
+
+        avail = new
+    END
 END
 
 #END
@@ -291,7 +343,7 @@ FN MmuAddPageReservation (
     // Reserve actual available page count.
 
     timeout : RtlUquad
-    RtlSetUquadToUlong ( &timeout, 1000 )
+    RtlSetUquadToUlong ( &timeout, MMP_PAGE_WAIT_RETRY_TIMEOUT_MS )
 
     status = MmpClaimAvailablePages (
         mmnode, // mmnode
@@ -316,6 +368,15 @@ FN MmuAddPageReservation (
 
     reserve^.Count += actual
     reserve^.Credit = 0
+
+    // Tell the available page quantity queue to reset the wait start tick next
+    // time. This is used for request aging, and we only reset it after
+    // successful requests that allowed waiting so that in the event of a retry,
+    // we don't lose the age.
+
+    IF saveflags & MM_ALLOCATE_WAIT THEN
+        reserve^.PageWaitStartTick = KEU_QUANTITY_QUEUE_KEY_BIAS_TICK
+    END
 
     RETURN OS_STATUS_SUCCESS
 
@@ -605,11 +666,6 @@ FN MmpUnreferencePage (
         )
 
         pagelist^.Count += 1
-
-        pagelist^.InsertionRoutine (
-            mmnode, // mmnode
-            pfe, // pfe
-        )
     END
 
     // The order of releasing the page lock and list lock is important
@@ -619,6 +675,13 @@ FN MmpUnreferencePage (
     KeReleaseLock ( &pfe^.Lock )
 
     KeReleaseLockLower ( &pagelist^.Lock, ipl )
+
+    IF oldcount == 1 THEN
+        // Do page list specific stuff for when a page is inserted, outside
+        // locks since it could be hefty.
+
+        pagelist^.InsertionRoutine ( mmnode )
+    END
 END
 
 FN MmpAllocatePageReserved (
@@ -780,18 +843,35 @@ FN MmpAllocatePageUnreserved (
     // Allocate a page that has not yet been reserved.
     // Returns NULLPTR if reserving the page fails.
 
+    timeout : RtlUquad
+    RtlSetUquadToUlong ( &timeout, MMP_PAGE_WAIT_RETRY_TIMEOUT_MS )
+
+@Retry
+
     status := MmpClaimAvailablePages (
         mmnode, // mmnode
         1, // pages
         flags, // flags
-        NULLPTR, // timeout
+        &timeout, // timeout
         OUT mmnode, // actualnode
     )
 
     IF OsError ( status ) THEN
+        IF status == OS_STATUS_WAIT_TIMEOUT THEN
+            GOTO Retry
+        END
+
         // Failed to claim an available page.
 
         RETURN NULLPTR
+    END
+
+    IF flags & MM_ALLOCATE_WAIT THEN
+        // Reset the page wait start tick since we might have waited.
+
+        thread := PsCurrentThread ()
+
+        MmpResetPageWaitAge ( thread )
     END
 
     // Got a count, so allocate the page.
@@ -805,11 +885,10 @@ END
 
 FN (MmpInUsePageListInsertionF) MmpInsertPageInStandbyList (
     IN mmnode : ^MmpNode,
-    IN pfe : ^MmpPfe,
 )
 
-    // The page has been inserted in the standby list.
-    // The list lock and PFE lock are held.
+    // A page has been inserted in the standby list.
+    // No locks are held.
 
     // We need to increment the available page count.
 
@@ -821,11 +900,10 @@ END
 
 FN (MmpInUsePageListInsertionF) MmpInsertPageInModifiedList (
     IN mmnode : ^MmpNode,
-    IN pfe : ^MmpPfe,
 )
 
-    // The page has been inserted in the modified list.
-    // The list lock and PFE lock are held.
+    // A page has been inserted in the modified list.
+    // No locks are held.
 
     // We need to see if the modified page writer should be signaled.
 

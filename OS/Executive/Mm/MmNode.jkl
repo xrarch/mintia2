@@ -92,6 +92,10 @@ FN MmpInitializeNodeStage1 (
     mmnode^.AvailablePageTiers[0].Threshold = 0
     mmnode^.AvailablePageTiers[1].Threshold = MMP_BLOCK_FOR_PAGES_THRESHOLD
 
+    keybiasoffsets : ULONG[2]
+    keybiasoffsets[0] = OFFSETOF PsuThread.ReservedPages[0].PageWaitStartTick
+    keybiasoffsets[1] = OFFSETOF PsuThread.ReservedPages[1].PageWaitStartTick
+
     KeuInitializeQuantityQueue (
         &mmnode^.AvailablePageQuantityQueue, // queue
         "AvailablePageCount", // name
@@ -99,6 +103,7 @@ FN MmpInitializeNodeStage1 (
         &mmnode^.AvailablePageTiers[0], // tiers
         2, // tiercount
         OFFSETOF KeuThread.PageTierIndex, // tieroffset
+        &keybiasoffsets[0], // keybiasoffsets
         OS_STATUS_NO_MEMORY, // errorstatus
     )
 

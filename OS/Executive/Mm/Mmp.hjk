@@ -139,7 +139,6 @@ END
 
 FNPTR MmpInUsePageListInsertionF (
     IN mmnode : ^MmpNode,
-    IN pfe : ^MmpPfe,
 )
 
 STRUCT MmpInUsePageList
@@ -563,3 +562,11 @@ EXTERN FN MmpSetObjectCacheContext (
 EXTERN FN MmpInitializeInUsePageLists (
     IN mmnode : ^MmpNode,
 )
+
+#DEFINE MMP_PAGE_WAIT_RETRY_TIMEOUT_MS 2000
+
+#MACRO MmpResetPageWaitAge ( thread ) [
+    NOTHING
+    (thread)^.ReservedPages[(thread)^.Tcb.ExecutingKapc].PageWaitStartTick =
+        KEU_QUANTITY_QUEUE_KEY_BIAS_TICK
+]

@@ -249,7 +249,7 @@ FN MmuAllocateKernelStack (
     END
 
     timeout : RtlUquad
-    RtlSetUquadToUlong ( &timeout, 1000 )
+    RtlSetUquadToUlong ( &timeout, MMP_PAGE_WAIT_RETRY_TIMEOUT_MS )
 
     status := MmpClaimAvailablePages (
         mmnode, // mmnode
@@ -269,6 +269,12 @@ FN MmuAllocateKernelStack (
 
         GOTO Retry
     END
+
+    // Reset the page wait start tick since we might have waited.
+
+    thread := PsCurrentThread ()
+
+    MmpResetPageWaitAge ( thread )
 
     // Acquire a pointer to the first PTE for this region.
 

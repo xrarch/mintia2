@@ -8,6 +8,11 @@
     ((CAST ((thread) + (queue)^.TierOffset) TO ^UBYTE)^)
 ]
 
+#MACRO KepThreadKeyBias ( queue, thread ) [
+    NOTHING ((CAST ((thread) +
+        (queue)^.KeyBiasOffset[(thread)^.ExecutingKapc]) TO ^UWORD)^)
+]
+
 FN (RtlLessThanF) KepCompareQuantityQueueRequests (
     IN a : ^RtlHeapEntry,
     IN b : ^RtlHeapEntry,
@@ -221,7 +226,7 @@ FN (KepShouldSatisfyF) KepSatisfyQuantityQueue (
 
     queue^.WaiterCount += 1
 
-    KeWriteMemoryBarrier ()
+    KeMemoryBarrier ()
 
     // Try to just CAS the atomic counter.
 
@@ -286,10 +291,12 @@ FN (KepConsumeF) KepConsumeQuantityQueue (
     IN argument : ^VOID,
 )
 
-    // Don't have to do anything here since our ShouldSatisfy function already
-    // yoinked the amount.
+    // Don't have to do anything here except decrement WaiterCount since our
+    // ShouldSatisfy function already yoinked the amount.
 
-    NOTHING
+    queue := CAST object TO ^KeuQuantityQueue
+
+    queue^.WaiterCount -= 1
 END
 
 FN (KepEnqueueF) KepEnqueueQuantityQueue (
@@ -311,12 +318,20 @@ FN (KepEnqueueF) KepEnqueueQuantityQueue (
     // Part of the key for the wait block is the tick that the request was
     // made at, to try to avoid starvation of older requests of many pages.
 
-    waitblock^.Context = KepLowTick ()
+    keybias := KepThreadKeyBias ( queue, thread )
+
+    IF keybias == KEU_QUANTITY_QUEUE_KEY_BIAS_TICK THEN
+        keybias = KepLowTick ()
+
+        KepThreadKeyBias ( queue, thread ) = keybias
+    END
+
+    waitblock^.Context = keybias
 
     // Compute whether the thread should go into the timeshared min heap or the
     // interactive/realtime min heap.
 
-    heapindex := NOT (thread^.Priority >= OS_PRIORITY_LOW_REALTIME |
+    heapindex := NOT ((thread^.Priority >= OS_PRIORITY_LOW_REALTIME) |
         thread^.InteractiveBits)
 
     waitblock^.Spare1 = heapindex
@@ -353,6 +368,8 @@ FN (KepDequeueF) KepDequeueQuantityQueue (
 
     // Remove the waitblock from the heap.
 
+    heaproot := tier^.HeapRoot[heapindex]
+
     RtlRemoveFromHeap (
         &KepCompareQuantityQueueRequests, // comparisonfunc
         &tier^.HeapRoot[heapindex], // rootptr
@@ -362,6 +379,16 @@ FN (KepDequeueF) KepDequeueQuantityQueue (
     // Decrement waiter count since we use that as a hint.
 
     queue^.WaiterCount -= 1
+
+    IF heaproot == &waitblock^.Links.Heap THEN
+        // We were the root so we might have been blocking younger, smaller
+        // requests from getting some resource. Check now.
+
+        KepTrySatisfyQuantityQueue (
+            queue, // queue
+            NULLPTR, // lockedthread
+        )
+    END
 END
 
 FN (KepRequeueF) KepRequeueQuantityQueue (
@@ -381,7 +408,7 @@ FN (KepRequeueF) KepRequeueQuantityQueue (
 
     tierid := KepThreadTierId ( queue, thread )
 
-    heapindex := NOT (thread^.Priority >= OS_PRIORITY_LOW_REALTIME |
+    heapindex := NOT ((thread^.Priority >= OS_PRIORITY_LOW_REALTIME) |
         thread^.InteractiveBits)
 
     // Grab the heap and tier it is currently in, since we stashed those in the
@@ -401,6 +428,8 @@ FN (KepRequeueF) KepRequeueQuantityQueue (
         tier := &queue^.Tiers[currenttierid]
 
         // First remove from the old heap.
+
+        heaproot := tier^.HeapRoot[currentheapindex]
 
         RtlRemoveFromHeap (
             &KepCompareQuantityQueueRequests, // comparisonfunc
@@ -423,10 +452,16 @@ FN (KepRequeueF) KepRequeueQuantityQueue (
             &waitblock^.Links.Heap, // entry
         )
 
-        IF tierid < currenttierid THEN
+        IF tierid < currenttierid OR
+            heaproot == &waitblock^.Links.Heap THEN
+
             // The thread is now in a lower tier which means it has a more
             // permissible threshold that may allow it to take the resources it
             // wants.
+
+            // Alternatively, we might have been at the root of the old heap
+            // and blocking younger, smaller requests from getting some
+            // resource, so try to satisfy them now.
 
             KepTrySatisfyQuantityQueue (
                 queue, // queue
@@ -453,6 +488,7 @@ FN KeuInitializeQuantityQueue (
     IN tiers : ^KeuQuantityTier,
     IN tiercount : UWORD,
     IN tieroffset : UWORD,
+    IN keybiasoffsets : ^ULONG,
     IN errorstatus : OsStatus,
 )
 
@@ -463,6 +499,14 @@ FN KeuInitializeQuantityQueue (
     //
     // tieroffset is an offset from the base of a KeuThread structure at which
     // a UBYTE tier ID can be found.
+    //
+    // keybiasoffsets is two offsets from the base of a KeuThread structure at
+    // which a UWORD key bias for insertion of the waitblock into the minheap
+    // can be found. This should be something like a tick count for request
+    // aging. We don't manage it because it would be lost across retries.
+    // This is indexed by whether the thread is currently executing a KAPC or
+    // not in order to allow KAPC and non-KAPC context to have their own key
+    // bias (i.e. the latter's won't get corrupted by the former).
 
     KepInitializeDispatchObject (
         &queue^.Header, // hdr
@@ -473,6 +517,8 @@ FN KeuInitializeQuantityQueue (
     queue^.Resource = resource
     queue^.Tiers = tiers
     queue^.TierOffset = tieroffset
+    queue^.KeyBiasOffset[0] = keybiasoffsets[0]
+    queue^.KeyBiasOffset[1] = keybiasoffsets[1]
     queue^.TierCount = tiercount
     queue^.WaiterCount = 0
     queue^.ErrorStatus = errorstatus

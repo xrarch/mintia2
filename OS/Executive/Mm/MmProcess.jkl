@@ -71,9 +71,15 @@ FN MmuInitializeThread (
 
     // Set the reserved page information for normal and KAPC context to 0.
 
+    thread^.ReservedPages[FALSE].PageWaitStartTick =
+        KEU_QUANTITY_QUEUE_KEY_BIAS_TICK
+
     thread^.ReservedPages[FALSE].Count = 0
     thread^.ReservedPages[FALSE].Debt = 0
     thread^.ReservedPages[FALSE].Credit = 0
+
+    thread^.ReservedPages[TRUE].PageWaitStartTick =
+        KEU_QUANTITY_QUEUE_KEY_BIAS_TICK
 
     thread^.ReservedPages[TRUE].Count = 0
     thread^.ReservedPages[TRUE].Debt = 0

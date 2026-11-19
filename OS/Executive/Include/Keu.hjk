@@ -596,6 +596,8 @@ EXTERN FN KeuReaperBarrier (
 
 #END
 
+#DEFINE KEU_QUANTITY_QUEUE_KEY_BIAS_TICK [RTL_MACHINE_WORD_MAX]
+
 STRUCT KeuQuantityTier
     HeapRoot : ^RtlHeapEntry[2],
     Threshold : UWORD,
@@ -607,6 +609,7 @@ STRUCT KeuQuantityQueue
     Tiers : ^KeuQuantityTier,
     ErrorStatus : OsStatus,
     TierOffset : ULONG,
+    KeyBiasOffset : ULONG[2],
     WaiterCount : ULONG,
     TierCount : UBYTE,
 END
@@ -632,5 +635,6 @@ EXTERN FN KeuInitializeQuantityQueue (
     IN tiers : ^KeuQuantityTier,
     IN tiercount : UWORD,
     IN tieroffset : UWORD,
+    IN keybiasoffsets : ^ULONG,
     IN errorstatus : OsStatus,
 )
