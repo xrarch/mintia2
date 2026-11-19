@@ -68,7 +68,7 @@ FN IopInitPacketZones ()
 
     IopInitPacketCache (
         &IopLocationCache, // cache
-        SIZEOF IoLocation, // headersize
+        SIZEOF IopInlinedLocation, // headersize
         "Packet Locations", // name
     )
 
@@ -123,6 +123,8 @@ EXPORT FN IoCreateLocation (
     // the provided packet.
 
     status : OsStatus
+
+    location = NULLPTR
 
     IF contextsize <= IO_LOCATION_AVERAGE_CONTEXT THEN
         // The context size is less or equal to the expected average so we can
@@ -301,18 +303,25 @@ FN IopRundownPacket (
 
     event := packet^.CompletionEvent
 
+    // Read packet fields before signaling the event in case it gets freed by
+    // that.
+
+    flags := packet^.Flags
+
     IF event THEN
+        internaltype := packet^.InternalType
+
         KeSignalEvent (
             event, // event
             packet^.PriorityBoost, // priorityboost
         )
 
-        IF packet^.InternalType == IOP_PACKET_TYPE_USERASYNC THEN
+        IF internaltype == IOP_PACKET_TYPE_USERASYNC THEN
             ObUnreferenceObject ( event )
         END
     END
 
-    IF packet^.Flags & IO_PACKET_AUTO_FREE THEN
+    IF flags & IO_PACKET_AUTO_FREE THEN
         IoFreePacket ( packet )
     END
 END
@@ -500,6 +509,10 @@ EXPORT FN IoCompletePacket (
 
         listentry = listentry^.Prev
 
+        // Pop the location from the stack.
+
+        RtlRemoveEntryList ( &location^.Entry )
+
         IF location^.CompletionRoutine THEN
             IF location^.CompletionRoutine ( location )
                 == OS_STATUS_CUSTODY_TAKEN THEN
@@ -513,10 +526,6 @@ EXPORT FN IoCompletePacket (
                 LEAVE
             END
         END
-
-        // Pop the location from the stack.
-
-        RtlRemoveEntryList ( &location^.Entry )
 
         // Free its memory.
 
@@ -537,20 +546,21 @@ EXPORT FN IoCompletePacket (
 
     // Call the general completion routine, if one was set.
 
-    IF NOT packet^.CompletionRoutine OR
-        packet^.CompletionRoutine ( packet )
-        != OS_STATUS_CUSTODY_TAKEN THEN
+    IF packet^.CompletionRoutine AND
+        packet^.CompletionRoutine ( packet ) == OS_STATUS_CUSTODY_TAKEN THEN
 
-        // General completion routine didn't take custody of the packet, so we
-        // can go ahead and run it down.
+        // General completion routine took custody of the packet, so we should
+        // not run it down or continue to complete the parent.
         //
         // An example of a completion routine that takes custody of a packet is
         // the user-initiated async IO completion routine, which takes custody
         // and then shoots an APC off to the requesting thread, who ultimately
         // calls IopRundownPacket instead of us doing it here.
 
-        IopRundownPacket ( packet )
+        LEAVE
     END
+
+    IopRundownPacket ( packet )
 
     packet = parentpacket
 
@@ -617,10 +627,10 @@ EXPORT FN IoEnqueuePacket (
     IF parentpacket THEN
         // Associate with parent packet.
 
-        // Incrementing this count requires no synchronization because the
-        // parent packet is in our sole custody right now.
-
-        parentpacket^.IoCount += 1
+        KeIncrementUlong (
+            &parentpacket^.IoCount, // ptr
+            1, // inc
+        )
 
         packet^.KernelFlags |= parentpacket^.KernelFlags
     END
