@@ -230,16 +230,16 @@ FN KepUpdateInteractivity (
         score = 0
     END
 
-    IF score < KEP_INTERACT_THRESH AND
-        NOT KepIsInteractiveForBehavior ( thread ) THEN
+    IF score < KEP_INTERACT_THRESH THEN
+        IF NOT KepIsInteractiveForBehavior ( thread ) THEN
+            // Changing from non-interactive to interactive.
 
-        // Changing from non-interactive to interactive.
+            IF deferupdate THEN
+                GOTO DeferUpdate
+            END
 
-        IF deferupdate THEN
-            GOTO DeferUpdate
+            KepSetInteractiveForBehavior ( thread )
         END
-
-        KepSetInteractiveForBehavior ( thread )
 
     ELSEIF KepIsInteractiveForBehavior ( thread ) THEN
         // Changing from interactive to non-interactive.
