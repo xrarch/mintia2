@@ -243,10 +243,10 @@ EXPORT FN KeEnqueueLapc (
     thread^.UserInterrupt = TRUE
 
 #IF BLD_MP
+    KeMemoryBarrier ()
+
     IF thread^.Status == KE_THREAD_RUNNING AND
         thread^.CurrentMode == KE_USER_MODE THEN
-
-        KeMemoryBarrier ()
 
         // The thread is running in usermode on another processor. Cause an IPI
         // to get him to check his lazy APC queue.
