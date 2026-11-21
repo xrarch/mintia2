@@ -723,6 +723,7 @@ FN KepInsertThread (
                         &prb^.IdleListHead, // head
                         &thread^.ReadyEntry, // entry
                     )
+
                 ELSE
                     RtlInsertAtTailList (
                         &prb^.IdleListHead, // head
@@ -753,16 +754,24 @@ FN KepInsertThread (
                     insertat -= 1
                     insertat %= KEP_TIMESHARED_QUEUES
                 END
+
+                // Go on the back of the queue.
+
+                RtlInsertAtTailList (
+                    &prb^.CalendarListHeads[insertat], // head
+                    &thread^.ReadyEntry, // entry
+                )
+
+            ELSE
+                // Go on the front of the queue.
+
+                RtlInsertAtHeadList (
+                    &prb^.CalendarListHeads[insertat], // head
+                    &thread^.ReadyEntry, // entry
+                )
             END
 
             thread^.QueueIndex = insertat
-
-            // Go on the back of the queue.
-
-            RtlInsertAtTailList (
-                &prb^.CalendarListHeads[insertat], // head
-                &thread^.ReadyEntry, // entry
-            )
 
             // Indicate that an item exists in this queue.
 
@@ -1482,6 +1491,7 @@ FN KepPreemptThread (
     KepAcquireReadyQueueElevated ( prb )
 
     next := prb^.NextThread
+    qend := KepCurrentThreadQend ( prb^.StashedCurrentThreadInfo )
 
     IF next THEN
         prb^.NextThread = NULLPTR
@@ -1556,7 +1566,7 @@ FN KepPreemptThread (
             prb, // prb
             current, // thread
             FALSE, // other
-            TRUE, // preempted
+            NOT qend, // preempted
         )
 
         KepReleaseReadyQueueElevated ( prb )
@@ -2002,6 +2012,11 @@ FN KepQuantumEnd (
             KepSetNextThread (
                 prb, // prb
                 next, // thread
+            )
+
+            prb^.StashedCurrentThreadInfo = KepSetQendInStash (
+                prb^.StashedCurrentThreadInfo, // stash
+                TRUE, // qend
             )
         END
     END
