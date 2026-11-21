@@ -1630,6 +1630,16 @@ FN KepReinsertThread (
     // ready queue. Manually unlink it from the queue, and then re-ready
     // it to place it on the correct one.
 
+    IF thread^.CurrentQueue == KEP_TIMESHARED_QUEUE AND
+        (NOT thread^.InteractiveBits AND
+        thread^.Priority < OS_PRIORITY_LOW_REALTIME) AND
+        thread^.Priority > OS_PRIORITY_IDLE THEN
+
+        // Don't re-enqueue from timeshared to timeshared.
+
+        LEAVE
+    END
+
     KepDecrementLoad ( prb )
 
     RtlRemoveEntryList ( &thread^.ReadyEntry )
@@ -1836,9 +1846,7 @@ EXPORT FN KeSetBasePriorityThread (
 #IF BLD_MP
         prb := thread^.CurrentPrb
 
-        IF prb THEN
-            KepAcquireReadyQueueElevated ( prb )
-        END
+        KepAcquireReadyQueueElevated ( prb )
 #ELSE
         prb := KEP_CURRENT_PRB
 #END
@@ -1850,9 +1858,7 @@ EXPORT FN KeSetBasePriorityThread (
         )
 
 #IF BLD_MP
-        IF prb THEN
-            KepReleaseReadyQueueElevated ( prb )
-        END
+        KepReleaseReadyQueueElevated ( prb )
 #END
     END
 
@@ -1871,9 +1877,7 @@ EXPORT FN KeSetPriorityThread (
 #IF BLD_MP
     prb := thread^.CurrentPrb
 
-    IF prb THEN
-        KepAcquireReadyQueueElevated ( prb )
-    END
+    KepAcquireReadyQueueElevated ( prb )
 #ELSE
     prb := KEP_CURRENT_PRB
 #END
