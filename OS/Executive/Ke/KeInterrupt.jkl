@@ -140,12 +140,13 @@ FN (KeInterruptF) KepClockTick (
     ridx := prb^.CalendarRunIndex
     idx := prb^.CalendarEnqueueIndex
 
+    IF RtlEmptyList ( &prb^.CalendarListHeads[ridx] ) THEN
+        ridx = idx
+        prb^.CalendarRunIndex = idx
+    END
+
     IF idx == ridx THEN
         prb^.CalendarEnqueueIndex = (idx + 1) % KEP_TIMESHARED_QUEUES
-
-        IF RtlEmptyList ( &prb^.CalendarListHeads[ridx] ) THEN
-            prb^.CalendarRunIndex = prb^.CalendarEnqueueIndex
-        END
     END
 
     currentticks : RtlUquad

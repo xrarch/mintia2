@@ -1299,7 +1299,9 @@ FN KepSelectTimesharedThread (
 #END
             // Advance the run index.
 
-            IF prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex THEN
+            IF k == prb^.CalendarRunIndex AND
+                prb^.CalendarRunIndex != prb^.CalendarEnqueueIndex THEN
+
                 prb^.CalendarRunIndex = (k + 1) % KEP_TIMESHARED_QUEUES
             END
 #IF BLD_MP
