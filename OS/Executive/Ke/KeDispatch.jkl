@@ -1484,6 +1484,14 @@ FN KepPreemptThread (
 
     current := prb^.CurrentThread
 
+    qend := NOT current^.RemainingQuantum
+
+    IF qend THEN
+        // Here because of a quantum end, so replenish the quantum.
+
+        current^.RemainingQuantum = KEP_DEFAULT_QUANTUM
+    END
+
 @Retry
 
     // Grab the next thread with the ready queue lock held.
@@ -1491,7 +1499,6 @@ FN KepPreemptThread (
     KepAcquireReadyQueueElevated ( prb )
 
     next := prb^.NextThread
-    qend := KepCurrentThreadQend ( prb^.StashedCurrentThreadInfo )
 
     IF next THEN
         prb^.NextThread = NULLPTR
@@ -1978,10 +1985,6 @@ FN KepQuantumEnd (
         LEAVE
     END
 
-    // Replenish the quantum of the thread.
-
-    current^.RemainingQuantum = KEP_DEFAULT_QUANTUM
-
     KepAcquireThreadElevated ( current )
 
     KepAcquireReadyQueueElevated ( prb )
@@ -2012,11 +2015,6 @@ FN KepQuantumEnd (
             KepSetNextThread (
                 prb, // prb
                 next, // thread
-            )
-
-            prb^.StashedCurrentThreadInfo = KepSetQendInStash (
-                prb^.StashedCurrentThreadInfo, // stash
-                TRUE, // qend
             )
         END
     END

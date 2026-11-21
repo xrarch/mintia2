@@ -91,9 +91,6 @@
 #DEFINE KEP_STASHED_IDLE_SHIFT 16
 #DEFINE KEP_STASHED_IDLE_MASK 0xFF
 
-#DEFINE KEP_STASHED_QEND_SHIFT 24
-#DEFINE KEP_STASHED_QEND_MASK 0xFF
-
 #MACRO KepCurrentThreadPriority ( stash ) [
     (((stash) >> KEP_STASHED_PRIORITY_SHIFT) & KEP_STASHED_PRIORITY_MASK)
 ]
@@ -104,10 +101,6 @@
 
 #MACRO KepCurrentThreadIdle ( stash ) [
     (((stash) >> KEP_STASHED_IDLE_SHIFT) & KEP_STASHED_IDLE_MASK)
-]
-
-#MACRO KepCurrentThreadQend ( stash ) [
-    (((stash) >> KEP_STASHED_QEND_SHIFT) & KEP_STASHED_QEND_MASK)
 ]
 
 #MACRO KepSetPriorityInStash ( stash, priority ) [
@@ -124,11 +117,6 @@
 #MACRO KepSetIdleInStash ( stash, idle ) [
     (((stash) & ~(KEP_STASHED_IDLE_MASK << KEP_STASHED_IDLE_SHIFT)) |
         (idle << KEP_STASHED_IDLE_SHIFT))
-]
-
-#MACRO KepSetQendInStash ( stash, qend ) [
-    (((stash) & ~(KEP_STASHED_QEND_MASK << KEP_STASHED_QEND_SHIFT)) |
-        (qend << KEP_STASHED_QEND_SHIFT))
 ]
 
 #DEFINE KEP_INTERACTIVE_WELL_BEHAVED 1
