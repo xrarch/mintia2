@@ -755,9 +755,7 @@ FN KepInsertThread (
                 END
             END
 
-            // Reuse Alertable to stash the timeshared queue index.
-
-            thread^.Alertable = insertat
+            thread^.QueueIndex = insertat
 
             // Go on the back of the queue.
 
@@ -1622,9 +1620,7 @@ FN KepReinsertThread (
             prb^.RealTimeReady &= ~(1 << curpri)
 
         ELSEIF thread^.CurrentQueue == KEP_TIMESHARED_QUEUE THEN
-            // The timeshared queue index was stashed in Alertable.
-
-            prb^.CalendarReady &= ~(1 << thread^.Alertable)
+            prb^.CalendarReady &= ~(1 << thread^.QueueIndex)
         END
     END
 
