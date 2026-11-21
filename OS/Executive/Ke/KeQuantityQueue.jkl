@@ -452,16 +452,15 @@ FN (KepRequeueF) KepRequeueQuantityQueue (
             &waitblock^.Links.Heap, // entry
         )
 
-        IF tierid < currenttierid OR
-            heaproot == &waitblock^.Links.Heap THEN
+        IF heaproot == &waitblock^.Links.Heap OR
+            tier^.HeapRoot[heapindex] == &waitblock^.Links.Heap THEN
 
-            // The thread is now in a lower tier which means it has a more
-            // permissible threshold that may allow it to take the resources it
-            // wants.
+            // We were at the root of the old heap and blocking younger, or
+            // smaller requests from getting some resource, so try to satisfy
+            // them now.
 
-            // Alternatively, we might have been at the root of the old heap
-            // and blocking younger, smaller requests from getting some
-            // resource, so try to satisfy them now.
+            // OR we might now be at the root of the new heap and could possibly
+            // be immediately satisfied, so try in that case too.
 
             KepTrySatisfyQuantityQueue (
                 queue, // queue
