@@ -1564,6 +1564,22 @@ FN KepPreemptThread (
 
         KepAcquireReadyQueueElevated ( prb )
 
+#IF BLD_MP
+        IF prb^.NextThread THEN
+            // Another next thread was selected, so avoid corrupting the stash
+            // and reassess matters.
+
+            GOTO Reassess
+        END
+
+        // Refresh stash with next thread since its priority might have been
+        // changed while we had locks dropped. There's still a race here but
+        // it should be much narrower. The result of the race is just that a
+        // lower priority thread might run for one quantum.
+
+        KepSetStashWithThread ( prb, next )
+#END
+
         IF KepWouldPreempt (
             current, // thread
             prb, // prb
@@ -1571,6 +1587,8 @@ FN KepPreemptThread (
 
             // Nevermind, the next thread is actually lower priority than the
             // current thread now.
+
+@Reassess
 
             KepReleaseThreadElevated ( current )
 
