@@ -1692,8 +1692,9 @@ FN KepSetPriorityThread (
         LEAVE
     END
 
-    IF thread^.Status == KE_THREAD_RUNNING AND
-        NOT prb^.NextThread THEN
+    IF thread^.Status == KE_THREAD_STANDBY OR
+        (thread^.Status == KE_THREAD_RUNNING AND
+        NOT prb^.NextThread) THEN
 
         // Update the stashed priority.
 
@@ -2201,8 +2202,9 @@ FN KepRaisePriorityFloorThread (
                     thread^.Priority, // curpri
                 )
 
-            ELSEIF thread^.Status == KE_THREAD_RUNNING AND
-                NOT prb^.NextThread THEN
+            ELSEIF thread^.Status == KE_THREAD_STANDBY OR
+                (thread^.Status == KE_THREAD_RUNNING AND
+                NOT prb^.NextThread) THEN
 
                 // Update stashed interactivity.
 
