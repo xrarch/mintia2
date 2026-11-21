@@ -1242,7 +1242,8 @@ FN KepSelectTimesharedThread (
 
     k := prb^.CalendarRunIndex
 
-    IF NOT current
+    IF NOT current OR
+        current^.Priority == OS_PRIORITY_IDLE
 #IF BLD_MP
         OR migrate
 #END
@@ -1345,7 +1346,9 @@ FN KepSelectThread (
     minimumpriority := 0
     interactive := FALSE
 
-    IF current THEN
+    IF current AND
+        current != prb^.IdleThreadPtr THEN
+
         // We're selecting a thread whose priority is >= the 'current' thread.
 
         minimumpriority = current^.Priority
