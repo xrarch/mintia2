@@ -1982,9 +1982,12 @@ FN KepQuantumEnd (
 
     current := prb^.CurrentThread
 
-    IF current == prb^.IdleThreadPtr THEN
-        // Idle thread takes no quantum ends. This can happen if there was a
-        // thread swap inbetween the quantum end request and service.
+    IF current == prb^.IdleThreadPtr OR
+        current^.RemainingQuantum > 0 THEN
+
+        // This is the idle thread, or the thread still has quantum left. This
+        // can happen if there was a thread swap inbetween the quantum end
+        // request and service.
 
         LEAVE
     END
