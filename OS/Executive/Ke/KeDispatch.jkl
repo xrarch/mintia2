@@ -1499,6 +1499,10 @@ FN KepPreemptThread (
 
         IF next THEN
             KepSetStashWithThread ( prb, next )
+
+        ELSEIF current == prb^.IdleThreadPtr THEN
+            prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
+
         ELSE
             KepSetStashWithThread ( prb, current )
         END
