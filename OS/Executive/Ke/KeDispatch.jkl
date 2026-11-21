@@ -832,8 +832,6 @@ FN KepInsertThread (
     END
 END
 
-#IF BLD_MP
-
 FN KepWouldPreempt (
     IN thread1 : ^KeuThread,
     IN targetprb : ^KepPrb,
@@ -890,6 +888,8 @@ FN KepWouldPreempt (
 
     RETURN FALSE
 END
+
+#IF BLD_MP
 
 FN KepFindProcessor (
     IN prb : ^KepPrb,
@@ -1559,18 +1559,40 @@ FN KepPreemptThread (
 
     KepAcquireThreadElevated ( current )
 
-#IF BLD_MP
-    // Indicate context switching so that anyone who grabs us from the ready
-    // queue and tries to switch into us, will wait until we are off our
-    // stack. This flag is cleared by KepSwitchContext.
-
-    current^.Switching = TRUE
-#END
-
     IF current != prb^.IdleThreadPtr THEN
         // Ready the current thread.
 
         KepAcquireReadyQueueElevated ( prb )
+
+        IF KepWouldPreempt (
+            current, // thread
+            prb, // prb
+        ) THEN
+
+            // Nevermind, the next thread is actually lower priority than the
+            // current thread now.
+
+            KepReleaseThreadElevated ( current )
+
+            KepInsertThread (
+                prb, // prb
+                next, // thread
+                FALSE, // other
+                TRUE, // preempted
+            )
+
+            KepReleaseReadyQueueElevated ( prb )
+
+            GOTO Retry
+        END
+
+#IF BLD_MP
+        // Indicate context switching so that anyone who grabs us from the ready
+        // queue and tries to switch into us, will wait until we are off our
+        // stack. This flag is cleared by KepSwitchContext.
+
+        current^.Switching = TRUE
+#END
 
         KepInsertThread (
             prb, // prb
