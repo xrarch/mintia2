@@ -634,7 +634,12 @@ EXPORT FN KeSignalThread (
         // Forcibly unmask.
 
         thread^.SignalDeliverOnWaitMask[index] &= ~(1 << offset)
-        thread^.SignalAcceptMask[index] |= 1 << offset
+
+        IF thread^.SignalAcceptMask[index] & (1 << offset) == 0 THEN
+            thread^.SignalAcceptMask[index] |= 1 << offset
+
+            // TODO reset signal action to default
+        END
     END
 
     // Set the pending event bit.
