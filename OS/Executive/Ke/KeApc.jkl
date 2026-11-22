@@ -190,6 +190,9 @@ EXPORT FN KeEnqueueUapc (
             // delivery.
 
             thread^.UserApcTriggered = TRUE
+
+            KeWriteMemoryBarrier ()
+            
             thread^.UserInterrupt = TRUE
         END
     END
@@ -239,6 +242,8 @@ EXPORT FN KeEnqueueLapc (
 
     // Set user interrupt pending to make sure the thread checks his lazy APC
     // queue on the way back out to usermode.
+
+    KeWriteMemoryBarrier ()
 
     thread^.UserInterrupt = TRUE
 

@@ -437,26 +437,24 @@ FN KepWakeThreadForSignal (
             status = OS_STATUS_KILLED
         END
 
-        IF status THEN
-            // We've identified an event that we should alert the thread to.
-            // Set user interrupt pending.
+        IF status AND
+            NOT thread^.IgnoreEventCount THEN
 
-            thread^.UserInterrupt = TRUE
+            // Wake the thread.
 
-            IF NOT thread^.IgnoreEventCount THEN
-                // Wake the thread.
-
-                KepUnwaitThread (
-                    thread, // thread,
-                    status, // status
-                    0, // priorityboost
-                )
-            END
+            KepUnwaitThread (
+                thread, // thread,
+                status, // status
+                0, // priorityboost
+            )
         END
+    END
 
-    ELSEIF KepAreTherePendingSignals ( thread ) THEN
+    IF KepAreTherePendingSignals ( thread ) THEN
         // There are pending signals. Set user interrupt pending so he checks
         // it eventually.
+
+        KeWriteMemoryBarrier ()
 
         thread^.UserInterrupt = TRUE
 
@@ -559,11 +557,6 @@ FN KeuMaskSignalThread (
 
         thread^.SignalAcceptMask[index] |= (1 << offset)
 
-        // See if we need to wake the thread now that this signal has been
-        // enabled.
-
-        KepWakeThreadForSignal ( thread )
-
     ELSE
         // Disable the signal.
 
@@ -584,6 +577,13 @@ FN KeuMaskSignalThread (
         // clear the bit.
 
         thread^.PendingEventsSet &= ~KEP_THREAD_PENDING_SIGNAL
+    END
+
+    IF enable THEN
+        // See if we need to wake the thread now that this signal has been
+        // enabled.
+
+        KepWakeThreadForSignal ( thread )
     END
 
     KepReleaseThread ( thread, ipl )
@@ -904,6 +904,8 @@ FN KepDispatchUserInterrupts ()
         thread^.UserInterrupt = FALSE
 
         KepEnableInterrupts ()
+
+        KeMemoryBarrier ()
 
         IF thread^.SignalMask[0] & (1 << OS_SIGNAL_KILL) THEN
             // The current thread has been terminated.
