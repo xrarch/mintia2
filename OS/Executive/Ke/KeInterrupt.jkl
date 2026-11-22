@@ -108,6 +108,10 @@ FN (KeInterruptF) KepClockTick (
 
     RtlAddUlongToUquad ( &prb^.ClockTicks, HALU_TIMER_INTERVAL )
 
+    // Update local ticks.
+
+    KepUpdateLocalTicks ( prb )
+
     // Update time spent at previous IPL on this processor.
 
     RtlAddUlongToUquad ( &prb^.IplTimes[previpl], HALU_TIMER_INTERVAL )
@@ -168,8 +172,6 @@ FN (KeInterruptF) KepClockTick (
         prb^.MsUntilTimesharedTick += KEP_TIMESHARED_TICK_MS
     END
 
-    currentticks : RtlUquad
-
 #IF BLD_MP
     IF prb^.NodeLocalId == 0 THEN
 #END
@@ -177,11 +179,6 @@ FN (KeInterruptF) KepClockTick (
         // If we're processor zero, then update the time.
 
         KepUpdateTime ( kenode, prb )
-
-        RtlMoveUquad (
-            &currentticks, // dest
-            &prb^.ClockTicks, // src
-        )
 
 #IF BLD_MP
         kepnode := prb^.Node^.Kep
@@ -207,15 +204,12 @@ FN (KeInterruptF) KepClockTick (
                 0, // context2
             )
         END
-
-    ELSE
-        KepCaptureCurrentTicks ( &currentticks )
     END
 #END
 
     // Check if the earliest timer has expired.
 
-    IF RtlUquadGteqUquad ( &currentticks, &prb^.EarliestTimerMs ) THEN
+    IF RtlUquadGteqUquad ( &prb^.ClockTicks, &prb^.EarliestTimerMs ) THEN
         // Enqueue the timer expiration DPC.
 
         KeEnqueueDpc (

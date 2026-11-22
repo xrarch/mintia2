@@ -311,6 +311,10 @@ KE_CACHE_LINE_END
 
     TimerExpirationDpc : KeDpc,
 
+    LocalTicks : RtlUquad,
+#IF ( == BLD_BITS 32 )
+    LocalTicksCheckHigh : ULONG,
+#END
     ClockTicks : RtlUquad,
     DpcTimeMs : RtlUquad,
     UserTimeMs : RtlUquad,
@@ -1033,6 +1037,21 @@ EXTERN KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
 
 #IF ( == BLD_BITS 32 )
 
+#MACRO KepCaptureLocalTicks ( uquad, prb ) [
+    WHILE TRUE DO
+        NOTHING (uquad)^.High = (prb)^.LocalTicks.High
+        BARRIER
+        NOTHING (uquad)^.Low = (prb)^.LocalTicks.Low
+        BARRIER
+
+        IF (uquad)^.High == (prb)^.LocalTicksCheckHigh THEN
+            // Didn't change while collecting.
+
+            BREAK
+        END
+    END
+]
+
 #MACRO KepCaptureCurrentTicks ( uquad ) [
     WHILE TRUE DO
         sup := KeCurrentVolatileNode ()^.SharedUserPage
@@ -1085,7 +1104,19 @@ EXTERN KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
     sup^.Uptime.High = (prb)^.ClockTicks.High
 ]
 
+#MACRO KepUpdateLocalTicks ( prb ) [
+    prb^.LocalTicksCheckHigh = (prb)^.ClockTicks.High
+    BARRIER
+    prb^.LocalTicks.Low = (prb)^.ClockTicks.Low
+    BARRIER
+    prb^.LocalTicks.High = (prb)^.ClockTicks.High
+]
+
 #ELSE
+
+#MACRO KepCaptureLocalTicks ( uquad, prb ) [
+    NOTHING (uquad)^.Quad = (prb)^.LocalTicks.Quad
+]
 
 #MACRO KepCaptureCurrentTicks ( uquad ) [
     NOTHING (uquad)^.Quad =
@@ -1112,6 +1143,10 @@ EXTERN KepLockClasses : KepLockClass[KEP_LOCKDEP_NUM_CLASSES]
     sup^.RealTime.Quad = realtime.Quad
 
     sup^.Uptime.Quad = (prb)^.ClockTicks.Quad
+]
+
+#MACRO KepUpdateLocalTicks ( prb ) [
+    prb^.LocalTicks.Quad = prb^.ClockTicks.Quad
 ]
 
 #END

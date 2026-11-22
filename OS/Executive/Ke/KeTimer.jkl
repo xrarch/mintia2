@@ -127,7 +127,7 @@ EXPORT FN KeEnqueueTimer (
 
     // Capture the current time.
 
-    KepCaptureCurrentTicks ( &timer^.ExpiryTime )
+    KepCaptureLocalTicks ( &timer^.ExpiryTime, prb )
 
     // We need to check the next UQUAD add for overflow, so save the current
     // value.
@@ -277,13 +277,16 @@ FN (KeDpcF) KepTimerExpiration (
     IN context2 : UWORD,
 )
 
-    currentticks : RtlUquad
+    // Deferred timer expiration at IPL DPC, enqueued by the timer interrupt
+    // after it notices that the earliest timer has expired.
 
     prb := KEP_CURRENT_PRB
 
     // Capture the current time.
 
-    KepCaptureCurrentTicks ( &currentticks )
+    currentticks : RtlUquad
+
+    KepCaptureLocalTicks ( &currentticks, prb )
 
     // Pop items from the timer tree until we hit one that hasn't expired yet.
 
