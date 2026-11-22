@@ -1731,10 +1731,11 @@ FN KepSetPriorityThread (
     IN prb : ^KepPrb,
     IN thread : ^KeuThread,
     IN priority : UWORD,
-)
+    IN interactive : UWORD,
+) : UWORD
 
     // Set the new priority for a thread. The thread lock and ready queue locks
-    // are held.
+    // are held. Returns object requeue flags.
 
     KeAssert ( KepCurrentIpl () == KEP_IPL_DPC )
 
@@ -1745,12 +1746,21 @@ FN KepSetPriorityThread (
         priority = thread^.PriorityFloor
     END
 
+    curint := thread^.InteractiveBits
     curpri := thread^.Priority
 
-    IF curpri == priority THEN
+    // Preserve the thread's current behavioral interactivity since it gets
+    // updated by a means other than this one. We just set the floor.
+
+    interactive = (interactive & ~KEP_INTERACTIVE_WELL_BEHAVED) |
+        (curint & KEP_INTERACTIVE_WELL_BEHAVED)
+
+    IF curpri == priority AND
+        curint == interactive THEN
+
         // Nothing changed.
 
-        LEAVE
+        GOTO Exit
     END
 
 #IF BLD_MP
@@ -1766,12 +1776,32 @@ FN KepSetPriorityThread (
 
     KeAssert ( thread != prb^.IdleThreadPtr )
 
-    thread^.Priority = priority
-
     IF priority == OS_PRIORITY_IDLE THEN
         // Make sure idle priority threads are never marked interactive.
 
-        KepClearInteractiveForBehavior ( thread )
+        interactive = 0
+    END
+
+    thread^.Priority = priority
+    thread^.InteractiveBits = interactive
+
+    IF thread^.Status == KE_THREAD_WAITING THEN
+        // See if the thread's waits should be requeued.
+
+        requeueflags := 0
+
+        IF (priority >= OS_PRIORITY_LOW_REALTIME OR interactive) AND
+            NOT (curpri >= OS_PRIORITY_LOW_REALTIME OR curint) THEN
+
+            requeueflags = KEP_REQUEUE_WHEN_CLASS_RAISED
+
+        ELSEIF NOT (priority >= OS_PRIORITY_LOW_REALTIME OR interactive) AND
+            (curpri >= OS_PRIORITY_LOW_REALTIME OR curint) THEN
+
+            requeueflags = KEP_REQUEUE_WHEN_CLASS_LOWERED
+        END
+
+        RETURN requeueflags & thread^.ObjectRequeueFlags
     END
 
     IF thread^.Status == KE_THREAD_READY THEN
@@ -1784,7 +1814,7 @@ FN KepSetPriorityThread (
             curpri, // curpri
         )
 
-        LEAVE
+        GOTO Exit
     END
 
     IF thread^.Status == KE_THREAD_STANDBY OR
@@ -1793,14 +1823,22 @@ FN KepSetPriorityThread (
 
         // Update the stashed priority.
 
-        prb^.StashedCurrentThreadInfo =
-            KepSetPriorityInStash ( prb^.StashedCurrentThreadInfo, priority )
+        KepSetStashWithNonIdleThread ( prb, thread )
     END
 
-    IF priority >= curpri THEN
-        // We raised priority, so there's nothing left to do.
+    IF ((interactive AND NOT curint AND
+        curpri < OS_PRIORITY_LOW_REALTIME) OR
+        (priority >= curpri AND
+        (interactive OR NOT curint))) OR
+        (NOT curint AND
+        (priority < OS_PRIORITY_LOW_REALTIME AND
+        priority > OS_PRIORITY_IDLE AND
+        curpri < OS_PRIORITY_LOW_REALTIME)) THEN
 
-        LEAVE
+        // We raised priority, or we lowered from timeshared to timeshared, so
+        // don't waste time seeing if the thread should now be preempted.
+
+        GOTO Exit
     END
 
     // Priority was dropped. It may need to be preempted.
@@ -1816,7 +1854,7 @@ FN KepSetPriorityThread (
 
         IF NOT KepWouldPreempt (
             priority, // pri1
-            thread^.InteractiveBits, // interactive1
+            interactive, // interactive1
             next^.Priority, // pri2
             next^.InteractiveBits, // interactive2
             next == prb^.IdleThreadPtr, // idle
@@ -1849,7 +1887,7 @@ FN KepSetPriorityThread (
                     priority, // priority
                 )
 
-                LEAVE
+                GOTO Exit
             END
 
             KepSetNextThread (
@@ -1867,7 +1905,7 @@ FN KepSetPriorityThread (
             TRUE, // preempted
         )
 
-        LEAVE
+        GOTO Exit
     END
 
     IF thread^.Status == KE_THREAD_RUNNING THEN
@@ -1877,7 +1915,7 @@ FN KepSetPriorityThread (
         IF prb^.NextThread THEN
             // A next thread was already selected.
 
-            LEAVE
+            GOTO Exit
         END
 
         next = KepSelectThread (
@@ -1888,7 +1926,7 @@ FN KepSetPriorityThread (
         )
 
         IF NOT next THEN
-            LEAVE
+            GOTO Exit
         END
 
         // Cause a preemption.
@@ -1907,7 +1945,7 @@ FN KepSetPriorityThread (
                 KEP_IPL_DPC, // ipl
             )
 
-            LEAVE
+            GOTO Exit
         END
 #END
 
@@ -1916,6 +1954,10 @@ FN KepSetPriorityThread (
             KEP_IPL_DPC, // ipl
         )
     END
+
+@Exit
+
+    RETURN 0
 END
 
 EXPORT FN KeSetBasePriorityThread (
@@ -1931,24 +1973,32 @@ EXPORT FN KeSetBasePriorityThread (
 
     thread^.BasePriority = priority
 
-    IF setcurrentpriority OR thread^.Priority < priority THEN
+    IF setcurrentpriority OR
+        thread^.Priority < priority THEN
+
 #IF BLD_MP
         prb := thread^.CurrentPrb
-
-        KepAcquireReadyQueueElevated ( prb )
 #ELSE
         prb := KEP_CURRENT_PRB
 #END
 
-        KepSetPriorityThread (
+        KepAcquireReadyQueueElevated ( prb )
+
+        requeueflags := KepSetPriorityThread (
             prb, // prb
             thread, // thread
             priority, // priority
+            thread^.InteractiveBits, // interactive
         )
 
-#IF BLD_MP
         KepReleaseReadyQueueElevated ( prb )
-#END
+
+        IF requeueflags THEN
+            KepRequeueWaits (
+                thread, // thread
+                requeueflags, // requeueflags
+            )
+        END
     END
 
     KepReleaseThread ( thread, ipl )
@@ -1965,62 +2015,29 @@ EXPORT FN KeSetPriorityThread (
 
 #IF BLD_MP
     prb := thread^.CurrentPrb
-
-    KepAcquireReadyQueueElevated ( prb )
 #ELSE
     prb := KEP_CURRENT_PRB
 #END
 
-    KepSetPriorityThread (
+    KepAcquireReadyQueueElevated ( prb )
+
+    requeueflags := KepSetPriorityThread (
         prb, // prb
         thread, // thread
         priority, // priority
+        thread^.InteractiveBits, // interactive
     )
 
-#IF BLD_MP
     KepReleaseReadyQueueElevated ( prb )
-#END
+
+    IF requeueflags THEN
+        KepRequeueWaits (
+            thread, // thread
+            requeueflags, // requeueflags
+        )
+    END
 
     KepReleaseThread ( thread, ipl )
-END
-
-FN KepCheckInteractivityInternal (
-    IN prb : ^KepPrb,
-    IN current : ^KeuThread,
-    IN oldinteractivity : UWORD,
-    IN newinteractivity : UWORD,
-)
-
-    // Check for, and cause, preemption by the thread dropping to
-    // non-interactive. Ready queue is locked.
-
-    IF NOT prb^.NextThread THEN
-        // Update the current interactivity stashed in the prb.
-
-        prb^.StashedCurrentThreadInfo =
-            KepSetInteractivityInStash ( prb^.StashedCurrentThreadInfo,
-            newinteractivity )
-
-        IF newinteractivity < oldinteractivity THEN
-            // Try to find a thread to preempt this one with.
-
-            next := KepSelectThread (
-                prb, // prb
-                current, // current
-                TRUE, // exclusive
-                FALSE, // migrate
-            )
-
-            IF next THEN
-                // Found one. Set it as the next thread.
-
-                KepSetNextThread (
-                    prb, // prb
-                    next, // thread
-                )
-            END
-        END
-    END
 END
 
 FN KepCheckInteractivity (
@@ -2049,13 +2066,34 @@ FN KepCheckInteractivity (
 
     newinteractivity := current^.InteractiveBits
 
-    IF oldinteractivity != newinteractivity THEN
-        KepCheckInteractivityInternal (
-            prb, // prb
-            current, // current
-            oldinteractivity, // oldinteractivity
-            newinteractivity, // newinteractivity
-        )
+    IF oldinteractivity != newinteractivity AND
+        NOT prb^.NextThread THEN
+
+        // Update the current interactivity stashed in the prb.
+
+        prb^.StashedCurrentThreadInfo =
+            KepSetInteractivityInStash ( prb^.StashedCurrentThreadInfo,
+            newinteractivity )
+
+        IF newinteractivity < oldinteractivity THEN
+            // Try to find a thread to preempt this one with.
+
+            next := KepSelectThread (
+                prb, // prb
+                current, // current
+                TRUE, // exclusive
+                FALSE, // migrate
+            )
+
+            IF next THEN
+                // Found one. Set it as the next thread.
+
+                KepSetNextThread (
+                    prb, // prb
+                    next, // thread
+                )
+            END
+        END
     END
 
     KepReleaseReadyQueueAndThreadElevated ( prb, current )
@@ -2090,6 +2128,7 @@ FN KepQuantumEnd (
             prb, // prb
             current, // thread
             current^.Priority - 1, // priority
+            current^.InteractiveBits, // interactive
         )
     END
 
@@ -2118,7 +2157,7 @@ FN KepQuantumEnd (
         END
     END
 
-    KepReleaseReadyQueueAndThreadElevated ( prb, current )
+    KepReleaseReadyQueueAndThreadElevated ( current )
 END
 
 FN KepYield (
@@ -2225,14 +2264,17 @@ FN KepRaisePriorityFloorThread (
 
     boosted := FALSE
 
-    flags := 0
+    requeueflags := 0
 
     IF vmprivilege AND
         NOT KeuHasVmPrivilegeForFloor ( thread ) THEN
 
         KeuSetVmPrivilegeForFloor ( thread )
 
-        flags |= KEP_REQUEUE_WHEN_VMP_RAISED
+        IF thread^.Status == KE_THREAD_WAITING THEN
+            requeueflags |=
+                thread^.ObjectRequeueFlags & KEP_REQUEUE_WHEN_VMP_RAISED
+        END
 
         boosted = TRUE
     END
@@ -2241,91 +2283,43 @@ FN KepRaisePriorityFloorThread (
     // We need to grab the ready queue lock.
 
     prb := thread^.CurrentPrb
-
-    KeAssert ( prb != NULLPTR )
-
-    KepAcquireReadyQueueElevated ( prb )
 #ELSE
     prb := KEP_CURRENT_PRB
 #END
 
-    // XXX We must do it in the order of raising priority floor and then
-    //     raising interactivity floor, otherwise we run the risk of
-    //     calling KepInsertThread with an idle priority + interactive
-    //     thread which it doesn't know how to deal with.
+    KepAcquireReadyQueueElevated ( prb )
 
     IF thread^.PriorityFloor < priority THEN
-        // Raise the priority floor.
-
         thread^.PriorityFloor = priority
-
-        IF thread^.Priority < priority THEN
-            // Raise the priority.
-
-            IF thread^.Priority < OS_PRIORITY_LOW_REALTIME AND
-                priority >= OS_PRIORITY_LOW_REALTIME THEN
-
-                flags |= KEP_REQUEUE_WHEN_CLASS_RAISED
-            END
-
-            KepSetPriorityThread (
-                prb, // prb
-                thread, // thread
-                thread^.PriorityFloor, // priority
-            )
-        END
-
-        boosted = TRUE
     END
 
-    IF interactive AND
-        NOT KepIsInteractiveForFloor ( thread ) THEN
+    IF thread^.Priority < priority OR
+        (interactive AND NOT KepIsInteractiveForFloor ( thread )) THEN
 
-        // Raise the interactivity floor.
+        // Raise the priority floor.
 
-        KepSetInteractiveForFloor ( thread )
+        interactive = KepSmearInteractivity ( interactive ) |
+            (thread^.InteractiveBits & KEP_INTERACTIVE_PI_FLOOR)
 
-        IF NOT KepIsInteractiveForOtherThanFloor ( thread ) THEN
-            // It wasn't interactive and we just raised the floor, so
-            // it's probably in the wrong queue now.
-
-            flags |= KEP_REQUEUE_WHEN_CLASS_RAISED
-
-            IF thread^.Status == KE_THREAD_READY THEN
-                KepReinsertThread (
-                    thread, // thread
-                    prb, // prb
-                    prb != KEP_CURRENT_PRB, // other
-                    thread^.Priority, // curpri
-                )
-
-            ELSEIF thread^.Status == KE_THREAD_STANDBY OR
-                (thread^.Status == KE_THREAD_RUNNING AND
-                NOT prb^.NextThread) THEN
-
-                // Update stashed interactivity.
-
-                prb^.StashedCurrentThreadInfo = KepSetInteractivityInStash (
-                    prb^.StashedCurrentThreadInfo,
-                    thread^.InteractiveBits,
-                )
-            END
-        END
+        requeueflags |= KepSetPriorityThread (
+            prb, // prb
+            thread, // thread
+            thread^.Priority, // priority
+            interactive, // interactive
+        )
 
         boosted = TRUE
     END
 
     KepReleaseReadyQueueElevated ( prb )
 
-    IF thread^.Status == KE_THREAD_WAITING AND
-        flags & thread^.ObjectRequeueFlags THEN
-
+    IF requeueflags THEN
         // The thread is waiting on an object that asked to be informed when
         // its priority is raised in the way we just did, so inform it.
 
         KepRequeueWaits (
             thread, // thread
-            flags, // flags
+            requeueflags, // requeueflags
         )
     END
 
@@ -2362,38 +2356,17 @@ FN KepLowerPriorityFloorThread (
         priority = thread^.BasePriority
     END
 
-    IF priority < thread^.Priority THEN
+    IF priority < thread^.Priority OR
+        (KepIsInteractiveForFloor ( thread ) AND NOT interactive) THEN
+
         // Set new priority.
 
         KepSetPriorityThread (
             prb, // prb
             thread, // thread
             priority, // priority
+            KepSmearInteractivity ( interactive ), // interactive
         )
-    END
-
-    // Apply the new interactivity floor.
-
-    IF KepIsInteractiveForFloor ( thread ) AND
-        NOT interactive THEN
-
-        // No longer interactive.
-
-        KepClearInteractiveForFloor ( thread )
-
-        IF NOT KepIsInteractiveForOtherThanFloor ( thread ) THEN
-            // We weren't interactive in our own right either, which means we
-            // may need to be preempted by someone who is.
-
-            // Remember "thread" is the current thread, on this processor.
-
-            KepCheckInteractivityInternal (
-                prb, // prb
-                thread, // current
-                TRUE, // oldinteractivity
-                FALSE, // newinteractivity
-            )
-        END
     END
 
     KepReleaseReadyQueueElevated ( prb )
