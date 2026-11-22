@@ -675,7 +675,7 @@ FN KepInsertThread (
 
     stash := prb^.StashedCurrentThreadInfo
 
-    IF thread^.Priority >= OS_PRIORITY_LOW_REALTIME OR
+    IF (thread^.Priority >= OS_PRIORITY_LOW_REALTIME) |
         thread^.InteractiveBits THEN
 
         // It's either one of the forced real time priorities or we've deemed it
@@ -1410,8 +1410,8 @@ FN KepSelectThread (
 #END
     END
 
-    IF interactive OR
-        priority >= OS_PRIORITY_LOW_REALTIME OR
+    IF (interactive |
+        (priority >= OS_PRIORITY_LOW_REALTIME)) OR
         (exclusive AND priority > OS_PRIORITY_IDLE) THEN
 
         // We are real-time/interactive or we are timeshared and exclusive was
@@ -1790,13 +1790,13 @@ FN KepSetPriorityThread (
 
         requeueflags := 0
 
-        IF (priority >= OS_PRIORITY_LOW_REALTIME OR interactive) AND
-            NOT (curpri >= OS_PRIORITY_LOW_REALTIME OR curint) THEN
+        IF ((priority >= OS_PRIORITY_LOW_REALTIME) | interactive) AND
+            NOT ((curpri >= OS_PRIORITY_LOW_REALTIME) | curint) THEN
 
             requeueflags = KEP_REQUEUE_WHEN_CLASS_RAISED
 
-        ELSEIF NOT (priority >= OS_PRIORITY_LOW_REALTIME OR interactive) AND
-            (curpri >= OS_PRIORITY_LOW_REALTIME OR curint) THEN
+        ELSEIF NOT ((priority >= OS_PRIORITY_LOW_REALTIME) | interactive) AND
+            ((curpri >= OS_PRIORITY_LOW_REALTIME) | curint) THEN
 
             requeueflags = KEP_REQUEUE_WHEN_CLASS_LOWERED
         END
@@ -1829,7 +1829,7 @@ FN KepSetPriorityThread (
     IF ((interactive AND NOT curint AND
         curpri < OS_PRIORITY_LOW_REALTIME) OR
         (priority >= curpri AND
-        (interactive OR NOT curint))) OR
+        (interactive | NOT curint))) OR
         (NOT curint AND
         (priority < OS_PRIORITY_LOW_REALTIME AND
         priority > OS_PRIORITY_IDLE AND
@@ -2157,7 +2157,7 @@ FN KepQuantumEnd (
         END
     END
 
-    KepReleaseReadyQueueAndThreadElevated ( current )
+    KepReleaseReadyQueueAndThreadElevated ( prb, current )
 END
 
 FN KepYield (
