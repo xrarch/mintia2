@@ -286,7 +286,7 @@ FN MmuAddPageReservation (
     OUT actual : UWORD,
 ) : OsStatus
 
-    // Set the current thread's page reservation to at least the minimum
+    // Add to the current thread's page reservation at least the minimum
     // requested, ideally up to the maximum. Return the actual amount reserved.
 
     // This is intended to be used by various levels of an allocation stack.
@@ -294,7 +294,7 @@ FN MmuAddPageReservation (
     // level of an allocation stack, and a lack thereof means it is at a deeper
     // layer. If a failure occurs here and it's at a lower layer, then a Debt
     // is accrued, and an OS_STATUS_TRY_AGAIN is returned to eventually induce
-    // the uppermost layer to call MmuFulfillPageReservation, at which point it
+    // the uppermost layer to call MmFulfillPageReservation, at which point it
     // will try to reserve the entire debt at once.
 
     // This has the effect that if a wait is needed for pages in order

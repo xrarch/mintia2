@@ -62,10 +62,19 @@
 
 #END
 
-#MACRO KepSetStashWithThread ( prb, thread ) [
+#MACRO KepSetStashWithNonIdleThread ( prb, thread ) [
     prb^.StashedCurrentThreadInfo =
         (thread^.Priority << KEP_STASHED_PRIORITY_SHIFT) |
         (thread^.InteractiveBits << KEP_STASHED_INTERACTIVE_SHIFT)
+]
+
+#MACRO KepSetStashWithThread ( prb, thread ) [
+    IF thread == prb^.IdleThreadPtr THEN
+        prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
+
+    ELSE
+        KepSetStashWithNonIdleThread ( prb, thread )
+    END
 ]
 
 #MACRO KepSetNextThread ( prb, next ) [
@@ -75,7 +84,7 @@
     // Stash these in the Prb so that they can be examined locklessly by
     // remote processors.
 
-    KepSetStashWithThread ( prb, next )
+    KepSetStashWithNonIdleThread ( prb, next )
 ]
 
 #SECTION "text"
@@ -833,25 +842,17 @@ FN KepInsertThread (
 END
 
 FN KepWouldPreempt (
-    IN thread1 : ^KeuThread,
-    IN targetprb : ^KepPrb,
+    IN pri1 : UWORD,
+    IN interactive1 : UWORD,
+    IN pri2 : UWORD,
+    IN interactive2 : UWORD,
+    IN idle : UWORD,
 ) : UWORD
 
-    // Returns TRUE if thread1 would preempt the current thread on the target
-    // processor. We do this locklessly.
+    // Returns TRUE if pri1 would preempt pri2.
 
-    // Compiler BARRIER is to ensure that the value of the stash is only
-    // loaded once by the compiler.
-
-    stash := targetprb^.StashedCurrentThreadInfo
-    BARRIER
-
-    pri1 := thread1^.Priority
-
-    pri2 := KepCurrentThreadPriority ( stash )
-
-    IF thread1^.InteractiveBits THEN
-        IF NOT KepCurrentThreadInteractivity ( stash ) AND
+    IF interactive1 THEN
+        IF NOT interactive2 AND
             pri2 < OS_PRIORITY_LOW_REALTIME THEN
 
             // Interactive threads always preempt non-interactive threads.
@@ -880,7 +881,7 @@ FN KepWouldPreempt (
         RETURN TRUE
     END
 
-    IF KepCurrentThreadIdle ( stash ) THEN
+    IF idle THEN
         // Always preempt the idle thread.
 
         RETURN TRUE
@@ -924,9 +925,14 @@ FN KepFindProcessor (
     id := prb^.NodeLocalId
 
     WHILE TRUE DO
+        stash := prb^.StashedCurrentThreadInfo
+
         preempt := KepWouldPreempt (
-            thread, // thread
-            prb, // targetprb
+            thread^.Priority, // pri1
+            thread^.InteractiveBits, // interactive1
+            KepCurrentThreadPriority ( stash ), // pri2
+            KepCurrentThreadInteractivity ( stash ), // interactive2
+            KepCurrentThreadIdle ( stash ), // idle
         )
 
         IF preempt THEN
@@ -1027,9 +1033,14 @@ FN KepReadyThread (
     prb := thread^.AffinityPrb
 
     IF prb THEN
+        stash := prb^.StashedCurrentThreadInfo
+
         IF thread^.Pinned OR KepWouldPreempt (
-            thread, // thread1
-            prb, // targetprb
+            thread^.Priority, // pri1
+            thread^.InteractiveBits, // interactive1
+            KepCurrentThreadPriority ( stash ), // pri2
+            KepCurrentThreadInteractivity ( stash ), // interactive2
+            KepCurrentThreadIdle ( stash ), // idle
         ) THEN
 
             GOTO Found
@@ -1343,6 +1354,7 @@ FN KepSelectThread (
 
     next : ^KeuThread = NULLPTR
 
+    priority := 0
     minimumpriority := 0
     interactive := FALSE
 
@@ -1351,7 +1363,8 @@ FN KepSelectThread (
 
         // We're selecting a thread whose priority is >= the 'current' thread.
 
-        minimumpriority = current^.Priority
+        priority = current^.Priority
+        minimumpriority = priority
         interactive = current^.InteractiveBits
 
         IF exclusive THEN
@@ -1380,7 +1393,7 @@ FN KepSelectThread (
 
     IF (readybits >> minimumpriority) OR
         (readybits AND
-        minimumpriority < OS_PRIORITY_LOW_REALTIME AND
+        priority < OS_PRIORITY_LOW_REALTIME AND
         NOT interactive) THEN
 
         // We're taking a thread off the real time queues.
@@ -1399,8 +1412,12 @@ FN KepSelectThread (
 #END
     END
 
-    IF interactive OR minimumpriority >= OS_PRIORITY_LOW_REALTIME THEN
-        // Can't be preempted by anybody timeshared.
+    IF interactive OR
+        priority >= OS_PRIORITY_LOW_REALTIME OR
+        (exclusive AND priority > OS_PRIORITY_IDLE) THEN
+
+        // We are real-time/interactive or we are timeshared and exclusive was
+        // specified. Can't be preempted by anybody timeshared.
 
         RETURN NULLPTR
     END
@@ -1489,12 +1506,6 @@ FN KepPreemptThread (
 
     qend := NOT current^.RemainingQuantum
 
-    IF qend THEN
-        // Here because of a quantum end, so replenish the quantum.
-
-        current^.RemainingQuantum = KEP_DEFAULT_QUANTUM
-    END
-
 @Retry
 
     // Grab the next thread with the ready queue lock held.
@@ -1513,15 +1524,12 @@ FN KepPreemptThread (
         next = KepSelectThread (
             prb, // prb
             current, // current
-            TRUE, // exclusive
+            NOT qend, // exclusive
             FALSE, // migrate
         )
 
         IF next THEN
-            KepSetStashWithThread ( prb, next )
-
-        ELSEIF current == prb^.IdleThreadPtr THEN
-            prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
+            KepSetStashWithNonIdleThread ( prb, next )
 
         ELSE
             KepSetStashWithThread ( prb, current )
@@ -1531,6 +1539,12 @@ FN KepPreemptThread (
     KepReleaseReadyQueueElevated ( prb )
 
     IF NOT next THEN
+        IF qend THEN
+            // Here because of a quantum end, so replenish the quantum.
+
+            current^.RemainingQuantum = KEP_DEFAULT_QUANTUM
+        END
+
         LEAVE
     END
 
@@ -1577,12 +1591,15 @@ FN KepPreemptThread (
         // it should be much narrower. The result of the race is just that a
         // lower priority thread might run for one quantum.
 
-        KepSetStashWithThread ( prb, next )
+        KepSetStashWithNonIdleThread ( prb, next )
 #END
 
         IF KepWouldPreempt (
-            current, // thread
-            prb, // prb
+            current^.Priority, // pri1
+            current^.InteractiveBits, // interactive1
+            next^.Priority, // pri2
+            next^.InteractiveBits, // interactive2
+            FALSE, // idle
         ) THEN
 
             // Nevermind, the next thread is actually lower priority than the
@@ -1643,6 +1660,12 @@ FN KepPreemptThread (
             END
         END
 #END
+    END
+
+    IF qend THEN
+        // Here because of a quantum end, so replenish the quantum.
+
+        current^.RemainingQuantum = KEP_DEFAULT_QUANTUM
     END
 
     // Switch into the thread.
@@ -1791,26 +1814,51 @@ FN KepSetPriorityThread (
         // thread we should switch to instead, now that we have dropped its
         // priority.
 
-        next = KepSelectThread (
-            prb, // prb
-            thread, // current
-            TRUE, // exclusive
-            FALSE, // migrate
-        )
+        next = prb^.CurrentThread
 
-        IF NOT next THEN
-            // Nope, next thread stays this thread. Update the stashed priority.
+        IF NOT KepWouldPreempt (
+            priority, // pri1
+            thread^.InteractiveBits, // interactive1
+            next^.Priority, // pri2
+            next^.InteractiveBits, // interactive2
+            next == prb^.IdleThreadPtr, // idle
+        ) THEN
 
-            prb^.StashedCurrentThreadInfo =
-            KepSetPriorityInStash ( prb^.StashedCurrentThreadInfo, priority )
+            // The current thread now preempts the next thread, so the next
+            // thread should be put back in the queue.
 
-            LEAVE
+            prb^.NextThread = NULLPTR
+
+            KepSetStashWithThread (
+                prb, // prb
+                next, // thread
+            )
+
+        ELSE
+            next = KepSelectThread (
+                prb, // prb
+                thread, // current
+                TRUE, // exclusive
+                FALSE, // migrate
+            )
+
+            IF NOT next THEN
+                // Nope, next thread stays this thread. Update the stashed
+                // priority.
+
+                prb^.StashedCurrentThreadInfo = KepSetPriorityInStash (
+                    prb^.StashedCurrentThreadInfo, // stash
+                    priority, // priority
+                )
+
+                LEAVE
+            END
+
+            KepSetNextThread (
+                prb, // prb
+                next, // thread
+            )
         END
-
-        KepSetNextThread (
-            prb, // prb
-            next, // thread
-        )
 
         // Re-ready our thread to place it on the normal ready queue.
 
@@ -2121,70 +2169,51 @@ FN KepYield (
         IF NOT next THEN
             // We're going to idle.
 
-            prb^.StashedCurrentThreadInfo = KepSetIdleInStash ( 0, TRUE )
+            next = prb^.IdleThreadPtr
 
 #IF BLD_MP
             prb^.InIdleLoop = TRUE
             prb^.StealWork = TRUE
 #END
-
-            // No need for this barrier, it is implied by releasing the ready
-            // queue spinlock below.
-            //
-            // KeWriteMemoryBarrier ()
-
-        ELSE
-            KepSetStashWithThread ( prb, next )
         END
+
+        KepSetStashWithThread ( prb, next )
     END
 
     KepReleaseReadyQueueElevated ( prb )
 
-    IF next THEN
-        flags := 0
+    // Wait for the next thread to no longer be switching off his stack.
 
-        // Wait for the next thread to no longer be switching off his stack.
+    KepWaitForSwitch ( next )
 
-        KepWaitForSwitch ( next )
+    flags := 0
 
-        IF NOT next^.KernelStackTop THEN
-            // Allocate a kernel stack for the next thread.
+    IF NOT next^.KernelStackTop THEN
+        // Allocate a kernel stack for the next thread.
 
-            flags = KepAllocateKernelStack (
-                next, // thread
-                continuation != NULLPTR, // handoffallowed
-            )
-
-            IF flags & KEP_ALLOC_KSTACK_GONE THEN
-                // Still doesn't have a stack, so just give up on it.
-                // Note that it is now in the custody of a worker thread and
-                // will be re-readied later.
-
-                GOTO Retry
-            END
-        END
-
-        // Switch into it. KepSwitchThread returns with the thread lock
-        // released.
-
-        KepSwitchThread (
-            current, // current
+        flags = KepAllocateKernelStack (
             next, // thread
-            continuation, // continuation
-            flags & KEP_ALLOC_KSTACK_HANDOFF, // handoff
+            continuation != NULLPTR, // handoffallowed
         )
 
-    ELSE
-        // Switch to the idle thread. KepSwitchThread returns with the thread
-        // lock released.
+        IF flags & KEP_ALLOC_KSTACK_GONE THEN
+            // Still doesn't have a stack, so just give up on it.
+            // Note that it is now in the custody of a worker thread and
+            // will be re-readied later.
 
-        KepSwitchThread (
-            current, // current
-            prb^.IdleThreadPtr, // thread
-            continuation, // continuation
-            FALSE, // handoff
-        )
+            GOTO Retry
+        END
     END
+
+    // Switch into it. KepSwitchThread returns with the thread lock
+    // released.
+
+    KepSwitchThread (
+        current, // current
+        next, // thread
+        continuation, // continuation
+        flags & KEP_ALLOC_KSTACK_HANDOFF, // handoff
+    )
 END
 
 FN KepRaisePriorityFloorThread (
