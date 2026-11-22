@@ -1739,6 +1739,10 @@ FN KepSetPriorityThread (
 
     KeAssert ( KepCurrentIpl () == KEP_IPL_DPC )
 
+    IF priority < thread^.BasePriority THEN
+        priority = thread^.BasePriority
+    END
+
     IF priority < thread^.PriorityFloor THEN
         // This thread is a subject of priority inheritance. Ensure its priority
         // never falls below the current inheritance floor.
@@ -2279,39 +2283,66 @@ FN KepRaisePriorityFloorThread (
         boosted = TRUE
     END
 
-#IF BLD_MP
-    // We need to grab the ready queue lock.
+    // Compute what we should raise the priority floor to outside the ready
+    // queue lock.
 
-    prb := thread^.CurrentPrb
-#ELSE
-    prb := KEP_CURRENT_PRB
-#END
+    boosterrt := interactive | (priority >= OS_PRIORITY_LOW_REALTIME)
+    floor := thread^.PriorityFloor
+    curpri := thread^.Priority
+    interactivityfloor := KepIsInteractiveForFloor ( thread )
+    raised := FALSE
 
-    KepAcquireReadyQueueElevated ( prb )
+    IF interactivityfloor |
+        (floor >= OS_PRIORITY_LOW_REALTIME) THEN
 
-    IF thread^.PriorityFloor < priority THEN
-        thread^.PriorityFloor = priority
+        // I'm real time, so I should only care about other real time
+        // threads.
+
+        IF boosterrt AND
+            priority > floor THEN
+
+            floor = priority
+            raised = TRUE
+        END
+
+    ELSEIF boosterrt THEN
+        // I wasn't real time but I'm about to be. I should take my
+        // priority floor from the real time thread that boosts me.
+
+        curpri = priority
+        floor = priority
+        interactivityfloor = KepSmearInteractivity ( interactive )
+        raised = TRUE
+
+    ELSEIF priority > floor THEN
+        floor = priority
+        raised = TRUE
     END
 
-    IF thread^.Priority < priority OR
-        (interactive AND NOT KepIsInteractiveForFloor ( thread )) THEN
-
+    IF raised THEN
         // Raise the priority floor.
 
-        interactive = KepSmearInteractivity ( interactive ) |
-            (thread^.InteractiveBits & KEP_INTERACTIVE_PI_FLOOR)
+#IF BLD_MP
+        prb := thread^.CurrentPrb
+#ELSE
+        prb := KEP_CURRENT_PRB
+#END
+
+        KepAcquireReadyQueueElevated ( prb )
+
+        thread^.PriorityFloor = floor
 
         requeueflags |= KepSetPriorityThread (
             prb, // prb
             thread, // thread
-            thread^.Priority, // priority
-            interactive, // interactive
+            curpri, // priority
+            interactivityfloor, // interactive
         )
+
+        KepReleaseReadyQueueElevated ( prb )
 
         boosted = TRUE
     END
-
-    KepReleaseReadyQueueElevated ( prb )
 
     IF requeueflags THEN
         // The thread is waiting on an object that asked to be informed when
@@ -2351,10 +2382,6 @@ FN KepLowerPriorityFloorThread (
     KepAcquireReadyQueueElevated ( prb )
 
     thread^.PriorityFloor = priority
-
-    IF priority < thread^.BasePriority THEN
-        priority = thread^.BasePriority
-    END
 
     IF priority < thread^.Priority OR
         (KepIsInteractiveForFloor ( thread ) AND NOT interactive) THEN
@@ -2604,8 +2631,9 @@ FN (KeDpcF) KepBalanceWork (
 
     max := kenode^.Kep^.MaximumBalanceIterations
     j := 0
+    k := 64
 
-    WHILE j < max DO
+    WHILE j < max AND k DO
         KepFindMostAndLeastLoadedProcessor (
             kenode, // kenode
             OUT: mostloaded, // mostloaded
@@ -2620,6 +2648,8 @@ FN (KeDpcF) KepBalanceWork (
 
         IF diff < 0 THEN
             // Something changed. Retry.
+
+            k -= 1
 
             CONTINUE
         END
