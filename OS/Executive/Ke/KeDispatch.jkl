@@ -1032,19 +1032,17 @@ FN KepReadyThread (
 
     prb := thread^.AffinityPrb
 
-    IF prb THEN
-        stash := prb^.StashedCurrentThreadInfo
+    stash := prb^.StashedCurrentThreadInfo
 
-        IF thread^.Pinned OR KepWouldPreempt (
-            thread^.Priority, // pri1
-            thread^.InteractiveBits, // interactive1
-            KepCurrentThreadPriority ( stash ), // pri2
-            KepCurrentThreadInteractivity ( stash ), // interactive2
-            KepCurrentThreadIdle ( stash ), // idle
-        ) THEN
+    IF thread^.Pinned OR KepWouldPreempt (
+        thread^.Priority, // pri1
+        thread^.InteractiveBits, // interactive1
+        KepCurrentThreadPriority ( stash ), // pri2
+        KepCurrentThreadInteractivity ( stash ), // interactive2
+        KepCurrentThreadIdle ( stash ), // idle
+    ) THEN
 
-            GOTO Found
-        END
+        GOTO Found
     END
 
     // Scan for the preemptible processor with the lowest load.
@@ -1980,9 +1978,7 @@ EXPORT FN KeSetPriorityThread (
     )
 
 #IF BLD_MP
-    IF prb THEN
-        KepReleaseReadyQueueElevated ( prb )
-    END
+    KepReleaseReadyQueueElevated ( prb )
 #END
 
     KepReleaseThread ( thread, ipl )
