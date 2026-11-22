@@ -747,11 +747,13 @@ FN KepInsertThread (
 
             thread^.CurrentQueue = KEP_TIMESHARED_QUEUE
 
-            insertat := prb^.CalendarEnqueueIndex
+            insertat : UWORD
 
             IF NOT preempted THEN
                 // Bias the index by the inverse of the priority, so that higher
                 // priority timeshared threads are scheduled sooner.
+
+                insertat = prb^.CalendarEnqueueIndex
 
                 insertat =
                     (insertat + KEP_TIMESHARED_DISTANCE - thread^.Priority)
@@ -773,6 +775,8 @@ FN KepInsertThread (
 
             ELSE
                 // Go on the front of the queue.
+
+                insertat = prb^.CalendarRunIndex
 
                 RtlInsertAtHeadList (
                     &prb^.CalendarListHeads[insertat], // head
