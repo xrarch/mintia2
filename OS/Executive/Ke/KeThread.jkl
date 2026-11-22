@@ -594,6 +594,7 @@ END
 EXPORT FN KeSignalThread (
     IN thread : ^KeuThread,
     IN signal : UWORD,
+    IN force : UWORD,
 )
 
     // Send a signal to the thread.
@@ -607,8 +608,11 @@ EXPORT FN KeSignalThread (
         // The thread must be set terminated *before* being unsuspended, so that
         // it can't be suspended again.
 
+        force = TRUE
         thread^.Terminated = TRUE
+    END
 
+    IF force THEN
         KeUnsuspendThread (
             thread, // thread
             TRUE, // force
@@ -625,6 +629,13 @@ EXPORT FN KeSignalThread (
     // OR the new signal bit in.
 
     thread^.SignalMask[index] |= (1 << offset)
+
+    IF force THEN
+        // Forcibly unmask.
+
+        thread^.SignalDeliverOnWaitMask[index] &= ~(1 << offset)
+        thread^.SignalAcceptMask[index] |= 1 << offset
+    END
 
     // Set the pending event bit.
 

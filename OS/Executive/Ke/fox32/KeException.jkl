@@ -198,6 +198,7 @@ BadSystemService:
 
     mov  a0, [(KEP_CURRENT_PRB_ADDR + KepPrb_CurrentThread)]
     mov  a1, OS_SIGNAL_SYS
+    mov  a2, 1
     call KeSignalThread
 
     icl
@@ -990,6 +991,7 @@ FN (KepExceptionHandlerF) KepErrorFault (
         KeSignalThread (
             thread, // thread
             KepExceptionToSignal[ecause], // signal
+            TRUE, // force
         )
 
     ELSE
@@ -1047,6 +1049,7 @@ FN (KepExceptionHandlerF) KepPageFault (
             KeSignalThread (
                 thread, // thread
                 OS_SIGNAL_ACV, // signal
+                TRUE, // force
             )
 
         ELSEIF context^.Epc >= &KepArgumentCopyStart AND
