@@ -135,18 +135,37 @@ FN (KeInterruptF) KepClockTick (
         END
     END
 
-    // Increment the timeshared enqueue index.
+    prb^.MsUntilTimesharedTick -= HALU_TIMER_INTERVAL
 
-    ridx := prb^.CalendarRunIndex
-    idx := prb^.CalendarEnqueueIndex
+    IF prb^.MsUntilTimesharedTick <= 0 THEN
+        // Increment the timeshared enqueue index.
 
-    IF RtlEmptyList ( &prb^.CalendarListHeads[ridx] ) THEN
-        ridx = idx
-        prb^.CalendarRunIndex = idx
-    END
+        ridx := prb^.CalendarRunIndex
+        idx := prb^.CalendarEnqueueIndex
 
-    IF idx == ridx THEN
-        prb^.CalendarEnqueueIndex = (idx + 1) % KEP_TIMESHARED_QUEUES
+        IF RtlEmptyList ( &prb^.CalendarListHeads[ridx] ) THEN
+            // The run queue is empty so skip to the next queue between the run
+            // index and the enqueue index that has threads in it.
+
+            span := (idx - ridx) & (KEP_TIMESHARED_QUEUES - 1)
+
+            bits := (prb^.CalendarReady ROR ridx) & ((2 << span) - 1) & ~1
+
+            IF bits THEN
+                ridx = (ridx + KepCircularSeek ( bits, 0 )) &
+                    (KEP_TIMESHARED_QUEUES - 1)
+            ELSE
+                ridx = idx
+            END
+
+            prb^.CalendarRunIndex = ridx
+        END
+
+        IF idx == ridx THEN
+            prb^.CalendarEnqueueIndex = (idx + 1) & (KEP_TIMESHARED_QUEUES - 1)
+        END
+
+        prb^.MsUntilTimesharedTick += KEP_TIMESHARED_TICK_MS
     END
 
     currentticks : RtlUquad

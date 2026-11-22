@@ -49,6 +49,8 @@
 
 #DEFINE KEP_TIMESHARED_QUEUES 32
 
+#DEFINE KEP_TIMESHARED_TICK_MS 20
+
 // Distance from the enqueue pointer to place a thread at priority zero into the
 // circular timeshared ready queues.
 
@@ -272,6 +274,7 @@ KE_CACHE_LINE_END
     DpcActive : UBYTE,
     CheckInteractivity : UBYTE,
     ActivateStackAllocator : UBYTE,
+    MsUntilTimesharedTick : BYTE,
 
 #IF BLD_MP
     StealWork : UBYTE,
@@ -1193,6 +1196,11 @@ EXTERN FN (KepDequeueF) KepDequeueWait (
 
 EXTERN KepIndexFirstBitClear : UBYTE[256]
 EXTERN KepIndexFirstBitSet : UBYTE[256]
+
+EXTERN FN KepCircularSeek (
+    IN bits32 : ULONG,
+    IN start : UWORD,
+) : UWORD
 
 #DEFINE KEP_THREAD_PENDING_KAPC 1
 #DEFINE KEP_THREAD_PENDING_UAPC 2

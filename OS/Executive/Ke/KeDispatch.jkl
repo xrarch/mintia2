@@ -1236,6 +1236,35 @@ FN KepSelectRealTimeThread (
     RETURN thread
 END
 
+FN KepCircularSeek (
+    IN bits32 : ULONG,
+    IN start : UWORD,
+) : UWORD
+
+    // Start from bit "start" wtihin bits32. 
+    // We seek circularly (i.e. with wraparound) from index start to start-1
+    // and return the index of the first encountered set bit. Assumes the caller
+    // has verified that there is at least one set bit.
+
+    // Portability hazard: We assume the architecture we run on, masks the
+    // rotation amount. This is true on all current and planned
+    // architectures (fox32, xr17032, Aphelion, AMD64).
+
+    IF (bits32 ROR start) & 0xFF == 0 THEN
+        start += 8
+
+        IF (bits32 ROR start) & 0xFF == 0 THEN
+            start += 8
+
+            IF (bits32 ROR start) & 0xFF == 0 THEN
+                start += 8
+            END
+        END
+    END
+
+    RETURN start + KepIndexFirstBitSet[(bits32 ROR start) & 0xFF]
+END
+
 FN KepSelectTimesharedThread (
     IN prb : ^KepPrb,
     IN current : ^KeuThread,
@@ -1245,52 +1274,41 @@ FN KepSelectTimesharedThread (
     // Return a thread to switch into from the given processor's calendar ready
     // queues. The processor's ready queue lock is held.
 
-    // If there's a current thread we want to see where it would be placed if it
-    // were to be enqueued here now, so that we can go right back to it if we
-    // figure out thats appropriate.
-
     readybits := prb^.CalendarReady
 
     KeAssert ( readybits != 0 )
 
     k := prb^.CalendarRunIndex
 
-    IF NOT current OR
-        current^.Priority == OS_PRIORITY_IDLE
+@SeekNextQueue
+
+    k = KepCircularSeek (
+        readybits, // bits32
+        k, // start
+    ) & 31
+
+    IF current AND
+        current^.Priority != OS_PRIORITY_IDLE
 #IF BLD_MP
-        OR migrate
+        AND NOT migrate
 #END
         THEN
 
-        // If we're migrating, or we'd become idle if we fail to get a thread
-        // here, seek to a set bit to make sure we get a thread.
+        // Since there's a current thread we want to see where it would be
+        // placed if it were to be enqueued here now, so that we can go right
+        // back to it if we figure out thats appropriate.
 
-@SeekNextQueue
+        insertat := (prb^.CalendarEnqueueIndex + KEP_TIMESHARED_DISTANCE -
+            current^.Priority) % KEP_TIMESHARED_QUEUES
 
-        // Start from bit k. Assume the ready bits are 32 bit.
-        // We seek circularly (i.e. with wraparound) from index k to k-1 for the
-        // first encountered set bit.
-        //
-        // Portability hazard: We assume the architecture we run on, masks the
-        // rotation amount. This is true on all current and planned
-        // architectures (fox32, xr17032, Aphelion, AMD64).
+        IF ((insertat - prb^.CalendarRunIndex) & 31) <
+            ((k - prb^.CalendarRunIndex) & 31) THEN
 
-        IF (readybits ROR k) & 0xFF == 0 THEN
-            k += 8
+            // The current thread would go before the queue we selected, so
+            // don't try to switch to it.
 
-            IF (readybits ROR k) & 0xFF == 0 THEN
-                k += 8
-
-                IF (readybits ROR k) & 0xFF == 0 THEN
-                    k += 8
-                END
-            END
+            RETURN NULLPTR
         END
-
-        k = (k + KepIndexFirstBitSet[(readybits ROR k) & 0xFF]) & 31
-
-    ELSEIF (readybits >> k) & 1 == 0 THEN
-        RETURN NULLPTR
     END
 
     // There's a thread in this queue.
