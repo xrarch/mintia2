@@ -321,6 +321,11 @@ FN (KepEnqueueF) KepEnqueueQuantityQueue (
     keybias := KepThreadKeyBias ( queue, thread )
 
     IF keybias == KEU_QUANTITY_QUEUE_KEY_BIAS_TICK THEN
+        // This is the magic value that means we should reinitialize the bias
+        // value to be the current tick. We don't ALWAYS do this because it
+        // would lose the tick when retrying request. Caller is responsible for
+        // resetting the key bias to this magic value at appropriate moments.
+
         keybias = KepLowTick ()
 
         KepThreadKeyBias ( queue, thread ) = keybias
