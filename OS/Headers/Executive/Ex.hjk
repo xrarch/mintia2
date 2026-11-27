@@ -91,7 +91,9 @@ EXTERN FN ExCreateNameReference (
 ) : OsStatus
 
 #MACRO ExDeleteNameReference ( reference ) [
-    IF (reference)^.U.Inlined.Buffer[0] == 0 THEN
+    IF NOT (((reference)^.U.Inlined.Buffer[0] != 0) | 
+        ((reference)^.U.Reference.Length == 0)) THEN
+
         ExuDeleteNameReference ( reference )
     END
 ]

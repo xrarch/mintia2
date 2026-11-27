@@ -118,7 +118,7 @@ EXPORT FN ExLookupDictionary (
     entry := ExpLookupDictionaryEntry (
         dict, // dict
         key, // key
-        ExpHash ( key^.Data ), // hash
+        ExpHashString ( key^.Data ), // hash
     )
 
     IF NOT entry THEN
@@ -159,7 +159,7 @@ EXPORT FN ExRemoveFromDictionary (
     // Remove the entry with the given key from the dictionary.
     // Returns the value of the entry if removed, NULLPTR if not found.
 
-    hash := ExpHash ( key^.Data )
+    hash := ExpHashString ( key^.Data )
 
     entry := ExpLookupDictionaryEntry (
         dict, // dict
@@ -197,7 +197,7 @@ EXPORT FN ExInsertInDictionary (
 
     oldvalue = NULLPTR
 
-    hash := ExpHash ( key^.Data )
+    hash := ExpHashString ( key^.Data )
 
     entry := ExpLookupDictionaryEntry (
         dict, // dict
@@ -294,7 +294,7 @@ EXPORT FN ExEnumerateDictionary (
             ExpRemoveEntryFromDictionary (
                 dict, // dict
                 entry, // entry
-                ExpHash ( str.Data ), // hash
+                ExpHashString ( str.Data ), // hash
             )
         END
 

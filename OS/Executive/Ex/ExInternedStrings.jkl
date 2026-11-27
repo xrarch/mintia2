@@ -99,6 +99,10 @@ EXPORT FN ExuFastComputeNameLength (
 
         RETURN 15
     END
+
+    // Should be unreachable but just return some sane-ish value.
+
+    RETURN 16
 END
 
 STRUCT ExpName
@@ -160,20 +164,65 @@ FN (RtlAvlLessThanF) ExpCompareNameNodes (
 END
 
 #SECTION "PAGEtext"
-FN ExpHash (
-    IN str : ^UBYTE,
-) : UWORD
+FN ExpHashAndValidateString (
+    IN str : ^RtlString,
+    OUT hash : UWORD,
+) : OsStatus
 
-    // Simple hash for a string.
+    // Simple hash for a string. Make sure this algorithm stays in sync with
+    // ExpHashString below.
+    //
+    // Also checks for embedded null bytes before the end of len, which are
+    // illegal. This might seem like a strange place to do that, but it's
+    // to avoid having a second place where we iterate over the string, we can
+    // just do it all at once.
 
-    hash := 0
+    data := str^.Data
+    len := str^.Length
 
-    WHILE str^ DO
-        hash += str^
+    hash = 0
+
+    WHILE len DO
+        IF data^ == 0 THEN
+            // Embedded null byte is bad.
+
+            RETURN OS_STATUS_ILLEGAL_STRING
+        END
+
+        hash += data^
         hash += hash << 10
         hash $= hash >> 6
 
-        str += 1
+        data += 1
+        len -= 1
+    END
+
+    hash += hash << 3
+    hash $= hash >> 11
+    hash += hash << 15
+
+    RETURN OS_STATUS_SUCCESS
+END
+
+#SECTION "PAGEtext"
+FN ExpHashString (
+    IN data : ^UBYTE,
+) : UWORD
+
+    // Simple hash for a string. Make sure this algorithm stays in sync with
+    // ExpHashAndValidateString.
+    //
+    // Doesn't do validation, since that was done earlier (or is not needed)
+    // and that would be redundant work for the caller.
+
+    hash := 0
+
+    WHILE data^ DO
+        hash += data^
+        hash += hash << 10
+        hash $= hash >> 6
+
+        data += 1
     END
 
     hash += hash << 3
@@ -184,12 +233,161 @@ FN ExpHash (
 END
 
 #SECTION "PAGEtext"
+FN ExpCopyToInlinedBuffer (
+    IN dest : ^UBYTE,
+    IN src : ^UBYTE,
+    IN len : UWORD,
+) : OsStatus
+
+    // Optimized copy of src to dest plus zero fill of remaining area.
+    // While we're at it we also validate that there are no null bytes.
+    // There's no guarantee that an error return leaves dest intact.
+
+    // We can optimize based on the fact the destination buffer is guaranteed
+    // to be 32-bit aligned and we know the length of the source buffer.
+    // We also know that the destination buffer is exactly 16 bytes and must
+    // end with a null byte, and that length is at least 1 and no more than 15.
+
+    destbuf := CAST dest TO ^ULONG
+    srcbuf := CAST src TO ^ULONG
+
+    bytes := len & 3
+    off := len - bytes
+
+    i : UWORD
+
+    IF (src & 3) != 0 THEN
+        // Source buffer isn't 32-bit aligned so do a dumb byte copy up until
+        // the final bytes, and then join the common code for the last bytes and
+        // the zero fill.
+
+        i = 0
+
+        WHILE i < off DO
+            dest[i] = src[i]
+
+            IF src[i] == 0 THEN
+                GOTO Error
+            END
+
+            i += 1
+        END
+
+        GOTO Common
+    END
+
+    // First copy full longs.
+
+    i = srcbuf[0]
+
+    IF len >= 4 THEN
+        destbuf[0] = i
+
+        IF (i - 0x01010101) & ~i & 0x80808080 THEN
+            // There's an embedded null byte which is not allowed.
+
+            GOTO Error
+        END
+
+        IF len >= 8 THEN
+            i = srcbuf[1]
+
+            destbuf[1] = i
+
+            IF (i - 0x01010101) & ~i & 0x80808080 THEN
+                // There's an embedded null byte which is not allowed.
+
+                GOTO Error
+            END
+
+            IF len >= 12 THEN
+                i = srcbuf[2]
+
+                destbuf[2] = i
+
+                IF (i - 0x01010101) & ~i & 0x80808080 THEN
+                    // There's an embedded null byte which is not allowed.
+
+                    GOTO Error
+                END
+            END
+        END
+    END
+
+@Common
+
+    // Now copy end bytes.
+
+    IF bytes THEN
+        // Fill final long with 0 first so that we don't have to do it manually
+        // in a byte-wise manner.
+
+        destbuf[off / 4] = 0
+
+        IF src[off] == 0 THEN
+            GOTO Error
+        END
+
+        IF bytes == 3 THEN
+            dest[off] = src[off]
+            dest[off + 1] = src[off + 1]
+            dest[off + 2] = src[off + 2]
+
+            IF src[off + 1] == 0 OR
+                src[off + 2] == 0 THEN
+
+                GOTO Error
+            END
+
+        ELSEIF bytes == 2 THEN
+            dest[off] = src[off]
+            dest[off + 1] = src[off + 1]
+
+            IF src[off + 1] == 0 THEN
+                GOTO Error
+            END
+
+        ELSEIF bytes == 1 THEN
+            dest[off] = src[off]
+        END
+
+        off += 4
+    END
+
+    // At this point off contains a long-aligned index to wherever we need to
+    // start filling with zeroes.
+
+    bytes = EXU_INLINE_BUF_LENGTH - off
+    off /= 4
+
+    IF bytes >= 4 THEN
+        destbuf[off] = 0
+
+        IF bytes >= 8 THEN
+            destbuf[off + 1] = 0
+
+            IF bytes >= 12 THEN
+                destbuf[off + 2] = 0
+            END
+        END
+    END
+
+    RETURN OS_STATUS_SUCCESS
+
+@Error
+
+    RETURN OS_STATUS_ILLEGAL_STRING
+END
+
+#SECTION "PAGEtext"
 EXPORT FN ExCreateNameReference (
     IN reference : ^ExNameReference,
     IN str : ^RtlString,
 ) : OsStatus
 
     // Create a reference to an interned string.
+
+    status : OsStatus
 
     len := str^.Length
 
@@ -198,22 +396,14 @@ EXPORT FN ExCreateNameReference (
 
         // We can actually just inline the string in the reference.
 
-        RtlCopyBytes (
+        RETURN ExpCopyToInlinedBuffer (
             &reference^.U.Inlined.Buffer[0], // dest
             str^.Data, // src
             len, // size
         )
-
-        RtlFillMemoryWithUlong (
-            &reference^.U.Inlined.Buffer[len], // dest
-            EXU_INLINE_BUF_LENGTH - len, // size
-            0, // ulong
-        )
-
-        RETURN OS_STATUS_SUCCESS
     END
 
-    status := ExCreateName (
+    status = ExCreateName (
         str, // str
         OUT: name, // name
     )
@@ -260,7 +450,14 @@ EXPORT FN ExCreateName (
 
     // Hash the name.
 
-    hash := ExpHash ( str^.Data )
+    status := ExpHashAndValidateString (
+        str, // str
+        OUT: hash, // hash
+    )
+
+    IF OsError ( status ) THEN
+        RETURN status
+    END
 
     kenode := KeCurrentAffinityNode ()
     expnode := kenode^.Exp
@@ -275,7 +472,7 @@ EXPORT FN ExCreateName (
 
 @Retry
 
-    status := OS_STATUS_SUCCESS
+    status = OS_STATUS_SUCCESS
 
     // Lock the bucket.
 
@@ -359,8 +556,14 @@ EXPORT FN ExCreateName (
     RtlCopyBytes (
         newstr^.Data, // dest
         str^.Data, // src
-        len + 1, // sz
+        len, // sz
     )
+
+    // Set null terminator here instead of copying it just for good measure
+    // in case caller passed in a non null terminated RtlString (shouldn't be
+    // possible but here we guard against it).
+
+    newstr^.Data[len] = 0
 
     // Insert into the tree.
 
@@ -434,7 +637,7 @@ EXPORT FN ExUnreferenceName (
 
     expnode := KeNumaNodeFromSpacePointer ( expname )^.Exp
 
-    hash := ExpHash ( expname^.String.Data )
+    hash := ExpHashString ( expname^.String.Data )
 
     bucket := &expnode^.NameBuckets[hash & (EXP_NAME_BUCKETS - 1)]
 
